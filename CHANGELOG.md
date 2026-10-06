@@ -69,6 +69,18 @@
   there twice).
 - `import ismail.guards` on its own works again: api_guards read guards' word sets while guards was half-loaded.
 
+### stage: pairing and principals, report mode by default (security floor part B1)
+
+- Devices pair once with a six-digit code (`stage_pair`, single use, two minutes; started only on this PC or by an
+  agent, never through tailscale serve) and send their key in `X-Stage-Key`; agents send the token the server keeps
+  beside the registry (`X-Stage-Agent`, via link.py). `stage_devices` lists them, `stage_unpair` revokes one at once
+  (an open long-poll with its key closes). The device file (~/.ismail/stage_devices.json) keeps a hash of each key.
+- Every event and command carries a `principal` stamped by the server: a person's device, an agent for a person,
+  the server, or unpaired; a client's own `principal` is kept only as `said_by`. ~/.ismail/stage.json `"auth"`:
+  `report` (the default: everyone accepted, the unpaired counted in /health) or `enforce` (the unpaired refused, and
+  only a person's paired device sends their voice to /voice/in and /voice/perf). Wrong codes are rate-limited.
+- Part A (Host and Origin checks) is not in this slice.
+
 ### live: headroom against the real deadline, cutting a section over, the room speaker off and on
 
 - `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since

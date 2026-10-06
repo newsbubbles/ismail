@@ -266,6 +266,42 @@ def stage_listen(who: str, since: int = None, wait: float = 25, port: int = None
     return '\n'.join(lines)
 
 
+@op(mutates=True)
+def stage_pair(name: str = None, kind: str = 'headset', person: str = None, port: int = None) -> str:
+    """Pair a device with the stage (the security floor part B1): a six-digit code, good once for two minutes, that the
+    device's page enters to get its key (kind: headset | phone | desktop; name: what to call it, e.g. "Quest 3";
+    person: whose device it is, default ~/.ismail/stage.json "person"). Only this PC or an agent can start a pairing,
+    never someone on the tailnet. Say the code to the person; the page sends it to /pair/claim. stage_devices lists
+    paired devices, stage_unpair revokes one."""
+    rec = link.server_for(port=port)
+    r = link.http(rec, 'pair/start', {'name': name or kind, 'kind': kind, 'person': person})
+    return f"code {r['code']} for {r['name']} ({r['kind']}), good for {r['expires_s']} s, once"
+
+
+@op()
+def stage_devices(port: int = None) -> str:
+    """The devices paired with the stage (name, kind, whose, when) and the auth mode: report (everyone accepted,
+    unpaired requests stamped and counted in /health) or enforce (unpaired requests refused); ~/.ismail/stage.json
+    "auth" sets it, and enforce comes only after the headset and the phone are paired."""
+    rec = link.server_for(port=port)
+    r = link.http(rec, 'pair/devices')
+    devs = r.get('devices') or []
+    head = f"auth {r['mode']}, person {r['person']}: " + (f'{len(devs)} paired' if devs else 'nothing paired')
+    return '\n'.join([head] + [f"  {d['device']} ({d['kind']}) for {d['person']}, paired {d['paired']}" for d in devs])
+
+
+@op(mutates=True)
+def stage_unpair(device: str, port: int = None) -> str:
+    """Revoke a paired device by its name (stage_devices): its key is refused from its next request, and any open
+    long-poll with it closes at once."""
+    rec = link.server_for(port=port)
+    try:
+        r = link.http(rec, 'pair/unpair', {'device': device})
+    except OpError as e:
+        raise OpError(f'{e}; stage_devices lists the paired devices')
+    return f"unpaired {r['device']} ({r['unpaired']} key)"
+
+
 @op()
 def stage_busy(who: str, text: str = '', minutes: float = None, port: int = None) -> str:
     """Say what you are busy with, in one line, so the person in the headset knows why an answer is slow

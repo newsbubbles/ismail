@@ -70,13 +70,23 @@ def server_for(scene=None, port=None):
     return srv[0]
 
 
+def agent_headers():
+    """An agent's credentials for the stage (pairing.py): the token the server keeps beside the registry, readable by
+    this user only, and the agent's name (ISMAIL_AGENT, else "agent"). Empty when no server has made the token yet."""
+    try:
+        t = (registry_dir() / 'agent_token').read_text(encoding='utf-8').strip()
+    except OSError:
+        return {}
+    return {'X-Stage-Agent': t, 'X-Stage-Who': os.environ.get('ISMAIL_AGENT') or 'agent'} if t else {}
+
+
 def http(rec, path, body=None, timeout=30):
     url = f'http://127.0.0.1:{rec["port"]}/{path.lstrip("/")}'
     try:                                                   # NaN or Infinity is no JSON the page can read: it would stall its queue
         data = None if body is None else json.dumps(body, allow_nan=False).encode()
     except ValueError:
         raise _op_error(f'a number in this command is not finite (NaN or Infinity): {str(body)[:200]}') from None
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'} if data else {},
+    req = urllib.request.Request(url, data=data, headers={**({'Content-Type': 'application/json'} if data else {}), **agent_headers()},
                                  method='POST' if data is not None else 'GET')
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
