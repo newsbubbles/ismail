@@ -48,6 +48,7 @@ import os
 import re
 import shutil
 import ssl
+import subprocess
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -63,6 +64,36 @@ FOOTAGE = STATE / 'footage'                                # headset recordings 
 PHRASES = STATE / 'speech'                                 # short lines Claude says, rendered once (spoken earcons)
 CONFIG = {}                                                # ~/.ismail/stage.json: {"esbuild": path, "speak": url}
 NAME = re.compile(r'^[A-Za-z0-9_\-]+$')
+
+
+# events only the server makes (the person's transcribed words, a performance's clips): never taken from a client
+SERVER_ONLY = {'voice_message', 'voice_in', 'voice_heard', 'perform_clip', 'perform_clip_in'}
+
+
+def claims_server(e):
+    """A client event that says it comes from the server (by/from/who "server...", or a principal naming it)."""
+    for k in ('by', 'from', 'who'):
+        v = e.get(k)
+        if isinstance(v, str) and v.strip().lower().startswith('server'):
+            return True
+    p = e.get('principal')
+    return p is not None and ('server' in p if isinstance(p, dict) else str(p).strip().lower().startswith('server'))
+
+
+def split_host(h):
+    """'name:port' (or '[::1]:port') -> (lowercase name, port or None); ('', None) when malformed."""
+    h = (h or '').strip().lower()
+    if h.startswith('['):
+        end = h.find(']')
+        if end < 0:
+            return '', None
+        name, rest = h[1:end], h[end + 1:]
+        port = rest[1:] if rest.startswith(':') else ''
+    else:
+        name, _, port = h.partition(':')
+    if port and not port.isdigit():
+        return '', None
+    return name, int(port) if port else None
 
 
 def registry_dir():
@@ -409,13 +440,58 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*a, directory=str(PAGE), **kw)
 
     def translate_path(self, path):
-        """The page from the package; scenes/<name>/... from the scenes folder (nothing above it)."""
+        """The page from the package; scenes/<name>/... from the scenes folder (nothing above it: a segment with a
+        backslash or a drive colon, or a path that resolves outside the folder, 404s and is counted)."""
         p = urlparse(path).path
         if p.startswith('/scenes/'):
             from urllib.parse import unquote
-            rel = [x for x in unquote(p[len('/scenes/'):]).split('/') if x and x not in ('.', '..')]
-            return str(SCENES.joinpath(*rel))
+            segs = [x for x in unquote(p[len('/scenes/'):]).split('/') if x and x not in ('.', '..')]
+            root = SCENES.resolve()
+            target = SCENES.joinpath(*segs)
+            try:
+                inside = not any('\\' in x or ':' in x for x in segs) and target.resolve().is_relative_to(root)
+            except (OSError, ValueError):
+                inside = False
+            if not inside:
+                self.server.refuse('path outside the scenes folder', self)
+                return str(root / '.refused' / 'nothing')
+            return str(target)
         return super().translate_path(path)
+
+    # ---- the security floor, part A (research/multiplayer/security-floor.md): who may talk to this server at all.
+    # A page on another origin could post a "voice message" the agents read as the person (a text/plain POST needs no
+    # preflight, and _body parses JSON whatever the type), and any Host name was answered (DNS rebinding). Checked
+    # before any handler runs; a refusal is counted in /health and logged in one line, never added to the live log.
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        host = self.headers.get('Host', '')
+        if not self.server.host_ok(host):
+            return self._refused(421, 'unknown Host name', f'this stage answers to its own names, not {host!r}')
+        origin, path = self.headers.get('Origin'), urlparse(self.path).path
+        writes = self.command not in ('GET', 'HEAD') or path.startswith('/live')
+        # X-Forwarded-Host only from the proxy on this PC (tailscale serve), and only a name we answer to
+        fwd = self.headers.get('X-Forwarded-Host')
+        if fwd and not (self.client_address[0] in ('127.0.0.1', '::1') and self.server.host_ok(fwd)):
+            fwd = None
+        if origin is not None and writes and not self.server.origin_ok(origin, host, fwd):
+            return self._refused(403, 'cross-origin request', f'a page on {origin} may not write to this stage')
+        # a page elsewhere can still make a browser GET these by embedding them (an audio element: no Origin); each
+        # new /voice/say text runs speech synthesis and writes a cached file. Browsers say where a fetch comes from
+        # (Sec-Fetch-Site); agents send nothing
+        site = self.headers.get('Sec-Fetch-Site')
+        if path in ('/voice/say', '/livestream') and site not in (None, 'same-origin', 'none'):
+            return self._refused(403, 'cross-site fetch', f"{path} answers this stage's own page only")
+        return True
+
+    def _refused(self, code, reason, msg):
+        self.server.refuse(reason, self)
+        self.close_connection = True
+        try:
+            self._json(code, {'error': msg, 'refused': reason})
+        except OSError:
+            pass
+        return False
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
@@ -606,6 +682,11 @@ class Handler(SimpleHTTPRequestHandler):
             evs = body if isinstance(body, list) else [body]
             if not all(isinstance(e, dict) and isinstance(e.get('type'), str) for e in evs):
                 raise ValueError('events need a "type"')
+            bad = next((e for e in evs if e['type'] in SERVER_ONLY or claims_server(e)), None)
+            if bad is not None:                    # the person's words come only from the server's own transcription
+                why = 'server-only event type' if bad['type'] in SERVER_ONLY else 'event claims to be the server'
+                self.server.refuse(why, self)
+                return self._json(403, {'error': f"{bad['type']!r}: only the stage server makes these", 'refused': why})
             with COND:
                 L = live(name)
                 out = []
@@ -975,7 +1056,87 @@ class Server(ThreadingHTTPServer):
         self.busy = self.served = 0
         self.polls = {}
         self.t0 = time.time()
+        self.refused = {}
+        self.lan_host = None                        # --host (the LAN TLS mode): its address is one of our names
+        self._hosts = (0.0, set())
+        self.ts_names = None                        # this PC's own tailnet name(s), read once (tailnet_names)
         super().__init__(*a, **kw)
+
+    # ---- who may talk to this server (Handler.parse_request)
+    def _listed_hosts(self):
+        """Extra Host names from ~/.ismail/stage.json {"hosts": [...]} (beside the registry folder), re-read every 5 s."""
+        t, names = self._hosts
+        if time.time() - t < 5:
+            return names
+        names = set()
+        try:
+            j = json.loads((registry_dir().parent / 'stage.json').read_text(encoding='utf-8'))
+            names = {str(h).lower() for h in j.get('hosts', []) if isinstance(h, str)}
+        except (OSError, ValueError, AttributeError):
+            pass
+        self._hosts = (time.time(), names)
+        return names
+
+    def tailnet_names(self):
+        """This PC's own MagicDNS name (`tailscale status --json` Self.DNSName), read once. Only this machine's name:
+        every person's stage defaults to 8862 under their own tailnet name, so once tailnets are shared a page from
+        someone else's stage must not pass as this one."""
+        if self.ts_names is None:
+            names = set()
+            exe = shutil.which('tailscale')
+            if exe:
+                try:
+                    r = subprocess.run([exe, 'status', '--json'], capture_output=True, text=True, timeout=5)
+                    d = json.loads(r.stdout or '{}').get('Self', {}).get('DNSName', '')
+                    if d:
+                        names.add(d.rstrip('.').lower())
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+            self.ts_names = names
+        return self.ts_names
+
+    def _lan_names(self):
+        if not self.lan_host:
+            return set()
+        if self.lan_host not in ('0.0.0.0', '::'):
+            return {self.lan_host.lower()}
+        import socket
+        try:
+            return {a for a in socket.gethostbyname_ex(socket.gethostname())[2]} | {socket.gethostname().lower()}
+        except OSError:
+            return set()
+
+    def host_ok(self, host):
+        """Loopback with our port, this PC's own tailnet name, the --host address, or a listed name. Anything else
+        is a rebinding attempt or a mistake."""
+        name, port = split_host(host)
+        if not name:
+            return False
+        if name in ('127.0.0.1', 'localhost', '::1'):
+            return port in (None, self.server_address[1])
+        return name in self.tailnet_names() or name in self._lan_names() or name in self._listed_hosts()
+
+    def origin_ok(self, origin, host, forwarded=None):
+        """A browser's Origin must be this stage itself: the Host it asked for, the name tailscale serve forwarded,
+        or (behind tailscale serve on loopback) this PC's tailnet name on our own port."""
+        o = urlparse(origin)
+        if o.scheme not in ('http', 'https') or not o.hostname:
+            return False                            # "null" (a sandboxed frame, a file) and anything odd
+        oport = o.port or (443 if o.scheme == 'https' else 80)
+        for want in (host, forwarded):
+            name, port = split_host(want or '')
+            if name and name == o.hostname.lower() and (port or (443 if o.scheme == 'https' else 80)) == oport:
+                return True
+        hname, _ = split_host(host)
+        return hname in ('127.0.0.1', 'localhost', '::1') and o.hostname.lower() in self.tailnet_names() \
+            and oport == self.server_address[1]
+
+    def refuse(self, reason, handler=None):
+        with self.stats_lock:
+            self.refused[reason] = self.refused.get(reason, 0) + 1
+        h = handler
+        print(f"REFUSED {reason}: {getattr(h, 'command', '?')} {getattr(h, 'path', '?')[:200]} "
+              f"Origin={h.headers.get('Origin') if h else None!r} Host={h.headers.get('Host') if h else None!r}", flush=True)
 
     def process_request(self, request, client_address):
         self.pool.submit(self._work, request, client_address)
@@ -1014,6 +1175,7 @@ class Server(ThreadingHTTPServer):
         return {'ok': free is None or free > 200, 'pid': os.getpid(), 'uptime_s': round(time.time() - self.t0),
                 'workers': self.workers, 'busy': busy, 'served': served, 'long_polls': polls,
                 'threads': threading.active_count(), 'scenes': len(scene_names()), 'state_free_mb': free,
+                'refused': dict(self.refused),
                 'disk_warned_s_ago': round(time.time() - DISK['warned']) if DISK['warned'] else None}
 
     def server_close(self):
@@ -1047,6 +1209,8 @@ def main(argv=None):
         srv = Server((host, port), Handler)
     except OSError as e:
         raise SystemExit(f'port {port} is busy ({e}); another stage server may be running: stage_status, or pick --port')
+    if a.host:
+        srv.lan_host = a.host
     scheme = 'http'
     if a.tls:
         if not (a.cert and a.key and Path(a.cert).is_file() and Path(a.key).is_file()):

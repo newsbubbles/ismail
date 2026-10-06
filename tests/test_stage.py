@@ -138,7 +138,8 @@ def test_unknown_command_and_scene(stage):
 
 def test_events_filtered_by_type(stage):
     p = stage['port']
-    _post(p, 'live/event?scene=room', [{'type': 'gesture', 'hand': 'left'}, {'type': 'voice_message', 'text': 'more light'}])
+    _post(p, 'live/event?scene=room', [{'type': 'gesture', 'hand': 'left'}])
+    S.server_event('room', {'type': 'voice_message', 'text': 'more light'})   # only the server makes these (security floor)
     out = OPS['stage_events'](scene='room', types=['voice_message'])
     assert out.splitlines()[0].startswith('last 2;') and 'more light' in out and 'gesture' not in out
 
@@ -322,7 +323,7 @@ from ismail.stage import presence as PR  # noqa: E402
 
 
 def _voice_in(port, scene='room', file='voice/n1.webm', seconds='3.0'):
-    return _post(port, f'live/event?scene={scene}', {'type': 'voice_in', 'file': file, 'seconds': seconds, 'via': 'test'})['ids'][0]
+    return S.server_event(scene, {'type': 'voice_in', 'file': file, 'seconds': seconds, 'via': 'test'})['id']   # as /voice/in does
 
 
 def _cmds(port, scene='room'):
@@ -412,7 +413,7 @@ def test_listen_and_presence_ops(stage, monkeypatch):
     first = OPS['stage_listen'](who='tester', wait=0)
     last = int(first.split()[1].rstrip(';'))
     _voice_in(port)
-    _post(port, 'live/event?scene=room', {'type': 'voice_message', 'file': 'voice/n1.webm', 'text': 'play something over Lucy'})
+    S.server_event('room', {'type': 'voice_message', 'file': 'voice/n1.webm', 'text': 'play something over Lucy'})
     out = OPS['stage_listen'](who='tester', since=last, wait=2)
     assert '[room]' in out and 'voice_message' in out and 'over Lucy' in out
     time.sleep(0.6)

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### The stage's security floor, part A (server only)
+
+- Only the stage server makes the person's words: a client posting `voice_message`, `voice_in`, `voice_heard`,
+  `perform_clip` or `perform_clip_in` (or an event that says it is the server) is refused with 403. Before, any client,
+  including a page on another origin with a text/plain POST, could add a "voice note" agents read as the person.
+- A request whose Origin is not this stage (another port, another site, a sandboxed `null`) is refused on every write
+  and on the /live reads; agents send no Origin and the page is same-origin, so neither changes. Behind tailscale serve
+  this PC's own tailnet name is accepted (read once from `tailscale status`), never another person's stage on a shared
+  tailnet; X-Forwarded-Host counts only from loopback and only as a name the stage answers to.
+- Unknown Host names get 421 (DNS rebinding): loopback on the server's port, this PC's tailnet name, the `--host`
+  address, and names listed in `~/.ismail/stage.json` `"hosts"` are answered.
+- `/voice/say` and `/livestream` refuse a browser fetch marked cross-site or same-site (`Sec-Fetch-Site`): a page
+  elsewhere embedding them made the stage synthesize speech.
+- `/scenes/` paths with a backslash or a drive colon, or that resolve outside the scenes folder, 404.
+- `/health` counts refusals by reason; server.log has one line per refusal; nothing refused reaches the live log.
+- Not closed yet (part B, pairing): a program on the tailnet or this PC that sends no Origin can still post ordinary
+  events, queue page commands and upload audio. Spec: research/multiplayer/security-floor.md (multiplayer branch).
 ### A pause tap stops the set by itself (the Live DJ's HANDOFF 50, Nate 10-06 15:08)
 
 - The phone server fades the playing engine out over 4 s and stops it when the person taps Pause or says "pause the
