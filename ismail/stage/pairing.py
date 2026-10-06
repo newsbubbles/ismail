@@ -25,6 +25,7 @@ from pathlib import Path
 
 CODE_S = 120                                   # a pairing code is good for two minutes, once
 WRONG_MAX, WRONG_WINDOW_S, BLOCK_S = 5, 60, 60  # five wrong codes in a minute from one address: a minute's pause
+WRONG_ALL = 20                                  # over twenty a minute from everyone: every claim pauses a minute
 KINDS = ('headset', 'phone', 'desktop')
 
 
@@ -42,6 +43,7 @@ class Auth:
         self.codes = {}                        # code -> {name, kind, person, until}
         self.wrong = {}                        # address -> [times of wrong codes]
         self.blocked = {}                      # address -> until
+        self.wrong_all, self.paused_until = [], 0.0   # wrong codes from every address; the global pause
         self.counts = {'unpaired': 0, 'paired': 0, 'agent': 0, 'bad_key': 0}
         self._devices = (None, {})             # (file mtime, {hash: record})
         self._conf = (0.0, {})
@@ -140,6 +142,8 @@ class Auth:
         """The device's page claims a code: (record, key) once; ValueError with the reason otherwise."""
         now = time.time()
         with self.lock:
+            if self.paused_until > now:
+                raise PermissionError('pairing is paused for a minute (too many wrong codes); start a new code after')
             if self.blocked.get(addr, 0) > now:
                 raise PermissionError('too many wrong codes: wait a minute')
             v = self.codes.pop(str(code or ''), None)
@@ -148,6 +152,13 @@ class Auth:
                 self.wrong[addr] = w
                 if len(w) >= WRONG_MAX:
                     self.blocked[addr], self.wrong[addr] = now + BLOCK_S, []
+                # a guesser that looks like a new address every try still meets this: pairing is rare and done at
+                # the PC, so a pause for everyone costs nothing
+                self.wrong_all = [t for t in self.wrong_all if now - t < WRONG_WINDOW_S] + [now]
+                if len(self.wrong_all) > WRONG_ALL:
+                    self.paused_until, self.wrong_all, self.codes = now + BLOCK_S, [], {}
+                    self.counts['pauses'] = self.counts.get('pauses', 0) + 1
+                    print(f'PAIRING PAUSED for {BLOCK_S} s: over {WRONG_ALL} wrong codes in a minute; pending codes cancelled', flush=True)
                 raise ValueError('no such code, or it expired (codes last two minutes and work once)')
             key = secrets.token_urlsafe(32)
             rec = {'hash': _h(key), 'device': (str(name)[:40] if name else v['name']), 'kind': kind if kind in KINDS else v['kind'],
@@ -197,7 +208,9 @@ class Auth:
         return {'unpaired': True}, None, None
 
     def health(self):
-        return {'mode': self.mode(), 'devices': len(self.devices()), 'pending_codes': len(self.codes), **self.counts}
+        paused = max(0, round(self.paused_until - time.time()))
+        return {'mode': self.mode(), 'devices': len(self.devices()), 'pending_codes': len(self.codes),
+                **({'pairing_paused_s': paused} if paused else {}), **self.counts}
 
 
 def stamp(obj, principal):

@@ -482,7 +482,11 @@ class Handler(SimpleHTTPRequestHandler):
         auth = self.server.auth
         self.principal, self.key_hash, problem = auth.principal(self.headers.get('X-Stage-Key'), self.headers.get('X-Stage-Agent'),
                                                                 self.headers.get('X-Stage-Who'))
-        guarded = (self.command not in ('GET', 'HEAD') and path != '/pair/claim') or path.startswith(('/live', '/voice/', '/pair/'))             or path == '/livestream'
+        # in enforce, the scene's files too: voice audio, transcripts, takes and performances (motion identifies a
+        # person), snapshots, panels. Open: the page's own files and /pair/claim (the B1 review, F2)
+        guarded = path != '/pair/claim' and (self.command not in ('GET', 'HEAD') or path.startswith(
+            ('/live', '/voice/', '/pair/', '/scenes/'))) or path in ('/livestream', '/world', '/edits', '/takes', '/snapshots',
+                                                                  '/actor/profile', '/updates.json', '/waypoints', '/cues')
         if guarded and auth.mode() == 'enforce' and 'unpaired' in self.principal:
             return self._refused(401, 'unpaired', problem or 'pair this device first (stage_pair shows a code)')
         return True
@@ -500,7 +504,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(405, {'error': 'POST'})
         if u.path == '/pair/claim':
             body = self._body() or {}
-            fwd = self.headers.get('X-Forwarded-For', '').split(',')[0].strip() if self.client_address[0] in ('127.0.0.1', '::1') else ''
+            # the proxy on this PC appends the address it saw: the LAST entry is its own, the first may be the client's
+            fwd = self.headers.get('X-Forwarded-For', '').split(',')[-1].strip() if self.client_address[0] in ('127.0.0.1', '::1') else ''
             addr = fwd or self.client_address[0]
             try:
                 rec, key = auth.claim(body.get('code'), addr, body.get('name'), body.get('kind'))

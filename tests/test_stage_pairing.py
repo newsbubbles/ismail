@@ -179,3 +179,56 @@ def test_commands_reach_the_page_with_their_principal(stage):
     assert cmds[-1]['principal'] == {'agent': 'test agent', 'for': 'owner'}
     S.server_cmd('room', {'type': 'ack'})
     assert _req(p, 'live/cmd?scene=room&since=0')[1]['cmds'][-1]['principal'] == {'server': True}
+
+
+def test_enforce_guards_the_scene_files_too(stage):
+    key, _ = _paired(stage)
+    room = stage['scenes'] / 'room'
+    (room / 'voice').mkdir()
+    (room / 'voice' / 'note.webm').write_bytes(b'audio')
+    (room / 'live').mkdir(exist_ok=True)
+    (room / 'live' / 'events.jsonl').write_text('{}\n', encoding='utf-8')
+    (room / 'takes' / 't1').mkdir(parents=True)
+    (room / 'takes' / 't1' / 'frames.jsonl').write_text('{}\n', encoding='utf-8')
+    _mode(stage, 'enforce')
+    p = stage['port']
+
+    def code(path, h=None):
+        r = urllib.request.Request(f'http://127.0.0.1:{p}/{path}', headers=h or {})
+        try:
+            with urllib.request.urlopen(r, timeout=10) as f:
+                return f.status
+        except urllib.error.HTTPError as e:
+            return e.code
+    paths = ['scenes/room/voice/note.webm', 'scenes/room/live/events.jsonl', 'scenes/room/takes/t1/frames.jsonl',
+             'scenes/room/scene.glb', 'world?scene=room', 'edits?scene=room', 'takes?scene=room', 'snapshots?scene=room',
+             'updates.json', 'waypoints?scene=room']
+    for path in paths:                                                           # 9a
+        assert code(path) == 401, path
+        assert code(path, {'X-Stage-Key': key}) == 200, path
+        assert code(path, _agent(stage)) == 200, path
+    for path in ('index.html', 'main.js', 'health'):                             # the page's own files stay open
+        assert code(path) == 200, path
+    assert _req(p, 'pair/claim', {'code': '123456'})[0] == 403                   # open: answered, not 401
+
+
+def test_wrong_codes_from_everywhere_pause_pairing(stage):
+    p = stage['port']
+    pending = _req(p, 'pair/start', {'kind': 'phone'})[1]['code']
+    for i in range(21):                                                          # 9b: 21 "addresses", 1 try each
+        st, _ = _req(p, 'pair/claim', {'code': '000000'}, {'X-Forwarded-For': f'6.6.6.{i}, 100.64.0.{i}'})
+        assert st == 403
+    st, got = _req(p, 'pair/claim', {'code': pending})
+    assert st == 429 and 'paused' in got['error']
+    a = _req(p, 'health')[1]['auth']
+    assert a['pairing_paused_s'] > 50 and a['pending_codes'] == 0 and a['pauses'] == 1
+
+
+def test_the_rate_limit_counts_the_proxys_own_address(stage):
+    p = stage['port']
+    for i in range(5):                                                           # the client's first entry changes,
+        _req(p, 'pair/claim', {'code': '000000'}, {'X-Forwarded-For': f'9.9.9.{i}, 100.64.0.7'})   # the proxy's does not
+    good = _req(p, 'pair/start', {'kind': 'phone'})[1]['code']
+    st, got = _req(p, 'pair/claim', {'code': good}, {'X-Forwarded-For': '1.1.1.1, 100.64.0.7'})
+    assert st == 429 and 'wait a minute' in got['error']
+    assert _req(p, 'pair/claim', {'code': good}, {'X-Forwarded-For': '100.64.0.8'})[0] == 200   # another device: fine
