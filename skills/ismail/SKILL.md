@@ -82,7 +82,11 @@ the README or AGENTS.md (not even for a recording: one is welcome, never require
 this is; at most two questions before any sound (what it is for and whether they play, then a mood or a reference if
 they have one); `guide(first_answer=<their words>)` says whether to talk to them as a musician or in plain words
 (`references/user-experience.md`), and you keep to it; `sketch` with their words, saying what is happening and about
-how long while it renders; play each sketch, take their correction as the next round, and `sketch_keep` the pick. An
+how long while it renders. A musician hears each sketch in turn and corrects it, and the pick is kept with `sketch_keep`. Someone
+on plain words hears version 1 at once, with no test (never "which is closest", never three to compare: the others are spares),
+and every round offers two or three playful choices in everyday words plus "or tell me anything"; each change plays
+straight away, new version first, with one plain line on what changed, and "Want to keep this as your song?" leads to
+`sketch_keep`. With a person, never say skill, plugin, MCP, uv or server unless they do first. An
 instrument they named with no voice is a later step (offer to find an example and build it, step 0); never present
 the stand-in as the instrument. At the end, say where their files are and what it took, and name in one line what
 else is here (recreate a reference, build an instrument from recordings, play live, the VR stage).

@@ -4,6 +4,14 @@ A person pointed you here ("set me up with ismail", a link to this repository). 
 text: you write music as notes, instruments and code, render it, and read the audio back as text. The person
 judges by ear. Read this page, then the playbook it names.
 
+**If you cannot run commands on this computer** (a plain chat in a browser or a phone app), say so in one sentence
+and name what works: Claude Code, the Code tab in the Claude desktop app, Cursor or Codex
+(`skills/ismail/references/setup.md` has the list). Do not explain skills, plugins or servers.
+
+**Their words, not ours.** Never say skill, plugin, MCP, uv or server to the person, and never ask them to find,
+install or understand "the skill", unless they used the word first. Say "the add-on that gives me ismail's tools"
+and do it yourself. If a step needs them (a prompt to click, a restart), say what they will see, in plain words.
+
 1. **The playbook** is `skills/ismail/SKILL.md`. Read it before making anything, and keep it loaded.
 2. **If ismail's tools are not available to you yet, set it up yourself** with
    `skills/ismail/references/setup.md`. You do the installing. Ask the person only for what only they can do
