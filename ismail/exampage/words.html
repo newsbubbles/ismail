@@ -1,0 +1,286 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eye Exam</title>
+<!-- The eye exam (ismail.exampage, ledger:M165 step 2, from vox's rec/words.html): one sound per card, two pictures
+of the same window, one real. They sit on top of each other, one showing at a time (the blink comparator). Keys act on
+the highlighted card: space plays the sound, F flips, hold Shift to peek, B blinks, M / S / 0 answer, Enter next. -->
+<style>
+:root {
+  --ground: #edf0ec; --panel: #f8faf7; --ink: #1b2320; --muted: #5d6a64; --line: #cfd7d1;
+  --accent: #a8365f; --accent-soft: #f1dfe5; --ok: #2f7d4f; --no: #c4362b;
+  --body: "Segoe UI", system-ui, sans-serif; --mono: Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; --ground: #111615; --panel: #182020; --ink: #e2e8e4; --muted: #95a39c; --line: #2c3834;
+    --accent: #e27aa0; --accent-soft: #3a2230; --ok: #6cc391; --no: #ef6a5c; }
+}
+body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 900px; margin: 0 auto; padding: 22px 16px 60px; display: grid; gap: 18px; }
+h1 { margin: 0; font-size: 24px; } h2 { margin: 0; font-size: 20px; font-family: var(--mono); } p { margin: 0; max-width: 70ch; }
+.eyebrow { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; display: grid; gap: 10px; }
+.panel.active { border-color: var(--accent); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.muted { color: var(--muted); font-size: 13.5px; }
+button { font: 600 14px var(--body); padding: 9px 14px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--ground); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+input[type=text] { flex: 1; min-width: 180px; padding: 8px; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--ground); color: var(--ink); font: 14px var(--body); }
+kbd { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.pics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 600px) { .pics { grid-template-columns: 1fr; } }
+.pic { position: relative; }
+.pic img { width: 100%; display: block; border: 1px solid var(--line); border-radius: 4px; cursor: crosshair; }
+.pic .tag, .pic .pos { position: absolute; font: 600 12px var(--mono); background: rgba(0,0,0,.72); color: #fff;
+  padding: 1px 6px; border-radius: 3px; pointer-events: none; white-space: nowrap; }
+.pic .tag { left: 6px; top: 6px; font-size: 15px; } .pic .pos { right: 6px; top: 6px; }
+.stack { max-width: 560px; width: 100%; margin: 0 auto; cursor: crosshair; user-select: none; touch-action: none; }
+.stack img { position: absolute; top: 0; left: 0; }
+.stack img:first-child { position: relative; }
+.which { font: 700 18px var(--mono); min-width: 1.2em; text-align: center; }
+.stack .dot { position: absolute; transform: translate(-50%, -50%); background: #fff; color: #000; font: 700 11px var(--mono);
+  border-radius: 999px; padding: 0 5px; pointer-events: none; box-shadow: 0 0 0 2px var(--accent); z-index: 2; }
+.stack .head { position: absolute; top: 3%; bottom: 11%; width: 2px; background: #7df9ff; pointer-events: none; z-index: 2; }
+.cmt { font: 13px var(--mono); color: var(--muted); }
+.stack .box { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--accent); background: rgba(255,255,255,.08); pointer-events: none; z-index: 2; }
+select { padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--ground); color: var(--ink); font: 14px var(--body); }
+.res { font: 13px var(--mono); }
+.res .ok { color: var(--ok); font-weight: 700; } .res .no { color: var(--no); font-weight: 700; }
+.status { font-size: 13.5px; color: var(--muted); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div>
+    <div class="eyebrow" id="eyebrow">eye exam</div>
+    <h1 id="title">One sound at a time</h1>
+    <p class="muted" id="intro"></p>
+    <p class="muted" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Keys act on the highlighted card: <kbd>space</kbd> plays the real sound, <kbd>F</kbd> flips, hold <kbd>Shift</kbd> to peek at the other, <kbd>B</kbd> blinks them. Then answer about the picture showing: <kbd>M</kbd> <span id="kreal">this one is the real one</span>, <kbd>S</kbd> <span id="kours">this one is ours</span>, <kbd>0</kbd> can't tell. <kbd>Enter</kbd> next card.</p>
+  </div>
+  <div id="cards" style="display:grid;gap:16px"></div>
+  <section class="panel">
+    <div class="row"><button id="submit" type="button">Submit</button><span class="status" id="st" role="status"></span></div>
+  </section>
+</main>
+<script>
+const ROUND = location.pathname.replace(/\/+$/, "").split("/").pop();
+const BASE = `/eye/${ROUND}/`;
+const url = p => /^(\/|https?:)/.test(p) ? p : BASE + p;
+const $ = id => document.getElementById(id);
+function mk(tag, props, text) { const e = document.createElement(tag); Object.assign(e, props || {}); if (text !== undefined) e.textContent = text; return e; }
+let M = null, C = [], active = 0, audio = new Audio(), FHI = 16000, LREAL = "", LOURS = "";
+function setActive(i) {
+  const n = Math.max(0, Math.min(C.length - 1, i));
+  if (n !== active && C[active]) C[active].stopBlink();
+  active = n;
+  C.forEach((c, j) => c.el.classList.toggle("active", j === active));
+}
+function pick(c, v) { c.pick = v; }
+function card(it, i) {
+  const c = { q: it.q, pick: null, note: "", plays: 0, btn: {} };
+  const el = mk("section", { className: "panel" }); c.el = el;
+  el.addEventListener("click", () => setActive(i));
+  const head = mk("div", { className: "row" });
+  head.appendChild(mk("h2", {}, `${i + 1}. "${it.word}"`));
+  const play = mk("button", { type: "button" }, (M.labels && M.labels.play) || "Play the real sound");
+  play.onclick = () => {
+    audio.src = url(it.audio); audio.currentTime = 0; audio.play(); c.plays++;
+    if (!M.timed) return;
+    const [l, , ww] = M.axes;
+    c.head.hidden = false;
+    const tick = () => {                       // the playhead: the sound is exactly the picture's window
+      const d = audio.duration || (it.window[1] - it.window[0]);
+      c.head.style.left = (100 * (l + ww * Math.min(1, audio.currentTime / d))) + "%";
+      if (!audio.paused && !audio.ended && audio.src.endsWith(url(it.audio))) requestAnimationFrame(tick); else c.head.hidden = true;
+    };
+    requestAnimationFrame(tick);
+  };
+  c.play = play.onclick;
+  head.appendChild(play);
+  el.appendChild(head);
+  // the blink comparator (his ask after w1 opened: "overlaid over each other ... turn one of them on or off ... take
+  // advantage of how the human eye works"): both pictures in one frame, one showing at a time; the eye reads any
+  // difference between them as movement. Flip by hand, hold Shift to peek, or let it blink.
+  const stack = mk("div", { className: "pic stack" });
+  const imgs = {};
+  for (const k of ["1", "2"]) {
+    imgs[k] = mk("img", { src: url(it.img[k]), alt: `picture ${k} of "${it.word}", 0 to ${FHI / 1000} kHz`, draggable: false });
+    stack.appendChild(imgs[k]);
+  }
+  const tag = mk("span", { className: "tag" }, "1"), pos = mk("span", { className: "pos" }, "");
+  stack.append(tag, pos);
+  c.layer = "1"; c.flips = 0; c.blinked = 0; c.timer = null;
+  c.show = k => { c.layer = k; imgs["1"].style.visibility = k === "1" ? "visible" : "hidden"; imgs["2"].style.visibility = k === "2" ? "visible" : "hidden"; tag.textContent = k; showing.textContent = k; };
+  c.flip = () => { c.show(c.layer === "1" ? "2" : "1"); c.flips++; };
+  c.stopBlink = () => { if (c.timer) { clearInterval(c.timer); c.timer = null; } blink.setAttribute("aria-pressed", "false"); };
+  c.blink = () => {
+    if (c.timer) return c.stopBlink();
+    for (const o of C) if (o !== c) o.stopBlink();
+    c.timer = setInterval(() => c.show(c.layer === "1" ? "2" : "1"), Number(speed.value)); c.blinked++;
+    blink.setAttribute("aria-pressed", "true");
+  };
+  const dur = it.window[1] - it.window[0];
+  const at = e => {
+    const b = stack.getBoundingClientRect(), fx = (e.clientX - b.left) / b.width, fy = 1 - (e.clientY - b.top) / b.height;
+    const [l, bo, ww, h] = M.axes, tt = (fx - l) / ww, ff = (fy - bo) / h * FHI;
+    const ms = Math.round(1000 * tt * dur);
+    const wd = (it.words || []).find(w => ms >= w.ms[0] && ms <= w.ms[1]);
+    return { fx, fy, ms, ff, word: wd ? wd.w : "gap", ok: !(tt < 0 || tt > 1 || ff < 0 || ff > FHI) };
+  };
+  stack.addEventListener("pointermove", e => {
+    const p = at(e);
+    pos.textContent = p.ok ? `${ROUND} q${it.q} ${p.ms} ms ${(p.ff / 1000).toFixed(1)} kHz` + (it.words ? ` "${p.word}"` : "") : "";
+  });
+  stack.addEventListener("pointerleave", () => { pos.textContent = ""; });
+  // w2 on: a click pins a comment at that time and height (SoundCloud style), on the picture showing; w1: a click flips
+  c.comments = [];
+  const clist = mk("div", { style: "display:grid;gap:6px" });
+  stack.addEventListener("click", ev => {
+    ev.stopPropagation(); setActive(i);
+    if (!M.timed) { c.stopBlink(); c.flip(); }
+  });
+  // w3 on (his ask in w2: "let me also draw an area for each of these comments"): press and drag draws a box,
+  // a plain click still pins a point
+  let drag = null;
+  stack.addEventListener("pointerdown", ev => {
+    if (!M.timed || ev.button !== 0) return;
+    const p = at(ev); if (!p.ok) return;
+    ev.preventDefault(); setActive(i); c.stopBlink();
+    drag = { p0: p, p1: p, box: null };
+  });
+  stack.addEventListener("pointermove", ev => {
+    if (!drag) return;
+    const p = at(ev); if (!p.ok) return;
+    drag.p1 = p;
+    if (Math.abs(p.fx - drag.p0.fx) + Math.abs(p.fy - drag.p0.fy) < 0.02) return;
+    if (!drag.box) { drag.box = mk("span", { className: "box" }); stack.appendChild(drag.box); }
+    const x0 = Math.min(p.fx, drag.p0.fx), x1 = Math.max(p.fx, drag.p0.fx), y0 = Math.min(p.fy, drag.p0.fy), y1 = Math.max(p.fy, drag.p0.fy);
+    Object.assign(drag.box.style, { left: 100 * x0 + "%", width: 100 * (x1 - x0) + "%", top: 100 * (1 - y1) + "%", height: 100 * (y1 - y0) + "%" });
+  });
+  document.addEventListener("pointerup", () => {
+    if (!drag) return;
+    const { p0, p1, box } = drag; drag = null;
+    const isBox = !!box;
+    const lo = isBox ? (p0.ms <= p1.ms ? p0 : p1) : p0, hi = isBox ? (p0.ms <= p1.ms ? p1 : p0) : p0;
+    const k0 = Math.min(p0.ff, p1.ff) / 1000, k1 = Math.max(p0.ff, p1.ff) / 1000;
+    const words = isBox ? [...new Set((it.words || []).filter(w => w.ms[1] >= lo.ms && w.ms[0] <= hi.ms).map(w => w.w))].join(" ") || "gap" : p0.word;
+    const cm = { n: c.comments.length + 1, ms: lo.ms, khz: +(isBox ? k0 : p0.ff / 1000).toFixed(1), word: words, picture: c.layer, text: "" };
+    if (isBox) { cm.ms2 = hi.ms; cm.khz2 = +k1.toFixed(1); }
+    c.comments.push(cm);
+    const dot = mk("span", { className: "dot" }, String(cm.n));
+    dot.style.left = (100 * (isBox ? Math.min(p0.fx, p1.fx) : p0.fx)) + "%"; dot.style.top = (100 * (1 - (isBox ? Math.max(p0.fy, p1.fy) : p0.fy))) + "%";
+    stack.appendChild(dot);
+    const r = mk("div", { className: "row" });
+    const where = isBox ? `${cm.ms}-${cm.ms2} ms ${cm.khz}-${cm.khz2} kHz` : `${cm.ms} ms ${cm.khz} kHz`;
+    r.appendChild(mk("span", { className: "cmt" }, `#${cm.n} ${where} "${cm.word}" on picture ${cm.picture}`));
+    const inp = mk("input", { type: "text", placeholder: "what you see here" });
+    inp.addEventListener("keydown", e2 => { e2.stopPropagation(); if (e2.key === "Enter") inp.blur(); });
+    inp.addEventListener("input", () => { cm.text = inp.value; });
+    r.appendChild(inp); clist.appendChild(r); inp.focus();
+  });
+  const phead = mk("span", { className: "head", hidden: true });
+  stack.appendChild(phead);
+  c.head = phead;
+  el.appendChild(stack);
+  const ctl = mk("div", { className: "row" });
+  const flip = mk("button", { type: "button" }, "Flip (F)");
+  flip.onclick = ev => { ev.stopPropagation(); setActive(i); c.stopBlink(); c.flip(); };
+  const blink = mk("button", { type: "button" }, "Blink (B)");
+  blink.onclick = ev => { ev.stopPropagation(); setActive(i); c.blink(); };
+  const speed = mk("select", { title: "blink speed" });
+  for (const [ms, label] of [[700, "slow"], [400, "medium"], [220, "fast"]]) speed.appendChild(mk("option", { value: ms }, label));
+  speed.value = 400;
+  speed.addEventListener("change", () => { if (c.timer) { c.stopBlink(); c.blink(); } });
+  speed.addEventListener("keydown", ev => ev.stopPropagation());
+  ctl.append(flip, blink, speed, mk("span", { className: "muted" }, M.timed ? "click the picture to pin a comment · F flips · hold Shift to peek" : "click the picture to flip · hold Shift to peek at the other one"));
+  el.appendChild(ctl);
+  el.appendChild(clist);
+  const row = mk("div", { className: "row" });
+  row.appendChild(mk("span", { className: "muted" }, "Showing picture"));
+  const showing = mk("b", { className: "which" }, "1"); row.appendChild(showing);
+  c.choice = mk("span", { className: "muted" }, "");
+  const choose = (v, ev) => {
+    if (ev) ev.stopPropagation();
+    setActive(i); c.stopBlink();
+    const other = c.layer === "1" ? "2" : "1";
+    pick(c, v === "mine" ? c.layer : v === "synth" ? other : "cant");
+    c.choice.textContent = c.pick === "cant" ? "you chose: can't tell" : `you chose: picture ${c.pick} is the real one`;
+  };
+  for (const [v, label] of [["mine", `${LREAL} (M)`], ["synth", `${LOURS} (S)`], ["cant", "can't tell (0)"]]) {
+    const b = mk("button", { type: "button" }, label);
+    b.onclick = ev => choose(v, ev);
+    c.btn[v] = b; row.appendChild(b);
+  }
+  c.choose = choose;
+  row.appendChild(c.choice);
+  el.appendChild(row);
+  const note = mk("input", { type: "text", placeholder: "what you noticed (optional)" });
+  note.addEventListener("keydown", ev => { ev.stopPropagation(); if (ev.key === "Enter") { setActive(i + 1); C[active].el.scrollIntoView({ block: "center", behavior: "smooth" }); note.blur(); } });
+  note.addEventListener("input", () => { c.note = note.value; });
+  el.appendChild(note);
+  c.res = mk("div", { className: "res", hidden: true });
+  el.appendChild(c.res);
+  c.show("1");
+  return c;
+}
+document.addEventListener("keydown", e => {
+  if (!C.length || e.target.tagName === "INPUT") return;
+  const c = C[active];
+  const k = e.key.toLowerCase();
+  if (e.key === " ") { e.preventDefault(); c.play(); }
+  else if (k === "f") { c.stopBlink(); c.flip(); }
+  else if (k === "b") c.blink();
+  else if (e.key === "Shift" && !e.repeat) { c.stopBlink(); c.peek = c.layer; c.flip(); }
+  else if (k === "m") c.choose("mine");
+  else if (k === "s") c.choose("synth");
+  else if (e.key === "0") c.choose("cant");
+  else if (e.key === "Enter") { setActive(active + 1); C[active].el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+});
+document.addEventListener("keyup", e => {           // Shift released: back to the picture you were on
+  const c = C[active];
+  if (e.key === "Shift" && c && c.peek) { c.show(c.peek); c.peek = null; }
+});
+async function reveal() {
+  const r = await fetch(BASE + "key"); if (!r.ok) return;
+  const key = await r.json();
+  for (const c of C) {
+    const k = key[c.q]; if (!k) continue;
+    const said = c.pick || k.said;
+    const right = said === k.real;
+    c.res.hidden = false;
+    c.res.innerHTML = "";
+    c.res.append(`Real: picture ${k.real}. You said: ${said === "cant" ? "can't tell" : said ? said : "nothing"} `);
+    if (said && said !== "cant") c.res.appendChild(mk("span", { className: right ? "ok" : "no" }, right ? "(right)" : "(ours fooled you)"));
+    c.res.append(` · the other picture: ${k.label}`);
+  }
+}
+$("submit").onclick = async () => {
+  const st = $("st");
+  const answers = C.map(c => ({ q: c.q, pick: c.pick, note: c.note, plays: c.plays, flips: c.flips, blinks: c.blinked, comments: c.comments }));
+  const r = await fetch(BASE + "answer", { method: "POST", body: JSON.stringify({ round: ROUND, format: "words", at: new Date().toISOString(), answers }) });
+  st.textContent = r.ok ? "Saved. Thanks. Each card now says which picture was the real one." : "Couldn't save (" + r.status + ").";
+  if (r.ok) reveal();
+};
+(async () => {
+  M = await (await fetch(BASE + "manifest.json")).json();
+  FHI = M.f_hi || 16000;
+  LREAL = (M.labels && M.labels.real) || "This one is the real one";
+  LOURS = (M.labels && M.labels.ours) || "This one is ours";
+  $("kreal").textContent = LREAL.toLowerCase(); $("kours").textContent = LOURS.toLowerCase();
+  document.title = "Eye Exam " + ROUND;
+  $("eyebrow").textContent = `eye exam · ${ROUND}`;
+  $("title").textContent = M.title; $("intro").textContent = M.intro || "";
+  C = M.items.map(card); C.forEach(c => $("cards").appendChild(c.el));
+  setActive(0);
+  reveal();
+})();
+</script>
+</body>
+</html>

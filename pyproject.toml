@@ -55,13 +55,14 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ismail.voices.bass", "ismail.voices.fx",
             "ismail.voices.strings", "ismail.voices.guitar", "ismail.voices.drums", "ismail.video", "ismail.video.blender",
-            "ismail.stage", "ismail.stage.bridge", "ismail.phone"]
+            "ismail.stage", "ismail.stage.bridge", "ismail.phone", "ismail.exampage"]
 
 [tool.setuptools.package-data]
 "ismail.voices" = ["*.json"]
 "ismail.voices.keys" = ["*.json"]
 "ismail.voices.strings" = ["*.json"]
 "ismail.video" = ["templates/*", "templates/*/*"]
+"ismail.exampage" = ["*.html"]
 "ismail.phone" = ["page/*.js", "page/*.html", "page/*.svg", "page/*.webmanifest", "page/cues/*.mp3", "page/*.png"]
 "ismail.stage" = ["page/*.js", "page/*.html", "page/*.mjs", "page/sounds/*.wav", "page/vendor/three/LICENSE",
                   "page/vendor/three/build/*", "page/vendor/three/examples/jsm/**/*"]
