@@ -21,6 +21,7 @@ import argparse
 import bisect
 import collections
 import datetime
+import http.client
 import io
 import json
 import os
@@ -126,6 +127,16 @@ def now_iso(at=None):
 
 
 INPUT_KINDS = ('choice', 'check', 'toggle', 'text')
+
+
+def panel_link(link):
+    """A panel's link: a path on this server (starts with one '/'), so it opens in the same tab and stays on the
+    tailnet's https address. Anything else is refused."""
+    if not isinstance(link, str) or not link.startswith('/') or link.startswith('//') or not link.isprintable() \
+            or '\\' in link or ' ' in link:
+        raise ValueError(f"link must be a path on the phone page, starting with one '/' (like '/eye/round1?from=phone'), "
+                         f"not {link!r}")
+    return link
 
 
 def panel_inputs(inputs):
@@ -1076,7 +1087,7 @@ class Agent:
                    "; the answer arrives in the inbox as kind 'answer'"))
 
     def op_panel_show(self, panel_id=None, title='', text='', image=None, buttons=None, inputs=None, wait=0,
-                      who=None, video=None, priority=None):
+                      who=None, video=None, priority=None, link=None, link_label='Open'):
         p = {'id': panel_id or 'p' + secrets.token_hex(3), 'kind': 'panel', 'title': title, 'text': text,
              'priority': norm_priority(priority),
              'buttons': [b if isinstance(b, str) else str(b) for b in (buttons or ['Send' if inputs else 'OK'])],
@@ -1087,6 +1098,9 @@ class Agent:
             p['image'] = '/files/' + self.ph.offer_file(image)
         if video:
             p['video'] = '/files/' + self.ph.offer_file(video)
+        if link is not None:
+            p['link'] = panel_link(link)
+            p['link_label'] = str(link_label or 'Open')[:60]
         return self._panel(p, wait)
 
     def op_ask(self, text, wait=0, who=None):
@@ -1478,11 +1492,72 @@ class Handler(BaseHTTPRequestHandler):
             if sent and size > self.RANGE_CHUNK:  # a player that seeks drops what it was reading; said, so a stall shows
                 print(f"[phone] {p.name}: dropped after {sent} of {b - a + 1} bytes ({type(e).__name__})", flush=True)
 
+    # The picture round (ismail/exampage) listens on 127.0.0.1 only. Its page and files are all under /eye/ (and /eye,
+    # the list of rounds); nothing else it serves (/ and /health) is passed on, so no phone route is ever shadowed.
+    EYE_PASS = ('content-type', 'content-length', 'content-range', 'accept-ranges')
+
+    @staticmethod
+    def is_eye(path):
+        return path == '/eye' or path.startswith('/eye/')
+
+    def _eye(self):
+        """Forward this GET, HEAD or POST to the picture-round page server, streaming the answer back (the phone
+        reaches the exam page through this server's https address). 503 when no round is open."""
+        from .. import exampage
+        up = None
+        try:
+            up = http.client.HTTPConnection('127.0.0.1', exampage.PORT, timeout=30)
+            hdrs = {k: self.headers[k] for k in ('Content-Type', 'Range') if self.headers.get(k)}
+            body = None
+            if self.command == 'POST':
+                body = self._body()
+                hdrs['Content-Length'] = str(len(body))
+            up.request(self.command, self.path, body=body, headers=hdrs)
+            r = up.getresponse()
+        except (OSError, http.client.HTTPException):
+            if up:
+                up.close()
+            b = (b'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                 b'<title>Picture round</title><body style="font:18px system-ui;padding:24px">'
+                 b'No picture round is open right now.</body>')
+            self.send_response(503)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(b)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            if self.command != 'HEAD':
+                self.wfile.write(b)
+            return
+        try:
+            self.send_response(r.status)
+            for k, v in r.getheaders():
+                if k.lower() in self.EYE_PASS:
+                    self.send_header(k, v)
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            if self.command != 'HEAD':
+                while True:
+                    buf = r.read(256 * 1024)
+                    if not buf:
+                        break
+                    self.wfile.write(buf)
+        except (OSError, http.client.HTTPException):
+            pass                                  # the phone dropped, or the page server did: nothing more to say
+        finally:
+            up.close()
+
+    def do_HEAD(self):
+        if self.is_eye(urllib.parse.urlparse(self.path).path):
+            return self._eye()
+        return self._json(404, {'error': 'no such page'})
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         g = lambda k, d=None: q.get(k, [d])[0]
         path = u.path
+        if self.is_eye(path):
+            return self._eye()
         if path in ('/', '/index.html'):
             return self._file(PAGE / 'index.html')
         if re.fullmatch(r'/cues/(start|end|sent|error)\.mp3', path):
@@ -1544,6 +1619,8 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         g = lambda k, d=None: q.get(k, [d])[0]
         ph = self.ph
+        if self.is_eye(u.path):
+            return self._eye()
         try:
             if u.path == '/agent':
                 req = json.loads(self._body() or b'{}')

@@ -266,7 +266,8 @@ def phone_video_copy(video, video_wait='10m'):
 @op()
 def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', image: str = None, buttons: list = None,
                      inputs: list = None, wait: float = 0, sender: str = None, video: str = None,
-                     video_wait: str = '10m', priority: str = None) -> str:
+                     video_wait: str = '10m', priority: str = None, link: str = None,
+                     link_label: str = 'Open') -> str:
     """A panel over the phone page (the stage_panel_show shape): title, text, an image file, a video file, buttons
     (labels), and inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) |
     'toggle' (on or off) | 'text', 'label', 'options', 'optional'}]. A choice must be picked before a button sends
@@ -281,13 +282,17 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
     in line for the machine ('10m'; '0' refuses at once when it is busy). It needs ffmpeg.
     priority: 'needs you' (sorts first, and the corner key takes the accent colour while it is open), 'normal' (the
     default) or 'low' (sorts last).
+    link=<path>: a big button in the panel that opens a page of this server in the same tab; it must start with one
+    '/' (anything else is refused). The picture round is '/eye/<round>?from=phone' (see exam_picture_round), with
+    link_label naming the button.
     A panel never pops up: it shows as a message on the page's corner key (a short buzz), and the person opens it
     when they choose, switches between open messages, or puts one back with Later. Send one only for something to
     decide; say everything else in a caption."""
     if video:
         video = phone_video_copy(video, video_wait)
     return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
-                 buttons=buttons, inputs=inputs, wait=wait, who=sender, video=video, priority=priority)
+                 buttons=buttons, inputs=inputs, wait=wait, who=sender, video=video, priority=priority,
+                 link=link, link_label=link_label)
 
 
 @op()
