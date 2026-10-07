@@ -12,6 +12,12 @@
 - Five built-in stacks from the 10-07 freestyles: `kit70_glue`, `dirty_pbass`, `afrobeat_tenor`, `afrobeat_chank`,
   `tonewheel_organ`.
 
+### Phone messages never pop up
+
+- Panels and exams no longer open over the page (Nate 10-07: "these are modals that block me"). A new one buzzes
+  once and shows on a corner key ("2 messages"); he opens it when he chooses, switches between open messages on
+  tabs, and Later puts one back. The rest of the page stays usable.
+
 ### Phone panels wait their turn
 
 - A new panel or exam no longer covers one the person is reading: it waits until the open one is answered or set
