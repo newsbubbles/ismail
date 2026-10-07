@@ -118,7 +118,10 @@ In a team of agents, each one with something waiting on the person posts its own
 `priority`, one topic per panel) and reads its own answers by `for`; nobody relays for another. A free voice note
 with no `for` that is plainly about another agent's work (one the person already asked to work on it) goes to that
 agent at once, word for word, with its inbox number, id and time; whoever's listener caught it passes it on and
-does not hold it. When the owner is unclear, keep it and ask the person. Watch with `phone_listen` (every line, in
+does not hold it. When the owner is unclear, keep it and ask the person. Between agents the same economy holds: news a
+team's lead only needs to know (merged, live, done) goes to a shared feed it reads at its check-ins, and a direct
+message is kept for a decision, a blocker, a conflict, or something the person must hear now, since every message
+wakes the agent it is sent to. Watch with `phone_listen` (every line, in
 order) and `phone_status` (open panels, what the page shows, the exam in progress); never filter by owner in a
 script, because a line for another agent can still change what you should do. Go quiet between an `exam_round`
 line with state `started` and the one with state `finished` (no sound over someone's listening exam). Panels never pop up

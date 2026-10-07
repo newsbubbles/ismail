@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Docs: a news feed between agents
+
+- skills phone.md: in a team, plain news for the lead goes to a feed it reads at its check-ins; a direct message is
+  only for a decision, a blocker, a conflict, or something the person must hear now (Nate 10-07).
+
 ### Docs: how an agent watches the phone
 
 - skills phone.md: one `phone_listen` loop that filters nothing by owner, passing untagged notes on, real silence
