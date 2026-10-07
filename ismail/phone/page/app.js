@@ -717,12 +717,30 @@ const notified = new Set(), readPanels = new Set(); const answered = new Set(); 
 const openPanels = () => (state.panels || []).filter((x) => !answered.has(x.id));
 function answeredHere(id) { answered.add(id); if (shown === id) closeSheet(); else renderBadge(); }
 function closeSheet() { $('sheet').classList.remove('show'); stopClip(); shown = null; renderBadge(); }
+// notes (the DJ's and the Director's captions) are only a toast and a chime when they land; the corner key keeps
+// count of the ones not looked at yet, so one that came in during a voice note is still one tap away (Nate 10-07
+// 12:20: "I heard a message ... but I was recording")
+const notesSeen = () => store.get('notes_seen', '');
+const newNotes = () => (state.captions || []).filter((c) => (c.ts || '') > notesSeen());
 function renderBadge() {
-  const ps = openPanels(), unread = ps.filter((x) => !readPanels.has(x.id)).length;
+  const ps = openPanels(), unread = ps.filter((x) => !readPanels.has(x.id)).length, nn = newNotes().length;
   const b = $('msgs');
-  b.hidden = !ps.length;
-  b.classList.toggle('new', unread > 0);
-  b.textContent = ps.length === 1 ? '1 message' : `${ps.length} messages`;
+  b.hidden = !ps.length && !(state.captions || []).length && !state.pinned;
+  b.classList.toggle('new', unread > 0 || nn > 0);
+  b.textContent = [ps.length ? `${ps.length} ${ps.length === 1 ? 'question' : 'questions'}` : '', nn ? `${nn} new` : '']
+    .filter(Boolean).join(' · ') || 'Notes';
+}
+function showNotes() {
+  shown = '__notes';
+  const caps = (state.captions || []).slice(-12).reverse(), seen = notesSeen();
+  let h = tabsHtml(openPanels(), '__notes') + '<h2>Notes</h2><div class="notes">';
+  if (state.pinned) h += `<div class="item"><span class="cap">Since you left</span>${esc(state.pinned.text)}</div>`;
+  h += caps.map((c) => `<div class="item${(c.ts || '') > seen ? ' new' : ''}"><span class="cap">${esc(c.who || 'DJ')} ${esc((c.ts || '').slice(11, 16))}</span>${esc(c.text)}</div>`).join('')
+    || '<div class="item">nothing yet</div>';
+  $('panel').innerHTML = h + '</div>';
+  if (caps.length) store.set('notes_seen', caps[0].ts || '');
+  $('sheet').classList.add('show');
+  bindTabs(); renderBadge(); ev('notes_open', { n: caps.length });
 }
 function renderPanel() {
   const ps = openPanels();
@@ -730,24 +748,27 @@ function renderPanel() {
   if (fresh.length) { fresh.forEach((x) => notified.add(x.id)); if (!talk.rec) buzz([60]); }   // a nudge, never a sound or a sheet
   renderBadge();
   if (!shown) return;
+  if (shown === '__notes') return;
   if (!ps.some((x) => x.id === shown)) { closeSheet(); return; }       // answered or closed by the agent
   const tabs = $('panel').querySelector('.ptabs');
   if (tabs && tabs.dataset.n !== String(ps.length)) { tabs.outerHTML = tabsHtml(ps, shown); bindTabs(); }
 }
 function tabsHtml(ps, id) {
-  return `<div class="ptabs" data-n="${ps.length}">` + (ps.length > 1 ? ps.map((x) => `<button data-tab="${esc(x.id)}" class="${x.id === id ? 'sel' : ''}${readPanels.has(x.id) ? '' : ' new'}">${esc((x.title || 'message').slice(0, 28))}</button>`).join('') : '')
+  return `<div class="ptabs" data-n="${ps.length}">` + (ps.length > 1 || (ps.length && id === '__notes') ? ps.map((x) => `<button data-tab="${esc(x.id)}" class="${x.id === id ? 'sel' : ''}${readPanels.has(x.id) ? '' : ' new'}">${esc((x.title || 'message').slice(0, 28))}</button>`).join('') : '')
+    + `<button data-tab="__notes" class="${id === '__notes' ? 'sel' : ''}${newNotes().length ? ' new' : ''}">Notes</button>`
     + '<button data-later class="later">Later</button></div>';
 }
 function bindTabs() {
   const box = $('panel');
-  box.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { const x = openPanels().find((q) => q.id === b.dataset.tab); if (x) { stopClip(); showPanel(x); } }; });
+  box.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { if (b.dataset.tab === '__notes') { stopClip(); showNotes(); return; } const x = openPanels().find((q) => q.id === b.dataset.tab); if (x) { stopClip(); showPanel(x); } }; });
   const l = box.querySelector('[data-later]');
   if (l) l.onclick = () => { ev('panel_later', { id: shown }); closeSheet(); };
 }
 function openMessages() {
-  const ps = openPanels();
-  if (!ps.length) return;
-  showPanel(ps.find((x) => !readPanels.has(x.id)) || ps[ps.length - 1]);
+  const ps = openPanels(), unread = ps.find((x) => !readPanels.has(x.id));
+  if (unread) showPanel(unread);
+  else if (newNotes().length || !ps.length) showNotes();
+  else showPanel(ps[ps.length - 1]);
 }
 function showPanel(p) {
   shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
@@ -873,7 +894,10 @@ function render() {
     $('follow').textContent = 'Follow Windows: ' + (e.follow ? 'on' : 'off');
   }
   $('pinned').hidden = !state.pinned;
-  if (state.pinned) $('pinned').innerHTML = `<span class="cap">Since you left</span>${esc(state.pinned.text)}`;
+  if (state.pinned) {
+    $('pinned').innerHTML = `<span class="cap">Since you left</span><span class="body">${esc(state.pinned.text)}</span>`;
+    if (!$('pinned').dataset.open) $('pinned').classList.add('clamp');
+  }
   const caps = state.captions || [], lastc = caps[caps.length - 1];
   const fresh = lastc && (!state.pinned || lastc.text !== state.pinned.text);
   $('last').hidden = !fresh;
@@ -958,6 +982,7 @@ async function poll() {
 }
 $('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { ev('panel_close', { id: shown }); closeSheet(); } });
 $('msgs').onclick = openMessages;
+$('pinned').onclick = () => { $('pinned').dataset.open = $('pinned').classList.toggle('clamp') ? '' : '1'; };
 // the set's sound follows the Windows default output, or stays where it is (Nate 10-07: "the way that most
 // applications work", switched by him, not by an agent)
 $('follow').onclick = async () => {

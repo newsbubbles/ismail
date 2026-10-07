@@ -81,6 +81,11 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #next{font-size:15px;color:var(--dim)}
 .note{margin:calc(var(--u)*3) 0 0;padding-left:calc(var(--u)*3);border-left:2px solid var(--accent);font-size:15px}
 .note .cap{display:block;margin-bottom:var(--u)}
+.note.clamp .body{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.notes{display:flex;flex-direction:column;gap:calc(var(--u)*3)}
+.notes .item{border-left:2px solid var(--line);padding-left:calc(var(--u)*3)}
+.notes .item.new{border-left-color:var(--accent)}
+.notes .item .cap{display:block;margin-bottom:var(--u)}
 #startset{width:100%;margin-top:calc(var(--u)*3);border-color:var(--accent);color:var(--accent)}
 /* transport */
 .transport{display:grid;grid-template-columns:76px 1fr 76px;gap:calc(var(--u)*2);margin:calc(var(--u)*4) 0 calc(var(--u)*2)}
@@ -199,8 +204,6 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
   <div class="row" id="outrow" hidden><span class="cap">Output</span><span><span id="outname">--</span> <button id="follow" class="mini">Follow Windows: off</button></span></div>
   <div id="pos" hidden><div id="postrack"><i id="posfill"></i></div><div id="postext"><span id="poselapsed"></span><span id="posnext"></span></div></div>
 </div>
-<div class="note" id="pinned" hidden></div>
-<div class="note" id="last" hidden></div>
 <button id="startset" hidden>Ask the DJ for a set</button>
 
 <div class="transport" data-sec="listen">
@@ -219,6 +222,8 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
   <button class="key" data-tap="pause" aria-label="Pause set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span class="lbl">Pause set</span></button><button class="key" data-tap="resume" aria-label="Resume set"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5 19 12 7 19Z"/></svg><span class="lbl">Resume set</span></button>
 </div>
 
+<div class="note" id="pinned" hidden></div>
+<div class="note" id="last" hidden></div>
 <div class="section" data-sec="mood"><span class="cap">Mood for the next chapter <span id="askedmood"></span></span>
   <div class="detents" id="mood"><button data-mood="calm">Calm</button><button data-mood="steady">Steady</button><button data-mood="lift">Lift</button><button data-mood="peak">Peak</button></div>
 </div>
