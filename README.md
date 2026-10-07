@@ -72,16 +72,35 @@ One set of operations, three ways in:
 - **CLI**: `ismail -p <project> <op> [args]` (same as `python -m ismail ...`)
 - **Python**: `from ismail import api`
 
+## What's built today
+
+- **The VR stage** (`ismail/stage`, the `stage_*` tools): a three.js WebXR page for a desktop browser or a headset, and
+  a small server that carries the live link between the page and the agent. Scenes live in the song's folder. The
+  agent drives the page with ops, and reads what the person did and said with `stage_events`.
+- **The phone page** (`ismail/phone`, the `phone_*` tools): live listening with the screen off, panels and buttons,
+  voice notes sent back to the agent with the bar being heard, and exam pages.
+- **Exams**: blind exams on the phone (`phone_exam`, with floor pairs: the real clip against a 64 or 128 kb/s MP3 copy
+  of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture rounds
+  (`ismail.exampage`); `exam_check` before any exam is shown; and recording warnings in `ismail/capture.py` for
+  soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **The first session** for someone new: `guide(new_person=True)`, `sketch` versions 1, 2 and 3 on the showcase voices,
+  and feeling words ("happier", "calmer", "darker") that change a sketch by named moves.
+- **Showcase voices**, each measured from recordings or fitted to a record: piano, violin, cello, contrabass,
+  clarinet, bassoon, horn, a 1970 kit, a fitted electric guitar and bass, and sampled Rhodes, drum and guitar sets
+  (see [Voices](#voices-instruments-as-code) and [Contributors](#contributors) for sources and licences).
+  Clarinet, bassoon and horn are new: measured from VSCO 2 CE (CC0) and checked blind against the real recordings on
+  2026-10-07 (clarinet not told apart, bassoon and horn judged good enough). Flute, oboe, trumpet, trombone and tuba
+  were measured too and heard as synthetic, so they stay out until they pass.
+
 ## Where it is going
 
 ismail is becoming an experience engine: agents build sound, pictures, rooms and whole scenes, run them live, and
 adapt them with the people inside them, measuring the world instead of guessing it and asking a person's senses
-only what a measurement cannot settle. Next on the road:
+only what a measurement cannot settle. Still ahead:
 
-- a browser and VR stage for building scenes with your hands and your voice, with an agent beside you;
 - worlds you can visit: a friend's scene from their headset, yours from theirs;
 - objects that work: knobs wired to the live engine, a radio that plays a set where you carry it;
-- one exam page for any sense, and a clock of the hours you spend inside;
+- one exam page for any sense (sound pairs and picture rounds exist today), and a clock of the hours you spend inside;
 - a hub of voices, instruments and scenes that passed review, each with its provenance.
 
 The whole map, with what is done and what is next, is in **[ROADMAP.md](ROADMAP.md)**. Fork it, build on it, and
@@ -246,11 +265,18 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 |---|---|---|
 | keys | `grand_piano` | grand piano calibrated from measured notes (partials, decay times, inharmonicity, stereo image, hammer knock, dampers); `fn: voice_sym` is an undamped sympathetic string |
 | keys | `additive_piano` | a lighter additive piano with no data file |
+| keys | `rhodes` | a 1977 Rhodes Mark I, sampled (jRhodes3d); fetch the samples with `samples_fetch` |
 | strings | `violin`, `cello`, `contrabass` | mimic profiles measured from real recordings (use `{"type": "mimic", "profile": "violin"}`); open strings, measured room and vibrato included; `params.players` makes a section |
+| winds | `clarinet`, `bassoon` | mimic profiles measured from VSCO 2 CE (CC0); passed a blind ear check on 2026-10-07 |
+| brass | `horn` | mimic profile measured from VSCO 2 CE (CC0); passed the same ear check |
+| bass | `pbass70`, `sub_bass` | `pbass70` is a waveguide bass fitted to a record's bass stem (a preset of the `electric` performer below); `sub_bass` is a sine, the one plain synth a sketch uses |
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
+| fx | `crackle` | designed vinyl surface noise: clicks and hiss |
 | guitar | `electric` | performer: electric guitar or bass as waveguide strings (pick, pickup comb, pickup resonance) playing a whole part, with legato, slides, bends, whammy, vibrato and mutes as lanes. Presets `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`; it is the DI signal, so `voice_help` lists the rig each preset was fitted with |
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
+| drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
+| guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
 
 Use one with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
 
@@ -435,13 +461,52 @@ ismail/
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano), strings (violin,
-                 cello, contrabass mimic profiles), bass (growl), fx (sfx), guitar (electric), drums (kit70)
-  api.py, api_cmp.py, api_sound.py, api_measure.py   the operations (CLI and MCP tools)
+                 cello, contrabass, clarinet, bassoon, horn mimic profiles), bass (growl), fx (sfx), guitar (electric),
+                 drums (kit70); showcase.json lists the voices a first sketch uses
+  api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py   the operations (CLI and MCP tools)
   mcp_server.py, guide.py
+  stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
+  phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
+  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer
+  capture.py     faults in a recording found before it is measured (soft-limited peaks, band-limited capture)
+  sketch.py      first sketches from a brief on the showcase voices, versions 1, 2, 3, feeling words
+  machine.py     the shared machine's governor: one board for GPU, CPU and memory, heavy jobs run in its slots
+  exam_check.py  the pre-flight every exam page runs before the person sees it (leaks, silent or quiet clips)
+  provenance.py  what each track's sound is modeled on: measured, designed or not said
+  handoffs.py    intake of the songs' HANDOFF files for the migration loop
 skills/ismail/   the agent skill (SKILL.md + references)
 .mcp.json, .cursor/   MCP and rule config for Claude Code and Cursor
 songs/           your projects (git-ignored)
 ```
+
+## Contributors
+
+- **Nate Codes** (newsbubbles): author and maintainer.
+- **eddiehavila**: [PR #116](https://github.com/newsbubbles/ismail/pull/116), the Docker image works under a non-root
+  `--user` with no extra flags (numba's cache and the machine board now sit in writable folders).
+- **The agent team.** ismail is also built by a team of AI agent sessions, each with one role:
+  - Director: keeps the roster, the board and the decision queue, and carries decisions to the agent they concern.
+  - Maintainer: maintains the repo (core, the op table, tests, CI, the skill) and reviews and merges pull requests.
+  - VR Dev: owns `ismail/stage`: the page runtime, the server, the stage ops, headset tests.
+  - Film: makes a film on the stage and is the stage's main user.
+  - Live DJ: plays live sets and tests the `live_*` ops under real-time use.
+  - Voice: voice modeling research, checked by blind ear exams.
+  - Multiplayer: research on shared worlds for the VR stage.
+  - Research: experiments and measurement.
+  - Business: go-to-market work.
+  - Marketing: launch videos, posts, the site's story and the first-session product shape.
+  - Steward: keeps the shared machine healthy (GPU, CPU, memory, disk) and the heavy-job queue moving.
+  - Historian: records whose ideas, senses and labor built ismail, and the provenance of what goes public.
+- **Sample sources.** Measured or sampled voices come from these sets. The audio itself stays out of the repo (mimic
+  profiles hold measurements only; sampled sets are fetched on the person's word with `samples_fetch`).
+
+| set | used for | licence |
+|---|---|---|
+| [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE) (Versilian Studios) | the `violin`, `contrabass`, `clarinet`, `bassoon` and `horn` mimic profiles | CC0 1.0 |
+| "real cello notes" by flcellogrl ([Freesound pack 12408](https://freesound.org/people/flcellogrl/packs/12408/)) | the `cello` mimic profile | CC BY 4.0 |
+| [jRhodes3d](https://github.com/sfzinstruments/jlearman.jRhodes3d) by Jeff Learman | the `rhodes` voice | samples CC BY-NC 4.0; the author grants CC0 for music made with them |
+| [Big Rusty Drums](https://github.com/sfzinstruments/karoryfer.big-rusty-drums) by Karoryfer Samples | the `rusty` voice | CC0 1.0 |
+| [Emilyguitar](https://github.com/sfzinstruments/karoryfer.emilyguitar) by D. Smolken, Karoryfer Samples | the `emily` voice | CC0 1.0 |
 
 ## Made something with it?
 
