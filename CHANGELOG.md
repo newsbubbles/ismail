@@ -20,6 +20,20 @@
 - `sketch_keep` marks the first session done only when the machine itself was new, so a guest's keep writes
   nothing for the owner.
 
+### Floor pairs in phone exams (ledger:M173)
+
+- `phone_exam(..., floor='auto' | 'full', floor_from=)`: device floor pairs, the real clip against a 64 or 128 kb/s
+  MP3 copy of itself or against itself, keyed so neither side is the synth. The full set on the first floor round,
+  then one rotating pair (history in the phone home, `floor_rounds.json`); seeded places, never first; neutral file
+  names. The pairs are renumbered; the reply and `<answers_path>.floor.json` map them back. Reference: the Voice
+  session's work/phone_round.py (hq:D-60).
+
+### Three measuring rules (ledger:S56)
+
+- listening.md, "Readings that mislead": a sum of medians runs short (fit lengths on a log scale, lengthen phrase
+  ends, put pauses back); level and band charts cannot see phase (a blind pair for any timing or phase stage); one
+  render is not a result (two seed sets before claiming a difference). From the Voice session's lessons (hq:D-60).
+
 ### Recording warnings before a take is measured (ledger:M172)
 
 - `ismail.capture`: two capture faults found before a recording is measured. Peaks flattened into a plateau under

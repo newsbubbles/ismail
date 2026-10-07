@@ -623,3 +623,37 @@ def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypat
                                'values': {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True}})
     a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
     assert a['values'] == {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True} and a['for'] == 'dj'
+
+
+@pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
+def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_path):
+    ph, base, _ = phone
+    import soundfile as sf
+    rng = np.random.default_rng(3)
+    t = np.arange(44100) / 44100
+    clips, key = [], {}
+    for i in (1, 2):
+        for ab, cls in zip('AB', ('real', 'synth') if i == 1 else ('synth', 'real')):
+            y = 0.2 * np.sin(2 * np.pi * (220 + 7 * i) * t) + 0.02 * rng.standard_normal(len(t))
+            f = tmp_path / f'c{i}{ab}.wav'
+            sf.write(str(f), y, 44100)
+            clips.append({'label': f'{i}{ab}', 'path': str(f)})
+            key[f'{i}{ab}'] = cls
+    ans = tmp_path / 'exam' / 'answers.jsonl'
+    out = P.phone_exam('floor round', clips, question='which is real?', answers_path=str(ans), exam_id='fl1',
+                       key=key, secrets=['take_r45'], floor='auto')
+    rec = json.loads((tmp_path / 'exam' / 'answers.jsonl.floor.json').read_text(encoding='utf8'))
+    assert sorted(r['rate'] for r in rec['floors']) == ['128k', '64k', 'same']        # the full set the first time
+    assert all(r['pair'] != 1 for r in rec['floors']) and 'floor pairs: pair' in out
+    assert sorted(rec['labels'].values()) == ['1A', '1B', '2A', '2B']
+    p = get(base, '/api/state?since=0&wait=0')['panels'][-1]
+    labels = [c['label'] for c in p['clips']]
+    assert labels == [f'{i}{ab}' for i in range(1, 6) for ab in 'AB']
+    same = next(r['pair'] for r in rec['floors'] if r['rate'] == 'same')
+    a, b = (urllib.request.urlopen(base + c['url'], timeout=5).read() for c in p['clips'] if c['label'][:-1] == str(same))
+    assert a == b                                                              # identical: the floor of floors
+    out = P.phone_exam('floor round 2', clips, answers_path=str(tmp_path / 'e2' / 'a.jsonl'), exam_id='fl2',
+                       key=key, secrets=['take_r45'], floor='auto')
+    assert out.count('pair ') == 1 and '128k' in out                           # then one rotating pair
+    with pytest.raises(Exception, match='labelled by pair'):
+        P.phone_exam('bad', [{'label': 'A', 'path': clips[0]['path']}], floor='auto')
