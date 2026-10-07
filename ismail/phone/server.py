@@ -797,6 +797,13 @@ class Phone:
             if not ffmpeg():
                 raise ValueError('ffmpeg is needed to read a voice note (set ISMAIL_FFMPEG)')
             chk = hum.check(hum.decode(f, ffmpeg()), text)
+            try:                                      # capture faults, at full rate (ledger:M172)
+                from .. import capture
+                cap = capture.check(hum.decode(f, ffmpeg(), sr=44100), 44100)
+                chk['capture'] = cap['warnings']
+                chk['air_db'] = cap['air_db']
+            except Exception as e:
+                chk['capture_why'] = f'{type(e).__name__}: {e}'
             (d / f'{vid}_hum.json').write_text(json.dumps(chk), encoding='utf8')
         self.hums[vid] = chk
         return meta, chk
@@ -846,6 +853,7 @@ class Phone:
                         self.post({'kind': 'hum', 'id': vid, 'file': str(f), 'heard': heard, 'ref': meta.get('ref'),
                                    'ref_beats': meta.get('ref_beats'), 'ref_lead_s': meta.get('ref_lead_s'),
                                    **{k: chk[k] for k in ('hz', 'note', 'voiced', 'steady', 'dur_s')},
+                                   **({'capture': chk['capture']} if chk.get('capture') else {}),
                                    '_age': chk.get('dur_s') or 0})
                 except Exception as e:
                     print(f'[phone] hum check {vid}: {type(e).__name__}: {e}', flush=True)
