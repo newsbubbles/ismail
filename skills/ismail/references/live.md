@@ -49,6 +49,13 @@ bass and lead one at a time, the user's ear on each A/B) and take the matched in
 console sounds is not rescued by arrangement. Set faders from the reference's stem balance (`levels_from_ref` offline,
 then carry the faders into the set), and swing from `analyze_swing`, not by feel.
 
+**A chain the person liked gets a name.** `fx_stack_save(name, chain, notes)` keeps it for every set (or one song,
+with `project=`), with their words in the notes; `live_track(fx='stack:<name>')` uses it, and `fx_stack_list` shows
+what there is. Saving runs 10 s through the chain the way the engine does and keeps how many times faster than
+realtime it ran on this machine: `live_track` and `live_load` say it again where the chain is used, with RISK under
+4x (the built-in `afrobeat_chank` measured 1.2x here: a univibe is costly). `fx_stack_measure` measures again after a
+machine change or when a set runs behind.
+
 **Only proven sounds go on air.** That means library voices with their fitted rigs, measured mimic profiles, and the
 instruments of finished songs. A voice written while preparing the set and never fitted to a recording or ear-tested
 does not play live. In a 40-minute blues set, a 12-string and a harmonica built from textbook numbers, with their
