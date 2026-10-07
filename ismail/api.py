@@ -1579,7 +1579,8 @@ def sound_make(project: str, name: str, instrument, notes: str = '0 C4 1', fx: l
 def sound_import(project: str, name: str, source: str, start_sec: float = None, end_sec: float = None,
                  bars: list = None, normalize: bool = False) -> str:
     """Import audio into the bank from a file or any analysis source (ref, ref:vocals, track:x, render...), optionally
-    a time slice (seconds) or bars [a, b] on the project grid."""
+    a time slice (seconds) or bars [a, b] on the project grid. Warns on capture faults (peaks flattened by a browser
+    mic or a limiter, nothing above 8 kHz from a Bluetooth mic) before the sound is measured or played as a sample."""
     import soundfile as sf
     P = _load(project)
     path, g = P.source(source, bars)
@@ -1592,11 +1593,13 @@ def sound_import(project: str, name: str, source: str, start_sec: float = None, 
     y = y[:, a:b]
     if y.shape[0] == 1:
         y = np.vstack([y, y])
+    from . import capture
+    warn = capture.check(y, sr)['warnings']                 # before normalizing, which would move the plateau
     if normalize:
         y = y / (np.max(np.abs(y)) + 1e-12) * 0.891
     _write_sound(P, name, y, sr, note=f"imported from {source}")
     P.save()
-    return f"sound {name!r}: {y.shape[1] / sr:.2f}s from {source}"
+    return f"sound {name!r}: {y.shape[1] / sr:.2f}s from {source}" + ''.join(f"\nRECORDING WARNING: {w}" for w in warn)
 
 
 @op()

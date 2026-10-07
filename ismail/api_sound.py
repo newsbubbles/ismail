@@ -384,7 +384,7 @@ def _pitch_of(name):
 @op(mutates=True)
 @heavy()
 def mimic_measure(project: str, name: str, notes: list = None, folder: str = None, kind: str = 'auto',
-                  vel: float = 0.7, check: bool = True, defaults: dict = None) -> str:
+                  vel: float = 0.7, check: bool = True, defaults: dict = None, no_top: bool = False) -> str:
     """Measure an instrument from recorded notes into a mimic profile (<project>/voices/<name>.mimic.json), then
     use it as {"type": "mimic", "profile": "<name>"}. notes: [[source, pitch], ...] or [[source, pitch, vel,
     [t0, t1]]] where source is 'sound:<name>', 'ref', 'ref:<stem>' or a path, pitch like 'A4', vel 0..1 (how hard
@@ -394,7 +394,10 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
     (bowed, blown, sung) | decaying (plucked, struck). check=True rebuilds every measured note from the OTHER
     notes and reports how close it lands (leave-one-out), the honest estimate for pitches you did not record.
     defaults: mimic params stored in the profile and used unless a track overrides them, e.g. the open strings of a
-    bowed instrument {"strings": ["G3", "D4", "A4", "E5"]} (instrument_help(type='mimic') lists them)."""
+    bowed instrument {"strings": ["G3", "D4", "A4", "E5"]} (instrument_help(type='mimic') lists them). Each recording is
+    checked first for capture faults that would be learned as the instrument's sound (peaks flattened by a browser
+    mic or a limiter, nothing above 8 kHz from a Bluetooth mic); no_top=True says the instrument has no top, so a
+    missing top is not a fault."""
     import glob as _glob
     import librosa
     from . import mimic
@@ -426,6 +429,13 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
             ys.append((mimic._load(src), midi, v))
         else:
             ys.append((_audio(P, src, win).mean(axis=0), midi, v))
+    from . import capture
+    from .voices import _note_name
+    faults = {}
+    for (y, _, _), (src, midi, _, win) in zip(ys, items):
+        w = capture.check(y, mimic.SR, no_top=no_top)['warnings']
+        if w:
+            faults[f"{os.path.basename(str(src))}{f' {win}' if win else ''} ({_note_name(midi)})"] = w
     try:
         measured = mimic.measure_notes(ys, kind=kind)
     except Exception as e:
@@ -458,6 +468,10 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
         if bad:
             raise OpError(f"unknown mimic params in defaults {sorted(bad)}; valid: {sorted(mimic.DEFAULT_PARAMS)}")
         prof['defaults'] = defaults
+    if faults:
+        prof['capture'] = faults
+    if no_top:
+        prof['no_top'] = True
     vd = os.path.join(P.root, 'voices')
     os.makedirs(vd, exist_ok=True)
     out = os.path.join(vd, name + '.mimic.json')
@@ -465,6 +479,9 @@ def mimic_measure(project: str, name: str, notes: list = None, folder: str = Non
         json.dump(prof, f)
     from .voices import _note_name
     L = [f"mimic profile {name!r} -> {out}", f"kind {prof['kind']}, {len(measured)} notes"]
+    if faults:
+        L.append(f"RECORDING WARNINGS ({len(faults)} of {len(items)} recordings; kept in the profile as 'capture'):")
+        L += [f"  {k}: {w}" for k, ws in faults.items() for w in ws]
     L.append(f"{'note':>5} {'partials':>8} {'B':>8} {'vib Hz':>6} {'cents':>5} {'attack':>6}  noise (sustain, dB under harmonics)")
     for n in prof['notes']:
         ns = np.array(n['noise_sus'])

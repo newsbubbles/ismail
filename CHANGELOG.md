@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Recording warnings before a take is measured (ledger:M172)
+
+- `ismail.capture`: two capture faults found before a recording is measured. Peaks flattened into a plateau under
+  0.98 (the browser mic chain stops near 0.894-0.899, so a clip test never fires; more than 20 samples a second
+  within 0.006 of the maximum), and band-limited capture (8-12 kHz more than 60 dB under 0.5-2 kHz: a Bluetooth
+  headset mic). From the Voice session's lessons (hq:D-60).
+- `mimic_measure` lists RECORDING WARNINGS per take and keeps them in the profile (`capture`); `no_top=True` for an
+  instrument with no top. `sound_import` warns the same way, before normalizing. Phone hums carry `capture` and
+  `air_db` in their check and the inbox record.
+- Parity: air_db equals vox's rec/server.py air_db to 0.0 dB on all 39 of its r39 (Bluetooth, all flagged) and r45
+  (clean, none flagged) takes.
+
 ### Phone panels: choices, checkboxes, toggles, a voice reply, and never over a voice note (ledger:M167)
 
 - `phone_panel_show(inputs=[...])`: choice (one of), check (any of), toggle and text inputs beside the buttons; the
