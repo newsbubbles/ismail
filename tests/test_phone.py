@@ -625,6 +625,23 @@ def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypat
     assert a['values'] == {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True} and a['for'] == 'dj'
 
 
+def test_a_second_panel_waits_and_not_now_is_a_dismissal(phone):
+    """Nate 10-07: an exam interrupted a panel he was reading; Live DJ 10-07: Send with nothing picked read as an
+    answer."""
+    ph, base, _ = phone
+    assert 'waits behind' not in P.phone_panel_show(panel_id='read-1', title='A long read', text='...')
+    out = P.phone_panel_show(panel_id='dj-2', title='Which?', sender='dj',
+                             inputs=[{'id': 'which', 'kind': 'choice', 'options': ['a', 'b']},
+                                     {'id': 'also', 'kind': 'choice', 'options': ['x'], 'optional': True}])
+    assert 'waits behind read-1' in out
+    p = ph.view['panels'][-1]
+    assert 'optional' not in p['inputs'][0] and p['inputs'][1]['optional'] is True
+    post(base, '/api/answer', {'id': 'dj-2', 'dismissed': True})
+    a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
+    assert a['dismissed'] is True and a['answer'] is None and a['for'] == 'dj'
+    assert [x['id'] for x in ph.view['panels']] == ['read-1']
+
+
 @pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
 def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_path):
     ph, base, _ = phone
