@@ -8,6 +8,31 @@
   concrete moves: tempo, major or minor, busier or sparser, softer or brighter; "a bit" halves the move, "much"
   makes it bigger, and the reply names each ("happier: faster (95 BPM), major, busier, brighter"). Marketing's dry
   run: "a bit happier" changed nothing and two takes came back slower.
+### The person's words are kept, and versions play from the song folder (ledger:M170 G-2b, U-5)
+
+- `guide(first_answer=..., project=)` keeps the vocabulary it decided (`<song>/person.json`, and the latest person
+  beside the first-session mark). For plain words, `sketch` says "Version 1: a piano plays the tune, slow and
+  bright, about 30 seconds" (no keys, BPM or bars, also in its change lines), and `sketch_keep` offers the next
+  change in their words, not "a warmer bass from bar 5".
+- Sketches are "version 1, 2, 3", starting again each round; `base=` and `sketch_keep` take the number. Each
+  finished sketch is also copied to the top of the song folder as "version N", replaced by the next round's.
+- The kept song gets a playable file at once (`<song>/<song name>.mp3`).
+
+### A newcomer is a person, not a machine (ledger:M170 G-3)
+
+- `guide(new_person=True)` opens with the first session for someone new at a computer where songs already exist
+  (Marketing's dry run and the DJ's fresh-agent test both got no first session there); the plain `guide` reply on
+  such a machine names it in its first line.
+- `sketch_keep` marks the first session done only when the machine itself was new, so a guest's keep writes
+  nothing for the owner.
+
+### Floor pairs in phone exams (ledger:M173)
+
+- `phone_exam(..., floor='auto' | 'full', floor_from=)`: device floor pairs, the real clip against a 64 or 128 kb/s
+  MP3 copy of itself or against itself, keyed so neither side is the synth. The full set on the first floor round,
+  then one rotating pair (history in the phone home, `floor_rounds.json`); seeded places, never first; neutral file
+  names. The pairs are renumbered; the reply and `<answers_path>.floor.json` map them back. Reference: the Voice
+  session's work/phone_round.py (hq:D-60).
 
 ### Three measuring rules (ledger:S56)
 

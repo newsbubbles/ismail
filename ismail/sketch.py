@@ -920,6 +920,52 @@ def marker_path():
                                                                   'first_session_done')
 
 
+def person_file(project=None):
+    """Where the person's vocabulary is kept: beside their song, or (no song yet) beside the first-session mark."""
+    if project:
+        return os.path.join(os.path.abspath(project), 'person.json')
+    return os.path.join(os.path.dirname(marker_path()), 'person.json')
+
+
+def remember_words(kind, said, project=None):
+    """guide(first_answer=...) decided 'musician' or 'plain': keep it, so every block written for this person
+    (sketch, sketch_keep) uses it (ledger:M170 G-2b)."""
+    import time as _t
+    for f in dict.fromkeys([person_file(project) if project else None, person_file()]):
+        if f:
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            with open(f, 'w', encoding='utf8') as fh:
+                json.dump({'words': kind, 'said': said, 'at': _t.strftime('%Y-%m-%d %H:%M')}, fh)
+
+
+def words_for(project=None):
+    """'musician', 'plain', or None (never asked): the song's own record first, then the latest person's."""
+    for f in ([person_file(project)] if project else []) + [person_file()]:
+        try:
+            with open(f, encoding='utf8') as fh:
+                return json.load(fh).get('words')
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def plain_mood(pl):
+    """A sketch's tempo and mode as a non-musician hears them: 'slow and bright', 'lively and darker'."""
+    bpm = pl['bpm']
+    pace = 'slow' if bpm < 80 else 'easy-going' if bpm < 105 else 'lively' if bpm < 130 else 'fast'
+    return f"{pace} and {'bright' if 'major' in (pl.get('key') or '') else 'darker'}"
+
+
+def plain_words(text):
+    """A change line without trade words: no BPM, keys or modes ('faster (93 BPM), A major' -> 'faster, brighter')."""
+    text = re.sub(r'\s*\(\d+(?:\.\d+)? BPM\)', '', text)
+    text = re.sub(r'\btempo \d+(?:\.\d+)?\b', 'a new pace', text)
+    text = re.sub(r'\b(?:in |key )?[A-G][#b]? (major|minor)\b',
+                  lambda m: 'brighter' if m.group(1) == 'major' else 'darker', text)
+    text = re.sub(r'\bmajor\b', 'brighter', text)
+    return re.sub(r'\bminor\b', 'darker', text)
+
+
 def mark_done():
     p = marker_path()
     os.makedirs(os.path.dirname(p), exist_ok=True)

@@ -504,18 +504,25 @@ def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) ->
 # ------------------------------------------------------------------ instruments
 
 @op()
-def guide(project: str = None, first_answer: str = None) -> str:
+def guide(project: str = None, first_answer: str = None, new_person: bool = False) -> str:
     """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question). For
     a person who has made nothing with ismail yet it opens with how to run their first session. first_answer: the
     person's first answer, verbatim; the reply is then only which words to use with them from now on (musician,
-    when they name an instrument they play, a style they trained in or reading music; otherwise plain words)."""
+    when they name an instrument they play, a style they trained in or reading music; otherwise plain words).
+    new_person=True: the person in front of you is new to ismail on a machine where someone else already made songs
+    ("I'm new", a friend at the owner's computer); the first session opens for them, and keeping their sketch
+    marks nothing for the machine's owner."""
     from .guide import GUIDE, FIRST_SESSION, vocabulary_text
     from . import sketch as SK
     if first_answer is not None:
+        from .guide import vocabulary
+        kind, said, _ = vocabulary(first_answer)
+        SK.remember_words(kind, said, project)
         return vocabulary_text(first_answer)
-    if SK.is_new(project):
+    if new_person or SK.is_new(project):
         return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + '\n\n' + GUIDE
-    return GUIDE
+    return ("Someone new to ismail at this computer (they say so, or have never made a song with it)? "
+            "guide(new_person=True) opens with their first session.\n\n" + GUIDE)
 
 
 @op()
@@ -542,7 +549,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     from . import voices as V
     root = os.path.abspath(project)
     sd = os.path.join(root, 'sketches')
-    have = sorted(os.listdir(sd)) if os.path.isdir(sd) else []
+    have = sorted(f for f in os.listdir(sd) if os.path.isdir(os.path.join(sd, f))) if os.path.isdir(sd) else []
     n = n or (2 if base else 3)
     if not 1 <= n <= 4:
         raise OpError("n: 1 to 4 sketches")
@@ -562,6 +569,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
         else:
             base_spec = None
             if base:
+                base = _sketch_ref(sd, base)
                 hits = [f for f in have if f == base or f.split('-')[0] == base]
                 if len(hits) != 1 or not os.path.exists(os.path.join(sd, hits[0], 'sketch.json')):
                     raise OpError(f"base={base!r}: no single sketch with that letter in {sd} (have: "
@@ -576,7 +584,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     letters = [c for c in 'abcdefghijklmnopqrstuvwxyz' if c not in used]
     mp3 = 'also' if _ffmpeg_ok() else 'none'
     L = [f"sketches for: {brief}" + (f" (from sketch {base})" if base else '')]
-    L += [f"FOR YOU: {x}" for x in said]
+    L += [f"FOR YOU: {SK.plain_words(x) if SK.words_for(project) == 'plain' else x}" for x in said]
     t0 = time.time()
     built, plans = [], []
     for i, (label, spec) in enumerate(todo):
@@ -628,8 +636,10 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
                 os.remove(os.path.join(sp, f_))
             except OSError:
                 pass
-        built.append({'sp': sp, 'letter': letter, 'lufs': prod['lufs'], 'mp3': mp3, 'why': prod['why']})
+        built.append({'sp': sp, 'letter': letter, 'lufs': prod['lufs'], 'mp3': mp3, 'why': prod['why'],
+                      'version': i + 1, 'root': root})
         plans.append((letter, pl, spec))
+    _new_round(sd, root, {str(j['version']): j['letter'] for j in built})
     # spec S-2: the first is played as soon as it lands; the others render behind it
     rest = built[1:] if background and len(built) > 1 else []
     for job in (built[:1] if rest else built):
@@ -641,12 +651,18 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     say = [f"Here {'are' if len(plans) > 1 else 'is'} {len(plans)} short sketch{'es' if len(plans) > 1 else ''}"
            + (f"; the first is ready now and the other{'s land' if len(rest) > 1 else ' lands'} in a minute or two"
               if rest else '') + '.']
-    for letter, pl, spec in plans:
+    plainw = SK.words_for(project) == 'plain'
+    for v, (letter, pl, spec) in enumerate(plans, 1):
         sec = pl['bars'] * 4 * 60 / pl['bpm']
         diff = SK.contrast(first, pl) if pl is not first else []
-        say.append(f"{letter.upper()}: {SK.plain_parts({r: p['voice'] for r, p in pl['parts'].items()})}, in "
-                   f"{pl['key']} at {pl['bpm']:g} BPM, about {sec:.0f} seconds"
-                   + (f"; unlike A: {', '.join(diff)}" if diff else '') + '.')
+        parts = SK.plain_parts({r: p['voice'] for r, p in pl['parts'].items()})
+        if plainw:                       # ledger:M170 G-2b: no keys, BPM or bars for someone who wants plain words
+            diff = [SK.plain_words(d) for d in diff]
+            say.append(f"Version {v}: {parts}, {SK.plain_mood(pl)}, about {sec:.0f} seconds"
+                       + (f"; unlike version 1: {', '.join(diff)}" if diff else '') + '.')
+        else:
+            say.append(f"Version {v}: {parts}, in {pl['key']} at {pl['bpm']:g} BPM, about {sec:.0f} seconds"
+                       + (f"; unlike version 1: {', '.join(diff)}" if diff else '') + '.')
     seen = []
     for _, _, spec in plans:
         for x in SK.say_plain(spec):
@@ -657,7 +673,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     for (letter, pl, spec), job in zip(plans, built):
         sec = pl['bars'] * 4 * 60 / pl['bpm']
         form = f"; form {' > '.join(pl['form'])} (4 bars each)" if pl['form'] else ''
-        L += [f"{letter}) {pl['what']}",
+        L += [f"{letter}) version {job['version']}: {pl['what']}",
               f"   {pl['key']}, {pl['bpm']:g} BPM, {pl['bars']} bars (~{sec:.0f} s){form}; chords "
               f"{' '.join(pl['progression'])}" + (f", closing {pl['cadence']}" if pl.get('cadence') else '') +
               (f"; feel {pl['feel']}" if pl['feel'] else '') + ('; soft' if pl.get('soft') else '')]
@@ -668,13 +684,16 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             L.append(f"   {r['lufs']:.1f} LUFS, peak {r['peak']:.1f} dBFS; {r['balance']}; {job['why']}; listen: "
                      f"{r['file']}")
     if rest:
-        L.append(f"PLAY {plans[0][0].upper()} NOW (open its file); while it plays, sketch_wait(project) waits for "
+        L.append(f"PLAY VERSION 1 NOW (open its file); while it plays, sketch_wait(project) waits for "
                  f"the others.")
+    L.append(f"Each is also at the top of the song folder as 'version 1', 'version 2' ... ({root}), replaced by "
+             f"the next round's.")
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
-             "missing. Their correction is the next round: sketch(project, '<their words>', base='<letter>'). "
-             f"sketch_keep(project, '<letter>') makes the pick the song (it is the song's example); until then "
-             f"{root} holds only sketches/, each its own project. These are sketches: do not polish one (no "
-             f"Listening Report, no section fixes) before the person picks.")
+             "missing. Their correction is the next round: sketch(project, '<their words>', base='<version number>'). "
+             f"sketch_keep(project, '<version number>') makes the pick the song (it is the song's example); until "
+             f"then {root} holds only sketches/, each its own project. These are sketches: do not polish one (no "
+             f"Listening Report, no section fixes) before the person picks."
+             + (" They want plain words: say what changed, never keys, BPM or bars." if plainw else ''))
     return '\n'.join(L)
 
 
@@ -720,9 +739,11 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
     from . import sketch as SK
     root = os.path.abspath(project)
     sd = os.path.join(root, 'sketches')
-    hits = [f for f in (os.listdir(sd) if os.path.isdir(sd) else []) if f == sketch or f.split('-')[0] == sketch]
+    sketch = _sketch_ref(sd, sketch)
+    hits = [f for f in (os.listdir(sd) if os.path.isdir(sd) else []) if (f == sketch or f.split('-')[0] == sketch)
+            and os.path.isdir(os.path.join(sd, f))]
     if len(hits) != 1:
-        have = ', '.join(sorted(os.listdir(sd))) if os.path.isdir(sd) else 'none: run sketch first'
+        have = ', '.join(sorted(f for f in os.listdir(sd) if f != 'round.json')) if os.path.isdir(sd) else 'none: run sketch first'
         raise OpError(f"no single sketch {sketch!r} in {sd} (have: {have})")
     src = os.path.join(sd, hits[0])
     dst = os.path.join(root, 'project.json')
@@ -742,12 +763,59 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
     os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
     with open(dst, 'w', encoding='utf8') as f:
         json.dump(d, f, indent=1)
-    SK.mark_done()
+    if SK.is_new():                    # only a machine whose owner is new: a guest's keep marks nobody (M170 G-3)
+        SK.mark_done()
+        done = f"First session marked done ({SK.marker_path()})."
+    else:
+        done = "First session over for this person (nothing marked: this computer's owner already makes songs)."
+    heard = sorted(f for f in (os.listdir(os.path.join(src, 'renders')) if os.path.isdir(os.path.join(src, 'renders'))
+                                else []) if f.startswith('sketch_') and f.endswith(('.mp3', '.wav')))
+    song = ''
+    if heard:                                        # ledger:M170 U-5: the kept song plays at once
+        pick = next((f for f in heard if f.endswith('.mp3')), heard[0])
+        song = os.path.join(root, d['name'] + os.path.splitext(pick)[1])
+        shutil.copyfile(os.path.join(src, 'renders', pick), song)
+        song = f" Play it now: {song}."
+    if SK.words_for(project) == 'plain':
+        nxt = ("NEXT: offer one change, in their words ('a bit happier', 'no drums at the start', 'shorter'), make "
+               "only that, render, and play before and after. Say what changed in plain words: never keys, BPM or "
+               "bars. Then grow it a part at a time.")
+    else:
+        nxt = ("NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for "
+               "two bars), make only that, render a window, play before and after. Then the normal loop: extend the "
+               "form in a Session Sheet, a part at a time.")
     return (f"kept {hits[0]} as the song in {root} ({d['bpm']} BPM, {d['length_bars']} bars, tracks: "
-            f"{', '.join(d['tracks'])}). First session marked done ({SK.marker_path()}).\n"
-            f"NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for two "
-            f"bars), make only that, render a window, play before and after. Then the normal loop: extend the form "
-            f"in a Session Sheet, a part at a time.")
+            f"{', '.join(d['tracks'])}). {done}{song}\n" + nxt)
+
+
+def _sketch_ref(sd, ref):
+    """A sketch named by the person's version number ('2', 'version 2') -> its letter in the latest round."""
+    m = re.fullmatch(r'\s*(?:version|v|number|no\.?)?\s*(\d+)\s*', str(ref), re.I)
+    if not m:
+        return ref
+    try:
+        with open(os.path.join(sd, 'round.json'), encoding='utf8') as f:
+            return json.load(f)['versions'].get(m.group(1), ref)
+    except (OSError, ValueError, KeyError):
+        return ref
+
+
+def _new_round(sd, root, versions):
+    """A new round of sketches: its version numbers start again at 1 (round.json), and the last round's copies at
+    the top of the song folder go, so 'version 2' is always this round's."""
+    try:
+        with open(os.path.join(sd, 'round.json'), encoding='utf8') as f:
+            old = json.load(f).get('versions', {})
+    except (OSError, ValueError):
+        old = {}
+    for v in old:
+        for ext in ('.mp3', '.wav'):
+            top = os.path.join(root, f"version {v}{ext}")
+            if os.path.exists(top):                  # our own copy of a sketch; the sketch itself stays in sketches/
+                os.remove(top)
+    os.makedirs(sd, exist_ok=True)
+    with open(os.path.join(sd, 'round.json'), 'w', encoding='utf8') as f:
+        json.dump({'versions': versions}, f)
 
 
 def _ffmpeg_ok():
@@ -803,6 +871,10 @@ def _sketch_render(job):
         lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
         got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time()}
+        if job.get('version') and job.get('root') and os.path.exists(f):      # ledger:M170 U-5
+            top = os.path.join(job['root'], f"version {job['version']}{os.path.splitext(f)[1]}")
+            shutil.copyfile(f, top)
+            got['top'] = top
     except Exception as e:                        # said by sketch_wait, never lost
         got = {'letter': letter, 'error': f"{type(e).__name__}: {e}", 'at': time.time()}
     with open(ready, 'w', encoding='utf8') as fh:

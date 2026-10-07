@@ -51,6 +51,16 @@ exam on the phone page: it runs `exam_check` first and refuses one that is not R
 (their earbuds, a speaker) and record it with the answers, as for any device. Keep clips short and the questions
 to two or three: they answer standing, walking, or between other things.
 
+**A floor under every phone round.** A "can't tell" on a phone means nothing until you know what that phone and
+ear can tell apart at all. `phone_exam(..., floor='auto')` adds floor pairs: the real clip against a 64 or 128 kb/s
+MP3 copy of itself, or against itself, at seeded places (never first). The full set (64k, 128k, identical) goes out
+on the first floor round, then one rotating pair per round; pass `floor='full'` again for a new listening device or
+when a floor answer differs from the first. Each floor pair costs a slot of the 5 to 6 pair budget. The pairs are
+renumbered around them, and the reply and `<answers_path>.floor.json` map the labels back and say which side is the
+MP3. Read the floor first: if they pick the MP3 side as "different" more often than chance, the device and ear
+separate even that, and a real pair they could not tell is a strong pass; if they never can, a "can't tell" says
+little. From the Voice and Paper agents' work (ledger:M173).
+
 ### Record the devices, every round
 
 The microphone and the listening device change what an exam measures, so the page records both (vox:r39 was lost:

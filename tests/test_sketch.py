@@ -61,13 +61,13 @@ def test_guide_opens_with_the_first_session_only_for_someone_new(tmp_path):
 def test_sketch_then_keep_makes_the_song_and_ends_the_first_session(tmp_path):
     song = str(tmp_path / 'songs' / 'rain')
     out = api.sketch(song, 'a quiet song for a rainy morning', styles=['piano'], bars=4)
-    assert 'a) solo piano' in out and 'sketch_keep' in out
+    assert 'a) version 1: solo piano' in out and 'sketch_keep' in out
     sp = os.path.join(song, 'sketches', 'a-piano')
     rendered = os.listdir(os.path.join(sp, 'renders'))
     assert any(f.startswith('sketch_a.') for f in rendered)
     assert api.guide().startswith('FIRST SESSION')                   # a sketch is not a finished song
     out = api.sketch(song, 'slower, with strings', styles='piano', bars=4)
-    assert 'b) solo piano' in out                                     # a second round adds letters
+    assert 'b) version 1: solo piano' in out                          # letters go on; versions restart
     with pytest.raises(OpError) as e:
         api.sketch_keep(song, 'z')
     assert 'a-piano' in str(e.value)
@@ -127,9 +127,9 @@ def test_the_next_round_takes_the_persons_words():
 def test_a_brief_sketch_and_a_next_round_from_it(tmp_path):
     song = str(tmp_path / 'songs' / 'trip')
     out = api.sketch(song, 'trip-hop with rhodes and a guitar melody, A minor, 88 BPM', n=1, bars=4)
-    assert "FOR YOU: the rhodes voice plays real samples" in out and "SAY TO THE PERSON" in out and 'a) as asked' in out and 'LUFS' in out
+    assert "FOR YOU: the rhodes voice plays real samples" in out and "SAY TO THE PERSON" in out and 'a) version 1: as asked' in out and 'LUFS' in out
     out = api.sketch(song, 'no guitar, slower', base='a', n=1, bars=4)
-    assert 'b) as asked' in out and 'changed from the base' in out and 'no melody' in out
+    assert 'b) version 1: as asked' in out and 'changed from the base' in out and 'no melody' in out
     with open(os.path.join(song, 'sketches', 'b-as-asked', 'sketch.json'), encoding='utf8') as f:
         assert json.load(f)['bpm'] < 88
     with pytest.raises(OpError):
@@ -196,15 +196,17 @@ def test_the_first_sketch_comes_first_says_it_plainly_and_is_balanced(tmp_path, 
         threading.Thread(target=api._sketch_finish, args=(jobs,))) or spawned[-1].start())
     out = api.sketch(song, 'lo-fi beat with flute and gritty vocals', n=2, bars=4)
     say = out.split('SAY TO THE PERSON (read it out as it is):')[1].split('\nFOR YOU')[0]
-    assert 'the first is ready now' in say and 'A: a violin plays the tune' in say and 'B: ' in say
-    assert 'unlike A:' in say and 'flute; that isn' in say and "isn't something I can make yet" in say
+    assert 'the first is ready now' in say and 'Version 1: a violin plays the tune' in say and 'Version 2: ' in say
+    assert 'unlike version 1:' in say and 'flute; that isn' in say and "isn't something I can make yet" in say
     assert 'grand_piano' not in say and 'kit70' not in say and 'voice' not in say.replace('singing voice', '')
-    assert 'PLAY A NOW' in out and 'rendering in the background' in out
+    assert 'PLAY VERSION 1 NOW' in out and 'rendering in the background' in out
     spawned[0].join(300)
     got = api.sketch_wait(song, wait=5)
     assert got.count(': ready') == 2 and 'the tune' in got, got
     import json as _j
     for d in os.listdir(os.path.join(song, 'sketches')):
+        if d == 'round.json':
+            continue
         r = _j.load(open(os.path.join(song, 'sketches', d, 'sketch_ready.json'), encoding='utf8'))
         assert 'sits' in r['balance'] or 'moved it' in r['balance']
 
@@ -222,3 +224,35 @@ def test_feeling_words_move_tempo_mode_density_and_tone(words, bpm, key, dense, 
     spec, changed = SK.apply_words(base, words)
     assert (spec['bpm'], spec['key'], spec['dense'], spec['soft']) == (bpm, key, dense, soft)
     assert changed
+def test_a_new_person_gets_the_first_session_on_a_machine_with_songs_and_marks_nobody(tmp_path):
+    r = tmp_path / 'songs' / 'owners_song' / 'renders'
+    r.mkdir(parents=True)
+    (r / 'latest.wav').write_bytes(b'')
+    g = api.guide()
+    assert not g.startswith('FIRST SESSION') and 'guide(new_person=True)' in g.split('\n')[0]
+    assert api.guide(new_person=True).startswith('FIRST SESSION')
+    song = str(tmp_path / 'songs' / 'guest')
+    api.sketch(song, 'a calm piano tune', styles=['piano'], bars=4)
+    out = api.sketch_keep(song, 'a')
+    assert 'nothing marked' in out and not os.path.exists(SK.marker_path())
+
+
+def test_plain_words_are_kept_and_versions_play_from_the_song_folder(tmp_path):
+    song = str(tmp_path / 'songs' / 'walk')
+    api.guide(project=song, first_answer="I just like listening to music on walks")
+    assert SK.words_for(song) == 'plain'
+    out = api.sketch(song, 'a calm piano tune', styles=['piano'], bars=4)
+    say = out.split('SAY TO THE PERSON')[1].split('\na)')[0]
+    assert 'Version 1:' in say and 'BPM' not in say and ' major' not in say and ' minor' not in say
+    assert any(f.startswith('version 1.') for f in os.listdir(song))           # playable at the song's top
+    api.sketch(song, 'a bit happier', base='1', bars=4, n=1, background=False)
+    assert any(f.startswith('version 1.') for f in os.listdir(song))           # the new round's version 1
+    out = api.sketch_keep(song, '1')
+    assert 'Play it now' in out and any(f.startswith('walk.') for f in os.listdir(song))
+    nxt = out.split('NEXT:')[1]
+    assert 'from bar' not in nxt and 'two bars' not in nxt
+
+
+def test_a_musician_keeps_keys_and_tempo():
+    assert SK.plain_words('faster (93 BPM), A major') == 'faster, brighter'
+    assert SK.plain_mood({'bpm': 70, 'key': 'D minor'}) == 'slow and darker'

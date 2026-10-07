@@ -221,16 +221,114 @@ def phone_ask(text: str, wait: float = 0, sender: str = None) -> str:
     return _call('ask', timeout=float(wait or 0) + 15, text=text, wait=wait, who=sender)
 
 
+FLOORS = ('64k', '128k', 'same')      # floor pairs: the real clip against a 64 or 128 kb/s MP3 copy, or itself
+REAL_CLASSES = ('real', 'record', 'recording', 'ref', 'reference')
+
+
+def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
+    """Device floor pairs (ledger:M173, from the Voice and Paper agents): the real clip against an MP3 copy of itself,
+    or against itself, so a "can't tell" on the phone can be told apart from what the phone and the ear cannot
+    separate at all. The full set on the first floor round (or floor='full': a new device, or a floor answer that
+    changed), then one rotating pair, at seeded random places, never first; the pairs are renumbered.
+    -> (clips, key, record)."""
+    import random
+    import shutil
+    pat = re.compile(r'^(\d+)([AB])$')
+    cl = [dict(c) for c in clips]
+    if not cl or not all(pat.match(str(c.get('label', ''))) for c in cl):
+        raise OpError("floor pairs need clips labelled by pair (1A, 1B, 2A, 2B ...); label them so, or leave floor "
+                      "off")
+    src = floor_from
+    if src is None:
+        src = next((c['path'] for c in cl if str((key or {}).get(c['label'], '')).lower() in REAL_CLASSES), None)
+    if not src or not os.path.isfile(str(src)):
+        raise OpError(f"floor pairs need a real clip: give floor_from=<path>, or key a clip as one of "
+                      f"{list(REAL_CLASSES)}")
+    ff = S.ffmpeg()
+    if not ff:
+        raise OpError('floor pairs need ffmpeg (set ISMAIL_FFMPEG)')
+    hist_f = S.HOME / 'floor_rounds.json'
+    try:
+        hist = json.loads(hist_f.read_text(encoding='utf8'))
+    except (OSError, ValueError):
+        hist = []
+    rates = list(FLOORS) if floor == 'full' or not hist else [FLOORS[len(hist) % len(FLOORS)]]
+    eid = exam_id or f'exam_{int(time.time())}'
+    rng = random.Random(eid)
+    out_d = os.path.join(os.path.dirname(os.path.abspath(answers_path)) if answers_path else str(S.HOME / 'exams'),
+                         f'{eid}_floor')
+    os.makedirs(out_d, exist_ok=True)
+
+    def run(*a):
+        subprocess.run([ff, '-y', '-loglevel', 'error', *a], check=True, capture_output=True)
+
+    groups = {}
+    for c in cl:
+        groups.setdefault(int(pat.match(c['label']).group(1)), []).append(c)
+    order = [sorted(groups[k], key=lambda c: c['label']) for k in sorted(groups)]
+    floors = []
+    for j, rate in enumerate(rates):
+        same = os.path.join(out_d, f'f{j + 1}_1.wav')           # neutral names: nothing says which side is the MP3
+        other = os.path.join(out_d, f'f{j + 1}_2.wav')
+        run('-i', str(src), same)
+        if rate == 'same':
+            shutil.copyfile(same, other)
+        else:
+            mp3 = os.path.join(out_d, f'f{j + 1}_tmp.mp3')
+            run('-i', str(src), '-b:a', rate, mp3)
+            run('-i', mp3, other)
+            os.remove(mp3)
+        side = rng.choice('AB')
+        pair = [{'path': other}, {'path': same}] if side == 'A' else [{'path': same}, {'path': other}]
+        order.insert(rng.randrange(1, len(order) + 1), pair)
+        floors.append((pair, rate, None if rate == 'same' else side))
+    new, new_key, labels, rec = [], {}, {}, []
+    for i, pair in enumerate(order, 1):
+        fl = next((f for f in floors if f[0] is pair), None)
+        for c, ab in zip(pair, 'AB'):
+            lab = f'{i}{ab}'
+            new.append({**c, 'label': lab})
+            if fl:
+                new_key[lab] = 'real'
+            else:
+                labels[lab] = c['label']
+                if key and c['label'] in key:
+                    new_key[lab] = key[c['label']]
+        if fl:
+            rec.append({'pair': i, 'rate': fl[1], 'mp3_side': fl[2]})
+    hist.append({'exam_id': eid, 'at': time.strftime('%Y-%m-%d %H:%M'), 'floors': rec})
+    hist_f.parent.mkdir(parents=True, exist_ok=True)
+    hist_f.write_text(json.dumps(hist, indent=1), encoding='utf8')
+    return new, (new_key if key else None), {'exam_id': eid, 'floors': rec, 'labels': labels, 'from': str(src)}
+
+
 @op()
 def phone_exam(title: str, clips: list, question: str = '', chips: list = None, choices: list = None,
                answers_path: str = None, exam_id: str = None, wait: float = 0, key: dict = None,
-               secrets: list = None, check: bool = True, sender: str = None) -> str:
+               secrets: list = None, check: bool = True, sender: str = None, floor: str = None,
+               floor_from: str = None) -> str:
     """A blind exam on the phone: clips [{label, path, note?}] each with a play button (the live stream pauses while
     one plays, and rejoins live after), word chips to tick per clip, one choice (e.g. ['A is the record', 'B is the
     record', "can't tell"]), a note, and Submit. The answers arrive as kind 'exam' {id, answers}, and are appended
     to answers_path when given (the exam's own answers file, so no "done" is needed). Label clips blind (A, B).
     It runs exam_check first and refuses on NOT READY: give key={label: class} and secrets=[source names] so the
-    blind-leak checks run too. check=False only when the person asked to see it anyway."""
+    blind-leak checks run too. check=False only when the person asked to see it anyway.
+    floor='auto' adds device floor pairs, the real clip against a 64 or 128 kb/s MP3 copy of itself or against
+    itself: the full set on the first floor round, then one rotating pair; 'full' gives the full set again (a new
+    listening device, or a floor answer that changed). Each costs a slot of the 5-6 pair budget. Clips must be
+    labelled 1A, 1B, 2A ...; they are renumbered around the floor pairs, and the reply (and <answers_path>.floor.json)
+    maps the new labels back to yours and says which side of each floor pair is the MP3. floor_from: the real clip
+    (default: the first clip keyed real, record or ref). A floor pair told apart more often than chance means the
+    phone and the ear separate even an MP3 copy; a floor never told apart means a "can't tell" on a real pair is
+    about the voice, not the device."""
+    record = None
+    if floor:
+        if floor not in ('auto', 'full'):
+            raise OpError("floor is 'auto' (the full set the first time, then one rotating pair) or 'full'")
+        clips, key, record = _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path)
+        if answers_path:
+            with open(answers_path + '.floor.json', 'w', encoding='utf8') as f:
+                json.dump(record, f, indent=1)
     if check:
         from .. import exam_check as EC
         cl = [c if isinstance(c, dict) else {'path': c} for c in clips or []]
@@ -241,8 +339,13 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
                               answers_path=answers_path, texts=texts)
         if not ready:
             raise OpError('the exam was not shown, its pre-flight failed:\n' + '\n'.join(lines))
-    return _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
-                 choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
+    out = _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
+                choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
+    if record:
+        out += ('\nfloor pairs: ' + ', '.join(f"pair {r['pair']} {r['rate']}" + (f" (the MP3 is {r['mp3_side']})"
+                                                  if r['mp3_side'] else '') for r in record['floors'])
+                + '; your pairs are now ' + ', '.join(f'{k}={v}' for k, v in record['labels'].items()))
+    return out
 
 
 @op()
