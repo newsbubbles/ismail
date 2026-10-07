@@ -248,16 +248,23 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
                fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar', deck: str = None) -> str:
     """Create or change a live track. instrument: a dict (instrument_help), 'preset:<name>' (presets_list),
     {'type': 'code', 'voice': '<name>'} (voices_list) or 'track:<name>' (copy from the folder's project.json).
-    fx: the track's whole effect chain, a list of effect dicts (fx_help), or 'track:<name>' to copy a project
-    track's chain; [] removes all. Sidechain/duck/vocoder sources must be live tracks. sends: {bus: dB} replaces
+    fx: the track's whole effect chain, a list of effect dicts (fx_help), 'stack:<name>' for a saved effect stack
+    (fx_stack_list; the reply says what it costs on this machine), or 'track:<name>' to copy a project track's
+    chain; [] removes all. Sidechain/duck/vocoder sources must be live tracks. sends: {bus: dB} replaces
     the track's sends (post-fader; live_bus creates buses). A new instrument or chain on a playing track takes
     over at `at` (live_queue values, or 'now'); a replaced chain's tail rings out. New instruments warm up off the
     air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes the track now.
     To move one effect param (a sweep, a fade), use live_fx instead of resending the chain. deck='B' puts a new
     track on deck B (created if needed): it then plays through that deck's strip and cue."""
-    if isinstance(fx, str):
+    stack = None
+    if isinstance(fx, str) and fx.startswith('stack:'):            # a saved effect stack (ledger:M177)
+        from .. import api_fxstack as X
+        stack = fx[6:]
+        fx = X.find(stack, project)[1]['chain']
+    elif isinstance(fx, str):
         if not fx.startswith(('track:', 'bus:')):
-            raise OpError("fx: a list of effect dicts, or 'track:<name>' / 'bus:<name>' to copy from project.json")
+            raise OpError("fx: a list of effect dicts, 'stack:<name>' (fx_stack_list), or 'track:<name>' / "
+                          "'bus:<name>' to copy from project.json")
         fx = _project_fx(project, fx)
     if instrument is not None:
         from .. import api
@@ -268,8 +275,14 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
         instrument = _mark_performer(instrument, project)
-    return _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
-                 at=at, fx=fx, sends=sends, deck=deck)
+    out = _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
+                at=at, fx=fx, sends=sends, deck=deck)
+    if fx:
+        from .. import api_fxstack as X
+        cost = X.chain_costs([stack or fx])
+        if cost:
+            out = str(out) + '\n' + '\n'.join(cost)
+    return out
 
 
 @op()
@@ -302,8 +315,18 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)
-    return _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
-                 performers=_song_performers(song), timeout=120)
+    out = _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
+                performers=_song_performers(song), timeout=120)
+    try:                                                    # its saved stacks, and what they cost here (ledger:M177)
+        from .. import api_fxstack as X
+        with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
+            d = json.load(f)
+        cost = X.chain_costs([t.get('fx') for t in d.get('tracks', {}).values() if t.get('fx')])
+        if cost:
+            out = str(out) + '\n' + '\n'.join(cost)
+    except (OSError, ValueError):
+        pass
+    return out
 
 
 def _song_performers(song):
