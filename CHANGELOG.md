@@ -7,6 +7,37 @@
 - `render` lists HOT on any track whose stem peaks over -0.5 dB, with how far to lower it. Marketing's dry run had
   a melody at -0.0 dB and no word of it (the master was fine, the limiter flattening the tune).
 - The sketch balance never raises the tune past a -1 dB peak; when it needs more, the other parts come down.
+### The person's words are kept, and versions play from the song folder (ledger:M170 G-2b, U-5)
+
+- `guide(first_answer=..., project=)` keeps the vocabulary it decided (`<song>/person.json`, and the latest person
+  beside the first-session mark). For plain words, `sketch` says "Version 1: a piano plays the tune, slow and
+  bright, about 30 seconds" (no keys, BPM or bars, also in its change lines), and `sketch_keep` offers the next
+  change in their words, not "a warmer bass from bar 5".
+- Sketches are "version 1, 2, 3", starting again each round; `base=` and `sketch_keep` take the number. Each
+  finished sketch is also copied to the top of the song folder as "version N", replaced by the next round's.
+- The kept song gets a playable file at once (`<song>/<song name>.mp3`).
+
+### A newcomer is a person, not a machine (ledger:M170 G-3)
+
+- `guide(new_person=True)` opens with the first session for someone new at a computer where songs already exist
+  (Marketing's dry run and the DJ's fresh-agent test both got no first session there); the plain `guide` reply on
+  such a machine names it in its first line.
+- `sketch_keep` marks the first session done only when the machine itself was new, so a guest's keep writes
+  nothing for the owner.
+
+### Floor pairs in phone exams (ledger:M173)
+
+- `phone_exam(..., floor='auto' | 'full', floor_from=)`: device floor pairs, the real clip against a 64 or 128 kb/s
+  MP3 copy of itself or against itself, keyed so neither side is the synth. The full set on the first floor round,
+  then one rotating pair (history in the phone home, `floor_rounds.json`); seeded places, never first; neutral file
+  names. The pairs are renumbered; the reply and `<answers_path>.floor.json` map them back. Reference: the Voice
+  session's work/phone_round.py (hq:D-60).
+
+### Three measuring rules (ledger:S56)
+
+- listening.md, "Readings that mislead": a sum of medians runs short (fit lengths on a log scale, lengthen phrase
+  ends, put pauses back); level and band charts cannot see phase (a blind pair for any timing or phase stage); one
+  render is not a result (two seed sets before claiming a difference). From the Voice session's lessons (hq:D-60).
 
 ### Recording warnings before a take is measured (ledger:M172)
 
