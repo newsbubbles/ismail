@@ -15,6 +15,11 @@
   work/score_words.py (11 and 101 lines).
 - README: the tool count is 221 (113 music and live, 88 stage, 20 phone).
 
+### A part at full scale is named (ledger:M170 S-1)
+
+- `render` lists HOT on any track whose stem peaks over -0.5 dB, with how far to lower it. Marketing's dry run had
+  a melody at -0.0 dB and no word of it (the master was fine, the limiter flattening the tune).
+- The sketch balance never raises the tune past a -1 dB peak; when it needs more, the other parts come down.
 ### The person's words are kept, and versions play from the song folder (ledger:M170 G-2b, U-5)
 
 - `guide(first_answer=..., project=)` keeps the vocabulary it decided (`<song>/person.json`, and the latest person
