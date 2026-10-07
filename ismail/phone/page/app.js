@@ -363,7 +363,6 @@ function micStop(sendIt) {
     if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel);
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
     if (!micKeep) closeMic();
-    if (heldPanel) { heldPanel = false; renderPanel(); }      // a panel that came in while they talked shows now
   };
   r.stop();
 }
@@ -703,30 +702,48 @@ function playClip(url, box) {
   a.onended = () => { box.classList.remove('playing'); clip.el = null; };
   a.play().catch(() => toast('could not play that clip'));
 }
-let shown = null, heldPanel = false;
+// Messages never pop up (Nate 10-07 11:17: "these are modals that block me ... it should let me know, in the top
+// right corner ... and then I can click on it to switch to that message"): a new one buzzes once and shows on the
+// corner key; he opens it when he chooses, switches between open ones on the tabs, and Later puts it back
+let shown = null;
+const notified = new Set(), readPanels = new Set();
+function closeSheet() { $('sheet').classList.remove('show'); stopClip(); shown = null; renderBadge(); }
+function renderBadge() {
+  const ps = state.panels || [], unread = ps.filter((x) => !readPanels.has(x.id)).length;
+  const b = $('msgs');
+  b.hidden = !ps.length;
+  b.classList.toggle('new', unread > 0);
+  b.textContent = ps.length === 1 ? '1 message' : `${ps.length} messages`;
+}
 function renderPanel() {
   const ps = state.panels || [];
-  const p = ps[ps.length - 1];
-  if (!p) { if (shown) { $('sheet').classList.remove('show'); stopClip(); shown = null; } return; }
-  if (shown === p.id) return;
-  // a new panel never covers one being read (Nate 10-07 11:00: "this test interrupted my reading of another panel"):
-  // while the open one is unanswered and on screen, the new one waits quietly and the open one says so
-  if (shown && $('sheet').classList.contains('show') && ps.some((x) => x.id === shown)) {
-    if (!$('panel').querySelector('.waitnote')) {
-      $('panel').insertAdjacentHTML('afterbegin', '<div class="hint waitnote">Another question is waiting. It opens when you answer this one or tap Not now.</div>');
-    }
-    return;
-  }
-  // a new panel never covers a voice note being recorded (Nate 10-07 08:56: "Am I still recording right now? ... it
-  // was still recording geez"): no sound, no buzz, no sheet; the record key says one is waiting, and it opens when
-  // the note ends
-  if (talk.rec) {
-    if (!heldPanel) { heldPanel = true; $('talkhint').textContent = 'recording. A question is waiting: it opens when you send'; }
-    return;
-  }
-  shown = p.id; buzz([80, 60, 80]); sound('panel'); ev('panel_open', { id: p.id, title: p.title || '' });
+  const fresh = ps.filter((x) => !notified.has(x.id));
+  if (fresh.length) { fresh.forEach((x) => notified.add(x.id)); if (!talk.rec) buzz([60]); }   // a nudge, never a sound or a sheet
+  renderBadge();
+  if (!shown) return;
+  if (!ps.some((x) => x.id === shown)) { closeSheet(); return; }       // answered or closed by the agent
+  const tabs = $('panel').querySelector('.ptabs');
+  if (tabs && tabs.dataset.n !== String(ps.length)) { tabs.outerHTML = tabsHtml(ps, shown); bindTabs(); }
+}
+function tabsHtml(ps, id) {
+  return `<div class="ptabs" data-n="${ps.length}">` + (ps.length > 1 ? ps.map((x) => `<button data-tab="${esc(x.id)}" class="${x.id === id ? 'sel' : ''}${readPanels.has(x.id) ? '' : ' new'}">${esc((x.title || 'message').slice(0, 28))}</button>`).join('') : '')
+    + '<button data-later class="later">Later</button></div>';
+}
+function bindTabs() {
   const box = $('panel');
-  let h = `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
+  box.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { const x = (state.panels || []).find((q) => q.id === b.dataset.tab); if (x) { stopClip(); showPanel(x); } }; });
+  const l = box.querySelector('[data-later]');
+  if (l) l.onclick = () => { ev('panel_later', { id: shown }); closeSheet(); };
+}
+function openMessages() {
+  const ps = state.panels || [];
+  if (!ps.length) return;
+  showPanel(ps.find((x) => !readPanels.has(x.id)) || ps[ps.length - 1]);
+}
+function showPanel(p) {
+  shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
+  const box = $('panel');
+  let h = tabsHtml(state.panels || [], p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
   if (p.kind === 'exam') {
     h += (p.clips || []).map((c, i) => `<div class="clip" data-i="${i}"><button class="playclip" data-url="${esc(c.url)}">Play ${esc(c.label)}</button>`
       + (c.note ? `<div class="hint">${esc(c.note)}</div>` : '')
@@ -773,6 +790,7 @@ function renderPanel() {
     else talk.panel = null;
   };
   $('sheet').classList.add('show');
+  bindTabs(); renderBadge();
   box.querySelectorAll('[data-answer]').forEach((b) => { b.onclick = async () => {
     // a pick is part of the answer (Live DJ 10-07: Send with nothing picked came in as {"which": null})
     const unpicked = (p.inputs || []).find((x) => x.kind === 'choice' && !x.optional
@@ -923,8 +941,8 @@ async function poll() {
     }
   }
 }
-$('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { $('sheet').classList.remove('show'); ev('panel_close', { id: shown }); } });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (shown) $('sheet').classList.add('show'); } });
+$('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { ev('panel_close', { id: shown }); closeSheet(); } });
+$('msgs').onclick = openMessages;
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 // Install: Chrome offers it once the page qualifies (PNG icons, a service worker); the button appears only then
 let installEvt = null;

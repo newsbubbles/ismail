@@ -64,7 +64,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 .lamp.on{border-color:var(--air);color:var(--air)}
 .lamp.on i{background:var(--air);box-shadow:0 0 8px var(--air)}
 .lamp small{font:600 11px/1 var(--mono);letter-spacing:.04em;text-transform:none;color:var(--dim)}
-#livestate{display:flex;align-items:center;gap:calc(var(--u)*2)}
+#livestate{display:flex;min-width:0;align-items:center;gap:calc(var(--u)*2)}
 #livestate i{width:7px;height:7px;border-radius:50%;background:var(--line)}
 .live #livestate i{background:var(--accent)}
 /* the counter */
@@ -154,6 +154,13 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 /* the sheet: questions and exams */
 #sheet{position:fixed;inset:0;background:rgba(8,7,6,.86);display:none;align-items:flex-end;z-index:8}
 #sheet.show{display:flex}
+#msgs{margin-left:auto;flex:none;min-height:36px;padding:calc(var(--u)*1.5) calc(var(--u)*3);font-size:12px;letter-spacing:.04em;text-transform:none;border-radius:999px}
+#msgs.new{border-color:var(--accent);color:var(--accent);background:var(--accent-deep)}
+.ptabs{display:flex;flex-wrap:wrap;gap:calc(var(--u)*2);margin:0 0 calc(var(--u)*3)}
+.ptabs button{min-height:34px;padding:calc(var(--u)*1.5) calc(var(--u)*3);font-size:12px;text-transform:none;letter-spacing:.02em;font-weight:600}
+.ptabs button.sel{border-color:var(--accent);color:var(--accent)}
+.ptabs button.new::after{content:" \2022";color:var(--accent)}
+.ptabs .later{margin-left:auto}
 #panel{background:var(--ground);border-top:3px solid var(--accent);width:100%;max-width:520px;margin:0 auto;padding:calc(var(--u)*5) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*5));max-height:90vh;overflow:auto}
 #panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--head);font-stretch:85%}
 #panel p{margin:0 0 calc(var(--u)*4);color:#d9d2c4;white-space:pre-wrap}
@@ -176,6 +183,7 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 <div class="strip" id="top">
   <span class="lamp" id="rec"><i></i><span id="rectext">ON AIR</span></span>
   <span id="livestate" class="cap"><i></i><span id="livetext">connecting</span></span>
+  <button id="msgs" hidden></button>
 </div>
 
 <div class="counter">
