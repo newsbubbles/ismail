@@ -289,7 +289,8 @@ def test_a_next_round_keeps_the_tune_says_the_words_back_and_names_the_before(tm
     out = api.sketch(song, 'a bit happier', base='3', background=False)
     say = out.split('SAY TO THE PERSON')[1].split('\nd)')[0]
     assert 'Version 4: your version 3 with the same tune and chords, happier' in say, say
-    assert 'Play version 3, then version 4: before and after' in say and 'BPM' not in say
+    assert 'Play version 4 now' in say and 'before and after' not in say and 'BPM' not in say   # plain: new first
+    assert 'Want it different? Try: ' in say and 'or tell me anything.' in say
     sd = os.path.join(song, 'sketches')
     spec = {d[0]: json.load(open(os.path.join(sd, d, 'sketch.json'), encoding='utf8')) for d in os.listdir(sd)
             if os.path.isdir(os.path.join(sd, d))}
@@ -330,3 +331,95 @@ def test_a_busy_machine_says_so_in_plain_words_first(tmp_path, monkeypatch):
     with pytest.raises(OpError) as e:
         api.sketch(str(tmp_path / 'x'), 'a calm piano tune', wait='0')
     assert str(e.value).startswith('BUSY: the computer is busy') and '90% busy' in str(e.value)
+
+
+def test_a_musician_still_gets_the_comparison_rounds(tmp_path):
+    song = str(tmp_path / 'songs' / 'organ')
+    api.guide(project=song, first_answer="I play the organ and read music")
+    assert SK.words_for(song) == 'musician'
+    out = api.sketch(song, 'a calm piano tune', styles=['piano'], bars=4)
+    assert 'ask which is closest or what each is missing' in out.split('NEXT:')[1]
+    assert 'Want it different' not in out and 'have a listen' not in out
+    out = api.sketch(song, 'a bit happier', base='1', bars=4, background=False)
+    say = out.split('SAY TO THE PERSON')[1].split('\nc)')[0]
+    assert 'before and after' in say and 'Want it different' not in say
+
+
+def _specs_for_many_briefs():
+    briefs = ['a calm piano tune', 'lo-fi beat with flute', 'rock band', 'house track', 'a sad hymn in D minor',
+              'trip-hop at 80 BPM', 'jazz with a rhodes', 'ambient strings', 'a lullaby', 'funk with bass and guitar',
+              'a happy 130 BPM dance track', 'solo violin in A minor', 'a 60 BPM ballad', 'something for a party',
+              'cinematic film score with drums', 'upright bass and piano', 'no drums, just piano and cello']
+    for b in briefs:
+        specs, _ = SK.specs_for(b)
+        for label, spec in specs:
+            yield b, label, spec, SK.plan_spec(spec, b)
+
+
+_NOISE = ('said', 'subs', 'unmodelled', 'changed')
+
+
+def test_every_playful_choice_changes_the_sketch_when_it_comes_back_as_words():
+    """hq:D-82: a choice offered to someone on plain words must do something when they say it."""
+    seen = set()
+    n = 0
+    for b, label, spec, pl in _specs_for_many_briefs():
+        choices = SK.playful_choices(spec, pl)
+        assert 2 <= len(choices) <= 3 and len(set(choices)) == len(choices), (b, choices)
+        spec['tune'] = pl['tune']
+        for c in choices:
+            assert not any(w in c for w in ('BPM', 'major', 'minor', 'key')), c         # everyday words only
+            specs, said = SK.specs_for(c, None, None, 2, spec)                          # as the next round runs it
+            assert 'named nothing to change' not in ' '.join(said), (b, c)
+            assert specs[0][1].get('changed'), (b, c)
+            eff = dict(spec, key=spec.get('key') or pl['key'], bpm=spec.get('bpm') or pl['bpm'])
+            new, changed = SK.apply_words(eff, c)
+            assert changed and {k: v for k, v in new.items() if k not in _NOISE} != \
+                {k: v for k, v in eff.items() if k not in _NOISE}, (b, c)
+            seen.add(c)
+            n += 1
+    assert n > 40 and {'add a beat you can nod to', 'sunnier', 'a bit spookier', 'faster and bouncier',
+                       'add a cello underneath'} <= seen, seen
+
+
+def test_choices_come_from_this_sketch():
+    quiet = SK.read_brief('a calm solo piano tune')
+    quiet['key'], quiet['bpm'] = 'C major', 70
+    assert SK.playful_choices(quiet)[:3] == ['add a beat you can nod to', 'faster and bouncier', 'a bit spookier']
+    band = SK.read_brief('a rock band in A minor at 120 bpm with a cello')
+    got = SK.playful_choices(band)
+    assert 'sunnier' in got and 'slower and dreamier' in got and 'add a beat you can nod to' not in got
+    assert 'add a cello underneath' not in got                                      # it is already there
+    assert SK.choices_line(['a', 'b', 'c']) == 'Want it different? Try: a, b, or c, or tell me anything.'
+    assert SK.choices_line(['a', 'b']) == 'Want it different? Try: a or b, or tell me anything.'
+
+
+def test_plain_words_first_round_plays_version_1_with_delight_and_offers_choices(tmp_path):
+    song = str(tmp_path / 'songs' / 'party')
+    api.guide(project=song, first_answer="it's for my sister's birthday, I don't play anything")
+    assert SK.words_for(song) == 'plain'
+    out = api.sketch(song, 'a calm piano tune', n=2, bars=4, background=False)
+    say = out.split('SAY TO THE PERSON (read it out as it is):')[1].split('\na)')[0]
+    nxt = out.split('NEXT:')[1]
+    for text in (say, nxt):
+        for bad in ('closest', 'missing', 'compare three'):
+            assert bad not in text, (bad, text)
+    assert 'BPM' not in say
+    assert 'Version 1 is ready now; the other is a spare' in say
+    assert say.index("Here's the first one, have a listen.") > say.index('Version 2:')           # after the versions
+    assert say.rstrip().endswith('or tell me anything.') and 'Want it different? Try: ' in say
+    line = [x for x in say.splitlines() if 'Want it different?' in x][0]
+    choices = [c.strip() for c in line.split('Try: ')[1].replace(', or tell me anything.', '').replace(' or ', ', ')
+               .split(',') if c.strip()]
+    assert 2 <= len(choices) <= 3
+    assert 'play version 1 at once' in nxt and 'or tell me anything' in nxt and 'Want to keep this as your song?' in nxt
+    # the choice, said back as the next round, plays at once and offers the next choices from the new spec
+    out2 = api.sketch(song, choices[0], base='1', bars=4, background=False)
+    say2 = out2.split('SAY TO THE PERSON')[1].split('\nc)')[0]
+    assert "Here's the new one, have a listen." in say2 and 'Want it different? Try: ' in say2
+    assert 'named nothing to change' not in say2
+    keep = api.sketch_keep(song, '1')
+    nk = keep.split('NEXT:')[1]
+    assert 'playful choices' in nk and 'or tell me anything' in nk
+    assert 'live changes come later; do not offer them yet' in nk.lower()
+    assert 'closest' not in nk and 'before and after' not in nk

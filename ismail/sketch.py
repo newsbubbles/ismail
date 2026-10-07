@@ -465,6 +465,7 @@ FEELINGS = [
      1, False, True, 'more exciting'),
     (r'darker|moodier|ominous|spookier|scarier|more mysterious|mysterious', 0.96, 'minor', 0, True, False, 'darker'),
     (r'dreamier|dreamy|floatier|floaty|spacier|spacey|hazier', 0.92, None, -1, True, False, 'dreamier'),
+    (r'bouncier|bouncy|peppier|perkier|zippier|more playful', 1.08, None, 1, False, True, 'bouncier'),
 ]
 _LITTLE = r'a (?:little|bit|touch|tad)(?: bit)?|slightly|somewhat|a little more|just a bit'
 _MUCH = r'much|a lot|way|far|very|really|lots'
@@ -479,6 +480,62 @@ def feelings(words):
         if _find(pat, words):
             out.append((name, 1 + (tempo - 1) * scale, mode, dense, soft, crisp))
     return out
+
+
+# What a person with no music words can be offered next, in everyday words, drawn from THIS sketch.
+# Every phrase here is passed back through apply_words before it is offered, so none is a promise it cannot keep.
+def _choice_pool(spec, bpm, key):
+    parts = spec.get('parts') or {}
+    fast = (bpm or 90) >= 105
+    adds = []
+    if 'drums' not in parts:
+        adds.append('add a beat you can nod to')
+    if 'counter' not in parts and 'melody' in parts:
+        adds.append('add a cello underneath')
+    if 'bass' not in parts and 'sub' not in parts:
+        adds.append('add a deep bass')
+    if parts.get('melody') == 'grand_piano' and len(parts) > 1:
+        adds.append('let a violin carry the tune')
+    pace = ['slower and dreamier' if fast else 'faster and bouncier']
+    mood = ['sunnier' if key and 'minor' in key else 'a bit spookier']
+    extra = ['calmer' if not spec.get('soft') else 'more exciting', 'a little bouncier', 'a bit dreamier',
+             'more exciting', 'calmer']
+    return adds[:1], pace, mood, adds[1:], extra
+
+
+def _moves(spec, words):
+    """Does passing these words back through apply_words change the sketch?"""
+    new, changed = apply_words(spec, words)
+    skip = ('said', 'subs', 'unmodelled', 'changed')
+    keep = lambda d: {k: v for k, v in d.items() if k not in skip}
+    return bool(changed) and keep(new) != keep(spec)
+
+
+def playful_choices(spec, plan=None, n=3):
+    """2 or 3 short, everyday-word changes to offer a person who wants plain words, made from this sketch (spec and
+    its plan): a missing part, a pace, a mood, then more. Each is checked against apply_words, so every one changes
+    the sketch when it comes back as the next round's words. Deterministic: the same sketch offers the same choices."""
+    eff = copy.deepcopy(spec)
+    plan = plan or {}
+    eff['key'] = eff.get('key') or plan.get('key') or (eff.get('tune') or {}).get('key')
+    eff['bpm'] = eff.get('bpm') or plan.get('bpm') or (eff.get('tune') or {}).get('bpm')
+    first, pace, mood, more_adds, extra = _choice_pool(eff, eff['bpm'], eff['key'])
+    out = []
+    for phrase in first + pace + mood + more_adds + extra:
+        if phrase not in out and _moves(eff, phrase):
+            out.append(phrase)
+        if len(out) >= n:
+            break
+    return out
+
+
+def choices_line(choices):
+    """'Want it different? Try: a, b or c, or tell me anything.'"""
+    if not choices:
+        return "Want it different? Tell me anything."
+    body = (choices[0] if len(choices) == 1 else choices[0] + ' or ' + choices[1] if len(choices) == 2
+            else ', '.join(choices[:-1]) + ', or ' + choices[-1])
+    return f"Want it different? Try: {body}, or tell me anything."
 
 
 def apply_words(base, words):

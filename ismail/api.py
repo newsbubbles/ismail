@@ -529,7 +529,7 @@ def guide(project: str = None, first_answer: str = None, new_person: bool = Fals
     new_person=True: the person in front of you is new to ismail on a machine where someone else already made songs
     ("I'm new", a friend at the owner's computer); the first session opens for them, and keeping their sketch
     marks nothing for the machine's owner."""
-    from .guide import GUIDE, FIRST_SESSION, vocabulary_text
+    from .guide import GUIDE, FIRST_SESSION, PLAIN_STEPS, vocabulary_text
     from . import sketch as SK
     if first_answer is not None:
         from .guide import vocabulary
@@ -540,7 +540,8 @@ def guide(project: str = None, first_answer: str = None, new_person: bool = Fals
         own = ("\n\nThis machine has an owner: this person's words and lexicon are kept apart from theirs, beside "
                "the new song. Pass project= to guide(first_answer=...) and to every lexicon op once the song has a "
                "folder." if not SK.is_new() else '')
-        return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + own + '\n\n' + GUIDE
+        return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text(),
+                                    plain_steps=PLAIN_STEPS) + own + '\n\n' + GUIDE
     return ("Someone new to ismail at this computer (they say so, or have never made a song with it)? "
             "guide(new_person=True) opens with their first session.\n\n" + GUIDE)
 
@@ -560,7 +561,9 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     ("slower, no guitar, add a pad", "a bit happier"): as asked, then the change taken further; n: how many
     (default 3, or 2 with base). styles: force the fixed styles. key, bpm, bars,
     progression ('i VI III VII' or chord names) override. Play each to the person, ask which is closest or what
-    each is missing, then sketch_keep(project, '<version>').
+    each is missing, then sketch_keep(project, '<version>'). For a person on plain words it is different: play
+    version 1 at once (the rest are spares), offer the 2 or 3 everyday-word choices in SAY TO THE PERSON plus "or
+    tell me anything", and play each change new version first.
     The first sketch comes back as soon as it is rendered and the others render in the background (background=
     False waits for all): play the first while they land, and sketch_wait(project) says when they are ready. The
     reply opens with SAY TO THE PERSON, written for them: read it out as it is. Every sketch is mixed (the tune
@@ -680,10 +683,15 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     if rest:
         _sketch_spawn(rest, sd)
     first = plans[0][1]
-    say = [f"Here {'are' if len(plans) > 1 else 'is'} {len(plans)} short sketch{'es' if len(plans) > 1 else ''}"
-           + (f"; the first is ready now and the other{'s land' if len(rest) > 1 else ' lands'} in a minute or two"
-              if rest else '') + '.']
     plainw = SK.words_for(project) == 'plain'
+    if plainw and len(plans) > 1:        # hq:D-82: version 1 is the idea; the others are spares, never a comparison
+        spares = len(plans) - 1
+        say = [f"Version 1 is ready now; the other{'s are spares' if spares > 1 else ' is a spare'} for when you want "
+               f"something different."]
+    else:
+        say = [f"Here {'are' if len(plans) > 1 else 'is'} {len(plans)} short sketch{'es' if len(plans) > 1 else ''}"
+               + (f"; the first is ready now and the other{'s land' if len(rest) > 1 else ' lands'} in a minute or two"
+                  if rest else '') + '.']
     v1 = built[0]['version']
     for job, (letter, pl, spec) in zip(built, plans):
         v = job['version']
@@ -709,7 +717,9 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
         else:
             say.append(f"Version {v}: {parts}, in {pl['key']} at {pl['bpm']:g} BPM, about {sec:.0f} seconds"
                        + (f"; unlike version {v1}: {', '.join(diff)}" if diff else '') + '.')
-    if kept:
+    if kept and plainw:                  # hq:D-82: the new version plays first; the old one only if they ask
+        say.append(f"Play version {v1} now.")
+    elif kept:
         say.append(f"Play version {_version_of(base)}, then version {v1}: before and after.")
     seen = []
     for _, _, spec in plans:
@@ -717,6 +727,10 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             if x not in seen:
                 seen.append(x)
     say += [x[0].upper() + x[1:] + '.' for x in seen]
+    choices = SK.playful_choices(plans[0][2], plans[0][1]) if plainw else []
+    if plainw:                           # hq:D-82: delight first, then 2 or 3 things to try, never a blank page
+        say.append("Here's the new one, have a listen." if kept else "Here's the first one, have a listen.")
+        say.append(SK.choices_line(choices))
     L[1:1] = ['SAY TO THE PERSON (read it out as it is):'] + ['  ' + x for x in say]
     for (letter, pl, spec), job in zip(plans, built):
         sec = pl['bars'] * 4 * 60 / pl['bpm']
@@ -737,15 +751,27 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     L.append(f"Each is also at the top of the song folder as 'version {v1}' ... ({root}); every round adds its own "
              f"numbers and nothing is replaced.")
     song = _kept_version(root)
-    L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
-             "missing. Their correction is the next round: sketch(project, '<their words>', base='<version number>') "
-             "keeps that version's tune and changes only what the words name. "
-             + (f"The song is version {song} (kept); sketch_keep(project, '<version number>', replace=True) makes a "
-                f"new pick the song." if song else
-                f"sketch_keep(project, '<version number>') makes the pick the song (it is the song's example); until "
-                f"then {root} holds only sketches/, each its own project.")
-             + " These are sketches: do not polish one (no Listening Report, no section fixes) before the person "
-             "picks." + (" They want plain words: say what changed, never keys, BPM or bars." if plainw else ''))
+    keep_line = (f"The song is version {song} (kept); sketch_keep(project, '<version number>', replace=True) makes a "
+                 f"new pick the song." if song else
+                 f"sketch_keep(project, '<version number>') makes the pick the song (it is the song's example); until "
+                 f"then {root} holds only sketches/, each its own project.")
+    if plainw:
+        L.append(f"NEXT: play version {v1} at once (open its file) and read the SAY block as it is: one line of delight, "
+                 f"no test. Do not ask them to judge it or to compare anything; the other "
+                 f"versions are spares, played only if they want something different. Then offer the choices in "
+                 f"that SAY block ({'; '.join(choices)}) and 'or tell me anything'. Whatever they pick or say is the "
+                 f"next round: sketch(project, '<their words, or the choice as written>', base='{v1}') plays the new "
+                 f"version first, with one plain line on what changed. Now and then slip in one small thing they did "
+                 f"not ask for (one of the choices you did not offer, run the same way) and name it after it plays. "
+                 f"When they like it: 'Want to keep this as your song?' and then sketch_keep(project, '<version "
+                 f"number>'). " + keep_line + " Say what changed in plain words: never keys, BPM or bars. These are "
+                 f"sketches: do not polish one (no Listening Report, no section fixes) before they pick.")
+    else:
+        L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
+                 "missing. Their correction is the next round: sketch(project, '<their words>', base='<version "
+                 "number>') keeps that version's tune and changes only what the words name. " + keep_line
+                 + " These are sketches: do not polish one (no Listening Report, no section fixes) before the person "
+                 "picks.")
     return '\n'.join(L)
 
 
@@ -831,11 +857,12 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
         shutil.copyfile(os.path.join(src, 'renders', pick), song)
         song = f" Play it now: {song}."
     if SK.words_for(project) == 'plain':
-        nxt = (f"NEXT: offer one change, in their words ('a bit happier', 'no drums at the start', 'shorter'): "
-               f"sketch(project, '<their words>', base='{v}') keeps this tune and changes only that, and its reply "
-               f"says which version is before and which after; play both. If they prefer the new one, "
+        nxt = (f"NEXT: offer 2 or 3 playful choices in everyday words (the kind the last round offered: 'a bit "
+               f"spookier', 'add a beat you can nod to'), plus 'or tell me anything': "
+               f"sketch(project, '<their words>', base='{v}') keeps this tune and changes only that; play the new "
+               f"version first and say in one plain line what changed. If they prefer it, "
                f"sketch_keep(project, '<its version>', replace=True). Say what changed in plain words: never keys, "
-               f"BPM or bars. Then grow it a part at a time.")
+               f"BPM or bars. Live changes come later; do not offer them yet. Then grow it a part at a time.")
     else:
         nxt = ("NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for "
                "two bars), make only that, render a window, play before and after. Then the normal loop: extend the "

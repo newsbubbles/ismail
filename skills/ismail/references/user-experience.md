@@ -43,7 +43,11 @@ your vocabulary for the whole session, and `guide(first_answer=<their words, ver
   already know. (Dress rehearsal 1, 2026-10-05: a trained organist who reads music, and nothing told the agent to
   use her background.)
 - **Plain words** for everyone else: say what a thing does ("the low notes", "the part that comes back"), times in
-  minutes and seconds, no keys, chord numbers or Hz until they use them first.
+  minutes and seconds, no keys, chord numbers or Hz until they use them first. They also get hand holding: version 1
+  plays at once with one line of delight, never "which is closest" or "what's missing", never three to compare (the
+  rest are spares); every round offers two or three playful choices in everyday words, made from this sketch
+  ("faster and bouncier", "add a beat you can nod to"), plus "or tell me anything"; each change plays at once, new
+  version first, with one plain line on what changed. `sketch` writes those choices into its reply.
 
 If they later say they play or read music, call `guide(first_answer=<those words>)` again and switch. Their words go
 into the lexicon as they come (below).

@@ -112,6 +112,24 @@ READING SCORES
   different: trust the perceptual group and the warnings, and never call a match done on notes alone.
 """
 
+PLAIN_STEPS = """PLAIN WORDS (guide(first_answer=...) said so; these replace the steps marked MUSICIAN in the first session, and
+nothing in them sounds like a test):
+3p. Play version 1 at once with one line of delight, the way you would hand someone a present ("Here's the first
+   one, have a listen"). Never ask them to judge it, to say what is missing, or to compare three. The other
+   sketches are spares, played only when they say they want something different.
+4p. Every round ends with 2 or 3 playful, concrete choices in everyday words, made from this very sketch (the
+   SAY TO THE PERSON block of sketch has them: "Want it different? Try: ..., ..., or ..., or tell me anything"),
+   never a bare "what would you change?". They can pick one, or say anything in their own words.
+5p. Each change plays at once, the new version first (it comes back from sketch(project, <the choice or their
+   words>, base='<version>')), with one plain line on what changed: no BPM, key or chord names. Do not play the
+   old one first and do not make them compare, unless they ask.
+6p. Now and then add one small thing they did not ask for (run one of the choices you did not offer) and name it
+   after it plays: "I slipped in a cello underneath, just because."
+7p. When they say they like it, or have heard it change a few times: "Want to keep this as your song?" A yes is
+   sketch_keep(project, '<version>').
+   Live changes while it plays come later; do not offer them yet.
+8p. At the end: where their files are, in plain words, and one line on what else it can do."""
+
 FIRST_SESSION = """FIRST SESSION: this person has made nothing with ismail yet (no finished render, no {marker}).
 Their first try decides whether they come back. Run it this way, then the normal loop:
 1. Two sentences on what this is: you write the music as notes and instruments, render it and read it back as
@@ -129,7 +147,8 @@ Their first try decides whether they come back. Run it this way, then the normal
    A busy machine answers BUSY: say "the computer is busy, I'll try again in a moment" and call it again.
    It returns as soon as the first is ready: read its SAY TO THE PERSON block out as it is (what each sketch is,
    what was swapped, what it can't make yet) and play version 1 at once; sketch_wait(project) says when the others
-   land.
+   land. What happens next depends on the first answer: the two branches below, and only that branch's steps.
+   MUSICIAN:
    Open each for them, one at a time, and ask which is closest or what each is missing; their correction is the
    next round:
    sketch(project, <their words>, base='<version>'): it keeps their tune and chords, changes only what the words
@@ -138,12 +157,13 @@ Their first try decides whether they come back. Run it this way, then the normal
    offer to find an example of it and build it (the loop's step 0), never pretend the stand-in is it.
 4. sketch_keep(project, '<version>') makes the pick the song and ends the first session. A change after that
    is the same route: sketch(..., base='<the kept version>'), then sketch_keep(..., replace=True) if they prefer it.
-5. Short rounds: one named change at a time, two versions played in turn, "which one?".
-6. Early on, one deliberate small edit: "change just one thing" (a warmer bass from bar 5, drums out for two
+5. MUSICIAN: short rounds: one named change at a time, two versions played in turn, "which one?".
+6. MUSICIAN: early on, one deliberate small edit: "change just one thing" (a warmer bass from bar 5, drums out for two
    bars); change only that, quickly, and play before and after. A generator cannot do this.
-7. At the end: where their files are, what it took (minutes, renders), and one line on the depth: recreate a
+{plain_steps}
+7. MUSICIAN: at the end: where their files are, what it took (minutes, renders), and one line on the depth: recreate a
    reference, build an instrument from recordings, play live, the VR stage.
-8. The rest waits for its moment, one feature at a time, one sentence, offered and never explained up front (not in
+8. For both: the rest waits for its moment, one feature at a time, one sentence, offered and never explained up front (not in
    the opening, not in the first sketch): when they keep a sketch or say they like one, that they can hear it on
    their phone and talk back while it plays (phone_start; reaching it away from home needs Tailscale, which you set
    up if they want it); when they want to jam, perform or hear it change while it plays, live play; when they
@@ -230,4 +250,4 @@ def vocabulary_text(first_answer: str) -> str:
             " thing does, not its trade name: \"the low notes\", \"the part that comes back\", \"softer\"; times in"
             " minutes and seconds, not bars; no keys, chord numbers or Hz unless they use them first. When they"
             " name a quality in their own words, note it with lexicon_note and use their word back. If they later"
-            " say they play or read music, call guide(first_answer=<those words>) again.")
+            " say they play or read music, call guide(first_answer=<those words>) again.\n" + PLAIN_STEPS)
