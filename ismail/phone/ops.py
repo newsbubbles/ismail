@@ -146,13 +146,17 @@ def phone_restart(why: str = 'updating', when_idle: bool = False) -> str:
 @op()
 def phone_status() -> str:
     """Who is listening on the phone, the bar they hear and how far behind the room, the engine, the inbox, voice
-    notes waiting for transcription, and what the page shows."""
+    notes waiting for transcription, and what the page shows. Also: the open panels (id, sender, priority, kind), the
+    panel the page shows now and since when, "exam in progress: <panel> for <sender> since <UTC time>" or "none",
+    and the last inbox line number (the `since` for phone_listen)."""
     return _call('status')
 
 
 @op()
 def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False) -> str:
-    """What the person sent from the phone, oldest first, as JSON {since, lines}: taps (love = cut a highlight,
+    """The watcher: every inbox line after the cursor, never filtered by owner; the agent decides what is its own,
+    and exam_round lines (state started / finished, with the panel id, `for` and title) say when to keep quiet.
+    What the person sent from the phone, oldest first, as JSON {since, lines}: taps (love = cut a highlight,
     change = change it up now, energy_up/energy_down, louder/quieter, pause/resume, start_set), mood (calm, steady,
     lift, peak), voice (then voice_text with the words, same id), answer / exam (to phone_ask, phone_panel_show,
     phone_exam), button (phone_buttons). Every line carries heard {bar, beat, of} (what they actually heard, not the

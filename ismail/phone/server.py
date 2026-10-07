@@ -319,9 +319,91 @@ class Phone:
         self.voice_q = collections.deque()
         self.voice_panel = {}                      # voice id -> {panel, for}: a reply said on a panel
         self.voice_state = {}
+        self.rounds = {}                           # panel id -> {for, title, since}: exam rounds the page has open now
+        self.showing = None                        # {id, since}: the panel the page shows now (its panel_open/close)
+        self._rounds_lock = threading.Lock()
+        self._recent_rounds()
         self.feeder = None
         threading.Thread(target=self._poll_engine, daemon=True).start()
         threading.Thread(target=self._transcriber, daemon=True).start()
+
+    # ---- exam rounds and the panel on screen (the page's panel_open/close, answers, dismissals)
+    @staticmethod
+    def _ts_epoch(ts):
+        try:
+            return datetime.datetime.fromisoformat(ts).timestamp()
+        except (TypeError, ValueError):
+            return time.time()
+
+    def _recent_rounds(self):
+        """After a restart: the exam round and the panel on screen, read back from the last inbox lines."""
+        try:
+            with open(HOME / 'inbox.jsonl', 'rb') as f:
+                f.seek(max(0, os.path.getsize(f.name) - 200_000))
+                lines = f.read().decode('utf8', 'replace').splitlines()[1:]
+        except OSError:
+            return
+        open_ids = {x['id'] for x in self.view['panels']}
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            at = self._ts_epoch(r.get('ts'))
+            if r.get('kind') == 'exam_round':
+                if r.get('state') == 'started':
+                    self.rounds[r.get('id')] = {'for': r.get('for'), 'title': r.get('title') or '', 'since': at}
+                else:
+                    self.rounds.pop(r.get('id'), None)
+            elif r.get('kind') == 'page' and r.get('what') == 'panel_open' and r.get('id'):
+                self.showing = {'id': r['id'], 'since': at}
+            elif r.get('kind') == 'page' and r.get('what') in ('panel_close', 'panel_later'):
+                self.showing = None
+            elif r.get('kind') in ('answer', 'exam') and self.showing and self.showing['id'] == r.get('id'):
+                self.showing = None
+        self.rounds = {k: v for k, v in self.rounds.items() if k in open_ids}
+        if self.showing and self.showing['id'] not in open_ids:
+            self.showing = None
+
+    @staticmethod
+    def is_round(p):
+        """An exam (phone_exam) or the picture round (a panel linking under /eye/)."""
+        return bool(p) and (p.get('kind') == 'exam' or str(p.get('link') or '').startswith('/eye/'))
+
+    def page_panel_event(self, what, pid=None):
+        """The page opened or left a panel. Opening a round is 'started'; leaving it (Later, closed the sheet, or
+        another panel opened in its place) is 'finished'. One line per state change, never twice."""
+        now = time.time()
+        if what == 'panel_open' and pid:
+            self.showing = {'id': pid, 'since': now}
+            p = next((x for x in self.view['panels'] if x['id'] == pid), None)
+            for other in [k for k in self.rounds if k != pid]:      # the page shows one panel at a time
+                self.round_mark(other, 'finished')
+            if self.is_round(p):
+                self.round_mark(pid, 'started', p)
+        elif what in ('panel_close', 'panel_later'):
+            gone = pid or (self.showing or {}).get('id')
+            self.showing = None
+            for k in [k for k in self.rounds if gone is None or k == gone]:
+                self.round_mark(k, 'finished')
+
+    def round_mark(self, pid, state, p=None):
+        """Append the exam_round line for a state change, once (a round already started is not started again)."""
+        with self._rounds_lock:
+            if (state == 'started') == (pid in self.rounds):
+                return
+            if state == 'started':
+                self.rounds[pid] = {'for': p.get('who'), 'title': p.get('title') or '', 'since': time.time()}
+                info = self.rounds[pid]
+            else:
+                info = self.rounds.pop(pid)
+        self.post({'kind': 'exam_round', 'state': state, 'id': pid, 'for': info['for'], 'title': info['title']})
+
+    def panel_gone(self, pid):
+        """A panel was answered, dismissed or closed by an agent: it is no longer on screen."""
+        if self.showing and self.showing['id'] == pid:
+            self.showing = None
+        self.round_mark(pid, 'finished')
 
     # ---- the inbox
     def _last_seq(self):
@@ -985,6 +1067,18 @@ class Agent:
             L.append('voice notes waiting: ' + '; '.join(f"{k} ({v})" for k, v in ph.voice_state.items()))
         L.append(f"view: now={ph.view['now']!r} next={ph.view['next']!r} mood={ph.view['mood']!r} "
                  f"buttons={[b['id'] for b in ph.view['buttons']]} panels={[p['id'] for p in ph.view['panels']]}")
+        L.append('open panels: ' + ('; '.join(f"{p['id']} (for {p.get('who') or 'nobody'}, priority "
+                                              f"{p.get('priority') or 'normal'}, kind {p.get('kind')})"
+                                              for p in ph.view['panels']) or 'none'))
+        utc = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%H:%M:%S UTC')
+        sh = ph.showing
+        L.append(f"page shows: panel {sh['id']} since {utc(sh['since'])}" if sh else 'page shows: no panel')
+        if ph.rounds:
+            L.append('exam in progress: ' + '; '.join(f"{k} for {v['for'] or 'nobody'} since {utc(v['since'])}"
+                                                      for k, v in ph.rounds.items()))
+        else:
+            L.append('exam in progress: none')
+        L.append(f"last inbox line: {ph.seq} (pass it as `since` to phone_listen)")
         return '\n'.join(L)
 
     def op_route(self, inbox=None):
@@ -1112,6 +1206,7 @@ class Agent:
         had = any(x['id'] == panel_id for x in v['panels'])
         v['panels'] = [x for x in v['panels'] if x['id'] != panel_id]
         self.ph.save()
+        self.ph.panel_gone(panel_id)
         self.ph.cmd('close', ref=panel_id)
         return f"closed {panel_id}" if had else f"no open panel {panel_id}"
 
@@ -1667,6 +1762,8 @@ class Handler(BaseHTTPRequestHandler):
                     age = max(0.0, min(3600.0, float(ev.get('age_ms') or 0) / 1000))
                     ph.post({'kind': 'page', 'what': what, **fields, 'sid': sid, 'heard': ph.heard(sid, ev.get('t')),
                              '_age': age})
+                    if what in ('panel_open', 'panel_close', 'panel_later'):
+                        ph.page_panel_event(what, fields.get('id'))
                     n += 1
                 return self._json(200, {'ok': True, 'n': n})
             if u.path == '/api/tap':
@@ -1741,6 +1838,7 @@ class Handler(BaseHTTPRequestHandler):
                 ph.view['panels'] = [x for x in ph.view['panels'] if x['id'] != pid]
                 ph.save()
                 rec = ph.post(rec)
+                ph.panel_gone(pid)
                 ph.cmd('close', ref=pid)
                 return self._json(200, {'ok': True, 'n': rec['n']})
             return self._json(404, {'error': 'no such action'})
