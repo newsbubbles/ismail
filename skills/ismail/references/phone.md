@@ -107,7 +107,10 @@ guesses: measure them on the phone mic first, then on each headset, and keep the
 `phone_panel_show` takes `inputs` beside the buttons when one tap is not enough: `choice` (one of `options`),
 `check` (any of them), `toggle`, `text`. The answer arrives as kind `answer` with `values` by input id. Every panel
 also has a "Say more" button: what they say there arrives as `voice` and `voice_text` with `panel` and `for` (your
-`sender`), so always pass `sender`, and listen for both. A panel never interrupts a voice note: it waits, silent,
+`sender`), so always pass `sender`, and listen for both. `video=<file>` plays a video inline in the panel
+(a 720 px phone copy is made once, through the machine gate; `video_wait='30m'` stands in line longer): send one to
+let them watch and ask questions. `priority='needs you'` (also on `phone_say`) sorts it first and lights the corner key;
+`'low'` sorts last. A panel never interrupts a voice note: it waits, silent,
 until the note is sent.
 
 ## Pause means stop, now

@@ -714,28 +714,35 @@ function playClip(url, box) {
 // corner key; he opens it when he chooses, switches between open ones on the tabs, and Later puts it back
 let shown = null;
 const notified = new Set(), readPanels = new Set(); const answered = new Set();   // answered here: gone at once, whatever a stale state says (Nate 10-07 12:01)
-const openPanels = () => (state.panels || []).filter((x) => !answered.has(x.id));
+// priority (the sender's: 'needs you', 'normal', 'low'): the most pressing first, then the newest
+const PRI = { 'needs you': 0, normal: 1, low: 2 };
+const rank = (x) => (x && x.priority in PRI ? PRI[x.priority] : 1);
+const byPriority = (a, b) => rank(a.x) - rank(b.x) || b.i - a.i;
+const sortPri = (xs) => xs.map((x, i) => ({ x, i })).sort(byPriority).map((o) => o.x);
+const openPanels = () => sortPri((state.panels || []).filter((x) => !answered.has(x.id)));
 function answeredHere(id) { answered.add(id); if (shown === id) closeSheet(); else renderBadge(); }
-function closeSheet() { $('sheet').classList.remove('show'); stopClip(); shown = null; renderBadge(); }
+function closeSheet() { $('sheet').classList.remove('show'); stopClip(); $('panel').querySelectorAll('video').forEach((v) => v.pause()); shown = null; renderBadge(); }
 // notes (the DJ's and the Director's captions) are only a toast and a chime when they land; the corner key keeps
 // count of the ones not looked at yet, so one that came in during a voice note is still one tap away (Nate 10-07
 // 12:20: "I heard a message ... but I was recording")
 const notesSeen = () => store.get('notes_seen', '');
 const newNotes = () => (state.captions || []).filter((c) => (c.ts || '') > notesSeen());
 function renderBadge() {
-  const ps = openPanels(), unread = ps.filter((x) => !readPanels.has(x.id)).length, nn = newNotes().length;
+  const ps = openPanels(), nn = newNotes().length;
   const b = $('msgs');
   b.hidden = !ps.length && !(state.captions || []).length && !state.pinned;
-  b.classList.toggle('new', unread > 0 || nn > 0);
+  // lit while anything waits: a panel put off with Later is still open and still counted (Nate 10-07)
+  b.classList.toggle('new', ps.length > 0 || nn > 0);
+  b.classList.toggle('urgent', ps.some((x) => x.priority === 'needs you') || newNotes().some((c) => c.priority === 'needs you'));
   b.textContent = [ps.length ? `${ps.length} ${ps.length === 1 ? 'question' : 'questions'}` : '', nn ? `${nn} new` : '']
     .filter(Boolean).join(' · ') || 'Notes';
 }
 function showNotes() {
   shown = '__notes';
-  const caps = (state.captions || []).slice(-12).reverse(), seen = notesSeen();
+  const caps = (state.captions || []).slice(-12).reverse(), seen = notesSeen();    // newest first
   let h = tabsHtml(openPanels(), '__notes') + '<h2>Notes</h2><div class="notes">';
   if (state.pinned) h += `<div class="item"><span class="cap">Since you left</span>${esc(state.pinned.text)}</div>`;
-  h += caps.map((c) => `<div class="item${(c.ts || '') > seen ? ' new' : ''}"><span class="cap">${esc(c.who || 'DJ')} ${esc((c.ts || '').slice(11, 16))}</span>${esc(c.text)}</div>`).join('')
+  h += sortPri(caps.slice().reverse()).map((c) => `<div class="item${(c.ts || '') > seen ? ' new' : ''}${c.priority === 'needs you' ? ' urgent' : ''}${c.priority === 'low' ? ' low' : ''}"><span class="cap">${esc(c.who || 'DJ')} ${esc((c.ts || '').slice(11, 16))}</span>${esc(c.text)}</div>`).join('')
     || '<div class="item">nothing yet</div>';
   $('panel').innerHTML = h + '</div>';
   if (caps.length) store.set('notes_seen', caps[0].ts || '');
@@ -768,12 +775,13 @@ function openMessages() {
   const ps = openPanels(), unread = ps.find((x) => !readPanels.has(x.id));
   if (unread) showPanel(unread);
   else if (newNotes().length || !ps.length) showNotes();
-  else showPanel(ps[ps.length - 1]);
+  else showPanel(ps[0]);
 }
 function showPanel(p) {
   shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
-  let h = tabsHtml(openPanels(), p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
+  let h = tabsHtml(openPanels(), p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '')
+    + (p.video ? `<video src="${esc(p.video)}" controls playsinline preload="metadata"></video>` : '');
   if (p.kind === 'exam') {
     h += (p.clips || []).map((c, i) => `<div class="clip" data-i="${i}"><button class="playclip" data-url="${esc(c.url)}">Play ${esc(c.label)}</button>`
       + (c.note ? `<div class="hint">${esc(c.note)}</div>` : '')
@@ -815,6 +823,7 @@ function showPanel(p) {
   $('panelrec').onclick = async () => {
     if (talk.rec && talk.panel === p.id) { micStop(true); return; }
     if (talk.rec) { toast('finish the note you are recording first'); return; }
+    box.querySelectorAll('video').forEach((v) => v.pause());       // the note is not said over the video
     talk.panel = p.id; await micStart();
     if (talk.rec) { talk.toggle = true; $('panelrec').classList.add('on'); $('panelrec').textContent = 'Recording: tap to send'; }
     else talk.panel = null;

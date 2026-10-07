@@ -85,6 +85,8 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 .notes{display:flex;flex-direction:column;gap:calc(var(--u)*3)}
 .notes .item{border-left:2px solid var(--line);padding-left:calc(var(--u)*3)}
 .notes .item.new{border-left-color:var(--accent)}
+.notes .item.urgent{border-left-width:5px;border-left-color:var(--accent)}
+.notes .item.low{opacity:.7}
 .notes .item .cap{display:block;margin-bottom:var(--u)}
 #startset{width:100%;margin-top:calc(var(--u)*3);border-color:var(--accent);color:var(--accent)}
 /* transport */
@@ -163,6 +165,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #follow.on{border-color:var(--accent);color:var(--accent)}
 #msgs{margin-left:auto;flex:none;min-height:36px;padding:calc(var(--u)*1.5) calc(var(--u)*3);font-size:12px;letter-spacing:.04em;text-transform:none;border-radius:999px}
 #msgs.new{border-color:var(--accent);color:var(--accent);background:var(--accent-deep)}
+#msgs.urgent{border-color:var(--accent);color:var(--ground);background:var(--accent);font-weight:700}
 .ptabs{display:flex;flex-wrap:wrap;gap:calc(var(--u)*2);margin:0 0 calc(var(--u)*3)}
 .ptabs button{min-height:34px;padding:calc(var(--u)*1.5) calc(var(--u)*3);font-size:12px;text-transform:none;letter-spacing:.02em;font-weight:600}
 .ptabs button.sel{border-color:var(--accent);color:var(--accent)}
@@ -172,6 +175,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--head);font-stretch:85%}
 #panel p{margin:0 0 calc(var(--u)*4);color:#d9d2c4;white-space:pre-wrap}
 #panel img{max-width:100%;border-radius:var(--r);margin-bottom:calc(var(--u)*3)}
+#panel video{display:block;width:100%;max-height:60vh;background:#000;border-radius:var(--r);margin-bottom:calc(var(--u)*3)}
 .btns{display:grid;gap:calc(var(--u)*2)}
 .clip{border:1px solid var(--line);border-radius:var(--r);padding:calc(var(--u)*3);margin:0 0 calc(var(--u)*3)}
 .clip .playclip{width:100%;min-height:64px;font-size:22px;font-stretch:62%;letter-spacing:.2em}

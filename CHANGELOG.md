@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Phone: panels can carry a video
+
+- `phone_panel_show(video=<file>)` puts a video in a panel. It plays inline on the phone page, next to the panel's
+  buttons, inputs and "Say more" voice reply (the video pauses when they start to record), so the person can watch it
+  and ask questions about it. Any agent that controls the phone may use it.
+- The agent's process first makes a phone-sized copy (H.264 and AAC MP4, at most 720 px tall, fast start) inside the
+  machine's cpu slot, so it waits its turn like any heavy job (`video_wait='10m'`; a busy machine comes back as a
+  plain message). The copy is kept in the phone's `videos/` folder, so one video is converted once. A small H.264 MP4
+  is sent as it is. Without ffmpeg the error says what to do.
+- The phone server's `/files/` now answers HTTP Range requests (206), which phone browsers need to play and seek a
+  video, and knows `.webm` and `.mov`.
+- Later on a panel only hides it: the corner key stays lit and keeps counting it (it went grey while a question was
+  still open).
+- `phone_panel_show` and `phone_say` take `priority`: 'needs you', 'normal' (the default) or 'low'. Notes and panel
+  tabs sort by it (needs you first, then newest), and the corner key fills with the accent colour while an open item
+  needs them.
 ### A newcomer's next round keeps their tune (ledger:M181, intro dry run 2)
 
 - `sketch(..., base=)` keeps the picked sketch's tune and chords and changes only what the words name: the first

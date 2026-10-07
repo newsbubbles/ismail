@@ -1,14 +1,18 @@
 """phone_* ops: agents drive the phone page and read what the person sends from it (server.py says how it works)."""
+import hashlib
 import json
 import re
 import os
+import shutil
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from ..api import OpError, op
+from .. import machine
 from . import server as S
 
 
@@ -173,11 +177,12 @@ def phone_timeline(minutes: float = 15, kinds: list = None, limit: int = 200) ->
 
 @op()
 def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = False, voice: str = None,
-              sender: str = None) -> str:
+              sender: str = None, priority: str = None) -> str:
     """A caption on the phone. speak=True also says it into the stream (Kokoro, the music ducked under it), so they
     hear it in their pocket: only to answer something they said, never unprompted. pin=True keeps it at the top
-    (a "since you left" summary). buzz=True vibrates the phone if the page is open."""
-    return _call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender)
+    (a "since you left" summary). buzz=True vibrates the phone if the page is open. priority: 'needs you' (sorts
+    first and lights the corner key in the accent colour), 'normal' (the default) or 'low' (sorts last)."""
+    return _call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender, priority=priority)
 
 
 @op()
@@ -196,21 +201,93 @@ def phone_now(now: str = None, next: str = None, recording_why: str = None, mood
                  next_mark=next_mark, length=length, sections=sections, into=into, who=sender)
 
 
+VIDEO_MAX_H = 720
+VIDEO_AS_IS_MB = 25
+
+
+def _ffprobe_codec(path):
+    """The video codec name of a file, or None when ffprobe is missing or cannot tell."""
+    ff = S.ffmpeg()
+    probe = None
+    if ff:
+        cand = os.path.join(os.path.dirname(ff), 'ffprobe' + ('.exe' if os.name == 'nt' else ''))
+        probe = cand if os.path.isfile(cand) else shutil.which('ffprobe')
+    if not probe:
+        return None
+    try:
+        r = subprocess.run([probe, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name',
+                            '-of', 'csv=p=0', str(path)], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout or '').strip() or None
+
+
+def phone_video_copy(video, video_wait='10m'):
+    """A phone-sized copy of a video (H.264 + AAC MP4, faststart, at most 720 px tall), made here in the agent's
+    process inside the machine's cpu slot, and kept in the phone's videos/ folder keyed by source path, size and
+    mtime so one video is converted once. A small H.264 MP4 (25 MB or less) is used as it is."""
+    src = Path(str(video)).expanduser().resolve()
+    if not src.is_file():
+        raise OpError(f'no video file {video}')
+    st = src.stat()
+    if src.suffix.lower() == '.mp4' and st.st_size <= VIDEO_AS_IS_MB * 1024 * 1024 and _ffprobe_codec(src) == 'h264':
+        return str(src)
+    key = hashlib.sha1(f'{src}|{st.st_size}|{st.st_mtime_ns}'.encode('utf8')).hexdigest()[:16]
+    out_dir = S.HOME / 'videos'
+    out = out_dir / f'{re.sub(r"[^A-Za-z0-9_-]+", "_", src.stem)[:40]}_{key}.mp4'
+    if out.is_file() and out.stat().st_size:
+        return str(out)
+    ff = S.ffmpeg()
+    if not ff:
+        raise OpError("a video needs ffmpeg to make a phone-sized copy, and none was found: install ffmpeg and put it "
+                      "on PATH, or set ISMAIL_FFMPEG to its path, then send the video again")
+    try:
+        wait_s = machine.duration_s(video_wait) if str(video_wait).strip() not in ('', '0', 'none', 'None') else None
+    except ValueError as e:
+        raise OpError(str(e))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix('.part.mp4')
+    cmd = [ff, '-y', '-hide_banner', '-loglevel', 'error', '-i', str(src), '-map', '0:v:0', '-map', '0:a:0?',
+           '-vf', f"scale=-2:'min({VIDEO_MAX_H},ih)'", '-c:v', 'libx264', '-crf', '28', '-preset', 'veryfast',
+           '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', str(tmp)]
+    try:
+        with machine.slot('cpu', f'phone video {src.name}', wait=wait_s, disk_gb=0.2, disk_path=str(out_dir)):
+            r = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000 if os.name == 'nt' else 0)
+    except machine.MachineBusy as e:
+        raise OpError(f"the computer is busy; try again in a few minutes, or video_wait='30m' to stand in line "
+                      f"longer. Detail: {e}")
+    if r.returncode != 0 or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        raise OpError(f"ffmpeg could not make a phone copy of {src.name}: {(r.stderr or '').strip()[-400:]}")
+    os.replace(tmp, out)
+    return str(out)
+
+
 @op()
 def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', image: str = None, buttons: list = None,
-                     inputs: list = None, wait: float = 0, sender: str = None) -> str:
-    """A panel over the phone page (the stage_panel_show shape): title, text, an image file, buttons (labels), and
-    inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) | 'toggle' (on
-    or off) | 'text', 'label', 'options', 'optional'}]. A choice must be picked before a button sends (unless
-    'optional': true). A tap arrives as kind 'answer' {id, answer, values: {input id: value}, for: sender}; Not now
-    (on every panel) arrives as kind 'answer' with dismissed: true and answer null, which is not an answer. wait=N
-    blocks up to N seconds for it. Every panel has a record button: what they say on it arrives
+                     inputs: list = None, wait: float = 0, sender: str = None, video: str = None,
+                     video_wait: str = '10m', priority: str = None) -> str:
+    """A panel over the phone page (the stage_panel_show shape): title, text, an image file, a video file, buttons
+    (labels), and inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) |
+    'toggle' (on or off) | 'text', 'label', 'options', 'optional'}]. A choice must be picked before a button sends
+    (unless 'optional': true). A tap arrives as kind 'answer' {id, answer, values: {input id: value}, for: sender};
+    Not now (on every panel) arrives as kind 'answer' with dismissed: true and answer null, which is not an answer.
+    wait=N blocks up to N seconds for it. Every panel has a record button: what they say on it arrives
     as kind 'voice' and 'voice_text' with panel=<id> and for=<sender>, so pass sender (your name) to get it back.
+    video=<local file>: the person watches it playing inline in the panel, next to the panel's buttons, inputs and
+    voice reply (the video pauses when they start to record), so they can watch and then ask questions about it.
+    Any agent that controls the phone may use it. A phone-sized copy (H.264 + AAC MP4, at most 720 px tall) is made
+    first, once per file and kept, inside the machine's cpu slot like any heavy job: video_wait is how long to stand
+    in line for the machine ('10m'; '0' refuses at once when it is busy). It needs ffmpeg.
+    priority: 'needs you' (sorts first, and the corner key takes the accent colour while it is open), 'normal' (the
+    default) or 'low' (sorts last).
     A panel never pops up: it shows as a message on the page's corner key (a short buzz), and the person opens it
     when they choose, switches between open messages, or puts one back with Later. Send one only for something to
     decide; say everything else in a caption."""
+    if video:
+        video = phone_video_copy(video, video_wait)
     return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
-                 buttons=buttons, inputs=inputs, wait=wait, who=sender)
+                 buttons=buttons, inputs=inputs, wait=wait, who=sender, video=video, priority=priority)
 
 
 @op()
