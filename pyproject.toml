@@ -54,13 +54,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ismail.voices.bass", "ismail.voices.fx",
-            "ismail.voices.strings", "ismail.voices.guitar", "ismail.voices.drums", "ismail.video", "ismail.video.blender",
+            "ismail.voices.strings", "ismail.voices.winds", "ismail.voices.brass", "ismail.voices.guitar", "ismail.voices.drums", "ismail.video", "ismail.video.blender",
             "ismail.stage", "ismail.stage.bridge", "ismail.phone", "ismail.exampage"]
 
 [tool.setuptools.package-data]
 "ismail.voices" = ["*.json"]
 "ismail.voices.keys" = ["*.json"]
 "ismail.voices.strings" = ["*.json"]
+"ismail.voices.winds" = ["*.json"]
+"ismail.voices.brass" = ["*.json"]
 "ismail.video" = ["templates/*", "templates/*/*"]
 "ismail.exampage" = ["*.html"]
 "ismail.phone" = ["page/*.js", "page/*.html", "page/*.svg", "page/*.webmanifest", "page/cues/*.mp3", "page/*.png"]
