@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A newcomer is a person, not a machine (ledger:M170 G-3)
+
+- `guide(new_person=True)` opens with the first session for someone new at a computer where songs already exist
+  (Marketing's dry run and the DJ's fresh-agent test both got no first session there); the plain `guide` reply on
+  such a machine names it in its first line.
+- `sketch_keep` marks the first session done only when the machine itself was new, so a guest's keep writes
+  nothing for the owner.
+
 ### Floor pairs in phone exams (ledger:M173)
 
 - `phone_exam(..., floor='auto' | 'full', floor_from=)`: device floor pairs, the real clip against a 64 or 128 kb/s

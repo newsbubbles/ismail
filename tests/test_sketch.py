@@ -207,3 +207,16 @@ def test_the_first_sketch_comes_first_says_it_plainly_and_is_balanced(tmp_path, 
     for d in os.listdir(os.path.join(song, 'sketches')):
         r = _j.load(open(os.path.join(song, 'sketches', d, 'sketch_ready.json'), encoding='utf8'))
         assert 'sits' in r['balance'] or 'moved it' in r['balance']
+
+
+def test_a_new_person_gets_the_first_session_on_a_machine_with_songs_and_marks_nobody(tmp_path):
+    r = tmp_path / 'songs' / 'owners_song' / 'renders'
+    r.mkdir(parents=True)
+    (r / 'latest.wav').write_bytes(b'')
+    g = api.guide()
+    assert not g.startswith('FIRST SESSION') and 'guide(new_person=True)' in g.split('\n')[0]
+    assert api.guide(new_person=True).startswith('FIRST SESSION')
+    song = str(tmp_path / 'songs' / 'guest')
+    api.sketch(song, 'a calm piano tune', styles=['piano'], bars=4)
+    out = api.sketch_keep(song, 'a')
+    assert 'nothing marked' in out and not os.path.exists(SK.marker_path())
