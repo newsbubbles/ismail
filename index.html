@@ -239,16 +239,24 @@ master: -11.8 LUFS, peak -0.3 dBFS
 <section id="video">
   <div class="wrap">
     <h2>On YouTube</h2>
-    <p class="sub">Luigi Manson: the Luigi's Mansion theme as dubstep, made with ismail. One bass voice plays the hook, and the note velocity picks each hit's articulation: a vowel sweep, a wub, a screech, a talk word ("Mario?").</p>
     <div class="videos">
       <div>
-        <div class="yt" id="yt">
-          <button type="button" aria-label="Play Luigi Manson on YouTube">
+        <div class="yt">
+          <button type="button" data-yt="fKGkaf2WYWw" data-title="My agent built a 1958 blues club. Then I walked in." aria-label="Play My agent built a 1958 blues club. Then I walked in. on YouTube">
+            <img src="https://i.ytimg.com/vi/fKGkaf2WYWw/hqdefault.jpg" alt="" loading="lazy">
+            <span class="play"></span>
+          </button>
+        </div>
+        <div class="caption">Agents built a 1958 juke joint for the Crossroads Rewired music video; Nate walked in with a Quest 3 and directed them from inside: voice notes, and dance takes they play on the characters (4:43). <a href="https://youtu.be/fKGkaf2WYWw">Open on YouTube</a></div>
+      </div>
+      <div>
+        <div class="yt">
+          <button type="button" data-yt="ZzT1T9GUoRo" data-title="Luigi Manson" aria-label="Play Luigi Manson on YouTube">
             <img src="https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg" alt="" loading="lazy">
             <span class="play"></span>
           </button>
         </div>
-        <div class="caption">Luigi Manson (fan remix). <a href="https://www.youtube.com/watch?v=ZzT1T9GUoRo">Open on YouTube</a></div>
+        <div class="caption">Luigi Manson (fan remix): the Luigi's Mansion theme as dubstep, made with ismail. One bass voice plays the hook, and the note velocity picks each hit's articulation: a vowel sweep, a wub, a screech, a talk word ("Mario?"). <a href="https://www.youtube.com/watch?v=ZzT1T9GUoRo">Open on YouTube</a></div>
       </div>
     </div>
   </div>
@@ -702,14 +710,14 @@ const ICON_NEXT = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5
   }
 })(window.SONGS);
 
-document.querySelector('#yt button').addEventListener('click', e => {
+document.querySelectorAll('.yt button[data-yt]').forEach(b => b.addEventListener('click', e => {
   const f = document.createElement('iframe');
-  f.src = 'https://www.youtube-nocookie.com/embed/ZzT1T9GUoRo?autoplay=1';
-  f.title = 'Luigi Manson';
+  f.src = 'https://www.youtube-nocookie.com/embed/' + b.dataset.yt + '?autoplay=1';
+  f.title = b.dataset.title;
   f.allow = 'autoplay; encrypted-media; picture-in-picture';
   f.allowFullscreen = true;
   e.currentTarget.replaceWith(f);
-});
+}));
 </script>
 </body>
 </html>
