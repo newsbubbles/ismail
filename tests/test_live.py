@@ -59,6 +59,21 @@ def test_safety_holds_the_ceiling_and_caps_loudness():
     assert np.all(np.isfinite(y2)) and s.bad_blocks == 1
 
 
+def test_one_huge_sample_never_silences_the_set():
+    """Live DJ 10-07 12:31: one huge finite sample drove the rider to -423 dB and the set was silent for minutes."""
+    s = Safety(SR)
+    music = 0.1 * np.sin(2 * np.pi * 220 * np.arange(BLOCK * 200) / SR)
+    x = np.stack([music, music])
+    x[:, 5 * BLOCK + 7] = 1e20                                      # finite, absurd
+    y = np.concatenate([s.process(x[:, i:i + BLOCK]) for i in range(0, x.shape[1], BLOCK)], axis=1)
+    assert s.bad_blocks == 1 and s.rider_db >= -1.0                 # the fault went like a NaN; the rider never dove
+    assert 20 * np.log10(np.sqrt(np.mean(y[:, -SR:] ** 2))) > -40   # still playing a second later
+    s.process(np.full((2, BLOCK), 20.0))                            # and a loud-but-real burst cannot sink it past
+    for _ in range(400):                                            # the floor
+        s.process(np.full((2, BLOCK), 20.0))
+    assert s.rider_db >= -40.0
+
+
 # ------------------------------------------------------------------ headless engine
 
 def run(eng, seconds):
