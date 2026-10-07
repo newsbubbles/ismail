@@ -112,3 +112,29 @@ def test_a_new_person_on_an_owned_machine_never_writes_the_owners_words(tmp_path
     api.lexicon_note(project=song, said='more like a music box', craft='listener')
     assert len(owner.read_text(encoding='utf8').splitlines()) == 1                # the owner's lexicon untouched
     assert SK.words_for(str(tmp_path / 'songs' / 'owners_song')) is None         # and so are their songs' words
+
+
+def test_the_first_session_has_a_musician_branch_and_a_plain_words_branch():
+    g = api.guide()
+    assert 'MUSICIAN:' in g and 'ask which is closest or what each is missing' in g      # the musician's rounds stay
+    assert '"which one?"' in g and 'change just one thing' in g
+    assert 'PLAIN WORDS (guide(first_answer=' in g and 'Want it different? Try:' in g
+    p = api.guide(first_answer="it's for my daughter's wedding")
+    plain = p.split('PLAIN WORDS (guide(first_answer=')[1]
+    for bad in ('closest', 'which one?', 'change just one thing'):
+        assert bad not in plain, bad
+    assert 'Play version 1 at once with one line of delight' in plain
+    assert 'Never ask them to judge it, to say what is missing, or to compare three' in plain
+    assert '2 or 3 playful, concrete choices' in plain and 'or tell me anything' in plain
+    assert 'new version first' in plain and 'no BPM, key or chord names' in plain
+    assert 'Want to keep this as your song?' in plain and 'sketch_keep' in plain
+    assert 'do not offer them yet' in plain                                              # live changes come later
+    m = api.guide(first_answer="I play the organ at church and read music")
+    assert 'PLAIN WORDS' not in m and 'Want it different' not in m
+
+
+def test_setup_keeps_trade_words_from_the_person():
+    for doc in (read('AGENTS.md'), read('skills', 'ismail', 'references', 'setup.md')):
+        assert 'skill, plugin, MCP, uv or server' in doc and 'unless they' in doc
+        assert 'Claude Code' in doc and 'Codex' in doc and 'in one sentence' in doc.lower()
+    assert 'playful choices' in read('skills', 'ismail', 'references', 'user-experience.md')

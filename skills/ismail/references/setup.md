@@ -10,7 +10,15 @@ stack trace has failed.
 ismail runs on the person's machine. You need a terminal: a coding agent (the Code tab in Claude's desktop app,
 Claude Code, Cursor, Codex, or any agent that runs commands and can call MCP tools). A chat assistant in a browser
 cannot set it up. If that is you, say so plainly, and tell the person which app to install and what to type in it
-first. Installing that app is the one step only they can do.
+first. Installing that app is the one step only they can do. In one sentence, without explaining anything else: "I
+can't run programs on your computer from this chat. Claude Code, the Code tab in the Claude desktop app, Cursor or
+Codex can; paste the same line there." Name only what works (the list above), and never go on to explain skills,
+plugins or servers.
+
+**Their words, not ours.** Never say skill, plugin, MCP, uv or server to the person, and never ask them to find,
+install or understand "the skill", unless they used the word first. Say "the add-on that gives me ismail's tools"
+and do it yourself. When a step needs them (the two plugin lines, an Allow box, the restart), say what they will see,
+in plain words, and nothing about what it is called.
 
 **Say what's coming, before your first command.** In an app that asks before each new tool (Claude's desktop app,
 Claude Code), tell them once: "You'll see about 10 to 20 Allow boxes in this window. Each one is me or ismail asking
