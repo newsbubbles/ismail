@@ -428,6 +428,34 @@ def say_plain(spec):
     return out
 
 
+# A non-musician's change is a feeling word (ledger:M170 S-6: "a bit happier" got "the words named nothing to change"
+# and two slower takes). Each moves the concrete things in its direction: (words, tempo factor, mode, density step,
+# soft, crisp, the name said back). "a bit" halves the move, "much" makes it half again as big.
+FEELINGS = [
+    (r'happier|happy|cheerful|joyful|joyous|uplifting|sunnier|more fun', 1.06, 'major', 1, False, True, 'happier'),
+    (r'sadder|sad|melanchol\w*|gloomier|more mournful|more wistful', 0.9, 'minor', -1, True, False, 'sadder'),
+    (r'calmer|calm|gentler|more relaxed|relaxing|more peaceful|peaceful|quieter|more soothing', 0.9, None, -1, True,
+     False, 'calmer'),
+    (r'more exciting|exciting|energetic|more energetic|livelier|more lively|upbeat|more intense|more epic', 1.12, None,
+     1, False, True, 'more exciting'),
+    (r'darker|moodier|ominous|spookier|scarier|more mysterious|mysterious', 0.96, 'minor', 0, True, False, 'darker'),
+    (r'dreamier|dreamy|floatier|floaty|spacier|spacey|hazier', 0.92, None, -1, True, False, 'dreamier'),
+]
+_LITTLE = r'a (?:little|bit|touch|tad)(?: bit)?|slightly|somewhat|a little more|just a bit'
+_MUCH = r'much|a lot|way|far|very|really|lots'
+
+
+def feelings(words):
+    """The feeling words in a change request -> [(name, tempo factor, mode, density step, soft, crisp)], scaled by
+    "a bit" (half) and "much" (one and a half)."""
+    scale = 0.5 if _find(_LITTLE, words) else 1.5 if _find(_MUCH, words) else 1.0
+    out = []
+    for pat, tempo, mode, dense, soft, crisp, name in FEELINGS:
+        if _find(pat, words):
+            out.append((name, 1 + (tempo - 1) * scale, mode, dense, soft, crisp))
+    return out
+
+
 def apply_words(base, words):
     """A sketch's spec changed by the person's next words ("more like a Rhodes, slower drums, no guitar"): what the
     words name replaces, the rest stays. -> (new spec, [what changed])."""
@@ -477,6 +505,31 @@ def apply_words(base, words):
         if new[k] and not spec.get(k):
             spec[k] = True
             changed.append(k)
+    tempo_named = bool(new['bpm']) or any(c.startswith(('slower', 'faster')) for c in changed)
+    mode_named = bool(new['key']) or any(c in ('minor', 'major') for c in changed)
+    for name, tempo, mode, dense, soft, crisp in feelings(words):
+        did = []
+        if not tempo_named and abs(tempo - 1) > 0.005:
+            lo, hi = spec.get('bpm_range') or (60, 140)
+            was = spec.get('bpm') or round((lo + hi) / 2)
+            spec['bpm'] = round(was * tempo)
+            did.append(f"{'faster' if tempo > 1 else 'slower'} ({spec['bpm']:g} BPM)")
+            tempo_named = True
+        if mode and not mode_named and spec.get('key') and mode not in spec['key']:
+            spec['key'] = spec['key'].split()[0] + ' ' + mode
+            did.append(mode)
+            mode_named = True
+        if dense and not new['dense'] and spec.get('dense', 0) != max(-1, min(1, spec.get('dense', 0) + dense)):
+            spec['dense'] = max(-1, min(1, spec.get('dense', 0) + dense))
+            did.append('busier' if dense > 0 else 'sparser')
+        if soft and not spec.get('soft'):
+            spec['soft'], spec['crisp'] = True, False
+            did.append('softer')
+        if crisp and not spec.get('crisp'):
+            spec['crisp'], spec['soft'] = True, False
+            did.append('brighter')
+        if did:
+            changed.append(f"{name}: " + ', '.join(did))
     spec['said'] = new['said']
     spec['subs'], spec['unmodelled'] = new.get('subs', []), new.get('unmodelled', [])
     return spec, changed

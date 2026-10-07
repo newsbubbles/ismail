@@ -207,3 +207,18 @@ def test_the_first_sketch_comes_first_says_it_plainly_and_is_balanced(tmp_path, 
     for d in os.listdir(os.path.join(song, 'sketches')):
         r = _j.load(open(os.path.join(song, 'sketches', d, 'sketch_ready.json'), encoding='utf8'))
         assert 'sits' in r['balance'] or 'moved it' in r['balance']
+
+
+@pytest.mark.parametrize('words, bpm, key, dense, soft', [
+    ('a bit happier', 93, 'A major', 1, False),          # Marketing's dry run: this changed nothing before
+    ('sadder', 81, 'A minor', -1, True),
+    ('much more exciting', 106, 'A minor', 1, False),
+    ('darker', 86, 'A minor', 0, True),
+    ('faster but happier', 101, 'A major', 1, False),     # a named tempo wins over the feeling's
+])
+def test_feeling_words_move_tempo_mode_density_and_tone(words, bpm, key, dense, soft):
+    base = SK.style_spec('piano')
+    base.update(bpm=90, key='A minor')
+    spec, changed = SK.apply_words(base, words)
+    assert (spec['bpm'], spec['key'], spec['dense'], spec['soft']) == (bpm, key, dense, soft)
+    assert changed
