@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phone: the picture round opens on the phone
+
+- The phone server now passes everything under `/eye/` through to the picture-round page server (127.0.0.1:8871),
+  with its body, Content-Type and Range, so the eye exam page opens on the phone's https address and its sounds
+  seek. With no round open it answers 503 "No picture round is open right now."
+- `phone_panel_show(link='/eye/<round>?from=phone', link_label='Open the picture round')` puts a big button in the
+  panel that opens a path on the phone server in the same tab. Anything that is not a path starting with one `/` is
+  refused. `exam_picture_round` says so in its reply.
+- The exam page (`words.html`) has 48 px controls on a phone, a "Peek (hold)" button for the Shift peek, plain-words
+  hints instead of key names, a drag that is dropped cleanly when the phone cancels it, and a "Back to the phone"
+  link when opened with `?from=phone`. Nothing changed on a desktop, and its ids and answer format are the same.
+
 ### Phone: a video on mobile data starts at once, and says when it cannot
 
 - A player asking for the rest of a file gets it 2 MB at a time, so the first frames of a long video arrive at

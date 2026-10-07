@@ -76,7 +76,8 @@ def exam_picture_round(out: str, items: list, title: str, intro: str = '', seed:
     return (f"round {rnd}: {len(man['items'])} cards in {out}" + (f"; open {url}" if url else
             f"; serve with python -m ismail.exampage serve {os.path.dirname(os.path.abspath(out))}") +
             ". The key is served only after a submit; answers land in answers.jsonl; exam_picture_score(out) reads "
-            "the last one.")
+            f"the last one. On the phone: phone_panel_show(link='/eye/{rnd}?from=phone', link_label='Open the picture "
+            f"round') (the phone server passes /eye/ through to this page; it works while the page server runs).")
 
 
 @op()

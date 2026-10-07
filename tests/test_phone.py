@@ -819,3 +819,92 @@ def test_the_page_keeps_the_key_lit_after_later_and_sorts_by_priority():
     js = (S.PAGE / 'app.js').read_text(encoding='utf8')
     assert "b.classList.toggle('new', ps.length > 0 || nn > 0)" in js
     assert "classList.toggle('urgent'" in js and "'needs you': 0" in js
+
+
+@pytest.fixture
+def eye_round(tmp_path, monkeypatch):
+    """A throwaway picture-round page server (ismail.exampage) on a free port, one round 'r1'; the phone server's
+    proxy is pointed at it."""
+    from ismail import exampage as X
+    root = tmp_path / 'rounds'
+    rd = root / 'r1'
+    (rd / 'files').mkdir(parents=True)
+    (rd / 'manifest.json').write_text(json.dumps({'round': 'r1', 'items': []}), encoding='utf8')
+    (rd / 'key.json').write_text('{"1": {"real": "1"}}', encoding='utf8')
+    (rd / 'files' / 'q01_word.wav').write_bytes(bytes(range(256)) * 8)
+    srv = ThreadingHTTPServer(('127.0.0.1', 0), X._handler(str(root)))
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setattr(X, 'PORT', srv.server_address[1])
+    yield rd, srv
+    srv.shutdown()
+
+
+def test_the_picture_round_opens_through_the_phone_server(phone, eye_round):
+    ph, base, _ = phone
+    rd, srv = eye_round
+    with urllib.request.urlopen(base + '/eye/r1?from=phone', timeout=10) as r:
+        page = r.read().decode()
+        assert r.status == 200 and r.headers['Content-Type'].startswith('text/html')
+    assert 'Eye Exam' in page and 'name="viewport"' in page
+    assert get(base, '/eye/r1/manifest.json')['round'] == 'r1'
+    assert b'r1' in urllib.request.urlopen(base + '/eye', timeout=10).read()
+    # a byte range reaches the audio, and its Content-Range and Accept-Ranges come back (a phone seeks)
+    req = urllib.request.Request(base + '/eye/r1/files/q01_word.wav', headers={'Range': 'bytes=10-19'})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        assert r.status == 206 and r.headers['Content-Range'] == 'bytes 10-19/2048'
+        assert r.headers['Accept-Ranges'] == 'bytes' and r.headers['Content-Type'] == 'audio/wav'
+        assert r.read() == bytes(range(10, 20))
+    with urllib.request.urlopen(urllib.request.Request(base + '/eye/r1/files/q01_word.wav', method='HEAD'), timeout=10) as r:
+        assert r.status == 200 and r.headers['Content-Length'] == '2048' and r.read() == b''
+    # the key waits for an answer; the POST, with its body and Content-Type, lands in answers.jsonl
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(base + '/eye/r1/key', timeout=10)
+    assert e.value.code == 403
+    out = post(base, '/eye/r1/answer', {'round': 'r1', 'format': 'words', 'answers': [{'q': 1, 'pick': '1'}]})
+    assert out == {'ok': True}
+    rows = [json.loads(l) for l in (rd / 'answers.jsonl').read_text(encoding='utf8').splitlines()]
+    assert rows[0]['answers'] == [{'q': 1, 'pick': '1'}] and 'saved_at' in rows[0]
+    assert get(base, '/eye/r1/key')['1']['real'] == '1'
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(base + '/eye/nope', timeout=10)
+    assert e.value.code == 404
+    # only /eye is passed on: the page server's own / and /health are not, and the phone's still answer
+    assert get(base, '/health')['inbox'] is not None
+
+
+def test_the_picture_round_says_so_when_none_is_open(phone, monkeypatch):
+    import socket
+    from ismail import exampage as X
+    ph, base, _ = phone
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    monkeypatch.setattr(X, 'PORT', s.getsockname()[1])
+    s.close()                                                     # a port nothing listens on
+    for method, data in (('GET', None), ('POST', b'{}')):
+        req = urllib.request.Request(base + '/eye/r1', data=data, method=method)
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req, timeout=10)
+        assert e.value.code == 503 and b'No picture round is open right now.' in e.value.read()
+    assert S.Handler.is_eye('/eye') and S.Handler.is_eye('/eye/r1/x')
+    assert not S.Handler.is_eye('/eyelid') and not S.Handler.is_eye('/api/eye') and not S.Handler.is_eye('/health')
+
+
+def test_a_panel_link_is_a_same_origin_path_and_rides_with_the_panel(phone):
+    ph, base, _ = phone
+    for bad in ('https://evil.example/x', '//evil.example/x', 'eye/r1', 'javascript:alert(1)', '/a b', '/a\b', '/a\nb', ''):
+        with pytest.raises(Exception) as e:
+            P.phone_panel_show(title='Open', link=bad)
+        assert 'link must be a path' in str(e.value)
+    assert not any(x['title'] == 'Open' for x in ph.view['panels'])
+    out = P.phone_panel_show(panel_id='eye-1', title='A picture round', text='Look at the sound.',
+                             link='/eye/r1?from=phone', link_label='Open the picture round')
+    assert 'shown: panel eye-1' in out
+    p = next(x for x in get(base, '/api/state')['panels'] if x['id'] == 'eye-1')
+    assert p['link'] == '/eye/r1?from=phone' and p['link_label'] == 'Open the picture round'
+    P.phone_panel_show(panel_id='plain-1', title='No link')
+    assert 'link' not in next(x for x in ph.view['panels'] if x['id'] == 'plain-1')
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert 'class="linkbtn" href="${esc(p.link)}"' in js and 'target=' not in js[js.index('linkbtn') - 80:js.index('linkbtn') + 120]
+    words = (S.PAGE.parent.parent / 'exampage' / 'words.html').read_text(encoding='utf8')
+    assert 'name="viewport"' in words and 'from' in words and 'Back to the phone' in words

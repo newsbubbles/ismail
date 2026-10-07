@@ -814,7 +814,8 @@ function showPanel(p) {
   shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
   let h = tabsHtml(openPanels(), p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '')
-    + (p.video ? `<video src="${esc(p.video)}" controls playsinline preload="metadata"></video>` : '');
+    + (p.video ? `<video src="${esc(p.video)}" controls playsinline preload="metadata"></video>` : '')
+    + (p.link ? `<a class="linkbtn" href="${esc(p.link)}">${esc(p.link_label || 'Open')}</a>` : '');
   if (p.kind === 'exam') {
     h += (p.clips || []).map((c, i) => `<div class="clip" data-i="${i}"><button class="playclip" data-url="${esc(c.url)}">Play ${esc(c.label)}</button>`
       + (c.note ? `<div class="hint">${esc(c.note)}</div>` : '')

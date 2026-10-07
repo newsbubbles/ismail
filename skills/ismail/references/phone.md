@@ -110,7 +110,9 @@ also has a "Say more" button: what they say there arrives as `voice` and `voice_
 `sender`), so always pass `sender`, and listen for both. `video=<file>` plays a video inline in the panel
 (a 720 px phone copy is made once, through the machine gate; `video_wait='30m'` stands in line longer): send one to
 let them watch and ask questions. `priority='needs you'` (also on `phone_say`) sorts it first and lights the corner key;
-`'low'` sorts last. A panel never interrupts a voice note: it waits, silent,
+`'low'` sorts last. `link='/eye/<round>?from=phone', link_label='Open the picture round'` adds a big button that opens
+a path on the phone server in the same tab (only a path starting with `/`; the phone server passes `/eye/` through to
+the picture round that `exam_picture_round` hosts, so the eye exam works on the phone while that page server runs). A panel never interrupts a voice note: it waits, silent,
 until the note is sent.
 In a team of agents, each one with something waiting on the person posts its own panel (`sender=<its role>`, a
 `priority`, one topic per panel) and reads its own answers by `for`; nobody relays for another. Panels never pop up

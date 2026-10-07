@@ -54,19 +54,40 @@ select { padding: 8px; border: 1px solid var(--line); border-radius: 5px; backgr
 .res .ok { color: var(--ok); font-weight: 700; } .res .no { color: var(--no); font-weight: 700; }
 .status { font-size: 13.5px; color: var(--muted); }
 [hidden] { display: none !important; }
+.backlink { display: none; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 5px;
+  border: 1px solid var(--accent); color: var(--accent); font: 600 15px var(--body); text-decoration: none; width: fit-content; }
+.backlink.on { display: inline-flex; }
+.touchhint { display: none; }
+.peek { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+/* a phone (reached through the phone page): big targets, nothing that needs a hover or a keyboard */
+@media (pointer: coarse), (max-width: 600px) {
+  .wrap { padding: 16px 16px 48px; }
+  button, select, input[type=text] { min-height: 48px; font-size: 16px; }   /* 16px also stops iOS zooming into a field */
+  button { padding: 10px 16px; max-width: 100%; touch-action: manipulation; }
+  .row { gap: 10px; }
+  input[type=text] { min-width: 0; flex-basis: 100%; }
+  .touchhint { display: block; }
+  .keyhint { display: none; }
+}
+@media (max-width: 600px) {
+  .ctl button, .ctl select { flex: 1 1 40%; }
+  .ans { flex: 1 1 100%; }
+}
 </style>
 </head>
 <body>
 <main class="wrap">
+  <a class="backlink" href="/" data-back>Back to the phone</a>
   <div>
     <div class="eyebrow" id="eyebrow">eye exam</div>
     <h1 id="title">One sound at a time</h1>
     <p class="muted" id="intro"></p>
-    <p class="muted" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Keys act on the highlighted card: <kbd>space</kbd> plays the real sound, <kbd>F</kbd> flips, hold <kbd>Shift</kbd> to peek at the other, <kbd>B</kbd> blinks them. Then answer about the picture showing: <kbd>M</kbd> <span id="kreal">this one is the real one</span>, <kbd>S</kbd> <span id="kours">this one is ours</span>, <kbd>0</kbd> can't tell. <kbd>Enter</kbd> next card.</p>
+    <p class="muted touchhint" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Tap <b>Flip</b> to switch, hold <b>Peek</b> to look at the other one for a moment, or tap <b>Blink</b>. Tap a picture to pin a comment there, or drag to box an area. Then say which picture is the real one.</p>
+    <p class="muted keyhint" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Keys act on the highlighted card: <kbd>space</kbd> plays the real sound, <kbd>F</kbd> flips, hold <kbd>Shift</kbd> to peek at the other, <kbd>B</kbd> blinks them. Then answer about the picture showing: <kbd>M</kbd> <span id="kreal">this one is the real one</span>, <kbd>S</kbd> <span id="kours">this one is ours</span>, <kbd>0</kbd> can't tell. <kbd>Enter</kbd> next card.</p>
   </div>
   <div id="cards" style="display:grid;gap:16px"></div>
   <section class="panel">
-    <div class="row"><button id="submit" type="button">Submit</button><span class="status" id="st" role="status"></span></div>
+    <div class="row"><button id="submit" type="button">Submit</button><span class="status" id="st" role="status"></span><a class="backlink" href="/" data-back>Back to the phone</a></div>
   </section>
 </main>
 <script>
@@ -164,6 +185,7 @@ function card(it, i) {
     const x0 = Math.min(p.fx, drag.p0.fx), x1 = Math.max(p.fx, drag.p0.fx), y0 = Math.min(p.fy, drag.p0.fy), y1 = Math.max(p.fy, drag.p0.fy);
     Object.assign(drag.box.style, { left: 100 * x0 + "%", width: 100 * (x1 - x0) + "%", top: 100 * (1 - y1) + "%", height: 100 * (y1 - y0) + "%" });
   });
+  stack.addEventListener("pointercancel", () => { if (drag) { if (drag.box) drag.box.remove(); drag = null; } });
   document.addEventListener("pointerup", () => {
     if (!drag) return;
     const { p0, p1, box } = drag; drag = null;
@@ -189,7 +211,7 @@ function card(it, i) {
   stack.appendChild(phead);
   c.head = phead;
   el.appendChild(stack);
-  const ctl = mk("div", { className: "row" });
+  const ctl = mk("div", { className: "row ctl" });
   const flip = mk("button", { type: "button" }, "Flip (F)");
   flip.onclick = ev => { ev.stopPropagation(); setActive(i); c.stopBlink(); c.flip(); };
   const blink = mk("button", { type: "button" }, "Blink (B)");
@@ -199,7 +221,14 @@ function card(it, i) {
   speed.value = 400;
   speed.addEventListener("change", () => { if (c.timer) { c.stopBlink(); c.blink(); } });
   speed.addEventListener("keydown", ev => ev.stopPropagation());
-  ctl.append(flip, blink, speed, mk("span", { className: "muted" }, M.timed ? "click the picture to pin a comment · F flips · hold Shift to peek" : "click the picture to flip · hold Shift to peek at the other one"));
+  // hold to peek, for a finger (the same as holding Shift): shows the other picture while pressed
+  const peek = mk("button", { type: "button", className: "peek" }, "Peek (hold)");
+  const unpeek = () => { if (c.peek) { c.show(c.peek); c.peek = null; } };
+  peek.addEventListener("pointerdown", ev => { ev.stopPropagation(); setActive(i); if (c.peek) return; c.stopBlink(); c.peek = c.layer; c.flip(); });
+  for (const t of ["pointerup", "pointercancel", "pointerleave"]) peek.addEventListener(t, unpeek);
+  peek.addEventListener("click", ev => ev.stopPropagation());
+  peek.addEventListener("contextmenu", ev => ev.preventDefault());
+  ctl.append(flip, blink, peek, speed, mk("span", { className: "muted" }, M.timed ? "click the picture to pin a comment · F flips · hold Shift to peek" : "click the picture to flip · hold Shift to peek at the other one"));
   el.appendChild(ctl);
   el.appendChild(clist);
   const row = mk("div", { className: "row" });
@@ -214,7 +243,7 @@ function card(it, i) {
     c.choice.textContent = c.pick === "cant" ? "you chose: can't tell" : `you chose: picture ${c.pick} is the real one`;
   };
   for (const [v, label] of [["mine", `${LREAL} (M)`], ["synth", `${LOURS} (S)`], ["cant", "can't tell (0)"]]) {
-    const b = mk("button", { type: "button" }, label);
+    const b = mk("button", { type: "button", className: "ans" }, label);
     b.onclick = ev => choose(v, ev);
     c.btn[v] = b; row.appendChild(b);
   }
@@ -275,6 +304,7 @@ $("submit").onclick = async () => {
   LOURS = (M.labels && M.labels.ours) || "This one is ours";
   $("kreal").textContent = LREAL.toLowerCase(); $("kours").textContent = LOURS.toLowerCase();
   document.title = "Eye Exam " + ROUND;
+  if (new URLSearchParams(location.search).get("from") === "phone") document.querySelectorAll("[data-back]").forEach(a => a.classList.add("on"));
   $("eyebrow").textContent = `eye exam · ${ROUND}`;
   $("title").textContent = M.title; $("intro").textContent = M.intro || "";
   C = M.items.map(card); C.forEach(c => $("cards").appendChild(c.el));
