@@ -4,7 +4,7 @@
 > Set me up with ismail: https://github.com/newsbubbles/ismail
 > ```
 >
-> It installs everything, asks what you want to make, and plays you a first idea. If you have a VR headset, it can put you on a stage inside your music later. You don't need to know what a "skill", "MCP" or "plugin" is: your agent handles that.
+> It installs everything, asks what you want to make, and plays you a first idea. If you have a VR headset (tested on Meta Quest), it can put you on a stage inside your music later. You don't need to know what a "skill", "MCP" or "plugin" is: your agent handles that.
 
 <p align="center">
   <picture>
