@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Phone panels wait their turn
+
+- A new panel or exam no longer covers one the person is reading: it waits until the open one is answered or set
+  aside, the open one says another is waiting, and `phone_panel_show` replies that it is queued (Nate 10-07: "this
+  test interrupted my reading of another panel").
+- Every panel has Not now: it arrives as a dismissal (`dismissed: true`, answer null), not as an empty answer. A
+  choice input must be picked before a button sends, unless it is `optional` (Live DJ 10-07: Send with nothing
+  picked came in as {"which": null}).
+
 ### Clarinet, bassoon and French horn in the showcase (ledger:M169)
 
 - Three measured voices from VSCO 2 CE (CC0) passed a blind ear check against the real recordings: `clarinet`

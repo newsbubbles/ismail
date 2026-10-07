@@ -141,7 +141,8 @@ def panel_inputs(inputs):
         if x['kind'] in ('choice', 'check') and not opts:
             raise ValueError(f"inputs[{i}] ({x['kind']}): give 'options', the labels to pick from")
         out.append({'id': str(x.get('id') or f'in{i + 1}'), 'kind': x['kind'], 'label': str(x.get('label') or ''),
-                    **({'options': opts} if opts else {}), **({'value': x['value']} if 'value' in x else {})})
+                    **({'options': opts} if opts else {}), **({'value': x['value']} if 'value' in x else {}),
+                    **({'optional': True} if x.get('optional') else {})})
     return out
 
 
@@ -1055,14 +1056,19 @@ class Agent:
 
     def _panel(self, p, wait):
         v = self.ph.view
+        ahead = [x['id'] for x in v['panels'] if x['id'] != p['id']]
         v['panels'] = [x for x in v['panels'] if x['id'] != p['id']] + [p]
         self.ph.save()
         self.ph.cmd('panel', panel=p)
         got = self._wait_answer(p['id'], wait)
+        if got and got.get('dismissed'):
+            return f"set aside: they tapped Not now on {p['id']} (not an answer; ask again later or let it go)"
         if got:
             return f"answered: {json.dumps(got.get('answers') or got.get('answer'), ensure_ascii=False)} (heard {got.get('heard', {}).get('of', '?')})"
-        return f"shown: panel {p['id']}" + (" (no answer yet; it arrives in the inbox as kind 'answer')" if wait else
-                                             "; the answer arrives in the inbox as kind 'answer'")
+        queued = (f"; it waits behind {', '.join(ahead)}, already open on the phone: it opens when that is answered "
+                  f"or set aside, never over it" if ahead else '')
+        return f"shown: panel {p['id']}{queued}" + (" (no answer yet; it arrives in the inbox as kind 'answer')"
+                                                    if wait else "; the answer arrives in the inbox as kind 'answer'")
 
     def op_panel_show(self, panel_id=None, title='', text='', image=None, buttons=None, inputs=None, wait=0,
                       who=None):
@@ -1548,7 +1554,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(404, {'error': 'that question is closed'})
                 rec = {'kind': 'exam' if p['kind'] == 'exam' else 'answer', 'id': pid, 'title': p['title'],
                        'sid': sid, 'heard': ph.heard(sid, t)}
-                if p['kind'] == 'exam':
+                if body.get('dismissed'):                                 # Not now: set aside, not answered
+                    rec['dismissed'] = True
+                    rec['answer'] = None
+                elif p['kind'] == 'exam':
                     rec['answers'] = body.get('answers') or {}
                 else:
                     rec['answer'] = body.get('answer')
@@ -1556,7 +1565,7 @@ class Handler(BaseHTTPRequestHandler):
                         rec['values'] = body.get('values') or {}
                 if p.get('who'):
                     rec['for'] = p['who']                                 # the agent that sent the panel
-                if p.get('answers_path'):
+                if p.get('answers_path') and not rec.get('dismissed'):
                     try:
                         ap = Path(p['answers_path'])
                         ap.parent.mkdir(parents=True, exist_ok=True)
