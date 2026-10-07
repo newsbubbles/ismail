@@ -11,6 +11,16 @@
   `lexicon.jsonl`, so a guest never adds to the owner's lexicon or sees the owner's words. Marketing's dry run 2
   found both.
 
+### Named effect stacks, with what they cost on this machine (ledger:M177)
+
+- `fx_stack_save`, `fx_stack_load`, `fx_stack_list`, `fx_stack_measure`: an effect chain saved by name with notes,
+  in the library (`~/.ismail/fx_stacks`) or a song (`<song>/fx_stacks`); `live_track(fx='stack:<name>')` uses one.
+- Saving measures 10 s through the chain the way the live engine runs it (live processors in 1024-sample blocks,
+  baked effects over the window) and keeps the times-realtime figure per device. `live_track` and `live_load` name
+  each saved chain they meet with its cost here, and RISK under 4x.
+- Five built-in stacks from the 10-07 freestyles: `kit70_glue`, `dirty_pbass`, `afrobeat_tenor`, `afrobeat_chank`,
+  `tonewheel_organ`.
+
 ### Phone messages never pop up
 
 - Panels and exams no longer open over the page (Nate 10-07: "these are modals that block me"). A new one buzzes

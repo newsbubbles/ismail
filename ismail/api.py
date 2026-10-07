@@ -2128,6 +2128,7 @@ from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison o
 from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)
 from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
 from . import api_exam  # noqa: E402,F401  (registers exam_check, the exam pre-flight)
+from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list/measure, ledger:M177)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)

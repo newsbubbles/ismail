@@ -1,0 +1,31 @@
+{
+ "about": "Built-in effect stacks (ledger:M177): chains from live sets the person liked, saved by name. fx_stack_list shows them with their cost on this machine; live_track(fx='stack:<name>') uses one.",
+ "stacks": {
+  "kit70_glue": {
+   "chain": [{"type": "compressor", "threshold_db": -18, "ratio": 3, "attack_ms": 10, "release_ms": 140},
+             {"type": "tape", "drive": 0.25}],
+   "notes": "glue for the 70s kit (kit70, humanize 7 ms, cym_bright 0.35), from the 10-07 Addis freestyle"
+  },
+  "dirty_pbass": {
+   "chain": [{"type": "eq", "bands": [{"type": "lowcut", "freq": 35}]},
+             {"type": "amp", "gain": 2.0, "volume": 6, "bass": 6, "mid": 6, "treble": 4, "presence": 3},
+             {"type": "cab"}],
+   "notes": "dirty P-bass through an amp and cab (the electric voice, kind pbass); the person: \"it's dirty\""
+  },
+  "afrobeat_tenor": {
+   "chain": [{"type": "amp", "gain": 2.0, "volume": 5, "bass": 3, "mid": 6, "treble": 9, "presence": 6},
+             {"type": "cab"}],
+   "notes": "bright Afrobeat tenor guitar (strat mono, damp 0.6), from the 10-07 Afrobeat freestyle"
+  },
+  "afrobeat_chank": {
+   "chain": [{"type": "univibe", "rate_hz": 4.0, "intensity": 0.4, "mode": "chorus", "drive": 0.2},
+             {"type": "amp", "gain": 2.0, "volume": 5, "bass": 2, "mid": 6, "treble": 9, "presence": 6},
+             {"type": "cab"}],
+   "notes": "the Afrobeat rhythm chank: univibe chorus into the bright amp (strat poly, strum 9 ms)"
+  },
+  "tonewheel_organ": {
+   "chain": [{"type": "rotary", "speed": 0.0, "drive": 0.35}, {"type": "eq", "bands": [{"type": "lowcut", "freq": 120}]}],
+   "notes": "rotary speaker for the tonewheel organ (drawbars 808400000, perc 0.3); automate speed 0 to 1 at the peaks"
+  }
+ }
+}
