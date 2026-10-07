@@ -115,7 +115,10 @@ a path on the phone server in the same tab (only a path starting with `/`; the p
 the picture round that `exam_picture_round` hosts, so the eye exam works on the phone while that page server runs). A panel never interrupts a voice note: it waits, silent,
 until the note is sent.
 In a team of agents, each one with something waiting on the person posts its own panel (`sender=<its role>`, a
-`priority`, one topic per panel) and reads its own answers by `for`; nobody relays for another. Panels never pop up
+`priority`, one topic per panel) and reads its own answers by `for`; nobody relays for another. A free voice note
+with no `for` that is plainly about another agent's work (one the person already asked to work on it) goes to that
+agent at once, word for word, with its inbox number, id and time; whoever's listener caught it passes it on and
+does not hold it. When the owner is unclear, keep it and ask the person. Panels never pop up
 (they wait on the corner key), so the person's own taps do the pacing. A video that stalls or fails says so in the
 panel, with a link to open it on its own, and the server's events carry `video_ok`, `video_slow` or `video_error`.
 
