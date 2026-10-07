@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Feeling words change a sketch (ledger:M170 S-6)
+
+- `sketch(base=...)` reads happier, sadder, calmer, more exciting, darker and dreamier (and their near words) as
+  concrete moves: tempo, major or minor, busier or sparser, softer or brighter; "a bit" halves the move, "much"
+  makes it bigger, and the reply names each ("happier: faster (95 BPM), major, busier, brighter"). Marketing's dry
+  run: "a bit happier" changed nothing and two takes came back slower.
 ### The picture round: the eye exam page (ledger:M165 step 2, M12)
 
 - `exam_picture_round(out, items, title)`: vox's word-picture page in main. One sound per card, the real picture and
