@@ -39,7 +39,9 @@ MOTIF_RHYTHMS = [   # (start beat, length) over two bars of 4/4; none of them on
 REG = {'melody': (62, 84), 'keys': (55, 72), 'harmony': (36, 60), 'counter': (48, 64), 'pad': (45, 62),
        'bass': (28, 50), 'sub': (26, 40), 'chords': (52, 67)}
 REG_VOICE = {('melody', 'strat70_clean'): (57, 79), ('melody', 'emily'): (57, 81), ('bass', 'contrabass'): (31, 48),
-             ('melody', 'violin'): (62, 84), ('keys', 'rhodes'): (52, 72), ('pad', 'violin'): (62, 79)}
+             ('melody', 'violin'): (62, 84), ('keys', 'rhodes'): (52, 72), ('pad', 'violin'): (62, 79),
+             ('melody', 'clarinet'): (55, 84), ('counter', 'bassoon'): (43, 64), ('bass', 'bassoon'): (43, 55),
+             ('melody', 'horn'): (53, 74), ('counter', 'horn'): (45, 65)}
 LEVEL = {('drums', 'kit70'): 7.0, ('bass', 'pbass70'): -9.0, ('bass', 'contrabass'): -6.0, ('sub', 'sub_bass'): -11.0,
          ('keys', 'grand_piano'): -7.0, ('melody', 'grand_piano'): 0.0, ('melody', 'violin'): -1.0,
          ('melody', 'strat70_clean'): 1.0, ('counter', 'cello'): 1.0, ('pad', 'cello'): -3.0,
@@ -81,7 +83,11 @@ INSTRUMENTS = [
     (r'strings|string section|string quartet|orchestra\w*', 'section', None,
      'a string section here is violin and cello (and contrabass when no other bass plays), one player each (no ensemble strings voice yet)'),
     (r'(?:synth |ambient |warm )?pads?', 'pad', 'cello', 'no pad voice yet (a known gap): cello holds the long notes'),
-    (r'flute|sax\w*|trumpet|horns?|brass|clarinet|oboe|synth lead|lead synth', 'melody', 'violin',
+    (r'clarinets?', 'melody', 'clarinet', None),
+    (r'bassoons?', 'counter', 'bassoon', None),
+    (r'(?:french )?horns?', 'melody', 'horn', None),
+    (r'brass(?: section)?', 'melody', 'horn', 'no brass section yet: a French horn plays the line'),
+    (r'flute|sax\w*|trumpet|trombone|tuba|oboe|synth lead|lead synth', 'melody', 'violin',
      'no {word} voice yet: violin plays the line'),
     (r'vocals?|singer|singing|voice|rap\w*|choir', None, None,
      'no singing voice in the showcase yet: {word} left out (say it to the person)'),
@@ -115,7 +121,7 @@ PLAIN = {'grand_piano': 'a grand piano', 'violin': 'a violin', 'cello': 'a cello
          'kit70': 'a drum kit', 'rusty': 'a real drum kit', 'strat70_rhythm': 'a rhythm guitar',
          'strat70_clean': 'an electric guitar', 'emily': 'a clean electric guitar', 'pbass70': 'a bass guitar',
          'sub_bass': 'a deep sub bass', 'growl': 'a growling synth bass', 'rhodes': 'a Rhodes electric piano',
-         'crackle': 'record crackle'}
+         'crackle': 'record crackle', 'clarinet': 'a clarinet', 'bassoon': 'a bassoon', 'horn': 'a French horn'}
 PLAIN_ROLE = {'melody': 'the tune', 'keys': 'the chords', 'harmony': 'the chords', 'chords': 'the chords',
               'counter': 'a second line', 'pad': 'the long notes', 'bass': 'the bass', 'sub': 'the low end',
               'drums': 'the drums', 'fx': 'the texture'}
@@ -365,7 +371,8 @@ def read_brief(brief):
 
 
 FAMILY_WORDS = {'drums': r'drums?|beat|percussion|kit|breakbeats?|hats|ride', 'guitar': r'guitars?',
-                'bass': r'bass\w*|sub\w*|808s?', 'keys': r'piano|keys|rhodes|organ', 'strings': r'strings?|violin|cello'}
+                'bass': r'bass\w*|sub\w*|808s?', 'keys': r'piano|keys|rhodes|organ', 'strings': r'strings?|violin|cello',
+                'winds': r'winds?|woodwinds?|clarinets?|bassoons?', 'brass': r'brass|horns?'}
 
 
 def _roles_named(word, parts):

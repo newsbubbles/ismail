@@ -20,7 +20,7 @@ _SAMPLE_FROM = ('imported from', 'avg of', 'fitted to')
 
 
 def _library_info(voice):
-    for cat in ('keys', 'guitar', 'strings', 'bass', 'drums', 'fx'):
+    for cat in ('keys', 'guitar', 'strings', 'winds', 'brass', 'bass', 'drums', 'fx'):
         try:
             return getattr(importlib.import_module(f'ismail.voices.{cat}.{voice}'), 'INFO', None)
         except ImportError:
@@ -29,8 +29,8 @@ def _library_info(voice):
 
 
 def _mimic_source(root, profile):
-    for d in (os.path.join(root, 'voices'), os.path.join(os.path.dirname(__file__), 'voices', 'strings'),
-              os.environ.get('ISMAIL_VOICES') or ''):
+    from . import voices
+    for _, d in voices.search_path(root):       # every family folder, so winds and brass profiles are found too
         p = os.path.join(d, f'{profile}.mimic.json') if d else ''
         if p and os.path.exists(p):
             try:

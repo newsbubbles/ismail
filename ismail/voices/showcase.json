@@ -56,6 +56,50 @@
    "why": "mimic profile, 5 notes measured (VSCO 2 CE, CC0)"
   },
   {
+   "name": "clarinet",
+   "family": "winds",
+   "instrument": {
+    "type": "mimic",
+    "profile": "clarinet",
+    "tail": 1.5
+   },
+   "range": "D3-F6",
+   "roles": [
+    "melody"
+   ],
+   "why": "mimic profile, 11 notes measured (VSCO 2 CE, CC0); ear check 10-07: not told from the recording"
+  },
+  {
+   "name": "bassoon",
+   "family": "winds",
+   "instrument": {
+    "type": "mimic",
+    "profile": "bassoon",
+    "tail": 1.5
+   },
+   "range": "G2-C5",
+   "roles": [
+    "counter",
+    "bass"
+   ],
+   "why": "mimic profile, 19 notes measured (VSCO 2 CE, CC0); ear check 10-07: good enough"
+  },
+  {
+   "name": "horn",
+   "family": "brass",
+   "instrument": {
+    "type": "mimic",
+    "profile": "horn",
+    "tail": 1.5
+   },
+   "range": "A1-F5",
+   "roles": [
+    "melody",
+    "counter"
+   ],
+   "why": "mimic profile, 29 notes measured (VSCO 2 CE, CC0); ear check 10-07: good enough, a little synthetic"
+  },
+  {
    "name": "kit70",
    "family": "drums",
    "instrument": "preset:kit70",
@@ -366,6 +410,6 @@
   "an organ (a pipe or Hammond voice; the piano stands in)",
   "a pad or ambient voice",
   "a singing voice (vox is in progress)",
-  "winds and brass (flute, sax, trumpet)"
+  "more winds and brass (flute, oboe, sax, trumpet, trombone, tuba: measured, not yet past the ear)"
  ]
 }
