@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Three measuring rules (ledger:S56)
+
+- listening.md, "Readings that mislead": a sum of medians runs short (fit lengths on a log scale, lengthen phrase
+  ends, put pauses back); level and band charts cannot see phase (a blind pair for any timing or phase stage); one
+  render is not a result (two seed sets before claiming a difference). From the Voice session's lessons (hq:D-60).
+
 ### Recording warnings before a take is measured (ledger:M172)
 
 - `ismail.capture`: two capture faults found before a recording is measured. Peaks flattened into a plateau under

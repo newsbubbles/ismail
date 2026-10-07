@@ -31,6 +31,15 @@ Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track
 Readings that mislead:
 - Long-window numbers are blind to fakeness. 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB while the user heard "30% there": what makes a sound fake lives inside single notes (attack, how each partial decays, pitch movement, noise). Report those numbers, never as proof that a sound is convincing.
 - `analyze_drums` on a full mix (`render`, `ref`) is band activity: leads and pads show up as snare and hat hits. Read your drums as `track:<drum track>`.
+- Lengths added up from typical (median) measurements come out short. Durations lean long (a few notes or words
+  last much longer than the rest), so a sum of medians ran about 28% under real phrases (344 spoken sentences);
+  phrase ends also lengthen, and pauses go missing. Fit lengths on a log scale, lengthen phrase ends, put the pauses
+  back: the error on new sentences went from 28% to about 8% (the Voice agent's work).
+- Level and band charts cannot see phase. A 3 ms all-pass in the high band moved no level in any chart and was heard
+  at once as a "phaser". A stage that changes timing or phase but not level gets a blind pair before it is kept
+  (`references/blind-tests.md`).
+- One render is not a result. Random variation (seeds) moves the measures: a transcription score alone moved 3 to 7
+  points between seed sets. Compare two versions on at least two seed sets before claiming one is better.
 - `analyze_melody` on a track with delay or vibrato splits held notes into runs of short notes. Check pitch with it and rhythm with `notes_read(view='roll')`, or read the melody before adding the delay.
 
 ## Listening Report (write one after every render you judge)
