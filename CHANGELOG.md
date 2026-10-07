@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### First contact: hand-holding for plain words
+
+- Someone on plain words no longer gets a test. `sketch` tells the agent to play version 1 at once with one line of
+  delight; the other sketches are spares, for when they want something different. No "which is closest", no "what is
+  missing", no three to compare. Musicians keep the rounds they had.
+- Every round now ends with two or three playful choices in everyday words, made from that very sketch, plus "or tell
+  me anything" ("Want it different? Try: add a beat you can nod to, faster and bouncier, or a bit spookier, or tell
+  me anything."). `sketch.playful_choices` picks them and checks each one against `apply_words` first, so every choice
+  changes the sketch when it comes back as the next round's words. New feeling words: bouncier, bouncy, peppier,
+  perkier, zippier.
+- A change plays at once, new version first, with one plain line on what changed, and now and then the agent slips in
+  a small unasked flourish and names it after it plays. "Want to keep this as your song?" leads to `sketch_keep`.
+  Live changes are not offered yet.
+- `guide`'s FIRST SESSION block now has a musician branch and a plain-words branch (also returned by
+  `guide(first_answer=...)`). AGENTS.md and `setup.md`: never say skill, plugin, MCP, uv or server to the person unless
+  they do first, and a plain chat that cannot run commands says so in one sentence and names what works.
+
 ### Phone: panels can carry a video
 
 - `phone_panel_show(video=<file>)` puts a video in a panel. It plays inline on the phone page, next to the panel's
