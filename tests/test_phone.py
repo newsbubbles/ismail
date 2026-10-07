@@ -908,3 +908,80 @@ def test_a_panel_link_is_a_same_origin_path_and_rides_with_the_panel(phone):
     assert 'class="linkbtn" href="${esc(p.link)}"' in js and 'target=' not in js[js.index('linkbtn') - 80:js.index('linkbtn') + 120]
     words = (S.PAGE.parent.parent / 'exampage' / 'words.html').read_text(encoding='utf8')
     assert 'name="viewport"' in words and 'from' in words and 'Back to the phone' in words
+
+
+def _exam_rounds(ph):
+    return [(r['state'], r['id'], r.get('for'), r.get('title')) for r in ph.read_inbox(0) if r['kind'] == 'exam_round']
+
+
+def _make_exam(tmp_path, exam_id, who='music'):
+    import soundfile as sf
+    a = tmp_path / f'{exam_id}.wav'
+    sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * np.arange(4410) / 44100), 44100)
+    return P._call('exam', title='round 1', clips=[{'label': 'A', 'path': str(a)}], exam_id=exam_id, who=who)
+
+
+def _page(base, what, pid):
+    post(base, '/api/events', {'sid': None, 'events': [{'what': what, 'id': pid, 'title': ''}]})
+
+
+def test_an_exam_round_is_marked_started_and_finished_once(phone, tmp_path):
+    ph, base, _ = phone
+    _make_exam(tmp_path, 'r1')
+    assert _exam_rounds(ph) == []                          # sent to the phone, not on screen yet
+    _page(base, 'panel_open', 'r1')
+    _page(base, 'panel_open', 'r1')                        # opened twice: still one started
+    assert _exam_rounds(ph) == [('started', 'r1', 'music', 'round 1')]
+    post(base, '/api/answer', {'id': 'r1', 'answers': {'choice': 'A'}})
+    assert _exam_rounds(ph) == [('started', 'r1', 'music', 'round 1'), ('finished', 'r1', 'music', 'round 1')]
+    _page(base, 'panel_close', 'r1')                       # already finished: nothing more
+    assert len(_exam_rounds(ph)) == 2
+
+
+def test_an_exam_round_ends_when_dismissed_or_closed_and_plain_panels_are_not_rounds(phone, tmp_path):
+    ph, base, _ = phone
+    P.phone_panel_show(panel_id='plain', title='Just a question', sender='dj')
+    _page(base, 'panel_open', 'plain')
+    assert _exam_rounds(ph) == []
+    _make_exam(tmp_path, 'r2')
+    _page(base, 'panel_open', 'r2')
+    post(base, '/api/answer', {'id': 'r2', 'dismissed': True})
+    assert [x[0] for x in _exam_rounds(ph)] == ['started', 'finished']
+    _make_exam(tmp_path, 'r3')
+    _page(base, 'panel_open', 'r3')
+    _page(base, 'panel_close', 'r3')
+    assert [x[0] for x in _exam_rounds(ph)] == ['started', 'finished', 'started', 'finished']
+    # the picture round: a panel linking under /eye/
+    P.phone_panel_show(panel_id='eye-9', title='Picture round', sender='music', link='/eye/round9?from=phone')
+    _page(base, 'panel_open', 'eye-9')
+    assert _exam_rounds(ph)[-1] == ('started', 'eye-9', 'music', 'Picture round')
+    P.phone_panel_close('eye-9')
+    assert _exam_rounds(ph)[-1][:2] == ('finished', 'eye-9')
+
+
+def test_phone_status_shows_the_exam_in_progress_and_the_open_panels(phone, tmp_path):
+    ph, base, _ = phone
+    st = P.phone_status()
+    assert 'exam in progress: none' in st and 'open panels: none' in st and 'page shows: no panel' in st
+    P.phone_panel_show(panel_id='dj-5', title='Which?', sender='dj', priority='needs you')
+    _make_exam(tmp_path, 'r4', who='music')
+    _page(base, 'panel_open', 'r4')
+    st = P.phone_status()
+    assert 'dj-5 (for dj, priority needs you, kind panel)' in st
+    assert 'r4 (for music, priority normal, kind exam)' in st
+    assert 'page shows: panel r4 since ' in st and ' UTC' in st
+    assert 'exam in progress: r4 for music since ' in st
+    assert f'last inbox line: {ph.seq}' in st
+    post(base, '/api/answer', {'id': 'r4', 'answers': {}})
+    st = P.phone_status()
+    assert 'exam in progress: none' in st and 'page shows: no panel' in st
+
+
+def test_phone_listen_returns_exam_round_lines_without_page_true(phone, tmp_path):
+    ph, base, _ = phone
+    _make_exam(tmp_path, 'r5')
+    _page(base, 'panel_open', 'r5')
+    lines = json.loads(P.phone_listen('watcher', since=0, wait=0))['lines']
+    assert [x['kind'] for x in lines] == ['exam_round']    # the page's own panel_open line is not shown
+    assert lines[0]['state'] == 'started' and lines[0]['for'] == 'music' and lines[0]['id'] == 'r5'
+    assert any(x['kind'] == 'page' for x in json.loads(P.phone_listen('watcher', since=0, wait=0, page=True))['lines'])

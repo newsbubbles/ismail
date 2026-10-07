@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Phone: exam rounds are marked, and the page's state is in phone_status
+
+- When the page opens an exam panel (or a panel linking under `/eye/`, the picture round), the inbox gets one line
+  of kind `exam_round`, state `started`, with the panel id, `for` (its sender) and title. When it is answered,
+  dismissed, set aside or closed, or another panel takes its place, one line with state `finished`. Never twice for
+  the same change. `phone_listen` returns these lines by default (not only with `page=True`), so a listener that
+  plays sound can mute on `started` and unmute on `finished`.
+- `phone_status` adds the open panels (id, sender, priority, kind), the panel the page shows now and since when,
+  "exam in progress: <panel> for <sender> since <UTC time>" (or "none"), and the last inbox line number, which is the
+  `since` for `phone_listen`. The existing lines are unchanged.
+- `phone_listen` says it is the watcher: every line, never filtered by owner, the agent decides what is its own.
+  skills phone.md says to watch with `phone_listen` and `phone_status`, never filter by owner in a script, and go
+  quiet between `exam_round` started and finished.
+
 ### Phone: who gets a voice note nobody tagged
 
 - skills phone.md: a free voice note plainly about another agent's work goes to that agent at once, verbatim, with
