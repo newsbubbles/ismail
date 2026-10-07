@@ -49,3 +49,43 @@ def exam_eye_score(out: str, answers: dict) -> str:
     except (OSError, ValueError) as e:
         raise OpError(f"exam_eye_score: {e}")
     return '\n'.join(lines)
+
+
+@op()
+def exam_picture_round(out: str, items: list, title: str, intro: str = '', seed: int = 0, f_lo: float = 0.0,
+                       f_hi: float = 16000.0, labels: dict = None, host: bool = True, port: int = 8871) -> str:
+    """The eye exam page for the person (ledger:M165 step 2, vox's word-picture round): one sound per card, the real
+    picture and ours of the same window stacked so one shows at a time (F flips, Shift peeks, B blinks: the eye reads
+    a difference as movement), M / S / 0 answers about the picture showing, and comments pinned at a time and
+    frequency (a click, or a dragged box). The key is served only after they answer. items: [{word, real: path,
+    other: path, window: [t0, t1] s, other_window (default the same), words: [[t0, t1, text]] in the real file,
+    other_label: what ours is, said after the answer, version}]; real-first and real-second are balanced and seeded.
+    labels: the page's words {real, ours, play} (default "This one is the real one", "This one is ours", "Play the
+    real sound"). out: the round's folder; its parent is what the page server serves. host=True starts it on
+    127.0.0.1:port unless it runs. Read the answers with exam_picture_score(out)."""
+    import os
+    from . import exampage as X
+    try:
+        man = X.build(out, items, title, intro, seed=seed, f_lo=f_lo, f_hi=f_hi, labels=labels)
+    except (OSError, KeyError, ValueError) as e:
+        raise OpError(f"exam_picture_round: {e} (each item needs word, real, other and window)")
+    rnd = man['round']
+    if not X.SAFE.match(rnd):
+        raise OpError(f"the round folder's name {rnd!r} must be letters, digits, '_', '-' or '.'")
+    url = (X.host(os.path.dirname(os.path.abspath(out)), port) + rnd) if host else None
+    return (f"round {rnd}: {len(man['items'])} cards in {out}" + (f"; open {url}" if url else
+            f"; serve with python -m ismail.exampage serve {os.path.dirname(os.path.abspath(out))}") +
+            ". The key is served only after a submit; answers land in answers.jsonl; exam_picture_score(out) reads "
+            "the last one.")
+
+
+@op()
+def exam_picture_score(out: str) -> str:
+    """Score the last answers of an exam_picture_round against its key: per card right, WRONG (ours fooled them),
+    cant or none, with flips, blinks and plays, their note, and each pinned comment on the REAL picture or OURS,
+    then the tally per version."""
+    from . import exampage as X
+    try:
+        return X.score(out)
+    except (OSError, KeyError, ValueError) as e:
+        raise OpError(f"exam_picture_score: {e}")

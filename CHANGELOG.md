@@ -8,6 +8,24 @@
   concrete moves: tempo, major or minor, busier or sparser, softer or brighter; "a bit" halves the move, "much"
   makes it bigger, and the reply names each ("happier: faster (95 BPM), major, busier, brighter"). Marketing's dry
   run: "a bit happier" changed nothing and two takes came back slower.
+### The picture round: the eye exam page (ledger:M165 step 2, M12)
+
+- `exam_picture_round(out, items, title)`: vox's word-picture page in main. One sound per card, the real picture and
+  ours of the same window stacked (F flips, Shift peeks, B blinks), M / S / 0 about the picture showing, comments
+  pinned at a time and frequency (a point or a dragged box), the key served only after a submit. Real-first and
+  real-second are balanced and seeded. Pictures come from `spectrogram_png`'s eye mode (step 1).
+- `exam_picture_score(out)`: per card right, WRONG, cant or none, with flips, blinks, plays, the note and each pin.
+- `ismail.exampage` serves rounds (`python -m ismail.exampage serve <folder>`) with HTTP byte ranges, the hosted
+  round of M12. Touch works too (pointer events).
+- Parity: vox's answered rounds w1 and w2, moved into main's round format, score line for line the same as vox's
+  work/score_words.py (11 and 101 lines).
+- README: the tool count is 221 (113 music and live, 88 stage, 20 phone).
+
+### A part at full scale is named (ledger:M170 S-1)
+
+- `render` lists HOT on any track whose stem peaks over -0.5 dB, with how far to lower it. Marketing's dry run had
+  a melody at -0.0 dB and no word of it (the master was fine, the limiter flattening the tune).
+- The sketch balance never raises the tune past a -1 dB peak; when it needs more, the other parts come down.
 ### The person's words are kept, and versions play from the song folder (ledger:M170 G-2b, U-5)
 
 - `guide(first_answer=..., project=)` keeps the vocabulary it decided (`<song>/person.json`, and the latest person

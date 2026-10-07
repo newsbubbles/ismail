@@ -822,6 +822,10 @@ def _ffmpeg_ok():
     return bool(os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg'))
 
 
+HOT_DB = -0.5          # a track stem peaking over this is a part at full scale on its own (ledger:M170 S-1)
+TUNE_PEAK_DB = -1.0    # the sketch balance never pushes the tune's own peak over this
+
+
 def _tune_balance(project, target=5.0):
     """ledger:M150: the tune sat +1 LU over a contrabass in one sketch and 7-13 LU over the others, because the
     faders are fixed. From a stems render: move the melody's fader so it sits `target` LU (4-6) over the other
@@ -850,9 +854,19 @@ def _tune_balance(project, target=5.0):
     if target - 1.0 <= gap <= target + 1.0:
         return f"the tune sits {gap:+.1f} LU over the parts"
     move = float(np.clip(target - gap, -8.0, 8.0))
+    room = TUNE_PEAK_DB - 20 * np.log10(np.max(np.abs(y)) + 1e-12)     # how far the tune can rise before full scale
+    rest_down = max(0.0, move - room) if move > 0 else 0.0
+    move -= rest_down
     P = _load(project)
     v = P.track('melody').get('volume_db', 0.0) + move
     track_set(project, 'melody', volume_db=round(v, 1))
+    if rest_down > 0.05:            # the tune is at its ceiling: the parts come down instead (ledger:M170 S-1)
+        for f in others:
+            name = os.path.basename(f)[:-4]
+            if name in P.d.get('tracks', {}):
+                track_set(project, name, volume_db=round(P.track(name).get('volume_db', 0.0) - rest_down, 1))
+        return (f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB (its peak stays under "
+                f"{TUNE_PEAK_DB:.0f} dB) and the parts {-rest_down:+.1f} dB, to about {gap + move + rest_down:+.1f}")
     return f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB to about {gap + move:+.1f}"
 
 
@@ -1781,7 +1795,10 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         rms = 10 * np.log10(np.mean(v ** 2) + 1e-12)
         s = R.stats.get(k, {})
         L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB" + (f"  ({'cached' if s.get('cached') else 'rendered in ' + str(s['sec']) + 's'})" if s else '')
-                 + ('  SILENT - check notes/instrument/mute' if pk < -90 else ''))
+                 + ('  SILENT - check notes/instrument/mute' if pk < -90 else '')
+                 + (f"  HOT: this part alone reaches full scale; lower it {pk + 3:.1f} dB (track_set volume_db) so "
+                    f"it peaks near -3 and the limiter is not flattening it" if pk > HOT_DB and k != 'master'
+                    and not k.startswith('bus:') else ''))
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
             L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")

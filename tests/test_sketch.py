@@ -224,6 +224,26 @@ def test_feeling_words_move_tempo_mode_density_and_tone(words, bpm, key, dense, 
     spec, changed = SK.apply_words(base, words)
     assert (spec['bpm'], spec['key'], spec['dense'], spec['soft']) == (bpm, key, dense, soft)
     assert changed
+def test_a_part_at_full_scale_is_named_and_the_tune_never_pushed_past_its_ceiling(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    p = str(tmp_path / 'hot')
+    api.project_new(p, bpm=120, length_bars=1)
+    api.track_add(p, 'melody', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]}, volume_db=18.0)
+    api.notes_write(p, 'melody', 1, '0 C4 4')
+    out = api.render(p, stems=True)
+    line = next(l for l in out.splitlines() if l.strip().startswith('melody'))
+    assert 'HOT' in line
+    sd = tmp_path / 'hot' / 'renders' / 'stems'
+    t = np.arange(44100 * 2) / 44100
+    sf.write(str(sd / 'melody.wav'), np.stack([0.8 * np.sin(2 * np.pi * 440 * t)] * 2, 1), 44100)
+    api.track_add(p, 'pad', instrument={'type': 'synth'})
+    sf.write(str(sd / 'pad.wav'), np.stack([0.8 * np.sin(2 * np.pi * 220 * t)] * 2, 1), 44100)
+    api.track_set(p, 'melody', volume_db=0.0)
+    msg = api._tune_balance(p)
+    d = api._load(p)
+    assert d.track('melody')['volume_db'] <= 20 * np.log10(1 / 0.8) - 1.0 + 0.1      # its peak stays under -1 dB
+    assert d.track('pad')['volume_db'] < 0 and 'the parts' in msg
 def test_a_new_person_gets_the_first_session_on_a_machine_with_songs_and_marks_nobody(tmp_path):
     r = tmp_path / 'songs' / 'owners_song' / 'renders'
     r.mkdir(parents=True)
