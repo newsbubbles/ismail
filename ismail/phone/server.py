@@ -981,9 +981,9 @@ class Agent:
         self.ph.save()
         return f"inbox routed to {', '.join(str(p) for p in self.ph.routes())}"
 
-    def op_say(self, text, speak=False, pin=False, buzz=False, voice=None, who=None):
+    def op_say(self, text, speak=False, pin=False, buzz=False, voice=None, who=None, priority=None):
         ph = self.ph
-        cap = {'text': text, 'ts': now_iso(), 'who': who}
+        cap = {'text': text, 'ts': now_iso(), 'who': who, 'priority': norm_priority(priority)}
         ph.view['captions'] = (ph.view['captions'] + [cap])[-20:]
         if pin:
             ph.view['pinned'] = cap
@@ -1076,14 +1076,17 @@ class Agent:
                    "; the answer arrives in the inbox as kind 'answer'"))
 
     def op_panel_show(self, panel_id=None, title='', text='', image=None, buttons=None, inputs=None, wait=0,
-                      who=None):
+                      who=None, video=None, priority=None):
         p = {'id': panel_id or 'p' + secrets.token_hex(3), 'kind': 'panel', 'title': title, 'text': text,
+             'priority': norm_priority(priority),
              'buttons': [b if isinstance(b, str) else str(b) for b in (buttons or ['Send' if inputs else 'OK'])],
              'who': who}
         if inputs:
             p['inputs'] = panel_inputs(inputs)
         if image:
             p['image'] = '/files/' + self.ph.offer_file(image)
+        if video:
+            p['video'] = '/files/' + self.ph.offer_file(video)
         return self._panel(p, wait)
 
     def op_ask(self, text, wait=0, who=None):
@@ -1372,6 +1375,19 @@ class Agent:
 
 # ------------------------------------------------------------------ http
 
+PRIORITIES = ('needs you', 'normal', 'low')
+
+
+def norm_priority(x):
+    """The sender's priority for a panel or note: 'needs you', 'normal' (the default) or 'low'."""
+    if x is None or str(x).strip() == '':
+        return 'normal'
+    t = str(x).strip().lower().replace('_', ' ')
+    if t not in PRIORITIES:
+        raise ValueError(f"priority is one of {', '.join(repr(p) for p in PRIORITIES)}, not {x!r}")
+    return t
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'ismail-phone'
     ph: Phone = None
@@ -1380,7 +1396,7 @@ class Handler(BaseHTTPRequestHandler):
              '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
              '.png': 'image/png', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
              '.flac': 'audio/flac', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf':
-             'application/pdf', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8'}
+             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8'}
 
     def log_message(self, fmt, *a):
         if '/api/state' not in (a[0] if a else ''):
@@ -1401,13 +1417,41 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('too big')
         return self.rfile.read(n) if n else b''
 
+    def _range(self, size):
+        """The (start, end) a single `Range: bytes=a-b` header asks for, None for no header or one that is not
+        understood (the whole file is sent), or False when it lies past the end (416)."""
+        m = re.fullmatch(r'bytes=(\d*)-(\d*)', (self.headers.get('Range') or '').strip())
+        if not m or not (m.group(1) or m.group(2)):
+            return None
+        if m.group(1):
+            a, b = int(m.group(1)), int(m.group(2) or size - 1)
+        else:                                   # "-N": the last N bytes
+            a, b = max(0, size - int(m.group(2))), size - 1
+        b = min(b, size - 1)
+        return (a, b) if a <= b else False
+
     def _file(self, p, download=False):
+        """A file, with HTTP Range (206) so a phone browser can play and seek a video or a long clip."""
         try:
-            data = p.read_bytes()
+            size = p.stat().st_size
+            rng = self._range(size)
+            if rng is False:
+                self.send_response(416)
+                self.send_header('Content-Range', f'bytes */{size}')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            a, b = rng if rng else (0, size - 1)
+            with open(p, 'rb') as fh:
+                fh.seek(a)
+                data = fh.read(b - a + 1) if size else b''
         except OSError:
             return self._json(404, {'error': 'gone'})
-        self.send_response(200)
+        self.send_response(206 if rng else 200)
         self.send_header('Content-Type', self.TYPES.get(p.suffix.lower(), 'application/octet-stream'))
+        self.send_header('Accept-Ranges', 'bytes')
+        if rng:
+            self.send_header('Content-Range', f'bytes {a}-{b}/{size}')
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-cache')
         if download:
@@ -1415,7 +1459,10 @@ class Handler(BaseHTTPRequestHandler):
                                                                                      .split('?')[0])), p.name)
             self.send_header('Content-Disposition', f'attachment; filename="{name}"')
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass        # a player that seeks drops the request it was reading
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)

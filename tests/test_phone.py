@@ -8,6 +8,7 @@ import os
 import shutil
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -692,3 +693,118 @@ def test_the_output_switch_acts_on_the_engine_without_an_agent(phone):
     assert DEVICE_CALLS == [{'device': 'default', 'follow': True}, {'follow': False, 'reopen': False}]
     outs = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'output']
     assert [x['follow'] for x in outs] == [True, False]
+
+
+def _make_video(path, size='1280x960'):
+    ff = S.ffmpeg()
+    subprocess.run([ff, '-y', '-loglevel', 'error', '-f', 'lavfi', '-i', f'testsrc=duration=1:size={size}:rate=10',
+                    '-f', 'lavfi', '-i', 'sine=duration=1', '-c:v', 'mpeg4', '-c:a', 'aac', '-shortest', str(path)],
+                   check=True)
+
+
+def _no_machine(monkeypatch):
+    import contextlib
+    calls = []
+
+    @contextlib.contextmanager
+    def slot(kind, what, **kw):
+        calls.append((kind, what, kw))
+        yield
+    monkeypatch.setattr(P.machine, 'slot', slot)
+    return calls
+
+
+@pytest.mark.skipif(not S.ffmpeg(), reason='needs ffmpeg')
+def test_a_video_gets_a_phone_sized_copy_once_through_the_machine_gate(phone, tmp_path, monkeypatch):
+    calls = _no_machine(monkeypatch)
+    src = tmp_path / 'clip.mkv'
+    _make_video(src)
+    out = P.phone_video_copy(str(src))
+    assert out.endswith('.mp4') and os.path.dirname(out) == str(S.HOME / 'videos') and os.path.getsize(out) > 0
+    assert [(c[0], c[2]['disk_gb']) for c in calls] == [('cpu', 0.2)] and 'phone video clip.mkv' in calls[0][1]
+    ffprobe = shutil.which('ffprobe') or os.path.join(os.path.dirname(S.ffmpeg()), 'ffprobe')
+    if os.path.isfile(ffprobe) or shutil.which('ffprobe'):
+        info = subprocess.run([ffprobe, '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+                               'stream=height,codec_name', '-of', 'csv=p=0', out], capture_output=True, text=True).stdout
+        codec, height = info.strip().split(',')
+        assert codec == 'h264' and int(height) <= 720
+    assert P.phone_video_copy(str(src)) == out and len(calls) == 1          # cached: not converted twice
+    (S.HOME / 'videos' / 'x').write_text('')                               # the cache is just files
+    shown = P.phone_panel_show(panel_id='v1', title='Watch', video=str(src), sender='dj')
+    assert 'shown: panel v1' in shown and len(calls) == 1
+
+
+def test_a_video_without_ffmpeg_or_on_a_busy_machine_says_what_to_do(phone, tmp_path, monkeypatch):
+    src = tmp_path / 'clip.mkv'
+    src.write_bytes(b'not really a video')
+    monkeypatch.setenv('ISMAIL_FFMPEG', '')
+    monkeypatch.setattr(shutil, 'which', lambda name, *a, **k: None)
+    with pytest.raises(Exception) as e:
+        P.phone_panel_show(title='Watch', video=str(src))
+    assert 'ffmpeg' in str(e.value) and 'ISMAIL_FFMPEG' in str(e.value)
+    monkeypatch.undo()
+    if not S.ffmpeg():
+        return
+    import contextlib
+
+    @contextlib.contextmanager
+    def busy(kind, what, **kw):
+        raise P.machine.MachineBusy('a render holds the cpu')
+        yield
+    monkeypatch.setattr(P.machine, 'slot', busy)
+    with pytest.raises(Exception) as e:
+        P.phone_panel_show(title='Watch', video=str(src))
+    assert 'computer is busy' in str(e.value) and "video_wait='30m'" in str(e.value) and 'a render holds' in str(e.value)
+
+
+def test_a_panel_carries_a_video_that_plays_and_seeks(phone, tmp_path):
+    ph, base, _ = phone
+    mp4 = tmp_path / 'talk.mp4'
+    blob = bytes(range(256)) * 40
+    mp4.write_bytes(blob)
+    P._call('panel_show', panel_id='v2', title='Watch this', video=str(mp4), buttons=['Got it'])
+    p = ph.view['panels'][-1]
+    assert p['id'] == 'v2' and p['video'].startswith('/files/') and 'image' not in p
+    assert get(base, '/api/state')['panels'][-1]['video'] == p['video']
+    with urllib.request.urlopen(base + p['video'], timeout=10) as r:
+        assert r.status == 200 and r.headers['Content-Type'] == 'video/mp4' and r.headers['Accept-Ranges'] == 'bytes'
+        assert r.read() == blob
+
+    def ranged(spec):
+        req = urllib.request.Request(base + p['video'], headers={'Range': spec})
+        return urllib.request.urlopen(req, timeout=10)
+    with ranged('bytes=100-299') as r:
+        assert r.status == 206 and r.headers['Content-Range'] == f'bytes 100-299/{len(blob)}'
+        assert r.read() == blob[100:300]
+    with ranged(f'bytes={len(blob) - 10}-') as r:
+        assert r.status == 206 and r.read() == blob[-10:]
+    with ranged('bytes=-50') as r:
+        assert r.status == 206 and r.read() == blob[-50:]
+    with pytest.raises(urllib.error.HTTPError) as e:
+        ranged(f'bytes={len(blob) + 5}-')
+    assert e.value.code == 416
+    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime')):
+        assert S.Handler.TYPES[ext] == mime
+
+
+def test_priority_rides_with_panels_and_notes_and_defaults_to_normal(phone):
+    ph, base, _ = phone
+    P.phone_panel_show(panel_id='a', title='Plain')
+    P.phone_panel_show(panel_id='b', title='Urgent', priority='needs you')
+    P.phone_panel_show(panel_id='c', title='Later one', priority='Low')
+    P.phone_say('just so you know')
+    P.phone_say('pick a drop', priority='needs you')
+    st = get(base, '/api/state')
+    assert {x['id']: x['priority'] for x in st['panels']} == {'a': 'normal', 'b': 'needs you', 'c': 'low'}
+    assert [(c['text'], c['priority']) for c in st['captions']] == [('just so you know', 'normal'),
+                                                                    ('pick a drop', 'needs you')]
+    with pytest.raises(Exception) as e:
+        P.phone_say('hm', priority='urgent!!')
+    assert "'needs you'" in str(e.value) and "'low'" in str(e.value)
+
+
+def test_the_page_keeps_the_key_lit_after_later_and_sorts_by_priority():
+    """The page is plain JS: check the rules are in it (Nate 10-07: Later greyed the key with a question still open)."""
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "b.classList.toggle('new', ps.length > 0 || nn > 0)" in js
+    assert "classList.toggle('urgent'" in js and "'needs you': 0" in js
