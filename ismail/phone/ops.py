@@ -206,8 +206,9 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
     (on every panel) arrives as kind 'answer' with dismissed: true and answer null, which is not an answer. wait=N
     blocks up to N seconds for it. Every panel has a record button: what they say on it arrives
     as kind 'voice' and 'voice_text' with panel=<id> and for=<sender>, so pass sender (your name) to get it back.
-    A panel never interrupts a voice note, nor another panel being read: it waits until they stop recording, and
-    until the open panel is answered or set aside (the reply says when it is queued)."""
+    A panel never pops up: it shows as a message on the page's corner key (a short buzz), and the person opens it
+    when they choose, switches between open messages, or puts one back with Later. Send one only for something to
+    decide; say everything else in a caption."""
     return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
                  buttons=buttons, inputs=inputs, wait=wait, who=sender)
 

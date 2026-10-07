@@ -629,11 +629,11 @@ def test_a_second_panel_waits_and_not_now_is_a_dismissal(phone):
     """Nate 10-07: an exam interrupted a panel he was reading; Live DJ 10-07: Send with nothing picked read as an
     answer."""
     ph, base, _ = phone
-    assert 'waits behind' not in P.phone_panel_show(panel_id='read-1', title='A long read', text='...')
+    assert 'other message' not in P.phone_panel_show(panel_id='read-1', title='A long read', text='...')
     out = P.phone_panel_show(panel_id='dj-2', title='Which?', sender='dj',
                              inputs=[{'id': 'which', 'kind': 'choice', 'options': ['a', 'b']},
                                      {'id': 'also', 'kind': 'choice', 'options': ['x'], 'optional': True}])
-    assert 'waits behind read-1' in out
+    assert 'never pops up' in out and '1 other message is open there too (read-1)' in out
     p = ph.view['panels'][-1]
     assert 'optional' not in p['inputs'][0] and p['inputs'][1]['optional'] is True
     post(base, '/api/answer', {'id': 'dj-2', 'dismissed': True})
