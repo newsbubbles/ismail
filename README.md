@@ -1,3 +1,11 @@
+> **New here? You don't need to know music or code.** Open an AI agent that can run programs on your computer (Claude Code, Codex, Cursor, or the Code tab in the Claude desktop app) and paste this line:
+>
+> ```
+> Set me up with ismail: https://github.com/newsbubbles/ismail
+> ```
+>
+> It installs everything, asks what you want to make, and plays you a first idea. If you have a VR headset, it can put you on a stage inside your music later. You don't need to know what a "skill", "MCP" or "plugin" is: your agent handles that.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/newsbubbles/ismail/main/assets/logo/ismail-dark.svg">
@@ -17,7 +25,7 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 
 [![ismail: a DAW for AI agents](https://newsbubbles.github.io/ismail/social.png)](https://newsbubbles.github.io/ismail/)
 
-*If you are an AI agent, start at [If you are an AI agent](#if-you-are-an-ai-agent).*
+*Agents: start at [AGENTS.md](AGENTS.md).*
 
 **[Listen to songs an agent made with it](https://newsbubbles.github.io/ismail/)**, each shown with the text the agent read while making it. The playhead runs across that text as the song plays.
 
