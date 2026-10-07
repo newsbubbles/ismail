@@ -19,6 +19,11 @@
   `guide(first_answer=...)`). AGENTS.md and `setup.md`: never say skill, plugin, MCP, uv or server to the person unless
   they do first, and a plain chat that cannot run commands says so in one sentence and names what works.
 
+### Phone: scrolling past the talk key never starts a note
+
+- The big talk key records only on a still press. A touch that moves (past about 10 px, or that the browser takes for a
+  scroll) scrolls the page and records nothing; a quick still tap is still hands-free (Nate 10-07 15:13).
+
 ### Phone: panels can carry a video
 
 - `phone_panel_show(video=<file>)` puts a video in a panel. It plays inline on the phone page, next to the panel's
