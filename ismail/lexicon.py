@@ -13,6 +13,7 @@ per machine with a `who` on every entry, and nothing in it leaves the machine wi
 Storage: append-only JSON lines at $ISMAIL_LEXICON, else <songs>/_user/lexicon.jsonl. An update is a new line with
 the same id; the latest line of an id wins, so the history of a word is kept.
 """
+import contextvars
 import json
 import os
 import re
@@ -39,8 +40,23 @@ sample samples round-robin bpm tempo downbeat syncopation polyrhythm cadence key
 lens grade lut exposure contrast saturation white-balance key-light fill rim bokeh framing shot cut""".split())
 
 
+_SCOPED = contextvars.ContextVar('ismail_lexicon_file', default=None)
+
+
 def path():
-    return os.environ.get('ISMAIL_LEXICON') or os.path.join(SONGS, '_user', 'lexicon.jsonl')
+    return _SCOPED.get() or os.environ.get('ISMAIL_LEXICON') or os.path.join(SONGS, '_user', 'lexicon.jsonl')
+
+
+@contextmanager
+def scoped(file):
+    """Read and write another person's lexicon (a guest's, beside their song) for the length of a block; None
+    leaves the machine's."""
+    tok = _SCOPED.set(file) if file else None
+    try:
+        yield
+    finally:
+        if tok is not None:
+            _SCOPED.reset(tok)
 
 
 def _read():
