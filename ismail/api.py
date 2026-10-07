@@ -81,17 +81,34 @@ def op(mutates=False):
     return deco
 
 
+BUSY_SAY = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try again "
+            "in a moment\", then call this again in a minute or two (wait='10m' stands in line longer). The "
+            "details, for you only: ")
+
+
 def heavy(kind='cpu'):
     """An op that runs in one of the machine's heavy-job slots (ismail.machine) for its whole length; it refuses
-    with the reason when the machine is busy or hot. Goes under @op()."""
+    with the reason when the machine is busy or hot. An op with a `wait` argument ('2m') stands in line that long
+    first. Goes under @op()."""
     def deco(fn):
         import functools
+        import inspect
+        dflt = inspect.signature(fn).parameters.get('wait')
 
         @functools.wraps(fn)
         def wrapped(*a, **kw):
             proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
-            with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}", disk_path=proj or None):
-                return fn(*a, **kw)
+            w = kw.get('wait', dflt.default if dflt is not None else None)
+            try:
+                wait_s = machine.duration_s(w) if w and str(w).strip() not in ('0', 'none', 'None') else None
+            except ValueError as e:
+                raise OpError(f"wait: {e}")
+            try:
+                with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}", disk_path=proj or None,
+                                  wait=wait_s):
+                    return fn(*a, **kw)
+            except machine.MachineBusy as e:     # ledger:M181: a newcomer's agent read a CPU table as the answer
+                raise machine.MachineBusy(BUSY_SAY + str(e))
         return wrapped
     return deco
 
@@ -532,21 +549,25 @@ def guide(project: str = None, first_answer: str = None, new_person: bool = Fals
 @heavy()
 def sketch(project: str, brief: str, base: str = None, n: int = None, styles: list = None, key: str = None,
            bpm: float = None, bars: int = None, progression: str | list = None, seed: int = 0,
-           background: bool = True) -> str:
+           background: bool = True, wait: str = '2m') -> str:
     """First sound for a new song, in one call: short sketches on the showcase voices, each a project in
     <project>/sketches/<letter>-<label>/, rendered to mp3 (wav without ffmpeg). brief: the person's words. The brief
     is read: a tempo ('90 BPM'), a key ('A minor'), a genre (trip-hop, house, jazz, rock, ambient, a church prelude or
     hymn ...), gentle or soft words, instruments and a form (intro, groove, breakdown, return, fade) shape the
     sketch; three readings come back (as asked, sparser, busier). Whatever has no voice yet is named first in the reply ("asked for Rhodes: ... grand_piano plays
     its part"): tell the person. A brief naming no genre or instrument gets three contrasting styles (piano,
-    chamber, band). base='<letter>': the next round, that sketch changed by the brief's words ("slower, no guitar,
-    add a pad"); n: how many (default 3, or 2 with base). styles: force the fixed styles. key, bpm, bars,
+    chamber, band). base='<version>' (or its letter): the next round, that sketch changed by the brief's words
+    ("slower, no guitar, add a pad", "a bit happier"): as asked, then the change taken further; n: how many
+    (default 3, or 2 with base). styles: force the fixed styles. key, bpm, bars,
     progression ('i VI III VII' or chord names) override. Play each to the person, ask which is closest or what
-    each is missing, then sketch_keep(project, '<letter>').
+    each is missing, then sketch_keep(project, '<version>').
     The first sketch comes back as soon as it is rendered and the others render in the background (background=
     False waits for all): play the first while they land, and sketch_wait(project) says when they are ready. The
     reply opens with SAY TO THE PERSON, written for them: read it out as it is. Every sketch is mixed (the tune
-    sits 4-6 LU over the rest) and mastered for its style."""
+    sits 4-6 LU over the rest) and mastered for its style. Versions are numbered across rounds (a next round's
+    first is version 4 after three), so every number names one sketch. A next round (base=) keeps the person's
+    tune and chords and changes only what their words name; its reply names the version to play as "before".
+    wait: when the machine is busy, stand in line this long ('2m' default, '0' refuses at once)."""
     import sys
     from . import sketch as SK
     from . import voices as V
@@ -572,19 +593,24 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
                 spec.update({'key': key or got['key'], 'bpm': bpm or got['bpm'], 'form': got['form']})
                 todo.append((st, spec))
         else:
-            base_spec = None
+            base_spec = base_dir = None
             if base:
                 base = _sketch_ref(sd, base)
                 hits = [f for f in have if f == base or f.split('-')[0] == base]
                 if len(hits) != 1 or not os.path.exists(os.path.join(sd, hits[0], 'sketch.json')):
                     raise OpError(f"base={base!r}: no single sketch with that letter in {sd} (have: "
                                   f"{', '.join(have) or 'none'})")
+                base_dir = hits[0]
                 with open(os.path.join(sd, hits[0], 'sketch.json'), encoding='utf8') as f:
-                    base_spec = json.load(f)['spec']
+                    got = json.load(f)
+                base_spec = got['spec']
+                brief_all = (got.get('objective') or got.get('brief') or '') + '; then: ' + brief
             todo, said = SK.specs_for(brief, key, bpm, n, base_spec)
     except SK.SketchError as e:
         raise OpError(str(e))
     sc = {v['name']: v for v in SK.showcase()['voices']}
+    kept = base_dir is not None and base_spec.get('tune') is not None if not styles else False
+    objective = brief_all if not styles and base_dir else brief
     used = {f.split('-')[0] for f in have}
     letters = [c for c in 'abcdefghijklmnopqrstuvwxyz' if c not in used]
     mp3 = 'also' if _ffmpeg_ok() else 'none'
@@ -604,7 +630,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
         letter = letters[i]
         slug = re.sub(r'[^a-z]+', '-', label.split(',')[0].lower()).strip('-')
         sp = os.path.join(sd, f"{letter}-{slug}")
-        project_new(sp, pl['bpm'], pl['bars'], name=f"sketch {letter} ({label})", objective=brief)
+        project_new(sp, pl['bpm'], pl['bars'], name=f"sketch {letter} ({label})", objective=objective)
         ops = []
         for role, part in pl['parts'].items():
             v = sc[part['voice']]
@@ -623,9 +649,10 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             v = sc[part['voice']]
             track_model(sp, role, on='designed' if not v.get('needs') and v['name'] in ('sub_bass', 'crackle')
                         else f"showcase voice {v['name']} ({v['why']})", by='sketch')
+        spec['tune'] = pl['tune']                          # ledger:M181: a next round from this one keeps it
         with open(os.path.join(sp, 'sketch.json'), 'w', encoding='utf8') as f:
-            json.dump({'brief': brief, 'label': label, 'spec': spec, 'key': pl['key'], 'bpm': pl['bpm'],
-                       'form': pl['form'], 'progression': pl['progression']}, f, indent=1)
+            json.dump({'brief': brief, 'objective': objective, 'label': label, 'spec': spec, 'key': pl['key'],
+                       'bpm': pl['bpm'], 'form': pl['form'], 'progression': pl['progression']}, f, indent=1)
         prod = SK.production(spec, list(pl['parts']))             # a first impression is mixed and mastered
         P = _load(sp)
         P.d['master']['fx'] = prod['master']
@@ -642,7 +669,7 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             except OSError:
                 pass
         built.append({'sp': sp, 'letter': letter, 'lufs': prod['lufs'], 'mp3': mp3, 'why': prod['why'],
-                      'version': i + 1, 'root': root})
+                      'version': _version_of(letter), 'root': root})
         plans.append((letter, pl, spec))
     _new_round(sd, root, {str(j['version']): j['letter'] for j in built})
     # spec S-2: the first is played as soon as it lands; the others render behind it
@@ -657,17 +684,33 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
            + (f"; the first is ready now and the other{'s land' if len(rest) > 1 else ' lands'} in a minute or two"
               if rest else '') + '.']
     plainw = SK.words_for(project) == 'plain'
-    for v, (letter, pl, spec) in enumerate(plans, 1):
+    v1 = built[0]['version']
+    for job, (letter, pl, spec) in zip(built, plans):
+        v = job['version']
         sec = pl['bars'] * 4 * 60 / pl['bpm']
-        diff = SK.contrast(first, pl) if pl is not first else []
+        diff = SK.contrast(first, pl, plainw) if pl is not first else []
         parts = SK.plain_parts({r: p['voice'] for r, p in pl['parts'].items()})
-        if plainw:                       # ledger:M170 G-2b: no keys, BPM or bars for someone who wants plain words
-            diff = [SK.plain_words(d) for d in diff]
-            say.append(f"Version {v}: {parts}, {SK.plain_mood(pl)}, about {sec:.0f} seconds"
-                       + (f"; unlike version 1: {', '.join(diff)}" if diff else '') + '.')
+        if kept:                         # ledger:M181: the person's own tune, changed by their words, said back
+            ch = [SK.plain_words(c) if plainw else c for c in spec.get('changed') or []]
+            if pl is first:
+                say.append(f"Version {v}: your version {_version_of(base)} with the same tune and chords, "
+                           + (', '.join(ch) if ch else 'unchanged: the words named nothing to change')
+                           + f", about {sec:.0f} seconds.")
+            else:
+                say.append(f"Version {v}: the same tune with that change taken further"
+                           + (f" ({', '.join(diff)} than version {v1})" if diff else '') + '.')
+        elif plainw:                     # ledger:M170 G-2b: no keys, BPM or bars for someone who wants plain words
+            mood = SK.plain_mood(pl)     # ledger:M181: said once; a later version says only how it differs
+            same = pl is not first and (parts, mood) == (SK.plain_parts({r: p['voice'] for r, p in
+                                                                         first['parts'].items()}), SK.plain_mood(first))
+            say.append(f"Version {v}: " + ('the same sound' if same else f"{parts}, {mood}")
+                       + f", about {sec:.0f} seconds" + (f"; unlike version {v1}: {', '.join(diff)}" if diff else '')
+                       + '.')
         else:
             say.append(f"Version {v}: {parts}, in {pl['key']} at {pl['bpm']:g} BPM, about {sec:.0f} seconds"
-                       + (f"; unlike version 1: {', '.join(diff)}" if diff else '') + '.')
+                       + (f"; unlike version {v1}: {', '.join(diff)}" if diff else '') + '.')
+    if kept:
+        say.append(f"Play version {_version_of(base)}, then version {v1}: before and after.")
     seen = []
     for _, _, spec in plans:
         for x in SK.say_plain(spec):
@@ -689,16 +732,20 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             L.append(f"   {r['lufs']:.1f} LUFS, peak {r['peak']:.1f} dBFS; {r['balance']}; {job['why']}; listen: "
                      f"{r['file']}")
     if rest:
-        L.append(f"PLAY VERSION 1 NOW (open its file); while it plays, sketch_wait(project) waits for "
+        L.append(f"PLAY VERSION {v1} NOW (open its file); while it plays, sketch_wait(project) waits for "
                  f"the others.")
-    L.append(f"Each is also at the top of the song folder as 'version 1', 'version 2' ... ({root}), replaced by "
-             f"the next round's.")
+    L.append(f"Each is also at the top of the song folder as 'version {v1}' ... ({root}); every round adds its own "
+             f"numbers and nothing is replaced.")
+    song = _kept_version(root)
     L.append("NEXT: play them to the person one at a time (open each file), ask which is closest or what each is "
-             "missing. Their correction is the next round: sketch(project, '<their words>', base='<version number>'). "
-             f"sketch_keep(project, '<version number>') makes the pick the song (it is the song's example); until "
-             f"then {root} holds only sketches/, each its own project. These are sketches: do not polish one (no "
-             f"Listening Report, no section fixes) before the person picks."
-             + (" They want plain words: say what changed, never keys, BPM or bars." if plainw else ''))
+             "missing. Their correction is the next round: sketch(project, '<their words>', base='<version number>') "
+             "keeps that version's tune and changes only what the words name. "
+             + (f"The song is version {song} (kept); sketch_keep(project, '<version number>', replace=True) makes a "
+                f"new pick the song." if song else
+                f"sketch_keep(project, '<version number>') makes the pick the song (it is the song's example); until "
+                f"then {root} holds only sketches/, each its own project.")
+             + " These are sketches: do not polish one (no Listening Report, no section fixes) before the person "
+             "picks." + (" They want plain words: say what changed, never keys, BPM or bars." if plainw else ''))
     return '\n'.join(L)
 
 
@@ -776,51 +823,71 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
     heard = sorted(f for f in (os.listdir(os.path.join(src, 'renders')) if os.path.isdir(os.path.join(src, 'renders'))
                                 else []) if f.startswith('sketch_') and f.endswith(('.mp3', '.wav')))
     song = ''
+    v = _version_of(hits[0])
     if heard:                                        # ledger:M170 U-5: the kept song plays at once
         pick = next((f for f in heard if f.endswith('.mp3')), heard[0])
-        song = os.path.join(root, d['name'] + os.path.splitext(pick)[1])
+        # ledger:M181: it was <folder>.mp3 ("proj.mp3"); the person knows it by its version
+        song = os.path.join(root, f"song (version {v}){os.path.splitext(pick)[1]}")
         shutil.copyfile(os.path.join(src, 'renders', pick), song)
         song = f" Play it now: {song}."
     if SK.words_for(project) == 'plain':
-        nxt = ("NEXT: offer one change, in their words ('a bit happier', 'no drums at the start', 'shorter'), make "
-               "only that, render, and play before and after. Say what changed in plain words: never keys, BPM or "
-               "bars. Then grow it a part at a time.")
+        nxt = (f"NEXT: offer one change, in their words ('a bit happier', 'no drums at the start', 'shorter'): "
+               f"sketch(project, '<their words>', base='{v}') keeps this tune and changes only that, and its reply "
+               f"says which version is before and which after; play both. If they prefer the new one, "
+               f"sketch_keep(project, '<its version>', replace=True). Say what changed in plain words: never keys, "
+               f"BPM or bars. Then grow it a part at a time.")
     else:
         nxt = ("NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for "
                "two bars), make only that, render a window, play before and after. Then the normal loop: extend the "
                "form in a Session Sheet, a part at a time.")
-    return (f"kept {hits[0]} as the song in {root} ({d['bpm']} BPM, {d['length_bars']} bars, tracks: "
+    return (f"kept version {v} ({hits[0]}) as the song in {root} ({d['bpm']} BPM, {d['length_bars']} bars, tracks: "
             f"{', '.join(d['tracks'])}). {done}{song}\n" + nxt)
 
 
+def _version_of(sketch):
+    """A sketch's version number, the one the person hears: its letter's place ('c-busier' -> 3). Letters are never
+    reused in a song, so a number names one sketch for good (ledger:M181: numbers restarted each round, and
+    "version 3", the pick, was gone from the top of the folder)."""
+    c = str(sketch).split('-')[0].strip().lower()
+    return ord(c) - 96 if len(c) == 1 and 'a' <= c <= 'z' else None
+
+
 def _sketch_ref(sd, ref):
-    """A sketch named by the person's version number ('2', 'version 2') -> its letter in the latest round."""
+    """A sketch named by the person's version number ('2', 'version 2') -> its letter."""
     m = re.fullmatch(r'\s*(?:version|v|number|no\.?)?\s*(\d+)\s*', str(ref), re.I)
     if not m:
         return ref
     try:
         with open(os.path.join(sd, 'round.json'), encoding='utf8') as f:
-            return json.load(f)['versions'].get(m.group(1), ref)
+            got = json.load(f)['versions'].get(m.group(1))
+        if got:
+            return got
     except (OSError, ValueError, KeyError):
-        return ref
+        pass
+    return chr(96 + int(m.group(1))) if 1 <= int(m.group(1)) <= 26 else ref
 
 
 def _new_round(sd, root, versions):
-    """A new round of sketches: its version numbers start again at 1 (round.json), and the last round's copies at
-    the top of the song folder go, so 'version 2' is always this round's."""
+    """A new round of sketches: its versions join the song's list (round.json); the copies at the top of the song
+    folder stay, so every number still plays."""
     try:
         with open(os.path.join(sd, 'round.json'), encoding='utf8') as f:
             old = json.load(f).get('versions', {})
     except (OSError, ValueError):
         old = {}
-    for v in old:
-        for ext in ('.mp3', '.wav'):
-            top = os.path.join(root, f"version {v}{ext}")
-            if os.path.exists(top):                  # our own copy of a sketch; the sketch itself stays in sketches/
-                os.remove(top)
     os.makedirs(sd, exist_ok=True)
     with open(os.path.join(sd, 'round.json'), 'w', encoding='utf8') as f:
-        json.dump({'versions': versions}, f)
+        json.dump({'versions': {**old, **versions}, 'latest': sorted(versions, key=int)}, f)
+
+
+def _kept_version(root):
+    """The version number the song was kept from, or None (no song kept yet)."""
+    try:
+        with open(os.path.join(root, 'project.json'), encoding='utf8') as f:
+            src = (json.load(f).get('lineage') or [{}])[0].get('project') or ''
+    except (OSError, ValueError):
+        return None
+    return _version_of(os.path.basename(src)) if os.path.basename(os.path.dirname(src)) == 'sketches' else None
 
 
 def _ffmpeg_ok():
@@ -886,7 +953,16 @@ def _sketch_render(job):
         if 'moved it' in bal:
             render(sp)
         _loudness_trim(sp, job['lufs'])
-        render(sp, out=f"sketch_{letter}", mp3=mp3)
+        render(sp, out=f"sketch_{letter}", mp3=mp3, stems=True)
+        down = 0.0
+        for _ in range(2):    # ledger:M181: the trim drove the tune to full scale (moved +3.0 dB, then -0.0 dB)
+            cut = _tune_hot(sp)
+            if cut <= 0:
+                break
+            down += _limiter_gain(sp, -cut)
+            render(sp, out=f"sketch_{letter}", mp3=mp3, stems=True)
+        if down < -0.05:
+            bal += f"; master {down:+.1f} dB so the tune is not flattened by the limiter"
         lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
         got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time()}
@@ -902,6 +978,29 @@ def _sketch_render(job):
     if 'error' in got:
         raise OpError(f"sketch {letter} did not render: {got['error']}")
     return got
+
+
+def _tune_hot(project):
+    """A tune stem over HOT_DB in the last stems render: how far (dB) to bring it down to TUNE_PEAK_DB; else 0."""
+    try:
+        import soundfile as sf
+        y, _ = sf.read(os.path.join(os.path.abspath(project), 'renders', 'stems', 'melody.wav'))
+    except Exception:
+        return 0.0
+    pk = float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
+    return pk - TUNE_PEAK_DB if pk > HOT_DB else 0.0
+
+
+def _limiter_gain(project, db):
+    """Move the master limiter's gain by db; -> the move made (0 without a limiter)."""
+    P = _load(project)
+    lim = [fx for fx in P.d['master']['fx'] if fx.get('type') == 'limiter']
+    if not lim:
+        return 0.0
+    db = round(db - 0.05, 1) if db < 0 else round(db, 1)
+    lim[0]['gain_db'] = round(lim[0].get('gain_db', 0.0) + db, 1)
+    P.save()
+    return db
 
 
 def _sketch_finish(jobs):
@@ -947,11 +1046,12 @@ def sketch_wait(project: str, wait: float = 180) -> str:
     L = []
     for d, r in rows:
         if r is None:
-            L.append(f"{d}: still rendering (the machine may be busy; sketch_wait again, or read {sd}/render.log)")
+            L.append(f"version {_version_of(d)} ({d}): still rendering (the machine may be busy; sketch_wait "
+                     f"again, or read {sd}/render.log)")
         elif r.get('error'):
-            L.append(f"{d}: did not render: {r['error']}")
+            L.append(f"version {_version_of(d)} ({d}): did not render: {r['error']}")
         else:
-            L.append(f"{d}: ready, {r['lufs']:.1f} LUFS; {r['balance']}; play: {r['file']}")
+            L.append(f"version {_version_of(d)} ({d}): ready, {r['lufs']:.1f} LUFS; {r['balance']}; play: {r['file']}")
     return '\n'.join(L) or 'no sketches yet'
 
 

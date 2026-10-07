@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### A newcomer's next round keeps their tune (ledger:M181, intro dry run 2)
+
+- `sketch(..., base=)` keeps the picked sketch's tune and chords and changes only what the words name: the first
+  take is the change, the second the change taken further (it was two new tunes, one of them sparser after "a bit
+  happier"). The reply says the words back ("your version 3 with the same tune and chords, happier: faster,
+  brighter") and names the before and after to play. `sketch_keep` and the guide now give the same route for a
+  change.
+- Version numbers go on across rounds (a next round after three starts at version 4), and nothing at the top of the
+  song folder is replaced, so "play version 3 again" still works. The kept song is `song (version 3).mp3`, not the
+  folder's name. `sketch_wait` and `sketch_keep` name versions, not letters.
+- Plain-words versions say how they differ: a key change of the same mode is "pitched higher" or "lower" (it read
+  "brighter"), "fewer notes" or "more notes" for sparser and busier, and the sound and mood are said once.
+- An upright, saloon, player or honky-tonk piano in a brief is named as missing, with the grand piano standing in,
+  and is on the showcase's "not covered yet" list.
+- A sketch is checked after its loudness trim: a tune pushed to full scale brings the master down until it peaks
+  under -1 dB (version 3 had reached -0.0 dB).
+- `sketch` stands in line for a busy machine (`wait='2m'`), and a refusal opens with BUSY and the plain words to say
+  ("the computer is busy, I'll try again in a moment") before the details.
+
 ### The live safety can no longer silence a set
 
 - One huge but finite sample drove the level rider to -423 dB and the set was silent for minutes (Live DJ 10-07 12:31). A sample past +30 dBFS is now zeroed like a NaN, the rider's level reading is clipped, and the rider never pulls deeper than -40 dB.

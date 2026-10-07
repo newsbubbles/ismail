@@ -117,20 +117,27 @@ Their first try decides whether they come back. Run it this way, then the normal
 1. Two sentences on what this is: you write the music as notes and instruments, render it and read it back as
    numbers, and they judge it by ear; everything stays as editable files on their machine.
 2. At most two questions before any sound: what it is for, and do they play (an instrument, a style they
-   trained in, reading music); then a mood or a reference if they have one. Ask nothing before this, and no
+   trained in, reading music); then a mood or a reference if they have one (skip it when the first answer gave
+   one). Ask nothing before this, and no
    recording: one is welcome, never required; the sketch they pick is the song's example (loop step 0).
    Their first answer decides your words:
    guide(first_answer=<their words, verbatim>) says musician or plain words, and you keep to it from then on.
 3. Sound within about five minutes: sketch(project, brief=<their words>) reads their tempo, key, genre,
    instruments and form, writes three readings on the measured voices below and renders them. While it works, say
-   what is happening and about how long (the first sketch about two minutes; silence for minutes reads as broken).
+   what is happening and about how long (the first sketch within about two minutes, often sooner; silence reads as
+   broken).
+   A busy machine answers BUSY: say "the computer is busy, I'll try again in a moment" and call it again.
    It returns as soon as the first is ready: read its SAY TO THE PERSON block out as it is (what each sketch is,
-   what was swapped, what it can't make yet) and play A at once; sketch_wait(project) says when the others land.
+   what was swapped, what it can't make yet) and play version 1 at once; sketch_wait(project) says when the others
+   land.
    Open each for them, one at a time, and ask which is closest or what each is missing; their correction is the
    next round:
-   sketch(project, <their words>, base='<letter>'). An instrument they named that has no voice is a later step:
+   sketch(project, <their words>, base='<version>'): it keeps their tune and chords, changes only what the words
+   name, and its reply says which version is before and which after: play both. Version numbers go on across
+   rounds, so a number always names the same sketch. An instrument they named that has no voice is a later step:
    offer to find an example of it and build it (the loop's step 0), never pretend the stand-in is it.
-4. sketch_keep(project, '<letter>') makes the pick the song and ends the first session.
+4. sketch_keep(project, '<version>') makes the pick the song and ends the first session. A change after that
+   is the same route: sketch(..., base='<the kept version>'), then sketch_keep(..., replace=True) if they prefer it.
 5. Short rounds: one named change at a time, two versions played in turn, "which one?".
 6. Early on, one deliberate small edit: "change just one thing" (a warmer bass from bar 5, drums out for two
    bars); change only that, quickly, and play before and after. A generator cannot do this.

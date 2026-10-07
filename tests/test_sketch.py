@@ -67,7 +67,7 @@ def test_sketch_then_keep_makes_the_song_and_ends_the_first_session(tmp_path):
     assert any(f.startswith('sketch_a.') for f in rendered)
     assert api.guide().startswith('FIRST SESSION')                   # a sketch is not a finished song
     out = api.sketch(song, 'slower, with strings', styles='piano', bars=4)
-    assert 'b) version 1: solo piano' in out                          # letters go on; versions restart
+    assert 'b) version 2: solo piano' in out                          # letters and version numbers go on
     with pytest.raises(OpError) as e:
         api.sketch_keep(song, 'z')
     assert 'a-piano' in str(e.value)
@@ -129,7 +129,7 @@ def test_a_brief_sketch_and_a_next_round_from_it(tmp_path):
     out = api.sketch(song, 'trip-hop with rhodes and a guitar melody, A minor, 88 BPM', n=1, bars=4)
     assert "FOR YOU: the rhodes voice plays real samples" in out and "SAY TO THE PERSON" in out and 'a) version 1: as asked' in out and 'LUFS' in out
     out = api.sketch(song, 'no guitar, slower', base='a', n=1, bars=4)
-    assert 'b) version 1: as asked' in out and 'changed from the base' in out and 'no melody' in out
+    assert 'b) version 2: as asked' in out and 'changed from the base' in out and 'no melody' in out
     with open(os.path.join(song, 'sketches', 'b-as-asked', 'sketch.json'), encoding='utf8') as f:
         assert json.load(f)['bpm'] < 88
     with pytest.raises(OpError):
@@ -266,9 +266,11 @@ def test_plain_words_are_kept_and_versions_play_from_the_song_folder(tmp_path):
     assert 'Version 1:' in say and 'BPM' not in say and ' major' not in say and ' minor' not in say
     assert any(f.startswith('version 1.') for f in os.listdir(song))           # playable at the song's top
     api.sketch(song, 'a bit happier', base='1', bars=4, n=1, background=False)
-    assert any(f.startswith('version 1.') for f in os.listdir(song))           # the new round's version 1
+    top = os.listdir(song)                                    # ledger:M181: the pick stays, the new one joins it
+    assert any(f.startswith('version 1.') for f in top) and any(f.startswith('version 2.') for f in top)
     out = api.sketch_keep(song, '1')
-    assert 'Play it now' in out and any(f.startswith('walk.') for f in os.listdir(song))
+    assert 'kept version 1' in out and 'Play it now' in out
+    assert any(f.startswith('song (version 1).') for f in os.listdir(song))
     nxt = out.split('NEXT:')[1]
     assert 'from bar' not in nxt and 'two bars' not in nxt
 
@@ -276,3 +278,55 @@ def test_plain_words_are_kept_and_versions_play_from_the_song_folder(tmp_path):
 def test_a_musician_keeps_keys_and_tempo():
     assert SK.plain_words('faster (93 BPM), A major') == 'faster, brighter'
     assert SK.plain_mood({'bpm': 70, 'key': 'D minor'}) == 'slow and darker'
+
+
+def test_a_next_round_keeps_the_tune_says_the_words_back_and_names_the_before(tmp_path):
+    """ledger:M181 (dry run 2): "a bit happier" came back as two new tunes, one sparser, said as "easy-going and
+    bright" with no word of happier, and as version 1 again, which replaced the pick at the top of the folder."""
+    song = str(tmp_path / 'songs' / 'intro')
+    api.guide(project=song, first_answer="I don't play anything")
+    api.sketch(song, 'a calm piano tune', bars=4, background=False)
+    out = api.sketch(song, 'a bit happier', base='3', background=False)
+    say = out.split('SAY TO THE PERSON')[1].split('\nd)')[0]
+    assert 'Version 4: your version 3 with the same tune and chords, happier' in say, say
+    assert 'Play version 3, then version 4: before and after' in say and 'BPM' not in say
+    sd = os.path.join(song, 'sketches')
+    spec = {d[0]: json.load(open(os.path.join(sd, d, 'sketch.json'), encoding='utf8')) for d in os.listdir(sd)
+            if os.path.isdir(os.path.join(sd, d))}
+    assert spec['d']['progression'] == spec['c']['progression']             # the same chords
+    mel = {k: api._load(os.path.join(sd, d)).d['tracks']['melody'] for k, d in
+           ((d[0], d) for d in os.listdir(sd) if d[0] in 'cd')}
+    tune = {k: [n[:3] for n in v['notes']] for k, v in mel.items()}         # pitch and timing; touch may differ
+    assert tune['c'] and tune['c'] == tune['d']                                # the same tune
+    assert spec['d']['bpm'] > spec['c']['bpm'] and 'then: a bit happier' in spec['d']['objective']
+    assert all(f'version {v}.' in ' '.join(os.listdir(song)) for v in (1, 2, 3, 4))
+    assert 'version 4 (d-' in api.sketch_wait(song, wait=1)
+
+
+def test_versions_say_how_they_differ_in_plain_words():
+    a = {'key': 'C major', 'bpm': 90, 'bars': 8, 'parts': {'melody': {'voice': 'grand_piano', 'notes': [1] * 20}}}
+    b = dict(a, key='F major', parts={'melody': {'voice': 'grand_piano', 'notes': [1] * 12}})
+    assert SK.contrast(a, b, plainw=True) == ['pitched higher', 'fewer notes']      # never "brighter" for F major
+    assert SK.contrast(a, dict(a, key='A minor'), plainw=True) == ['darker']
+
+
+def test_a_saloon_piano_is_named_as_missing():
+    s = SK.read_brief("an intro for a video; like an old saloon player piano")
+    assert s['parts']['keys'] == 'grand_piano' and SK.read_brief('upright bass')['parts']['bass'] == 'contrabass'
+    assert any("old saloon player piano; that sound isn't here yet" in x for x in SK.say_plain(s))
+    assert any('saloon' in g for g in SK.showcase()['gaps'])
+
+
+def test_a_busy_machine_says_so_in_plain_words_first(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from ismail import machine
+
+    @contextmanager
+    def busy(*a, **kw):
+        assert kw.get('wait') == 0.0 or kw.get('wait') is None
+        raise machine.MachineBusy("not starting cpu job 'sketch x': the CPU is 90% busy (limit 80%)")
+        yield
+    monkeypatch.setattr(machine, 'slot', busy)
+    with pytest.raises(OpError) as e:
+        api.sketch(str(tmp_path / 'x'), 'a calm piano tune', wait='0')
+    assert str(e.value).startswith('BUSY: the computer is busy') and '90% busy' in str(e.value)
