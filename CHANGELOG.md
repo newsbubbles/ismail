@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Phone: the controls come first, and every note is one tap away
+
+- Listen, talk and the keys sit at the top; "Since you left" and the latest note move below them, the summary three
+  lines until tapped (Nate 10-07: "this could be a little bit more ergonomic").
+- The corner key counts notes not seen yet ("1 question · 2 new"), including one that came in during a voice note,
+  and opens a Notes list (the summary and the last twelve notes, the new ones marked) beside the open questions.
+
 ### Phone: answered panels close at once; the server's log is dated
 
 - An answered panel closes on the phone at once, without waiting for the next state (Nate 10-07 12:01: a panel stayed open after his answer and he could not get out of it). A refusal from the server (the question already closed) is shown and closes it too, instead of being queued as offline and retried.
