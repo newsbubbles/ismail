@@ -417,18 +417,31 @@ async function upload(blob, s, t, dur, endBy, mic, ended, panel) {
 }
 setInterval(() => { if (navigator.onLine && pending.length) { const p = pending.splice(0); p.forEach((x) => upload(...x)); } if (outbox.length) flush(); }, 8000);
 const T = $('talk');
+// a still press records; a touch that moves is a scroll past the key and never starts a note (Nate 10-07 15:13:
+// "getting annoying"). The press waits STILL_MS for the finger to settle; moving past STILL_PX, or the browser
+// taking the touch for a scroll, lets it go
+const STILL_PX = 10, STILL_MS = 150;
+let arm = null;
+const disarm = () => { if (arm) { clearTimeout(arm.t); arm = null; } };
 T.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  if (talk.toggle) { micStop(true); return; }
-  talk.down = Date.now(); micStart();
+  if (talk.toggle) { e.preventDefault(); micStop(true); return; }
+  disarm();
+  const at = Date.now();
+  arm = { x: e.clientX, y: e.clientY, t: setTimeout(() => { arm = null; talk.down = at; micStart(); }, STILL_MS) };
+});
+T.addEventListener('pointermove', (e) => {
+  if (arm && Math.hypot(e.clientX - arm.x, e.clientY - arm.y) > STILL_PX) disarm();
 });
 T.addEventListener('pointerup', () => {
+  if (arm) {                         // a quick still tap: hands-free, as before
+    disarm(); talk.toggle = true; micStart(); $('talkhint').textContent = 'hands-free: tap to send'; return;
+  }
   if (!talk.rec && !talk.down) return;
   const held = Date.now() - talk.down; talk.down = 0;
   if (held < 400) { talk.toggle = true; $('talkhint').textContent = 'hands-free: tap to send'; return; }
   if (!talk.toggle) micStop(true);
 });
-T.addEventListener('pointercancel', () => { if (!talk.toggle) micStop(false); });
+T.addEventListener('pointercancel', () => { if (arm) { disarm(); return; } if (!talk.toggle) micStop(false); });
 T.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ---- what the agents put here
