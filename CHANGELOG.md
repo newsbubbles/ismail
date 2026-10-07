@@ -11,6 +11,13 @@
   choice input must be picked before a button sends, unless it is `optional` (Live DJ 10-07: Send with nothing
   picked came in as {"which": null}).
 
+### Clarinet, bassoon and French horn in the showcase (ledger:M169)
+
+- Three measured voices from VSCO 2 CE (CC0) passed a blind ear check against the real recordings: `clarinet`
+  (not told apart), `bassoon` and `horn` (good enough). New families `winds` and `brass`; `sketch` now plays a
+  clarinet, bassoon or horn when the brief names one instead of standing the violin in, and "brass" gets the horn.
+  Flute, oboe, trumpet, trombone and tuba were measured too but heard as synthetic: they stay out until they pass.
+
 ### Feeling words change a sketch (ledger:M170 S-6)
 
 - `sketch(base=...)` reads happier, sadder, calmer, more exciting, darker and dreamier (and their near words) as
