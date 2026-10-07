@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### A new person's words stay theirs (ledger:M175)
+
+- On a machine where songs were already made, `guide(first_answer=...)` no longer writes the owner's machine-wide
+  vocabulary: a new person's record goes beside their song (`person.json`, marked as a guest's), or waits in
+  `~/.ismail/pending_person.json` (12 hours) until their first `sketch` moves it into the song folder.
+- `lexicon_note`, `lexicon_find` and `lexicon_view` on a guest's song read and write that song's own
+  `lexicon.jsonl`, so a guest never adds to the owner's lexicon or sees the owner's words. Marketing's dry run 2
+  found both.
+
 ### Clarinet, bassoon and French horn in the showcase (ledger:M169)
 
 - Three measured voices from VSCO 2 CE (CC0) passed a blind ear check against the real recordings: `clarinet`

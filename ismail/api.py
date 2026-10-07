@@ -520,7 +520,10 @@ def guide(project: str = None, first_answer: str = None, new_person: bool = Fals
         SK.remember_words(kind, said, project)
         return vocabulary_text(first_answer)
     if new_person or SK.is_new(project):
-        return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + '\n\n' + GUIDE
+        own = ("\n\nThis machine has an owner: this person's words and lexicon are kept apart from theirs, beside "
+               "the new song. Pass project= to guide(first_answer=...) and to every lexicon op once the song has a "
+               "folder." if not SK.is_new() else '')
+        return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + own + '\n\n' + GUIDE
     return ("Someone new to ismail at this computer (they say so, or have never made a song with it)? "
             "guide(new_person=True) opens with their first session.\n\n" + GUIDE)
 
@@ -550,6 +553,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     root = os.path.abspath(project)
     sd = os.path.join(root, 'sketches')
     have = sorted(f for f in os.listdir(sd) if os.path.isdir(os.path.join(sd, f))) if os.path.isdir(sd) else []
+    if not have:
+        SK.adopt_pending(root)                       # ledger:M175: a new person's words move into their song
     n = n or (2 if base else 3)
     if not 1 <= n <= 4:
         raise OpError("n: 1 to 4 sketches")
@@ -984,12 +989,14 @@ def lexicon_note(project: str = None, said: str = None, means=None, craft: str =
     or health. The file is local and shared by every session (lexicon_view shows where). Returns the entry and what
     the same words meant before."""
     from . import lexicon as LX
+    from . import sketch as SK
     song = os.path.basename(os.path.abspath(project)) if project else None
-    before = LX.find(said, who) if said and not id else []
-    try:
-        e = LX.note(said, means, craft, song, where, outcome, why, who, id)
-    except ValueError as ex:
-        raise OpError(str(ex))
+    with LX.scoped(SK.lexicon_file(project)):        # ledger:M175: a guest's words stay theirs
+        before = LX.find(said, who) if said and not id else []
+        try:
+            e = LX.note(said, means, craft, song, where, outcome, why, who, id)
+        except ValueError as ex:
+            raise OpError(str(ex))
     L = [("updated " if id else "noted ") + LX.line(e)]
     if before:
         L.append("the same words before:")
@@ -1007,7 +1014,9 @@ def lexicon_find(project: str = None, text: str = None, who: str = 'user') -> st
     from . import lexicon as LX
     if not text:
         raise OpError("text: the person's words, or a system term (an op, param or effect name)")
-    hits = LX.find(text, who)
+    from . import sketch as SK
+    with LX.scoped(SK.lexicon_file(project)):
+        hits = LX.find(text, who)
     if not hits:
         return (f"no entries share words with {text!r}. If the person just used it, lexicon_note it; "
                 f"lexicon_view lists everything")
@@ -1021,7 +1030,9 @@ def lexicon_view(project: str = None, who: str = 'user', craft: str = None, sinc
     ten. since='2026-10-01' limits it. Read it at the start of a session to speak the person's language."""
     from . import lexicon as LX
     try:
-        return '\n'.join(LX.view(who, craft, since))
+        from . import sketch as SK
+        with LX.scoped(SK.lexicon_file(project)):
+            return '\n'.join(LX.view(who, craft, since))
     except ValueError as ex:
         raise OpError(str(ex))
 
