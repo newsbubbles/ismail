@@ -14,6 +14,11 @@ from numba import njit
 from ..dsp import SR
 
 
+BAD_ABS = 31.6           # +30 dBFS: past this a sample is a fault and is zeroed like a NaN
+MS_CLIP = 4.0            # the rider's level reading never sees more than +12 dBFS a sample
+RIDER_FLOOR_DB = -40.0   # the rider never pulls deeper than this
+
+
 def _env(name, default):
     try:
         return float(os.environ.get(name, default))
@@ -65,16 +70,21 @@ class Safety:
 
     def process(self, x):
         n = x.shape[1]
-        if not np.all(np.isfinite(x)):
+        # a sample past BAD_ABS (+30 dBFS) is a fault, not music: it goes like a NaN. One huge finite sample once
+        # pushed the 3 s mean square ~400 dB over the cap and the rider held the set silent for minutes (live DJ
+        # 10-07 12:31, "rider -423.1 dB")
+        bad = ~np.isfinite(x) | (np.abs(np.nan_to_num(x)) > BAD_ABS)
+        if bad.any():
             self.bad_blocks += 1
-            x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+            x = np.where(bad, 0.0, x)
         x = x * 10 ** (self.trim_db / 20)
-        # rider: mean square with a ~3 s time constant; above the cap it pulls down at 12 dB/s, recovers at 2 dB/s
+        # rider: mean square with a ~3 s time constant; above the cap it pulls down at 12 dB/s, recovers at 2 dB/s,
+        # never past RIDER_FLOOR_DB (the limiter after it holds the peaks), so it comes back within seconds
         dt = n / self.sr
         a = np.exp(-dt / 3.0)
-        self.ms = self.ms * a + float(np.mean(x ** 2)) * (1 - a)
+        self.ms = self.ms * a + float(np.mean(np.clip(x, -MS_CLIP, MS_CLIP) ** 2)) * (1 - a)
         lvl = 10 * np.log10(self.ms + 1e-12)
-        want = min(0.0, self.cap_db - lvl)
+        want = max(RIDER_FLOOR_DB, min(0.0, self.cap_db - lvl))
         prev = self.rider_db
         if want < self.rider_db:
             self.rider_db = max(want, self.rider_db - 12 * dt)

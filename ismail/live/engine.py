@@ -33,7 +33,7 @@ from ..presets import PRESETS
 from . import decks as D
 from . import graph as G
 from . import worker
-from .safety import Safety
+from .safety import BAD_ABS, Safety
 from . import outputs as O
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 
@@ -619,6 +619,14 @@ class Engine:
             fed = name in bufs
             if path.chain.procs:
                 x = path.chain.process(x, self._blocks('track:' + name, path.chain, p0, n, post, onsets))
+                pk = float(np.max(np.abs(x))) if x.size else 0.0
+                if not np.isfinite(pk) or pk > BAD_ABS:          # an effect blew up: silence this block, name it
+                    x = np.zeros_like(x)
+                    if t.get('fault_at', -1e9) < p0 - SR:            # once a second at most
+                        self.news.append(f"track {name}: its effects produced a fault ("
+                                         + (f"peak {20 * np.log10(pk):+.0f} dBFS" if np.isfinite(pk) else "NaN/inf")
+                                         + "); that block was silenced. Check the chain (live_status, fx_help)")
+                    t['fault_at'] = p0
             post[name] = x
             gl0, gr0 = t['cur']
             gl1, gr1 = t['gl'], t['gr']

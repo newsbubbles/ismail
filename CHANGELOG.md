@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### The live safety can no longer silence a set
+
+- One huge but finite sample drove the level rider to -423 dB and the set was silent for minutes (Live DJ 10-07 12:31). A sample past +30 dBFS is now zeroed like a NaN, the rider's level reading is clipped, and the rider never pulls deeper than -40 dB.
+- A track whose live effects blow up (NaN, inf, or past +30 dBFS) has that block silenced and is named in live_status news, once a second at most.
+
 ### Phone: the controls come first, and every note is one tap away
 
 - Listen, talk and the keys sit at the top; "Since you left" and the latest note move below them, the summary three
