@@ -77,6 +77,16 @@ end differs (a band-limited mic on one side) and warns on any clip with nothing 
 
 Put the real sound next to lenses, versions that each change exactly ONE named, physical thing (body colour, wood ring, room, open strings, pick or bow noise, brightness, attack, vibrato, evenness). The names become the user's vocabulary for the rest of the session: "B, but more air" is an instruction you can execute. Loudness-match every clip and make clips long enough to include the release. One round of this on a bowed voice found three things no metric showed (moving vibrato, missing air, sympathetic strings).
 
+**The picture round: let their eyes compare.** When the ear says "something is off" and the words run out, put
+pictures in front of them. `exam_picture_round(out, items, title)` builds a page of cards, one sound each: the real
+spectrogram and ours of the same window, stacked so one shows at a time. F flips, holding Shift peeks, B blinks at a
+chosen speed, and the eye reads any difference as movement (the blink comparator). They answer about the picture
+showing (M real, S ours, 0 can't tell) and pin comments at a time and frequency, a click for a point or a drag for a
+box, each saved with its word. The key is served only after they submit, and `exam_picture_score(out)` lists every
+card and every pin on the REAL picture or OURS. In the Voice agent's work the pins named what 40 rounds of numbers
+missed ("fire plumes between the columns, ours are straight smears"). The page server is `python -m
+ismail.exampage serve <rounds folder>` (127.0.0.1:8871; the op starts it), with byte ranges so long audio seeks.
+
 ## 2. The blind exam: can the user tell?
 
 Per trial, three clips of the same moment: **R** the recording, **A** my instrument with the recording's exact expression copied onto it (its pitch curve, filter or wah curve, level curve), **B** my instrument played by my player model (my own vibrato, bends, dynamics, effect moves). The two lenses separate the two questions: A failing means the instrument or rig is wrong; A passing while B fails means the performance is wrong. Hide which is which, shuffle per trial, and reveal the answers with scores and spectrogram strips only after the user submits.
