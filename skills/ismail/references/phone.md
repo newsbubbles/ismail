@@ -125,6 +125,31 @@ line with state `started` and the one with state `finished` (no sound over someo
 (they wait on the corner key), so the person's own taps do the pacing. A video that stalls or fails says so in the
 panel, with a link to open it on its own, and the server's events carry `video_ok`, `video_slow` or `video_error`.
 
+## Watching the phone: one loop that sees everything
+
+The person's model, in his words: the watcher "should tell you when shit goes down and give you state info you ask
+for"; the agent makes every call (Nate, 10-07, after a watcher that skipped lines for other agents missed his
+listening exams and two notes).
+
+1. **One loop.** `phone_listen(who=<your role>, since=<the last since>, wait=25, page=True)`, nothing filtered by
+   owner. Drop only page telemetry (scroll, stall, note start and end, visible and hidden, clip plays) and the
+   `voice` line that only says a note is being transcribed (its words follow as `voice_text`). For every other line
+   you decide: act on it, pass it to its owner, or leave it. Handle a burst of lines in one turn.
+2. **Passing on.** A note with no `for` that is plainly about another agent's work goes to that agent at once, word
+   for word, with its inbox number, id and time. When the owner is unclear, keep it and ask the team's lead (or the
+   person, when there is no lead).
+3. **Listening exams mean silence.** From the first exam card, or an `exam_round` started line, silence the music:
+   stop every track at the next bar and stop anything that queues new passes. Moving the laptop's output to no
+   device is not silence, because the phone's stream keeps playing. The round ends on the person's "done", on
+   `exam_round` finished, or after 90 s with no activity from them (clip plays and notes count as activity). Then
+   bring the output back and start a fresh pass.
+4. **Stay alive.** A watcher run in the background may be stopped by its host after a time limit. Give it a shorter
+   life of its own (for example 100 minutes where the limit is 2 hours), and when it ends, read `phone_status` and
+   start it again, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
+   hours ... you can still get the voice notes").
+5. **Their clock.** The machine's clock may not be the person's. Any clock time shown or said to them is in their
+   own time zone.
+
 ## Pause means stop, now
 
 A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Docs: how an agent watches the phone
+
+- skills phone.md: one `phone_listen` loop that filters nothing by owner, passing untagged notes on, real silence
+  during a listening exam (stopping tracks, not moving the output), re-arming a watcher before its host stops it, and
+  times in the person's own zone (Nate 10-07, from the Live DJ's working loop).
+
 ### Phone: exam rounds are marked, and the page's state is in phone_status
 
 - When the page opens an exam panel (or a panel linking under `/eye/`, the picture round), the inbox gets one line
