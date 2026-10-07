@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The person's words are kept, and versions play from the song folder (ledger:M170 G-2b, U-5)
+
+- `guide(first_answer=..., project=)` keeps the vocabulary it decided (`<song>/person.json`, and the latest person
+  beside the first-session mark). For plain words, `sketch` says "Version 1: a piano plays the tune, slow and
+  bright, about 30 seconds" (no keys, BPM or bars, also in its change lines), and `sketch_keep` offers the next
+  change in their words, not "a warmer bass from bar 5".
+- Sketches are "version 1, 2, 3", starting again each round; `base=` and `sketch_keep` take the number. Each
+  finished sketch is also copied to the top of the song folder as "version N", replaced by the next round's.
+- The kept song gets a playable file at once (`<song>/<song name>.mp3`).
+
 ### A newcomer is a person, not a machine (ledger:M170 G-3)
 
 - `guide(new_person=True)` opens with the first session for someone new at a computer where songs already exist
