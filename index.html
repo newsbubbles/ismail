@@ -138,6 +138,7 @@ body.has-np { padding-bottom: 72px; }
 .steps h3 { margin: 0 0 8px; font-size: 16px; }
 .steps pre { background: var(--panel-2); border-radius: 6px; padding: 10px 12px; font-size: 12.5px; overflow-x: auto; margin: 8px 0 0; }
 .steps p { margin: 0; color: var(--dim); font-size: 15px; }
+.steps code { overflow-wrap: anywhere; font-size: 13px; }
 @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
 
 .cmp-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
@@ -247,7 +248,7 @@ master: -11.8 LUFS, peak -0.3 dBFS
 <section id="how">
   <div class="wrap">
     <h2>How it works</h2>
-    <p class="sub">About a hundred tools behind one MCP server (or a CLI). The agent never needs ears; it needs readings it can trust.</p>
+    <p class="sub">221 tools behind one MCP server (or a CLI): 113 for music and live play, 88 for the VR stage, 20 for the phone page. The agent never needs ears; it needs readings it can trust.</p>
     <div class="steps">
       <div>
         <h3>Everything goes in as text</h3>
@@ -349,15 +350,40 @@ master: -11.8 LUFS, peak -0.3 dBFS
   </div>
 </section>
 
+<section id="built">
+  <div class="wrap">
+    <h2>What's built today</h2>
+    <p class="sub">All of this is in the repository now.</p>
+    <div class="steps">
+      <div>
+        <h3>The VR stage</h3>
+        <p>A three.js WebXR page for a desktop browser or a headset, and a small server that carries the live link between the page and the agent. Scenes live in the song's folder. The agent drives the page with <code>stage_*</code> tools and reads what the person did and said.</p>
+      </div>
+      <div>
+        <h3>The phone page</h3>
+        <p>Live listening with the screen off, panels and buttons, and voice notes that reach the agent with the bar being heard. It runs on your own private network, and the agent drives it with <code>phone_*</code> tools.</p>
+      </div>
+      <div>
+        <h3>Blind exams and eye exams</h3>
+        <p>Blind exams on the phone, with floor pairs (the real clip against an MP3 copy of itself) so a device limit can be told from a real difference. Eye exams as picture rounds. Each exam is checked before it is shown, and recordings are checked for soft-limited peaks and band-limited microphones.</p>
+      </div>
+      <div>
+        <h3>A first session</h3>
+        <p>For someone new, the agent asks at most two questions and plays a first sketch within minutes. Sketches come back as versions 1, 2 and 3, and feeling words such as "happier" or "calmer" change a sketch by named moves.</p>
+      </div>
+      <div>
+        <h3>Showcase voices</h3>
+        <p>Piano, violin, cello, contrabass, clarinet, bassoon, horn, a 1970 kit and a fitted electric guitar and bass, plus sampled Rhodes, drum and guitar sets. Clarinet, bassoon and horn are new: measured from VSCO 2 CE (CC0) and checked blind against the real recordings on 2026-10-07. The cello is measured from flcellogrl (CC BY 4.0). Sources and licences are in the <a href="https://github.com/newsbubbles/ismail#contributors">README</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="roadmap">
   <div class="wrap">
     <h2>Where it is going</h2>
-    <p class="sub">ismail is becoming an experience engine: agents build sound, pictures, rooms and whole scenes, run them live, and adapt them with the people inside them. Measured, not guessed; judged by a person's senses where measurement runs out.</p>
+    <p class="sub">ismail is becoming an experience engine: agents build sound, pictures, rooms and whole scenes, run them live, and adapt them with the people inside them. Measured, not guessed; judged by a person's senses where measurement runs out. The stage, the phone page and the exams above exist today; this is what is still ahead.</p>
     <div class="steps">
-      <div>
-        <h3>A stage you step into</h3>
-        <p>Build a scene in the browser or a headset with your hands and your voice while an agent works beside you: placing, acting takes, judging looks, with Blender doing the real renders.</p>
-      </div>
       <div>
         <h3>Worlds you can visit</h3>
         <p>A friend opens your world from their headset over a private network you grant, and you visit theirs. The agent hosts; everything you place stays yours.</p>
@@ -368,7 +394,7 @@ master: -11.8 LUFS, peak -0.3 dBFS
       </div>
       <div>
         <h3>Your words and your ears</h3>
-        <p>The agent keeps your vocabulary for what you hear and see, mapped to what it does, and asks your senses through exam pages for any medium. A clock shows the hours you put in.</p>
+        <p>The agent keeps your vocabulary for what you hear and see, mapped to what it does, and asks your senses through exam pages for any medium (sound pairs and picture rounds exist today). A clock shows the hours you put in.</p>
       </div>
       <div>
         <h3>A hub for what people share</h3>
@@ -385,18 +411,28 @@ master: -11.8 LUFS, peak -0.3 dBFS
 <section id="start">
   <div class="wrap">
     <h2>Get started</h2>
-    <p class="sub">Python 3.10+. Works with Claude Code, Cursor or any MCP client, or straight from the shell.</p>
+    <p class="sub">Python 3.10+ and <a href="https://docs.astral.sh/uv/">uv</a>. Works with Claude Code, Cursor or any MCP client, or straight from the shell.</p>
     <div class="steps">
       <div>
-        <h3>Install and connect</h3>
-<pre>pip install git+https://github.com/newsbubbles/ismail
-claude mcp add -s user ismail -- python -m ismail.mcp_server</pre>
+        <h3>Claude Code plugin (tools and skill in one step)</h3>
+<pre>/plugin marketplace add newsbubbles/ismail
+/plugin install ismail@ismail</pre>
+        <p style="margin-top:10px">Send the two lines one at a time. The plugin runs the server with uvx and loads the composing skill.</p>
+      </div>
+      <div>
+        <h3>Any MCP client</h3>
+<pre>claude mcp add -s user ismail -- uvx --from git+https://github.com/newsbubbles/ismail ismail mcp</pre>
+        <p style="margin-top:10px">The same command, <code>uvx --from git+https://github.com/newsbubbles/ismail ismail mcp</code>, runs the server over stdio for Cursor or any other client. Or <code>pip install "ismail @ git+https://github.com/newsbubbles/ismail"</code>, then <code>ismail mcp</code>.</p>
+      </div>
+      <div>
+        <h3>If you are an AI agent</h3>
+        <p>Start with <a href="https://github.com/newsbubbles/ismail/blob/main/AGENTS.md">AGENTS.md</a>: it sends you to the playbook, to setup, and to <code>guide</code>, which opens a new person's first session.</p>
       </div>
       <div>
         <h3>Ask for a song</h3>
 <pre>"make a 16 bar lo-fi loop in D minor
  in songs/demo and render an mp3"</pre>
-        <p style="margin-top:10px">Skill install, Cursor setup and the full tool list: <a href="https://github.com/newsbubbles/ismail#readme">README</a>.</p>
+        <p style="margin-top:10px">Skill install, Cursor setup and every option: <a href="https://github.com/newsbubbles/ismail#readme">README</a>.</p>
       </div>
     </div>
   </div>
@@ -404,7 +440,7 @@ claude mcp add -s user ismail -- python -m ismail.mcp_server</pre>
 
 <footer>
   <div class="wrap">
-    <p>ismail is MIT licensed. <a href="https://github.com/newsbubbles/ismail">github.com/newsbubbles/ismail</a></p>
+    <p>ismail is MIT licensed. <a href="https://github.com/newsbubbles/ismail">github.com/newsbubbles/ismail</a> · <a href="https://github.com/newsbubbles/ismail#contributors">Contributors and sample sources</a></p>
     <p>The name is a nod to <a href="https://en.wikipedia.org/wiki/Ismail_al-Jazari">Ismail al-Jazari</a>, whose <i>Book of Knowledge of Ingenious Mechanical Devices</i> (1206) describes a boat of automaton musicians that played for the court, its drummer's rhythm set by pegs on a turning shaft. Eight centuries later the musicians are software.</p>
     <p>Fantaisie-Impromptu is played from the public-domain Mutopia Project score. The other songs are originals.</p>
   </div>
