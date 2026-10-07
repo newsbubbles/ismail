@@ -182,7 +182,9 @@ def parse_status(text):
     rec = re.search(r'\| recording (\S+)', text)
     playing = re.findall(r'^\s+([\w.-]+)\s.*?\| playing (\S+)', text, re.M)
     nxt = re.search(r'next (\S+) at (bar \d+(?: beat [\d.]+)?)', text)
+    out = re.search(r'\| output (.+?)( \(follows the default\))?(?: \||$)', (text or '').splitlines()[0])
     return {'bpm': bpm, 'bpb': bpb, 'beat': beat, 'ahead': float(m.group(6)),
+            'output': out.group(1) if out else None, 'follow': bool(out and out.group(2)),
             'recording': rec.group(1) if rec else None,
             'playing': [f"{c} ({t})" for t, c in playing[:3]],
             'next': f"{nxt.group(1)} at {nxt.group(2)}" if nxt else None}
@@ -910,6 +912,7 @@ class Phone:
         moods = [x for x in self.taps if x['what'] == 'mood']
         return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'bpb': (e.get('bpb') or 4) if e else None,
                            'now': now_t, 'next': next_t,
+                           'output': e.get('output') if e else None, 'follow': bool(e and e.get('follow')),
                            'now_mark': self.mark(now_t), 'next_mark': self.mark(next_t)},
                 'taps': list(self.taps)[-8:][::-1], 'tally': dict(tally),
                 'asked_mood': moods[-1] if moods else None,
@@ -1549,6 +1552,27 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {'error': f'what: one of {sorted(TAPS)}, mood, button:<id>'})
                 ph.cmd('view')
                 return self._json(200, {'ok': True, 'n': rec['n'], 'heard': rec['heard']})
+            if u.path == '/api/output':                       # ledger:M179: he sets it, no agent needed
+                e = ph.engine
+                if not e:
+                    return self._json(409, {'error': 'no set is playing'})
+                follow = bool(body.get('follow'))
+                try:
+                    if follow:                                     # onto the Windows default now, and follow it
+                        msg = engine_call(e['port'], 'device', timeout=20, device='default', follow=True)
+                    else:
+                        try:                                       # stay where it is, no gap
+                            msg = engine_call(e['port'], 'device', timeout=20, follow=False, reopen=False)
+                        except Exception:                          # an engine from before reopen=: reopen it there
+                            msg = engine_call(e['port'], 'device', timeout=20, device=e.get('output') or 'default',
+                                              follow=False)
+                except Exception as ex:
+                    return self._json(502, {'ok': False, 'error': str(ex)})
+                text = msg.get('result') if isinstance(msg, dict) else msg
+                ph.post({'kind': 'output', 'follow': follow, 'result': text, 'sid': sid, 'heard': ph.heard(sid, t)})
+                e['follow'] = follow
+                ph.cmd('view')
+                return self._json(200, {'ok': True, 'result': text})
             if u.path == '/api/answer':
                 pid = str(body.get('id'))
                 p = next((x for x in ph.view['panels'] if x['id'] == pid), None)
