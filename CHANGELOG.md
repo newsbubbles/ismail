@@ -9,6 +9,15 @@
   directly, so no agent is needed; each change reaches the inbox as kind 'output'. `live_device` takes
   `reopen=False` to change following without a gap.
 
+### A new person's words stay theirs (ledger:M175)
+
+- On a machine where songs were already made, `guide(first_answer=...)` no longer writes the owner's machine-wide
+  vocabulary: a new person's record goes beside their song (`person.json`, marked as a guest's), or waits in
+  `~/.ismail/pending_person.json` (12 hours) until their first `sketch` moves it into the song folder.
+- `lexicon_note`, `lexicon_find` and `lexicon_view` on a guest's song read and write that song's own
+  `lexicon.jsonl`, so a guest never adds to the owner's lexicon or sees the owner's words. Marketing's dry run 2
+  found both.
+
 ### Named effect stacks, with what they cost on this machine (ledger:M177)
 
 - `fx_stack_save`, `fx_stack_load`, `fx_stack_list`, `fx_stack_measure`: an effect chain saved by name with notes,

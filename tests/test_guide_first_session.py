@@ -88,3 +88,27 @@ def test_setup_says_what_is_coming_and_the_windows_truths():
                                  ('skills', 'ismail', 'references', 'user-experience.md')])
 def test_no_dashes_in_the_first_session_docs(doc):
     assert not re.search('[–—]', read(*doc))
+
+
+def test_a_new_person_on_an_owned_machine_never_writes_the_owners_words(tmp_path, monkeypatch):
+    """ledger:M175 (Marketing's dry run 2): a guest's 'plain' became the owner's default, their words went into the
+    owner's lexicon, and they were shown the owner's own words."""
+    from ismail import sketch as SK
+    owner = tmp_path / 'owner_lexicon.jsonl'
+    monkeypatch.setenv('ISMAIL_LEXICON', str(owner))
+    api.lexicon_note(said='sounds like a kids piano', craft='listener')          # the owner's word
+    mark = tmp_path / 'home' / 'first_session_done'
+    mark.parent.mkdir(exist_ok=True)
+    mark.write_text('done')                                                       # an owned machine
+    assert api.guide(new_person=True).count('kept apart') == 1
+    api.guide(first_answer="it's for my daughter's wedding")
+    assert not (tmp_path / 'home' / 'person.json').exists() and (tmp_path / 'home' / 'pending_person.json').exists()
+    assert 'kids piano' not in api.lexicon_note(said='a bit happier', craft='listener')
+    song = str(tmp_path / 'songs' / 'wedding')
+    assert SK.adopt_pending(song) and SK.is_guest(song) and SK.words_for(song) == 'plain'
+    assert not (tmp_path / 'home' / 'pending_person.json').exists()
+    assert 'a bit happier' in api.lexicon_view(project=song)                     # their words moved with them
+    assert 'kids piano' not in api.lexicon_view(project=song)
+    api.lexicon_note(project=song, said='more like a music box', craft='listener')
+    assert len(owner.read_text(encoding='utf8').splitlines()) == 1                # the owner's lexicon untouched
+    assert SK.words_for(str(tmp_path / 'songs' / 'owners_song')) is None         # and so are their songs' words

@@ -934,15 +934,71 @@ def person_file(project=None):
     return os.path.join(os.path.dirname(marker_path()), 'person.json')
 
 
+PENDING_S = 12 * 3600      # a new person's words with no song yet wait this long for their first sketch
+
+
+def pending_file(name='person.json'):
+    """A new person's record on someone else's machine, before they have a song (ledger:M175)."""
+    return os.path.join(os.path.dirname(marker_path()), 'pending_' + name)
+
+
+def pending_fresh():
+    """The pending record, if a new person made it in the last PENDING_S seconds."""
+    import time as _t
+    p = pending_file()
+    return p if os.path.exists(p) and _t.time() - os.path.getmtime(p) < PENDING_S else None
+
+
 def remember_words(kind, said, project=None):
     """guide(first_answer=...) decided 'musician' or 'plain': keep it, so every block written for this person
-    (sketch, sketch_keep) uses it (ledger:M170 G-2b)."""
+    (sketch, sketch_keep) uses it (ledger:M170 G-2b). On a machine where songs were already made, the machine-wide
+    record is the owner's and a new person never writes it (ledger:M175: a guest's "plain" became the owner's
+    default): their words go beside their song, or into pending_person.json until their first sketch."""
     import time as _t
-    for f in dict.fromkeys([person_file(project) if project else None, person_file()]):
+    rec = {'words': kind, 'said': said, 'at': _t.strftime('%Y-%m-%d %H:%M')}
+    if is_new():
+        files = dict.fromkeys([person_file(project) if project else None, person_file()])
+    else:
+        rec['guest'] = True
+        files = [person_file(project) if project else pending_file()]
+    for f in files:
         if f:
             os.makedirs(os.path.dirname(f), exist_ok=True)
             with open(f, 'w', encoding='utf8') as fh:
-                json.dump({'words': kind, 'said': said, 'at': _t.strftime('%Y-%m-%d %H:%M')}, fh)
+                json.dump(rec, fh)
+
+
+def adopt_pending(project):
+    """A new person's first sketch: their pending record (words, and the lexicon kept before they had a song)
+    moves into the song folder, so it is theirs alone from now on. Only for a song with no record yet."""
+    p = pending_fresh()
+    if not p or not project or os.path.exists(person_file(project)):
+        return False
+    os.makedirs(os.path.abspath(project), exist_ok=True)
+    os.replace(p, person_file(project))
+    lx = pending_file('lexicon.jsonl')
+    if os.path.exists(lx):
+        os.replace(lx, os.path.join(os.path.abspath(project), 'lexicon.jsonl'))
+    return True
+
+
+def is_guest(project=None):
+    """A song made by someone other than the machine's owner (its person.json says so)."""
+    try:
+        with open(person_file(project), encoding='utf8') as fh:
+            return bool(json.load(fh).get('guest'))
+    except (OSError, ValueError):
+        return False
+
+
+def lexicon_file(project=None):
+    """Where this person's words go: a guest's song keeps its own lexicon beside it, and a new person with no song
+    yet a pending one; None is the machine's (the owner's) lexicon."""
+    if project and is_guest(project):
+        return os.path.join(os.path.abspath(project), 'lexicon.jsonl')
+    if not project and pending_fresh():
+        return pending_file('lexicon.jsonl')
+    return None
 
 
 def words_for(project=None):
