@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Phone: who gets a voice note nobody tagged
+
+- skills phone.md: a free voice note plainly about another agent's work goes to that agent at once, verbatim, with
+  its inbox number, id and time; an unclear one is kept and the person asked (Nate 10-07: "you should always send to
+  an agent I've already asked you to work with before").
+
 ### Phone: the picture round opens on the phone
 
 - The phone server now passes everything under `/eye/` through to the picture-round page server (127.0.0.1:8871),
