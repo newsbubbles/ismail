@@ -709,6 +709,14 @@ function renderPanel() {
   const p = ps[ps.length - 1];
   if (!p) { if (shown) { $('sheet').classList.remove('show'); stopClip(); shown = null; } return; }
   if (shown === p.id) return;
+  // a new panel never covers one being read (Nate 10-07 11:00: "this test interrupted my reading of another panel"):
+  // while the open one is unanswered and on screen, the new one waits quietly and the open one says so
+  if (shown && $('sheet').classList.contains('show') && ps.some((x) => x.id === shown)) {
+    if (!$('panel').querySelector('.waitnote')) {
+      $('panel').insertAdjacentHTML('afterbegin', '<div class="hint waitnote">Another question is waiting. It opens when you answer this one or tap Not now.</div>');
+    }
+    return;
+  }
   // a new panel never covers a voice note being recorded (Nate 10-07 08:56: "Am I still recording right now? ... it
   // was still recording geez"): no sound, no buzz, no sheet; the record key says one is waiting, and it opens when
   // the note ends
@@ -726,7 +734,7 @@ function renderPanel() {
     if (p.choices && p.choices.length) h += `<div class="btns">${p.choices.map((c) => `<button class="choice" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
     const dev = store.get('listen_on', '');
     h += `<div class="hint">Listening on</div><div class="chips" id="listenon">${['Earbuds', 'Headphones', 'Phone speaker', 'Speaker'].map((w) => `<button data-on="${w}" class="${w === dev ? 'sel' : ''}">${w}</button>`).join('')}</div>`;
-    h += `<textarea id="examnote" placeholder="a note (optional)"></textarea><div class="btns"><button id="submit" style="font-weight:700">Submit</button></div>`;
+    h += `<textarea id="examnote" placeholder="a note (optional)"></textarea><div class="btns"><button id="submit" style="font-weight:700">Submit</button><button data-notnow>Not now</button></div>`;
   } else {
     h += (p.inputs || []).map((x) => {
       const lab = x.label ? `<div class="inlab">${esc(x.label)}</div>` : '';
@@ -735,7 +743,8 @@ function renderPanel() {
       const val = [].concat(x.value || []);
       return lab + `<div class="chips" data-in="${esc(x.id)}" data-kind="${x.kind}">${(x.options || []).map((o) => `<button data-opt="${esc(o)}" class="${val.includes(o) ? 'sel' : ''}">${esc(o)}</button>`).join('')}</div>`;
     }).join('');
-    h += `<div class="btns">${(p.buttons || ['OK']).map((b) => `<button data-answer="${esc(b)}">${esc(b)}</button>`).join('')}</div>`;
+    h += `<div class="btns">${(p.buttons || ['OK']).map((b) => `<button data-answer="${esc(b)}">${esc(b)}</button>`).join('')}`
+      + `<button data-notnow>Not now</button></div>`;
   }
   // every panel takes a voice reply too (Nate 10-07 08:52: "I felt like I should be able to say more"): tap to
   // record, tap again to send; it reaches the agent that sent the panel, and the panel stays open
@@ -765,9 +774,19 @@ function renderPanel() {
   };
   $('sheet').classList.add('show');
   box.querySelectorAll('[data-answer]').forEach((b) => { b.onclick = async () => {
+    // a pick is part of the answer (Live DJ 10-07: Send with nothing picked came in as {"which": null})
+    const unpicked = (p.inputs || []).find((x) => x.kind === 'choice' && !x.optional
+      && !box.querySelector(`.chips[data-in="${CSS.escape(x.id)}"] .sel`));
+    if (unpicked) { toast(`${unpicked.label ? unpicked.label + ': ' : ''}pick one first, or tap Not now`); return; }
     if (talk.rec && talk.panel === p.id) micStop(true);        // what they were saying goes too
     const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer, ...(p.inputs ? { values: values() } : {}) });
     if (j) { toast('sent: ' + b.dataset.answer); } } });
+  const nn = box.querySelector('[data-notnow]');
+  if (nn) nn.onclick = async () => {                          // set aside: the agent reads a dismissal, not an answer
+    if (talk.rec && talk.panel === p.id) micStop(true);
+    const j = await send('/api/answer', { id: p.id, dismissed: true });
+    if (j) toast('set aside');
+  };
   box.querySelectorAll('.playclip').forEach((b) => { b.onclick = () => playClip(b.dataset.url, b.closest('.clip')); });
   box.querySelectorAll('[data-chip]').forEach((b) => { b.onclick = () => b.classList.toggle('sel'); });
   box.querySelectorAll('[data-on]').forEach((b) => { b.onclick = () => { box.querySelectorAll('[data-on]').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); store.set('listen_on', b.dataset.on); }; });

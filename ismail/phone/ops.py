@@ -201,10 +201,13 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
                      inputs: list = None, wait: float = 0, sender: str = None) -> str:
     """A panel over the phone page (the stage_panel_show shape): title, text, an image file, buttons (labels), and
     inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) | 'toggle' (on
-    or off) | 'text', 'label', 'options'}]. A tap arrives as kind 'answer' {id, answer, values: {input id: value},
-    for: sender}; wait=N blocks up to N seconds for it. Every panel has a record button: what they say on it arrives
+    or off) | 'text', 'label', 'options', 'optional'}]. A choice must be picked before a button sends (unless
+    'optional': true). A tap arrives as kind 'answer' {id, answer, values: {input id: value}, for: sender}; Not now
+    (on every panel) arrives as kind 'answer' with dismissed: true and answer null, which is not an answer. wait=N
+    blocks up to N seconds for it. Every panel has a record button: what they say on it arrives
     as kind 'voice' and 'voice_text' with panel=<id> and for=<sender>, so pass sender (your name) to get it back.
-    A panel never interrupts a voice note: it waits until they stop recording."""
+    A panel never interrupts a voice note, nor another panel being read: it waits until they stop recording, and
+    until the open panel is answered or set aside (the reply says when it is queued)."""
     return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
                  buttons=buttons, inputs=inputs, wait=wait, who=sender)
 
