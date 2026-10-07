@@ -40,6 +40,10 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 | [Clash](https://newsbubbles.github.io/ismail/#clash) | hybrid orchestral fight cue, every instrument synthesized |
 | [Two Kinds of Tears](https://newsbubbles.github.io/ismail/#tears) | solo piano, a minor theme that returns in major |
 
+[![My agent built a 1958 blues club. Then I walked in.](https://i.ytimg.com/vi/fKGkaf2WYWw/hqdefault.jpg)](https://youtu.be/fKGkaf2WYWw)
+
+*Agents built a 1958 juke joint for the Crossroads Rewired music video; Nate walked in with a Quest 3 and directed them from inside: voice notes, and dance takes they play on the characters (4:43).*
+
 [![Luigi Manson on YouTube](https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg)](https://www.youtube.com/watch?v=ZzT1T9GUoRo)
 
 *Luigi Manson, made with ismail (fan remix of the Luigi's Mansion theme).*
