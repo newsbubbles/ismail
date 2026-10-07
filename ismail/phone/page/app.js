@@ -857,6 +857,12 @@ function render() {
   catchUp(h.behind_s);
   $('now').textContent = e.now || (e.playing ? 'playing' : 'nothing playing');
   $('next').textContent = e.next || '--';
+  $('outrow').hidden = !e.playing || !e.output;
+  if (e.output) {
+    $('outname').textContent = e.output;
+    $('follow').classList.toggle('on', !!e.follow);
+    $('follow').textContent = 'Follow Windows: ' + (e.follow ? 'on' : 'off');
+  }
   $('pinned').hidden = !state.pinned;
   if (state.pinned) $('pinned').innerHTML = `<span class="cap">Since you left</span>${esc(state.pinned.text)}`;
   const caps = state.captions || [], lastc = caps[caps.length - 1];
@@ -943,6 +949,13 @@ async function poll() {
 }
 $('sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') { ev('panel_close', { id: shown }); closeSheet(); } });
 $('msgs').onclick = openMessages;
+// the set's sound follows the Windows default output, or stays where it is (Nate 10-07: "the way that most
+// applications work", switched by him, not by an agent)
+$('follow').onclick = async () => {
+  const on = !$('follow').classList.contains('on');
+  const j = await send('/api/output', { follow: on });
+  if (j) toast(on ? 'following Windows output' : 'staying on this output');
+};
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 // Install: Chrome offers it once the page qualifies (PNG icons, a service worker); the button appears only then
 let installEvt = null;

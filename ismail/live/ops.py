@@ -474,12 +474,15 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
 
 
 @op()
-def live_device(project: str, device: str = 'default', follow: bool = None) -> str:
+def live_device(project: str, device: str = 'default', follow: bool = None, reopen: bool = True) -> str:
     """Move a running set to another audio output without stopping it: the timeline, the queue and the audio mixed
     ahead carry on, with a gap of about a second. device: 'default' (the system's default output now: use it after
     connecting a Bluetooth speaker), a name or part of one ('JBL'), an index, or 'none'. With device 'default' the
     engine also follows the system default by itself (checked every few seconds; follow=False stops that), and a
-    device that stops taking audio (a speaker switched off) falls back to the default."""
+    device that stops taking audio (a speaker switched off) falls back to the default. reopen=False only sets
+    follow and stays on the output it has (no gap); the phone page's Output switch does the same."""
+    if not reopen:
+        return _call(project, 'device', follow=follow, reopen=False, timeout=20)
     return _call(project, 'device', device=device, follow=follow, timeout=20)
 
 

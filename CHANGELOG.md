@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The phone sets where the sound goes (ledger:M179)
+
+- The phone page shows the set's output and a Follow Windows switch: on moves the set to the Windows default output
+  and follows it (a headset plugged in takes the sound), off keeps it where it is. It acts on the live engine
+  directly, so no agent is needed; each change reaches the inbox as kind 'output'. `live_device` takes
+  `reopen=False` to change following without a gap.
+
 ### Phone messages never pop up
 
 - Panels and exams no longer open over the page (Nate 10-07: "these are modals that block me"). A new one buzzes

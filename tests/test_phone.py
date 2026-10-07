@@ -23,6 +23,9 @@ STATUS = "live 120 BPM 4/4 | heard bar 5 beat 2 (9 s) | mixed ahead 0.50 s | out
          "(max 2 s  -12.0) | playing ch3 (pass 1/inf), next ch4 at bar 9 | renders 9x realtime"
 
 
+DEVICE_CALLS = []
+
+
 class FakeEngine(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -30,6 +33,8 @@ class FakeEngine(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get('Content-Length') or 0)
         req = json.loads(self.rfile.read(n))
+        if req['op'] == 'device':
+            DEVICE_CALLS.append(req['args'])
         b = json.dumps({'ok': True, 'result': STATUS if req['op'] == 'status' else ''}).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(b)))
@@ -674,3 +679,16 @@ def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_pat
     assert out.count('pair ') == 1 and '128k' in out                           # then one rotating pair
     with pytest.raises(Exception, match='labelled by pair'):
         P.phone_exam('bad', [{'label': 'A', 'path': clips[0]['path']}], floor='auto')
+
+
+def test_the_output_switch_acts_on_the_engine_without_an_agent(phone):
+    """Nate 10-07: output follows Windows "the way that most applications work", a switch he controls."""
+    ph, base, _ = phone
+    st = get(base, '/api/state?since=0&wait=0')['engine']
+    assert st['output'] == 'none' and st['follow'] is False
+    DEVICE_CALLS.clear()
+    assert post(base, '/api/output', {'follow': True})['ok']
+    assert post(base, '/api/output', {'follow': False})['ok']
+    assert DEVICE_CALLS == [{'device': 'default', 'follow': True}, {'follow': False, 'reopen': False}]
+    outs = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'output']
+    assert [x['follow'] for x in outs] == [True, False]

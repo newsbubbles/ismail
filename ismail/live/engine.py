@@ -883,12 +883,16 @@ class Engine:
         t.join(3.0)                     # a dead device (a Bluetooth speaker gone) can block stop() forever
         return not t.is_alive()
 
-    def cmd_device(self, device='default', follow=None):
+    def cmd_device(self, device='default', follow=None, reopen=True):
         """Move the sound to another output mid-set: the timeline, the queue and the audio mixed ahead carry on (a
         gap of about a second). device: 'default' (whatever the system's default is now), a name or part of one, an
-        index, or 'none'."""
+        index, or 'none'. reopen=False only sets follow and stays on the output it has (no gap)."""
         if follow is not None:
             self.follow = bool(follow)
+        if not reopen:
+            return f"output: {self.out_name or self.device}" + (
+                "; follows the system default" if self.device == 'default' and self.follow else
+                "; stays on it (does not follow the system default)")
         old = self.out_name or self.device
         with self._out_lock:
             if not self._close_output():
