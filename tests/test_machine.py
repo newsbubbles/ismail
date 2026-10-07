@@ -508,6 +508,8 @@ def test_a_run_is_pinned_to_its_threads_cores_and_the_next_run_takes_other_cores
     import psutil
     if (psutil.cpu_count() or 1) < 4:
         pytest.skip('needs 4 cores')
+    if not hasattr(psutil.Process(), 'cpu_affinity'):
+        pytest.skip('no CPU affinity on this OS (macOS): a 4-core runner failed here, 10-07')
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
     env.pop(machine.SLOT_ENV, None)
     code = ("import os, psutil, subprocess, sys\n"

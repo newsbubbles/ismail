@@ -790,6 +790,26 @@ function openMessages() {
   else if (newNotes().length || !ps.length) showNotes();
   else showPanel(ps[0]);
 }
+// a panel's video says what it is doing: loading, still loading on a slow connection, or could not play, with a
+// link to open it on its own; each reaches the server's events so a stall can be read back (Nate 10-07 15:39: "it is
+// not loading on the phone ... maybe if it's like an error")
+function watchVideo(v, id) {
+  const say = document.createElement('div'), src = esc(v.getAttribute('src')), t0 = Date.now();
+  const open = ` <a href="${src}" target="_blank" rel="noopener">Open it on its own</a>`;
+  say.className = 'hint'; say.textContent = 'loading the video';
+  v.after(say);
+  v.addEventListener('loadedmetadata', () => { say.textContent = ''; ev('video_ok', { id, ms: Date.now() - t0 }); }, { once: true });
+  v.addEventListener('waiting', () => { if (!v.error) say.textContent = 'loading'; });
+  v.addEventListener('playing', () => { say.textContent = ''; });
+  v.addEventListener('error', () => {
+    const code = v.error ? v.error.code : 0;
+    say.innerHTML = `This video could not play here${code === 4 ? ' (the phone cannot read this file)' : code === 2 ? ' (the connection dropped)' : ''}.` + open;
+    ev('video_error', { id, code, ms: Date.now() - t0 });
+  });
+  setTimeout(() => {
+    if (v.isConnected && v.readyState < 1 && !v.error) { say.innerHTML = 'Still loading on this connection.' + open; ev('video_slow', { id }); }
+  }, 15000);
+}
 function showPanel(p) {
   shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
@@ -818,6 +838,7 @@ function showPanel(p) {
   // record, tap again to send; it reaches the agent that sent the panel, and the panel stays open
   h += `<div class="btns"><button id="panelrec" class="rec">Say more</button></div>`;
   box.innerHTML = h;
+  box.querySelectorAll('video').forEach((v) => watchVideo(v, p.id));
   box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { b.onclick = () => {
     const on = !b.classList.contains('sel'); b.classList.toggle('sel', on);
     const x = (p.inputs || []).find((i) => i.id === b.dataset.in); b.textContent = `${(x && x.label) || b.dataset.in}: ${on ? 'on' : 'off'}`; }; });
