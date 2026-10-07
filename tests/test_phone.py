@@ -785,6 +785,17 @@ def test_a_panel_carries_a_video_that_plays_and_seeks(phone, tmp_path):
     assert e.value.code == 416
     for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime')):
         assert S.Handler.TYPES[ext] == mime
+    big = tmp_path / 'long.mp4'                    # "the rest" comes a chunk at a time, so 4G starts at once
+    data = bytes(range(256)) * (S.Handler.RANGE_CHUNK // 256 + 4096)
+    big.write_bytes(data)
+    P._call('panel_show', panel_id='v3', title='Long', video=str(big))
+    url = base + ph.view['panels'][-1]['video']
+    req = urllib.request.Request(url, headers={'Range': 'bytes=0-'})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        n = S.Handler.RANGE_CHUNK
+        assert r.status == 206 and r.headers['Content-Range'] == f'bytes 0-{n - 1}/{len(data)}' and r.read() == data[:n]
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'Range': f'bytes={n}-'}), timeout=10) as r:
+        assert r.read() == data[n:]
 
 
 def test_priority_rides_with_panels_and_notes_and_defaults_to_normal(phone):

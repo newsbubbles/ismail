@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Phone: a video on mobile data starts at once, and says when it cannot
+
+- A player asking for the rest of a file gets it 2 MB at a time, so the first frames of a long video arrive at
+  once on 4G (Nate 10-07 15:39: a 4:43 video "not loading on the phone"). A transfer that drops is one line in the
+  server's log.
+- A panel's video says "loading", then "still loading on this connection" after 15 s, or that it could not play,
+  each with a link to open it on its own, and reports `video_ok`, `video_slow` or `video_error` to the events.
+
 ### Phone: scrolling past the talk key never starts a note
 
 - The big talk key records only on a still press. A touch that moves (past about 10 px, or that the browser takes for a

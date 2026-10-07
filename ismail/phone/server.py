@@ -1417,6 +1417,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('too big')
         return self.rfile.read(n) if n else b''
 
+    RANGE_CHUNK = 2 * 1024 * 1024
+
     def _range(self, size):
         """The (start, end) a single `Range: bytes=a-b` header asks for, None for no header or one that is not
         understood (the whole file is sent), or False when it lies past the end (416)."""
@@ -1442,9 +1444,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             a, b = rng if rng else (0, size - 1)
-            with open(p, 'rb') as fh:
-                fh.seek(a)
-                data = fh.read(b - a + 1) if size else b''
+            if rng:
+                # a player asking for "the rest" gets RANGE_CHUNK at a time and asks again: on 4G the first frames
+                # come at once instead of after one long 30 MB answer (Nate 10-07 15:39, a video "not loading")
+                b = min(b, a + self.RANGE_CHUNK - 1)
+            fh = open(p, 'rb')
+            fh.seek(a)
         except OSError:
             return self._json(404, {'error': 'gone'})
         self.send_response(206 if rng else 200)
@@ -1452,17 +1457,26 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Accept-Ranges', 'bytes')
         if rng:
             self.send_header('Content-Range', f'bytes {a}-{b}/{size}')
-        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Content-Length', str(b - a + 1 if size else 0))
         self.send_header('Cache-Control', 'no-cache')
         if download:
             name = next((o['name'] for o in self.ph.view['offers'] if o['url'].endswith('/' + self.path.split('/')[2]
                                                                                      .split('?')[0])), p.name)
             self.send_header('Content-Disposition', f'attachment; filename="{name}"')
         self.end_headers()
+        left, sent = (b - a + 1 if size else 0), 0
         try:
-            self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            pass        # a player that seeks drops the request it was reading
+            with fh:
+                while left > 0:
+                    buf = fh.read(min(256 * 1024, left))
+                    if not buf:
+                        break
+                    self.wfile.write(buf)
+                    sent += len(buf)
+                    left -= len(buf)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError) as e:
+            if sent and size > self.RANGE_CHUNK:  # a player that seeks drops what it was reading; said, so a stall shows
+                print(f"[phone] {p.name}: dropped after {sent} of {b - a + 1} bytes ({type(e).__name__})", flush=True)
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)

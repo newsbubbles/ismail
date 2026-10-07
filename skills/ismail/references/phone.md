@@ -112,6 +112,10 @@ also has a "Say more" button: what they say there arrives as `voice` and `voice_
 let them watch and ask questions. `priority='needs you'` (also on `phone_say`) sorts it first and lights the corner key;
 `'low'` sorts last. A panel never interrupts a voice note: it waits, silent,
 until the note is sent.
+In a team of agents, each one with something waiting on the person posts its own panel (`sender=<its role>`, a
+`priority`, one topic per panel) and reads its own answers by `for`; nobody relays for another. Panels never pop up
+(they wait on the corner key), so the person's own taps do the pacing. A video that stalls or fails says so in the
+panel, with a link to open it on its own, and the server's events carry `video_ok`, `video_slow` or `video_error`.
 
 ## Pause means stop, now
 
