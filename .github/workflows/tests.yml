@@ -16,6 +16,8 @@ jobs:
           - os: ubuntu-latest
             python: "3.12"
     runs-on: ${{ matrix.os }}
+    # a healthy run takes 5 to 11 minutes; fail a stuck one instead of waiting the 6-hour default
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +26,13 @@ jobs:
           cache: pip
       - name: speech and mp3 tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg libsndfile1
+        # the Azure apt mirror sometimes stalls (an hour on 2026-10-07): give up on a stalled
+        # download after 30 s and retry it, and skip recommended packages we do not need
+        timeout-minutes: 10
+        run: |
+          APT="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $APT update
+          sudo apt-get $APT install -y --no-install-recommends espeak-ng ffmpeg libsndfile1
       - name: install
         run: pip install -e ".[dev]"
       - name: tests
