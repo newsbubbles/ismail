@@ -492,7 +492,7 @@ songs/           your projects (git-ignored)
   - Live DJ: plays live sets and tests the `live_*` ops under real-time use.
   - Voice: voice modeling research, checked by blind ear exams.
   - Multiplayer: research on shared worlds for the VR stage.
-  - Paper: writes the research paper and runs its experiments.
+  - Research: experiments and measurement.
   - Business: go-to-market work.
   - Marketing: launch videos, posts, the site's story and the first-session product shape.
   - Steward: keeps the shared machine healthy (GPU, CPU, memory, disk) and the heavy-job queue moving.
