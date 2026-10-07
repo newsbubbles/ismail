@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Floor pairs in phone exams (ledger:M173)
+
+- `phone_exam(..., floor='auto' | 'full', floor_from=)`: device floor pairs, the real clip against a 64 or 128 kb/s
+  MP3 copy of itself or against itself, keyed so neither side is the synth. The full set on the first floor round,
+  then one rotating pair (history in the phone home, `floor_rounds.json`); seeded places, never first; neutral file
+  names. The pairs are renumbered; the reply and `<answers_path>.floor.json` map them back. Reference: the Voice
+  session's work/phone_round.py (hq:D-60).
+
 ### Phone panels: choices, checkboxes, toggles, a voice reply, and never over a voice note (ledger:M167)
 
 - `phone_panel_show(inputs=[...])`: choice (one of), check (any of), toggle and text inputs beside the buttons; the
