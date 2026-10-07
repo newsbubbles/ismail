@@ -16,6 +16,10 @@ Read it at the start of a session that works with a person, beside SKILL.md.
 - All of it stays on the machine (`songs/_user/`, `notes/feedback.md`). A quote or a number measured from the person
   goes public only after they say yes to exactly what would be published (development.md, the inclusion review).
 
+A newcomer is a person, not a computer. On a machine where someone already makes songs, `guide` opens normally;
+when the person in front of you is new (they say so, or a friend sits at the owner's computer), call
+`guide(new_person=True)` and run their first session. Keeping their sketch marks nothing for the owner.
+
 ## The rest waits for its moment
 
 The first session stays narrow: two sentences, two questions, sound in minutes. Everything else ismail can do (the

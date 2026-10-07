@@ -504,18 +504,22 @@ def bus_add(project: str, name: str, fx: list = None, volume_db: float = 0.0) ->
 # ------------------------------------------------------------------ instruments
 
 @op()
-def guide(project: str = None, first_answer: str = None) -> str:
+def guide(project: str = None, first_answer: str = None, new_person: bool = False) -> str:
     """Read this first: how to use this DAW as an agent (workflow, conventions, which tool for which question). For
     a person who has made nothing with ismail yet it opens with how to run their first session. first_answer: the
     person's first answer, verbatim; the reply is then only which words to use with them from now on (musician,
-    when they name an instrument they play, a style they trained in or reading music; otherwise plain words)."""
+    when they name an instrument they play, a style they trained in or reading music; otherwise plain words).
+    new_person=True: the person in front of you is new to ismail on a machine where someone else already made songs
+    ("I'm new", a friend at the owner's computer); the first session opens for them, and keeping their sketch
+    marks nothing for the machine's owner."""
     from .guide import GUIDE, FIRST_SESSION, vocabulary_text
     from . import sketch as SK
     if first_answer is not None:
         return vocabulary_text(first_answer)
-    if SK.is_new(project):
+    if new_person or SK.is_new(project):
         return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text()) + '\n\n' + GUIDE
-    return GUIDE
+    return ("Someone new to ismail at this computer (they say so, or have never made a song with it)? "
+            "guide(new_person=True) opens with their first session.\n\n" + GUIDE)
 
 
 @op()
@@ -742,9 +746,13 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
     os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
     with open(dst, 'w', encoding='utf8') as f:
         json.dump(d, f, indent=1)
-    SK.mark_done()
+    if SK.is_new():                    # only a machine whose owner is new: a guest's keep marks nobody (M170 G-3)
+        SK.mark_done()
+        done = f"First session marked done ({SK.marker_path()})."
+    else:
+        done = "First session over for this person (nothing marked: this computer's owner already makes songs)."
     return (f"kept {hits[0]} as the song in {root} ({d['bpm']} BPM, {d['length_bars']} bars, tracks: "
-            f"{', '.join(d['tracks'])}). First session marked done ({SK.marker_path()}).\n"
+            f"{', '.join(d['tracks'])}). {done}\n"
             f"NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for two "
             f"bars), make only that, render a window, play before and after. Then the normal loop: extend the form "
             f"in a Session Sheet, a part at a time.")
