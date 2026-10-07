@@ -277,6 +277,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 | drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
 | guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
+| guitar | `strat70_clean` | the `electric` performer as a clean single-coil guitar (strat, mono): the showcase electric guitar a sketch reaches for |
 
 Use one with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
 

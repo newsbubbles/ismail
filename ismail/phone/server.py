@@ -1612,10 +1612,42 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(500, {'ok': False, 'error': f'{type(e).__name__}: {e}'})
 
 
+class Stamped:
+    """A log stream whose every line starts with the UTC time (the Director, 10-07: drops in server.log could not be
+    dated)."""
+
+    def __init__(self, f):
+        self.f, self.bol = f, True
+
+    def write(self, s):
+        out = []
+        for part in s.splitlines(True):
+            if self.bol:
+                out.append(time.strftime('%H:%M:%SZ ', time.gmtime()))
+            out.append(part)
+            self.bol = part.endswith('\n')
+        return self.f.write(''.join(out))
+
+    def __getattr__(self, k):
+        return getattr(self.f, k)
+
+
+class PhoneServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        """A phone that drops off (4G, the screen off, a page closed) mid long-poll is one line, not a traceback."""
+        e = sys.exc_info()[1]
+        if isinstance(e, (ConnectionError, TimeoutError)):
+            sys.stderr.write(f"[phone] {client_address[0]} dropped: {type(e).__name__}\n")
+            return
+        super().handle_error(request, client_address)
+
+
 def serve(port=8870, inbox=None, host='127.0.0.1'):
     ph = Phone(inbox)
     Handler.ph, Handler.agent = ph, Agent(ph)
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd = PhoneServer((host, port), Handler)
     httpd.daemon_threads = True
     rec = {'port': httpd.server_address[1], 'pid': os.getpid(), 'started': time.time()}
     (HOME / 'server.json').write_text(json.dumps(rec), encoding='utf8')
@@ -1636,6 +1668,7 @@ def main(argv=None):
     a.add_argument('--port', type=int, default=8870)
     a.add_argument('--inbox', default=None, help='also write what the person sends here')
     args = a.parse_args(argv)
+    sys.stdout, sys.stderr = Stamped(sys.stdout), Stamped(sys.stderr)
     serve(args.port, args.inbox)
 
 

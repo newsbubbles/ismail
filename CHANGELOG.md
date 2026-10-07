@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Phone: answered panels close at once; the server's log is dated
+
+- An answered panel closes on the phone at once, without waiting for the next state (Nate 10-07 12:01: a panel stayed open after his answer and he could not get out of it). A refusal from the server (the question already closed) is shown and closes it too, instead of being queued as offline and retried.
+- Every line of the phone server's log starts with the UTC time, and a phone dropping off mid long-poll is one line
+  ("dropped: ConnectionAbortedError") instead of a traceback.
+
 ### The phone sets where the sound goes (ledger:M179)
 
 - The phone page shows the set's output and a Follow Windows switch: on moves the set to the Windows default output

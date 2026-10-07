@@ -169,12 +169,19 @@ setInterval(() => {
 // ---- sending (queued while offline)
 async function send(path, body, quiet) {
   body = Object.assign({ sid, t: heardNow() }, body);
+  let r;
   try {
-    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || r.status);
-    return j;
+    r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch (e) {
+    r = null;
+  }
+  if (r) {                                   // the server answered: a refusal is final, never queued as offline
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return j;
+    if (!quiet) toast(j.error || `refused (${r.status})`);
+    return r.status === 404 ? { gone: true } : null;
+  }
+  {
     if (!quiet) toast('offline: kept, sends when you are back');
     outbox.push([path, body]); store.set('outbox', outbox);
     return null;
@@ -706,17 +713,19 @@ function playClip(url, box) {
 // right corner ... and then I can click on it to switch to that message"): a new one buzzes once and shows on the
 // corner key; he opens it when he chooses, switches between open ones on the tabs, and Later puts it back
 let shown = null;
-const notified = new Set(), readPanels = new Set();
+const notified = new Set(), readPanels = new Set(); const answered = new Set();   // answered here: gone at once, whatever a stale state says (Nate 10-07 12:01)
+const openPanels = () => (state.panels || []).filter((x) => !answered.has(x.id));
+function answeredHere(id) { answered.add(id); if (shown === id) closeSheet(); else renderBadge(); }
 function closeSheet() { $('sheet').classList.remove('show'); stopClip(); shown = null; renderBadge(); }
 function renderBadge() {
-  const ps = state.panels || [], unread = ps.filter((x) => !readPanels.has(x.id)).length;
+  const ps = openPanels(), unread = ps.filter((x) => !readPanels.has(x.id)).length;
   const b = $('msgs');
   b.hidden = !ps.length;
   b.classList.toggle('new', unread > 0);
   b.textContent = ps.length === 1 ? '1 message' : `${ps.length} messages`;
 }
 function renderPanel() {
-  const ps = state.panels || [];
+  const ps = openPanels();
   const fresh = ps.filter((x) => !notified.has(x.id));
   if (fresh.length) { fresh.forEach((x) => notified.add(x.id)); if (!talk.rec) buzz([60]); }   // a nudge, never a sound or a sheet
   renderBadge();
@@ -731,19 +740,19 @@ function tabsHtml(ps, id) {
 }
 function bindTabs() {
   const box = $('panel');
-  box.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { const x = (state.panels || []).find((q) => q.id === b.dataset.tab); if (x) { stopClip(); showPanel(x); } }; });
+  box.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { const x = openPanels().find((q) => q.id === b.dataset.tab); if (x) { stopClip(); showPanel(x); } }; });
   const l = box.querySelector('[data-later]');
   if (l) l.onclick = () => { ev('panel_later', { id: shown }); closeSheet(); };
 }
 function openMessages() {
-  const ps = state.panels || [];
+  const ps = openPanels();
   if (!ps.length) return;
   showPanel(ps.find((x) => !readPanels.has(x.id)) || ps[ps.length - 1]);
 }
 function showPanel(p) {
   shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
-  let h = tabsHtml(state.panels || [], p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
+  let h = tabsHtml(openPanels(), p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '');
   if (p.kind === 'exam') {
     h += (p.clips || []).map((c, i) => `<div class="clip" data-i="${i}"><button class="playclip" data-url="${esc(c.url)}">Play ${esc(c.label)}</button>`
       + (c.note ? `<div class="hint">${esc(c.note)}</div>` : '')
@@ -798,12 +807,12 @@ function showPanel(p) {
     if (unpicked) { toast(`${unpicked.label ? unpicked.label + ': ' : ''}pick one first, or tap Not now`); return; }
     if (talk.rec && talk.panel === p.id) micStop(true);        // what they were saying goes too
     const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer, ...(p.inputs ? { values: values() } : {}) });
-    if (j) { toast('sent: ' + b.dataset.answer); } } });
+    if (j) { if (!j.gone) toast('sent: ' + b.dataset.answer); answeredHere(p.id); } } });
   const nn = box.querySelector('[data-notnow]');
   if (nn) nn.onclick = async () => {                          // set aside: the agent reads a dismissal, not an answer
     if (talk.rec && talk.panel === p.id) micStop(true);
     const j = await send('/api/answer', { id: p.id, dismissed: true });
-    if (j) toast('set aside');
+    if (j) { if (!j.gone) toast('set aside'); answeredHere(p.id); }
   };
   box.querySelectorAll('.playclip').forEach((b) => { b.onclick = () => playClip(b.dataset.url, b.closest('.clip')); });
   box.querySelectorAll('[data-chip]').forEach((b) => { b.onclick = () => b.classList.toggle('sel'); });
@@ -817,7 +826,7 @@ function showPanel(p) {
     if (p.choices && p.choices.length && !answers.choice) { toast('pick one answer first'); return; }
     answers.device = await deviceInfo((box.querySelector('[data-on].sel') || { dataset: {} }).dataset.on || '');
     const j = await send('/api/answer', { id: p.id, answers });
-    if (j) { toast('submitted, thank you'); stopClip(); }
+    if (j) { if (!j.gone) toast('submitted, thank you'); stopClip(); answeredHere(p.id); }
   };
 }
 // What the person listened on, for an exam's answers: their pick, and what the browser can name (Chrome on a computer
