@@ -71,6 +71,9 @@ INSTRUMENTS = [
     (r'rhodes|electric piano|e-piano|epiano', 'keys', 'rhodes', None),
     (r'wurli\w*', 'keys', 'rhodes', 'no Wurlitzer voice yet: the Rhodes plays its part'),
     (r'organ|hammond', 'keys', 'grand_piano', 'no organ voice yet: grand_piano plays its part'),
+    # ledger:M181 (dry run 2): "an old saloon player piano" got the grand piano and no reply said so
+    (r'(?:(?:old|saloon|honky[- ]?tonk|upright|player|tack|bar(?:room)?|western|out[- ]of[- ]tune) )+pianos?|'
+     r'honky[- ]?tonk', 'keys', 'grand_piano', 'no {word} voice yet: grand_piano plays its part'),
     (r'(?:clean |bluesy |blues |lead |melodic |jazz )+guitar(?: melody| lead| solo| line)?|guitar (?:melody|lead|solo|line)',
      'melody', 'emily', None),
     (r'(?:rhythm )?guitars?', 'chords', 'strat70_rhythm', None),
@@ -147,13 +150,25 @@ def plain_parts(parts):
     return f"{plain(lead)} plays the tune" + (f" over {tail}" if tail else ' alone')
 
 
-def contrast(a, b):
-    """How sketch b differs from sketch a, in plain words: key or mode, tempo, length, lead, density, form."""
+NOTE_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
+
+
+def contrast(a, b, plainw=False):
+    """How sketch b differs from sketch a: key or mode, tempo, length, lead, density, form. plainw: a non-musician's
+    words, where a move to another key of the same mode is higher or lower, never "brighter" (ledger:M181: F major
+    against C major read "brighter")."""
     out = []
     if a['key'] != b['key']:
-        out.append(f"in {b['key']}" if a['key'].split()[1] == b['key'].split()[1] else f"{b['key'].split()[1]} ({b['key']})")
+        same_mode = a['key'].split()[1] == b['key'].split()[1]
+        if plainw and same_mode:
+            up = (NOTE_NAMES.index(b['key'].split()[0]) - NOTE_NAMES.index(a['key'].split()[0])) % 12
+            out.append('pitched higher' if up <= 6 else 'pitched lower')
+        elif plainw:
+            out.append('brighter' if b['key'].endswith('major') else 'darker')
+        else:
+            out.append(f"in {b['key']}" if same_mode else f"{b['key'].split()[1]} ({b['key']})")
     if abs(a['bpm'] - b['bpm']) >= 0.06 * a['bpm']:
-        out.append(('slower' if b['bpm'] < a['bpm'] else 'faster') + f" ({b['bpm']:g} BPM)")
+        out.append(('slower' if b['bpm'] < a['bpm'] else 'faster') + ('' if plainw else f" ({b['bpm']:g} BPM)"))
     if a['bars'] != b['bars']:
         out.append('longer' if b['bars'] > a['bars'] else 'shorter')
     la, lb = a['parts'].get('melody', {}).get('voice'), b['parts'].get('melody', {}).get('voice')
@@ -161,7 +176,7 @@ def contrast(a, b):
         out.append(f"{plain(lb)} on the tune")
     na, nb = (sum(len(p['notes']) for p in x['parts'].values()) for x in (a, b))
     if na and abs(nb - na) >= 0.15 * na:
-        out.append('sparser' if nb < na else 'busier')
+        out.append(('fewer notes' if nb < na else 'more notes') if plainw else ('sparser' if nb < na else 'busier'))
     if (a.get('form') or []) != (b.get('form') or []):
         out.append('with an intro and an ending' if b.get('form') else 'one groove throughout')
     return out
@@ -427,6 +442,9 @@ def say_plain(spec):
                        f"full string section isn't here yet")
         elif who is None:
             out.append(f"you asked for {s['asked']}; there's no singing voice yet, so it's left out")
+        elif 'piano' in s['asked'].lower() or 'tonk' in s['asked'].lower():     # a kind of piano: the grand plays it
+            art = 'an' if s['asked'][0].lower() in 'aeiou' else 'a'
+            out.append(f"you asked for {art} {s['asked']}; that sound isn't here yet, so {who} plays it instead")
         else:
             what = PLAIN_ROLE.get(s['role'], 'its part')
             out.append(f"you asked for {s['asked']}; that isn't here yet, so {who} plays {what}")
@@ -769,7 +787,12 @@ ACTIVE = {   # section -> roles that play in it (drums play their own section pa
 
 def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, label=None):
     """-> a dict: what it is, key, bpm, bars, form, chords, every part's notes as (bar, beat, pitch, dur, vel)."""
-    rng = random.Random(f"{seed}:{variant}:{brief}:{sorted(spec['parts'].items())}")
+    tune_id = f"{seed}:{variant}:{brief}:{sorted(spec['parts'].items())}"
+    rng = random.Random(tune_id)
+    # ledger:M181: a next round keeps the person's tune. Its seed, motif rhythm, chords and length come from the
+    # base sketch (spec['tune']), and the tune has its own random stream, so what the words change around it
+    # (tempo, density, mode) never redraws it
+    tune = spec.get('tune') or {}
     tonic, mode = parse_key(spec.get('key'), brief)
     if not spec.get('key') and spec.get('key_shift'):        # a reading in another key, the mode the words chose
         tonic = (tonic + spec['key_shift']) % 12
@@ -782,6 +805,8 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
     at = {'as asked': 0.5, 'sparser': 0.15, 'busier': 0.85}.get((label or '').split(',')[0])
     bpm = spec.get('bpm') or (round(lo_b + at * (hi_b - lo_b)) if at is not None else rng.randint(lo_b, hi_b))
     form = spec.get('form') or (['groove', 'groove', 'outro'] if classical else None)
+    if not bars and tune.get('bars') and (tune.get('form') or None) == (spec.get('form') or None):
+        bars = tune['bars']
     if form:
         bars = bars or 4 * len(form)
     elif not bars:
@@ -792,7 +817,7 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
     else:
         secs = ['groove'] * bars
     table = CLASSICAL if classical else PROGRESSIONS
-    prog = progression or table[mode][variant % len(table[mode])]
+    prog = progression or tune.get('progression') or table[mode][variant % len(table[mode])]
     if isinstance(prog, str):
         prog = [x for x in re.split(r'[\s,|-]+', prog) if x]
     loop = [chord(s, tonic, mode) for s in prog]
@@ -803,7 +828,7 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
         chords[-2] = chord('iv' if mode == 'minor' else 'IV', tonic, mode) if plagal else chord('V', tonic, mode)
         cadence = ('iv i' if mode == 'minor' else 'IV I') if plagal else ('V i' if mode == 'minor' else 'V I')
     mmode = ('minor_pent' if mode == 'minor' else 'major_pent') if spec.get('blues') else mode
-    k = (variant + len(spec['parts'])) % 3 if spec.get('dense', 0) >= 0 else 3
+    k = tune['k'] if 'k' in tune else (variant + len(spec['parts'])) % 3 if spec.get('dense', 0) >= 0 else 3
     rhythm, alt = MOTIF_RHYTHMS[k], MOTIF_RHYTHMS[(k + 1) % 3]
     feel, dense = spec.get('feel'), spec.get('dense', 0)
     parts = {}
@@ -813,7 +838,7 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
         if role == 'melody':
             if voice == 'grand_piano' and len(spec['parts']) > 2:
                 reg = (64, 86)
-            notes = melody(chords, tonic, mmode, reg, rng, rhythm, alt)
+            notes = melody(chords, tonic, mmode, reg, random.Random(tune.get('id') or tune_id), rhythm, alt)
             if dense < 0:                                    # sparser: the tune's long notes, the passing ones out
                 notes = [n for n in notes if n[3] >= 1 or n[1] % 1 == 0 and n[1] % 2 == 0]
         elif role == 'harmony':
@@ -857,12 +882,14 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
         if soft and role not in ('drums', 'fx'):              # soft dynamics: everything played lighter
             keep = [n[:4] + (max(24, int(n[4] * 0.8)),) for n in keep]
         parts[role] = {'voice': voice, 'level': level, 'notes': keep}
-    names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
+    names = NOTE_NAMES
     what = spec.get('what') or (label or 'as asked') + ': ' + ', '.join(
         f"{r} ({v})" for r, v in ((r, spec['parts'][r]) for r in ROLE_ORDER if r in spec['parts']))
     return {'what': what, 'key': f"{names[tonic]} {mode}", 'bpm': bpm, 'bars': bars, 'progression': prog,
             'form': [s for i, s in enumerate(secs) if i == 0 or secs[i - 1] != s] if form else None,
-            'feel': feel, 'soft': bool(soft), 'cadence': cadence, 'parts': parts}
+            'feel': feel, 'soft': bool(soft), 'cadence': cadence, 'parts': parts,
+            'tune': {'id': tune.get('id') or tune_id, 'k': k, 'progression': list(prog), 'bars': bars,
+                     'form': spec.get('form'), 'key': f"{names[tonic]} {mode}", 'bpm': bpm}}
 
 
 def plan(brief, style, key=None, bpm=None, bars=None, progression=None, seed=0, variant=0):
@@ -884,10 +911,25 @@ def specs_for(brief, key=None, bpm=None, n=3, base=None):
     """-> [(label, spec)], and the lines to say: a brief that names a genre or instruments gets n readings of it
     (as asked, sparser, busier); a vague one gets the three styles; base= a sketch's spec changed by the words."""
     if base is not None:
-        spec, changed = apply_words(base, brief)
+        b = copy.deepcopy(base)
+        t = b.get('tune') or {}
+        b['key'], b['bpm'] = b.get('key') or t.get('key'), b.get('bpm') or t.get('bpm')   # what was heard
+        spec, changed = apply_words(b, brief)
         said = spec['said'] + ([f"changed from the base: {', '.join(changed)}"] if changed else
                                ["the words named nothing to change: say what to change (an instrument, tempo, "
                                 "sparser or busier, a section)"])
+        if t:
+            # ledger:M181: "a bit happier" came back as two new tunes, one of them sparser (the opposite of
+            # happier). Now: the same tune with the change, then the same tune with the change taken further
+            spec['changed'] = changed
+            out = [('as asked', spec)]
+            more, again = apply_words(spec, brief)
+            same = {k: v for k, v in more.items() if k not in ('said', 'changed')} == \
+                {k: v for k, v in spec.items() if k not in ('said', 'changed')}
+            if n > 1 and again and not same:
+                more['changed'] = again
+                out.append(('further', more))
+            return out, said
     else:
         spec = read_brief(brief)
         said = list(spec['said'])
