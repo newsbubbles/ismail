@@ -64,7 +64,10 @@ def server_for(scene=None, port=None):
 
 def http(rec, path, body=None, timeout=30):
     url = f'http://127.0.0.1:{rec["port"]}/{path.lstrip("/")}'
-    data = None if body is None else json.dumps(body).encode()
+    try:                                                   # NaN or Infinity is no JSON the page can read: it would stall its queue
+        data = None if body is None else json.dumps(body, allow_nan=False).encode()
+    except ValueError:
+        raise OpError(f'a number in this command is not finite (NaN or Infinity): {str(body)[:200]}') from None
     req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'} if data else {},
                                  method='POST' if data is not None else 'GET')
     try:

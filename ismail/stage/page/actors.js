@@ -324,7 +324,7 @@ export function initActors(ed, live) {
   }
 
   // ---- play / stop
-  async function play(c) {
+  async function playNow(c) {
     const person = c.person, who = c.actor || world().actors[person];
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     const gone = unloadedOf(person);
@@ -392,7 +392,7 @@ export function initActors(ed, live) {
   }
   // ---- follow: the person moves with the user, live, from where they stand (no take needed; a take on a person
   // turns it on while recording). Same puppet map as a played take, fed the user's frame of this moment.
-  async function follow(c) {
+  async function followNow(c) {
     const person = c.person, who = c.actor || world().actors[person];
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     const gone = unloadedOf(person);
@@ -451,6 +451,21 @@ export function initActors(ed, live) {
   // since they were imported; "a pose to leave everything in"). Their own body, posed once; the statue hidden.
   // stage_actor_start(idle=False) keeps the statue for that person.
   const resting = new Map();                                // person -> { rig, spec }
+  // a play or a Follow being set up claims its person until it is playing, so a rest still loading (the one its own
+  // stop() begins, or a scene reveal's) stands down instead of adding a second body (the user, 2026-10-08: "double
+  // Pete" while following and recording, after Pete had a start pose: the rest finished during useStart's await)
+  const starting = new Map();                               // person -> plays or Follows being set up
+  const claimed = (fn) => async (c) => {
+    const person = c && c.person;
+    starting.set(person, (starting.get(person) || 0) + 1);
+    try { return await fn(c); } finally {
+      const n = starting.get(person) - 1;
+      if (n > 0) starting.set(person, n);
+      else { starting.delete(person); if (!playing.has(person)) rest(person).catch(() => {}); }   // it failed: rest again
+    }
+  };
+  const play = claimed(playNow), follow = claimed(followNow);
+  const busy = (person) => playing.has(person) || starting.has(person);
   function unrest(person) {
     const r = resting.get(person);
     if (!r) return;
@@ -458,21 +473,21 @@ export function initActors(ed, live) {
     scene.remove(r.rig.root);
   }
   async function rest(person) {
-    if (playing.has(person) || !world().actors[person]) return null;
+    if (busy(person) || !world().actors[person]) return null;
     if (unloadedOf(person)) { unrest(person); return null; }   // in an unloaded set (loadsets.js): no body at all
     const rig0 = await rigOf(person);
     await readProfile(rig0);
     const spec = rig0.profile && rig0.profile.start;
     const it = ed.byName.get(person);
     if (!spec || spec.idle === false || !it) { unrest(person); if (it) it.obj.visible = true; return null; }
-    if (playing.has(person) || unloadedOf(person)) return null;   // a play began, or its set went, while it loaded
+    if (busy(person) || unloadedOf(person)) return null;   // a play began, or its set went, while it loaded
     const r = resting.get(person) || { rig: await cloneRig(rig0) };
     const w = it.obj.getWorldPosition(new THREE.Vector3()), floor = groundOf(it);
     const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), r.rig.fwd);
     const tmp = { person, rig: r.rig, s: 1, floor, to: new THREE.Vector3(w.x, floor, w.z), alignInv: align.invert(),
       feet: { l: {}, r: {} }, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
     await startPose(tmp, spec);
-    if (playing.has(person) || unloadedOf(person)) return null;   // a play began, or its set was unloaded, meanwhile
+    if (busy(person) || unloadedOf(person)) return null;   // a play began, or its set was unloaded, meanwhile
     r.spec = spec;
     resting.set(person, r);
     scene.add(r.rig.root);
