@@ -27,6 +27,10 @@
 // color, seconds}), show(names, on), move(name, {by, to, turn, seconds}), sound(file, {at, volume}), emit(type, data),
 // do(command, fields), after(seconds, fn), every(seconds, fn). Names take a list or a glob (cf_floor_*). Positions are
 // Blender metres, z up; turn is [x, y, z] degrees about the object's own origin.
+//
+// Errors (the user, 2026-10-08, after a touch did nothing: "you should have an event hook on object functionality
+// errors"): every one goes to the agents as behaviour_error {object, phase, action, error, line}, load errors too, and
+// a person's press that fails buzzes and says so at the object, so a broken switch never passes for one that is off.
 import * as THREE from 'three';
 import { listenerOf } from './stream.js';
 
@@ -36,8 +40,8 @@ const ACTIONS = ['press', 'apply'];
 export function initBehaviours(ed, live, panels) {
   let defs = {}, states = {}, report = { file: false, objects: [], errors: [], warnings: [] };
   let timers = [], anims = [], saveTimer = null, gen = 0;
-  const lastPress = new Map(), buffers = new Map();
-  let listener = null;
+  const lastPress = new Map(), buffers = new Map(), broken = new Map();   // broken: object -> why its code is not running
+  let listener = null, modUrl = null;
   const scn = () => ed.sceneName;
   const base = () => `scenes/${encodeURIComponent(scn())}/`;
   const b2t = (v) => new THREE.Vector3(v[0], v[2], -v[1]);           // Blender (z up) to three (y up)
@@ -70,6 +74,15 @@ export function initBehaviours(ed, live, panels) {
     o.type = 'triangle'; o.frequency.setValueAtTime(1800, t); o.frequency.exponentialRampToValueAtTime(600, t + 0.03);
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
     o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.08);
+  }
+  function buzz() {                                             // a failed press: two low falling buzzes, unlike any click
+    const a = ctx(), t = a.currentTime;
+    for (const dt of [0, 0.16]) {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(190, t + dt); o.frequency.exponentialRampToValueAtTime(95, t + dt + 0.12);
+      g.gain.setValueAtTime(0.0001, t + dt); g.gain.exponentialRampToValueAtTime(0.18, t + dt + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.13);
+      o.connect(g).connect(a.destination); o.start(t + dt); o.stop(t + dt + 0.15);
+    }
   }
   async function sound(file, o = {}) {
     const url = new URL(base() + file, location.href).href;
@@ -199,14 +212,38 @@ export function initBehaviours(ed, live, panels) {
   function guard(name, action, fn) {
     try {
       const r = fn();
-      if (r && r.catch) r.catch((e) => fail(name, action, e));
+      if (r && r.catch) return r.catch((e) => { fail(name, action, e); });   // reported once, never rethrown
       return r;
     } catch (e) { fail(name, action, e); return undefined; }
   }
-  function fail(name, action, e) {
-    const error = String((e && e.message) || e);
-    report.errors.push({ object: name, action, error });
-    live.emit('behaviour_error', { object: name, action, error });
+  function phaseOf(name, action) {
+    if (['load', 'apply', 'press', 'after', 'every'].includes(action)) return action;
+    const d = defs[name] || {};
+    return d.menu && d.menu[action] ? 'menu' : d.inputs && d.inputs[action] ? 'input' : action;
+  }
+  function lineOf(e) {                                          // the line in behaviours.js, from the stack, when it is there
+    const m = modUrl && e && e.stack && e.stack.match(new RegExp(modUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':(\\d+)'));
+    return m ? +m[1] : (e && e.lineNumber) || null;
+  }
+  function fail(name, action, e, line = lineOf(e)) {
+    const error = String((e && e.message) || e), err = { object: name, phase: phaseOf(name, action), action, error, line };
+    report.errors.push(err);
+    live.emit('behaviour_error', err);
+    return err;
+  }
+  function nearHead() {
+    const head = ed.camera.getWorldPosition(new THREE.Vector3()), look = ed.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+    const near = head.clone().addScaledVector(look, 0.55); near.y = head.y - 0.18;
+    return near;
+  }
+  // a person's press that failed: a buzz, and a short note at the object (gone by itself), with the edit menu one tap away
+  async function failedPress(name, error) {
+    try { buzz(); } catch (e) { /* no sound must not cost the note */ }
+    const it = ed.byName.get(name);
+    const r = await panels.show({ panel_id: 'behaviour_error_' + name, title: (it ? ed.label(it) : name) + ': its code failed',
+      text: error.length > 140 ? error.slice(0, 137) + '...' : error, buttons: ['⚙ Edit', '✕'], near: nearHead(), width: 0.4,
+      quiet: true, seconds: 8 }).catch(() => null);
+    if (r && r.answer === '⚙ Edit' && it) { editing = it; ed.select(it, 'behaviour-edit'); setTimeout(() => { if (editing === it) editing = null; }, 60000); }
   }
   function fnOf(d, action) {
     if (ACTIONS.includes(action)) return d[action];
@@ -228,16 +265,35 @@ export function initBehaviours(ed, live, panels) {
     const errs = report.errors.length;
     await call(name, action, value, via);
     const res = { object: name, action, via, state: states[name] || {} };
-    if (report.errors.length > errs) res.error = report.errors[report.errors.length - 1].error;
+    if (report.errors.length > errs) {
+      res.error = report.errors[report.errors.length - 1].error;
+      if (via === 'person') failedPress(name, res.error);
+    }
     live.emit('behaviour_run', res);
     return res;
   }
 
   // ---- loading: the scene's file, its saved state, apply() on each object
+  // a module that does not parse says where only to a script tag (the window's error event has the line), so ask one
+  function syntaxLine(src) {
+    return new Promise((res) => {
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' })), el = document.createElement('script');
+      let over = false;
+      const done = (line) => { if (over) return; over = true; window.removeEventListener('error', on, true); el.remove(); URL.revokeObjectURL(url); res(line); };
+      const on = (ev) => { if (ev.filename === url) { ev.preventDefault(); done(ev.lineno || null); } };
+      window.addEventListener('error', on, true);
+      el.type = 'module'; el.src = url; el.onload = () => done(null); el.onerror = () => done(null);
+      document.head.appendChild(el); setTimeout(() => done(null), 1500);
+    });
+  }
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const named = (name, src) => new RegExp(`(^|[\\s{,])['"]?${esc(name)}['"]?\\s*:`, 'm').test(src);   // a key in the file
+
+  // ---- loading: the scene's file, its saved state, apply() on each object
   async function load(why = 'load') {
     gen++;
     for (const t of timers) t();
-    timers = []; anims = []; defs = {}; warned.clear();
+    timers = []; anims = []; defs = {}; warned.clear(); broken.clear();
     report = { file: false, objects: [], errors: [], warnings: [], why };
     const scene = scn();
     const r = await fetch(base() + 'behaviours.js', { cache: 'no-store' }).catch(() => null);
@@ -245,23 +301,27 @@ export function initBehaviours(ed, live, panels) {
     report.file = true;
     let mod = null;
     const src = await r.text(), url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    modUrl = url;
     try { mod = await import(/* @vite-ignore */ url); } catch (e) {
-      report.errors.push({ object: null, action: 'load', error: String((e && e.message) || e) });
+      const line = lineOf(e) || (e instanceof SyntaxError ? await syntaxLine(src) : null);
+      const err = fail(null, 'load', e, line);
+      // the whole file is out: the objects it names answer a press with a buzz, not the edit menu
+      for (const name of ed.byName.keys()) if (named(name, src)) broken.set(name, 'the file did not load: ' + err.error + (line ? ` (line ${line})` : ''));
     } finally { URL.revokeObjectURL(url); }
     if (scene !== scn()) return report;                        // the scene changed while it loaded
     const all = (mod && mod.default) || {};
-    if (mod && (typeof all !== 'object' || Array.isArray(all))) report.errors.push({ object: null, action: 'load', error: 'export default must be an object: { objectName: { press, menu, ... } }' });
+    if (mod && (typeof all !== 'object' || Array.isArray(all))) fail(null, 'load', 'export default must be an object: { objectName: { press, menu, ... } }', null);
     const saved = await fetch(`behaviour_state?scene=${encodeURIComponent(scene)}`, { cache: 'no-store' }).then((x) => (x.ok ? x.json() : {})).catch(() => ({}));
     for (const [name, d] of Object.entries(typeof all === 'object' && all ? all : {})) {
-      if (!ed.byName.has(name)) { report.errors.push({ object: name, action: 'load', error: `no object "${name}" in ${scene}` }); continue; }
-      if (!d || typeof d !== 'object') { report.errors.push({ object: name, action: 'load', error: 'must be an object' }); continue; }
+      if (!ed.byName.has(name)) { fail(name, 'load', `no object "${name}" in ${scene}`, null); continue; }
+      if (!d || typeof d !== 'object') { broken.set(name, fail(name, 'load', 'must be an object: { sound, press, menu, ... }', null).error); continue; }
       defs[name] = d;
       states[name] = { ...(d.state || {}), ...((saved && saved[name]) || {}) };
       if (!d.sound) warn(name, 'no sound: every interaction needs one (render it with ismail, put it under sounds/, name it in `sound`)');
       report.objects.push({ object: name, actions: actionsOf(name), state: states[name], sound: d.sound || null });
     }
     for (const name of Object.keys(defs)) if (defs[name].apply) call(name, 'apply', undefined, 'load');
-    live.emit('behaviours_loaded', { ...report, objects: report.objects.map((o) => o.object) });
+    live.emit('behaviours_loaded', { ...report, objects: report.objects.map((o) => o.object), broken: [...broken.keys()] });
     return report;
   }
 
@@ -275,6 +335,15 @@ export function initBehaviours(ed, live, panels) {
     if (typeof it === 'string') it = ed.byName.get(it) || null;
     if (!it || !['xr', 'touch'].includes(via)) return false;   // the desktop selects to edit; agents use the ops
     const name = ownerOf(it);
+    if (!name && editing !== it) {                              // code that did not load: say so, never a silent edit menu
+      const bad = [...(it.path || [it])].reverse().map((x) => x.name).find((n) => broken.has(n));
+      if (bad) {
+        const now = performance.now();
+        ed.select(null, 'behaviour');
+        if (now - (lastPress.get(bad) || 0) >= PRESS_GAP_MS) { lastPress.set(bad, now); failedPress(bad, fail(bad, 'press', broken.get(bad), null).error); }
+        return true;
+      }
+    }
     if (!name || editing === it) return false;
     const d = defs[name];
     if (!d.press && !d.menu) return false;
@@ -288,10 +357,8 @@ export function initBehaviours(ed, live, panels) {
   }
   async function menu(name, it) {
     const d = defs[name], labels = Object.keys(d.menu);
-    const head = ed.camera.getWorldPosition(new THREE.Vector3()), look = ed.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
-    const near = head.clone().addScaledVector(look, 0.55); near.y = head.y - 0.18;
     const r = await panels.show({ panel_id: 'behaviour_' + name + '_' + Date.now(), title: d.title || ed.label(it),
-      text: d.text || '', buttons: [...labels, '⚙ Edit', '✕'], near, width: labels.length > 3 ? 0.42 : 0.34, quiet: true });
+      text: d.text || '', buttons: [...labels, '⚙ Edit', '✕'], near: nearHead(), width: labels.length > 3 ? 0.42 : 0.34, quiet: true });
     const a = r && r.answer;
     if (!a || a === '✕') return;
     if (a === '⚙ Edit') { editing = it; ed.select(it, 'behaviour-edit'); setTimeout(() => { if (editing === it) editing = null; }, 60000); return; }
@@ -306,9 +373,9 @@ export function initBehaviours(ed, live, panels) {
   if (ed.items.length) fresh();                                // the room came before this module did
   live.handlers.behaviours = async (c) => {
     const r = c.reload ? await load('reload') : report;
-    return { file: r.file, objects: report.objects.map((o) => ({ ...o, state: states[o.object] || {} })), errors: r.errors.slice(-20), warnings: r.warnings };
+    return { file: r.file, objects: report.objects.map((o) => ({ ...o, state: states[o.object] || {} })), errors: r.errors.slice(-20), warnings: r.warnings, broken: Object.fromEntries(broken) };
   };
   live.handlers.behaviour_run = (c) => run(c.object, c.action || 'press', c.value, c.via || 'agent', c.sound !== false);
   live.handlers.behaviour_state = (c) => (c.state ? setState(c.object, c.state, 'agent') : (defs[c.object] ? { ...(states[c.object] || {}) } : (() => { throw new Error(`"${c.object}" has no behaviour in ${scn()}`); })()));
-  return { load, run, onSelect, ownerOf, state: () => ({ objects: Object.keys(defs), errors: report.errors.length }) };
+  return { load, run, onSelect, ownerOf, state: () => ({ objects: Object.keys(defs), errors: report.errors.length, broken: [...broken.keys()] }) };
 }

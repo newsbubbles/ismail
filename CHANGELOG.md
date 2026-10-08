@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Stage: a thing whose code fails says so
+
+- Every behaviour failure, at load or on a press, goes to the agents as `behaviour_error` with its phase and the line
+  in behaviours.js (a file that does not parse included), so whoever wrote it can fix it at once (the user,
+  2026-10-08: "you should have an event hook on object functionality errors").
+- In VR a press that fails buzzes and shows a short note at the object, and a thing whose code did not load does the
+  same instead of opening the edit menu: a broken switch no longer looks like one that is off.
+- An async function that fails is reported once (it was reported twice).
+
 ### Stage: things that do things, from saved code
 
 - A scene can give its objects their own small functions (`scenes/<scene>/behaviours.js`, written by an agent): a

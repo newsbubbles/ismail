@@ -505,7 +505,7 @@ def stage_behaviours(scene: str, reload: bool = False) -> str:
     """What the things in a scene do on their own: the objects with a behaviour in scenes/<scene>/behaviours.js, what
     each can do (press, its menu items, its inputs), its state now, its sound, and every load error and warning
     (page command: behaviours). reload=True reads the file again first: after writing or changing it, call this with
-    reload and read the errors, the page has no other way to tell you a function failed to load.
+    reload and read the errors (each {object, phase, action, error, line}; line is in behaviours.js).
     The file is plain JavaScript, no imports: `export default { object_name: { sound, state, apply(s), press(s),
     menu: {label: (s) => ...}, inputs: {name: (s, value) => ...} } }`. The page runs these itself when the person
     pinches or triggers the object in VR (or picks a menu item), so the room answers with no agent in the loop: turn
@@ -514,7 +514,11 @@ def stage_behaviours(scene: str, reload: bool = False) -> str:
     emit (a message to agents: object_message), do, after, every. apply(s) runs at load and after every state change:
     put the state-to-room mapping there, so a reload or a scene switch shows the right room. Every interaction needs
     its own sound (`sound`: a file under the scene folder, rendered with ismail); without one the page clicks and
-    warns. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings}. Emits: behaviours_loaded."""
+    warns. Every error, at load or at run time, also goes out as behaviour_error {object, phase (load, apply, press,
+    menu, input, after, every), action, error, line}; listen for it. In VR a press that fails buzzes and shows a short
+    note at the object, and an object whose code did not load (`broken`) does the same instead of opening the edit
+    menu. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings, broken: {object: why}}.
+    Emits: behaviours_loaded, behaviour_error, behaviour_warning."""
     return page_cmd(scene, 'behaviours', {'reload': reload or None}, timeout=60)
 
 
