@@ -107,6 +107,12 @@ def esbuild_path():
     return p if p and Path(p).exists() else None
 
 
+def _not_finite(word):
+    """json.loads' parse_constant: NaN and Infinity are refused, since a page reading them back fails to parse the
+    command list and its queue stalls (the user, 2026-10-08)."""
+    raise ValueError(f'{word} is not a number the page can read')
+
+
 def bundle():
     """bundle.js in the state folder, rebuilt (build_bundle.mjs, esbuild) when a page module is newer: the headset
     boots in one request. None without esbuild."""
@@ -431,7 +437,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _body(self):
         n = int(self.headers.get('Content-Length', 0))
-        return json.loads(self.rfile.read(n) or b'null')
+        return json.loads(self.rfile.read(n) or b'null', parse_constant=_not_finite)
 
     def _livestream(self, q):
         """Relay one ismail live stream to the page until either side leaves (stream.js plays it at an object)."""
