@@ -1046,6 +1046,16 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
                         raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
                                           f"machine op shows the board), wait in line (`run --wait 30m`), do lighter "
                                           f"work meanwhile, or pass force=True only if the user says so.")
+                    # on the board inside the same lock as the check: registered later, the slot looked free to the
+                    # next waiter in between (this waiter's line file already gone), and two jobs took one GPU slot
+                    job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
+                           'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'disk_gb': disk_gb,
+                           'forced': bool(force), 'threads': threads}
+                    # unique per slot: two slots taken in the same millisecond by one process overwrote each other
+                    job['id'] = f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}"
+                    path = os.path.join(board_dir(), 'jobs', job['id'] + '.json')
+                    with open(path, 'w', encoding='utf8') as f:
+                        json.dump(job, f)
                     break
                 if wid is None:        # stand in line
                     wid = f"{me.pid}_{int(since * 1000)}_{os.urandom(3).hex()}"
@@ -1071,15 +1081,6 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         state['disk'] = d[-1][0]
         state['disk_free_gb'] = round(d[-1][1], 2)
     state['commit_free_gb'] = round(memory()[0], 2)
-    with _board_lock():
-        job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
-               'started': time.time(), 'est_s': est_s, 'mem_gb': mem_gb, 'disk_gb': disk_gb, 'forced': bool(force),
-               'threads': threads}
-        # unique per slot: two slots taken in the same millisecond by one process overwrote each other
-        job['id'] = f"{me.pid}_{int(job['started'] * 1000)}_{os.urandom(3).hex()}"
-        path = os.path.join(board_dir(), 'jobs', job['id'] + '.json')
-        with open(path, 'w', encoding='utf8') as f:
-            json.dump(job, f)
     _held.depth, _held.threads, _held.job = 1, threads, job
     undo = []
     meter = _Meter(job, gpu_sampler=g is not None, path=path)
