@@ -408,6 +408,8 @@ def test_plain_words_first_round_plays_version_1_with_delight_and_offers_choices
     assert 'Version 1 is ready now; the other is a spare' in say
     assert say.index("Here's the first one, have a listen.") > say.index('Version 2:')           # after the versions
     assert say.rstrip().endswith('or tell me anything.') and 'Want it different? Try: ' in say
+    assert "It's a first try: I don't know your taste yet" in say and 'name a song you love' in say
+    assert 'HAND IT OVER' in out and os.path.join(song, 'version 1.') in out and 'no setup report' in out
     line = [x for x in say.splitlines() if 'Want it different?' in x][0]
     choices = [c.strip() for c in line.split('Try: ')[1].replace(', or tell me anything.', '').replace(' or ', ', ')
                .split(',') if c.strip()]
@@ -421,5 +423,21 @@ def test_plain_words_first_round_plays_version_1_with_delight_and_offers_choices
     keep = api.sketch_keep(song, '1')
     nk = keep.split('NEXT:')[1]
     assert 'playful choices' in nk and 'or tell me anything' in nk
-    assert 'live changes come later; do not offer them yet' in nk.lower()
+    assert 'want me to play it live' in nk.lower() and 'do not offer them yet' not in nk.lower()
     assert 'closest' not in nk and 'before and after' not in nk
+
+
+def test_play_file_opens_the_persons_player_and_says_to_link_it(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    f = tmp_path / 'version 1.mp3'
+    f.write_bytes(b'ID3')
+    opened = []
+    if sys.platform == 'win32':
+        monkeypatch.setattr(os, 'startfile', lambda p: opened.append(p), raising=False)
+    else:
+        monkeypatch.setattr(subprocess, 'Popen', lambda cmd, **k: opened.append(cmd[-1]))
+    out = api.play_file(str(f))
+    assert opened == [str(f)] and 'link it in your reply' in out
+    with pytest.raises(api.OpError, match='no file at'):
+        api.play_file(str(tmp_path / 'nope.mp3'))
