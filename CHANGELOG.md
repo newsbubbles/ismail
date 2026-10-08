@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Two waiting jobs no longer take one slot together
+
+- `machine.slot`: a job goes on the board in the same lock as the check that let it start. It used to be registered
+  after the GPU, disk and memory readings, and meanwhile the next job in line saw a free slot and started too (two
+  jobs on one GPU slot; it showed as a macOS CI flake on main 10-07). Test: two waiters, a slow reading, never two
+  jobs at once.
+
 ### Song rebuilds back up only what cannot be made again
 
 - `ismail.backup`: `set_aside(proj)` moves the old `proj/` to `backups/proj_<time>` as before, and `carry_back(kept,

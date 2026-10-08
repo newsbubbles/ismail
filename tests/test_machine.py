@@ -356,6 +356,41 @@ def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     assert j['over_gb'] > 0.75 and j['mem_peak_gb'] >= 0.85 and not j.get('suspended')
 
 
+def test_two_waiters_never_share_one_slot_when_it_frees(board, monkeypatch):
+    """The job goes on the board inside the same lock as its check: registered after the GPU and disk readings, the
+    slot looked free to the next waiter meanwhile and both started (a macOS CI flake, main 10-07)."""
+    import threading
+    import time
+    monkeypatch.setattr(machine, 'WAIT_POLL_S', 0.02)
+    monkeypatch.setattr(machine, 'METER_S', 0.05)
+    monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
+    monkeypatch.setattr(machine, 'gpu', lambda: None)
+    monkeypatch.setattr(machine, 'disks', lambda *a, **k: (time.sleep(0.3), [])[1])   # a slow reading widens the gap
+    most, errors = [], []
+
+    def take(who):
+        machine._held.depth = 0
+        try:
+            with machine.slot('gpu', 'job ' + who, who=who, wait=60):
+                most.append(len([j for j in machine.jobs() if j['kind'] == 'gpu']))
+                time.sleep(1.0)                                      # long enough for a second taker to overlap
+        except machine.MachineBusy as e:
+            errors.append(str(e))
+    with machine.slot('gpu', 'holder', who='crossroads'):
+        machine._held.depth = 0
+        ts = [threading.Thread(target=take, args=(w,)) for w in ('a', 'b')]
+        for t in ts:
+            t.start()
+        t_end = time.time() + 10
+        while len(machine.waiters()) < 2 and time.time() < t_end:
+            time.sleep(0.02)
+        machine._held.depth = 1
+    for t in ts:
+        t.join(90)
+    assert not errors, errors
+    assert most == [1, 1]
+
+
 def test_a_render_in_a_big_process_is_not_over_its_estimate(board, monkeypatch):
     """The holder's memory before the slot is not the job's: an agent's 0.7 GB Python process rendering a 0.15 GB
     window was flagged OVER on every render (2026-10-05)."""
