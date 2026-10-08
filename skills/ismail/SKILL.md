@@ -44,7 +44,7 @@ songs/<slug>/            everything one song owns
   PROGRESS.md            the deliverable, who and what matters most, what is locked, what is next in order, and
                          the side tracks that must not take over: read at every start and after every compaction
   HANDOFF.md             what can migrate into ismail: elements, evidence, files, proposed ops, tests, skill text
-  build.py               rebuilds proj/ (never deletes: an old proj/ moves to backups/)
+  build.py               rebuilds proj/ (never deletes: an old proj/ moves to backups/ with ismail.backup)
   voices/                the song's voices, profiles and song-local engine modules (build.py copies them
                          into proj/voices/, where the engine looks)
   work/                  analysis, measurement and exam scripts, and their saved output
@@ -64,6 +64,13 @@ songs/_briefs/           briefs for starting a song in a fresh session
 folder, nested repositories included), never in the ismail checkout. The song's `.gitignore` keeps out audio and
 anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backups/`, live recordings,
 `exam/**/*.mp3`, profiles a script rebuilds, `__pycache__/`. Local commits only; a remote only if the user asks.
+
+**Rebuild backups**: a `build.py` sets the old `proj/` aside with `ismail.backup.set_aside(PROJ)` before
+`project_new`, then `ismail.backup.carry_back(kept, PROJ)` after it. Every backup keeps what cannot be made again
+(`project.json`, `history/`, `sounds/`, `voices/`); `cache/`, `renders/` and `stems/` move back into the new `proj/`
+instead of being copied, and older backups that still hold them hand them to the song's `_reclaim/` (the newest 2
+keep theirs). Moving the whole `proj/` each time wrote 3.2 GB in 15 minutes of rebuilds. Backups made the old way:
+`python -m ismail.backup trim songs/<slug>/backups --dry`, then without `--dry`.
 
 **Words**: "the engine" is `ismail/` on main; "song code" is anything under `songs/<slug>/`. A song never modifies
 the engine; it adds song code.

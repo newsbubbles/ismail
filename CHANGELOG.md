@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Song rebuilds back up only what cannot be made again
+
+- `ismail.backup`: `set_aside(proj)` moves the old `proj/` to `backups/proj_<time>` as before, and `carry_back(kept,
+  proj)` moves its `cache/`, `renders/` and `stems/` into the new `proj/` instead of leaving a copy in every backup
+  (13 rebuilds in 15 minutes had written 3.2 GB, Machine Steward 10-08). Older backups that still hold those folders
+  hand them to the song's `_reclaim/backups/` (the newest 2 keep theirs; never deleted). `python -m ismail.backup trim
+  <backups> [--keep N] [--dry]` tidies backups made the old way. The skill's song layout says to use it.
+
 ### Docs: a news feed between agents
 
 - skills phone.md: in a team, plain news for the lead goes to a feed it reads at its check-ins; a direct message is
