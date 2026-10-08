@@ -2157,7 +2157,12 @@ def spectrogram(project: str, source: str = None, bars: list = None, out: str = 
     """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path.
     For eyes (zoomed on one sound, to compare two by picture): seconds=[t0, t1] inside bars (or the source), the band
     f_lo..f_hi Hz, ruler=True (ms from the window start), words=[{'w', 't0', 't1'}] in s. That picture sits on a fixed
-    plot box, so two of the same window line up pixel for pixel, and a .json beside it maps a pixel to (s, Hz)."""
+    plot box, so two of the same window line up pixel for pixel, and a .json beside it maps a pixel to (s, Hz).
+    Zoom early, not as a last resort, when: the person names a texture (robotic, digital, bitcrushed, smeared,
+    gargle, old TTS, cut off, pre-delay, reversed, phaser); the numbers say close but the ear says no; the sound is a
+    voice, sung words or a played instrument; two rounds passed without progress; or to see that a fix made its spot
+    fade. Draw the reference and yours on the same window, two ways (a few ms around an edge; a whole word or note for
+    texture), and read them one above the other (references/listening.md, "When to zoom")."""
     P = _load(project)
     path, g = P.source(source, bars)
     a, b = (g.bar_time(bars[0]), g.bar_time(bars[1] + 1)) if bars else (0.0, None)

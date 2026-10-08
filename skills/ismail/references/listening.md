@@ -16,7 +16,7 @@
 | What is this sound? | `analyze_timbre`, `analyze_spectrum`, `sound_compare` | harmonic slope, brightness and rolloff, envelope times, width |
 | What is the voice saying? | `analyze_formants` | F1/F2 per half beat, nearest vowel |
 | Why does it sound fake or digital? | `spectrogram` of the reference and of yours, same bars | look at them together, one above the other: "chopped rectangles vs ringing lines" showed partials that stopped instead of decaying. Then an ear test (`references/blind-tests.md`) |
-| Anything else | `spectrogram` (PNG) | last resort; it caught a missing low-pass that no text view showed |
+| Anything else | `spectrogram` (PNG) | it caught a missing low-pass that no text view showed |
 
 Zoom in for eyes. `spectrogram(seconds=[t0, t1], f_lo=, f_hi=, ruler=True, words=[...])` draws one sound (a word,
 a hit, a note plus 60 ms either side) on a fixed plot box, so the reference's picture and yours line up pixel for
@@ -25,6 +25,43 @@ maps a pixel to (s, Hz): `analysis.eye_address(view, fx, fy)` gives the spot the
 (`0.19 s 7.9 kHz "this" hiss`; bands body 0-1 kHz, vowel bands 1-4, hiss 4-8, air 8-16), so a screenshot they mark
 points you to the same place. From the Voice agent's work, where the eye found in one look what 40 rounds of numbers
 missed.
+
+## When to zoom
+
+The zoom is a measurement, not only a picture for exams: the sound becomes a large image of time against
+frequency, and you frame any part of it at the resolution the question needs. Reach for it early when:
+
+- **the person names a texture**: robotic, digital, bitcrushed, smeared, gargle, "old TTS", cut off, pre-delay,
+  reversed, phaser, plumes, motion blur. These live inside one moment, where long-window numbers cannot see;
+- **the numbers say close and the ear says no**: spectra within 1 to 2 dB while the person heard "30% there", or
+  every sensor at its best while they still heard "digital";
+- **the sound is hard**: a voice, sung words, a played instrument (guitar, piano, strings, brass), anything whose
+  realness is inside each note (attack, how partials decay, noise, pitch motion). Synths, drums and arrangement
+  usually go fine on the text views;
+- **two rounds passed without progress**: rotate the sense that measures (ears and numbers to eyes);
+- **after a fix aimed at a spot**: zoom the same spot again and see that the difference faded.
+
+How: draw the reference and yours on the same window and read them one above the other. Zoom two ways: a few ms
+around an edge (a time-sharp view shows a start early or late) and a whole word or note (a frequency-sharp view shows
+texture up high). For a blind check of your own, `exam_eye_crops` then `exam_eye_score`: if you can pick the real
+one from the picture, the person will most likely hear the difference too. A diff of two zooms (lighting only what
+lies outside the reference's own take-to-take spread) is coming from the Voice agent's work.
+
+What they said, and what the zoom found (the Voice agent's rounds):
+
+| they said | zoom | what it was |
+|---|---|---|
+| "almost sounds reversed", "pre-delay" | 2.5 ms on the first word | the synth was loud at the start of a sound where the voice is near silent: its loudness smoothing was too coarse |
+| "cut off the D" | the word "code" | the voice keeps buzzing through a closed consonant; the synth went silent there |
+| "ate the is" | the word "is" | its hiss started 50 to 200 ms early in 14 of 29 takes |
+| "like smoke plumes" (the voice), smooth (ours) | frequency-sharp, above 4 kHz | the synth's top end was too even |
+| "old TTS", "a line between words" | each word, full band | the voice's formant bands slide and curve through a sound; the synth's stepped as flat blocks |
+
+Words for pointing at a spot, so you and the person mean the same place: bands **body** 0-1 kHz, **vowel bands** 1-4,
+**hiss** 4-8, **air** 8-16; shapes **stripes** (one line per voice pulse), **bars** (level bands across a vowel),
+**plumes** (smoky, uneven, changing), **dashes** (short level lines at one height), **pockets** (dark gaps), **edges**
+(where a sound starts), **tails** (where it fades), **ridges** (fine lines that stay sharp); movement **blur along
+time**, **blur along pitch**.
 
 Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track stem is the track after its own effects and fader, scaled by the master chain's gain, so the stems sum to the mix. That means a sidechain duck shows up in `track:<name>`; if it barely dips, the duck depth is small, not the stem pre-fx.
 

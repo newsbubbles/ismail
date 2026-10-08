@@ -104,7 +104,7 @@ else is here (recreate a reference, build an instrument from recordings, play li
 1. **Session Sheet** (artifact, write it in your reply before any note): see the template below.
 2. **Build** the skeleton: tracks with instruments from the Sheet, drums first, then bass, then harmony, then lead, then ear candy. Use `batch` for multi-op edits (atomic, one round trip).
 3. **Render a window**, not the song: `render(bars=[a, b], stems=True)` on the section you just changed.
-4. **Listen** with the checks in `references/listening.md` and write a **Listening Report** (artifact): one line per check, a number from a tool on each line.
+4. **Listen** with the checks in `references/listening.md` and write a **Listening Report** (artifact): one line per check, a number from a tool on each line. Zoom early (`spectrogram` on the same window of the reference and yours, `exam_eye_crops` for a blind look of your own) when the person names a texture (robotic, digital, smeared, cut off), when the numbers say close and the ear says no, on voices and played instruments, and after two rounds without progress: on the voice work the zoom found what dozens of rounds of numbers missed (`references/listening.md`, "When to zoom").
 5. **Fix** the worst line, re-render, re-check. Only then move to the next section.
 6. **Full render + structure check**: `analyze_structure(source='render')` must show the form you planned in the Sheet.
 7. **Master** (`references/mastering.md`): loudness for the genre or the reference, glue, mono low end, limiter ceiling -1 dB for mp3.
