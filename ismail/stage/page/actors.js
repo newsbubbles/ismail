@@ -98,6 +98,11 @@ const FINGER_JOINTS = {
 };
 const SPINE = [['spine_01', 0.15], ['spine_02', 0.3], ['spine_03', 0.5], ['neck_01', 0.75], ['head', 1.0]];
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
+// a standing body from a headset (the user, 2026-10-08: "when I move my head ... sometimes the rest of my body moves,
+// but that's not actually what's going on"): the hips stay put while the head moves within HIP_SLACK of above them (a
+// lean, a nod: the spine bends toward the head instead) and trail it beyond; the body turns only when the head is
+// turned more than YAW_SLACK from it (a look aside twists the neck and spine, not the feet)
+const HIP_SLACK = 0.12, YAW_SLACK = THREE.MathUtils.degToRad(35);
 // pins while following (the user, 2026-10-04, sitting in real life while following a man on a bar stool: "anchors his
 // butt to the chair, so if I do anything with my head and hands his butt's gonna be anchored unless I move completely
 // away from the chair"). Pinned hips stay on the seat, facing the person's own way; the user's head bends the spine
@@ -235,20 +240,28 @@ export function initActors(ed, live) {
     const pin = st.pins && st.pins.hips;
     // the hips under the head, turned with it; or pinned to a seat, facing the person's own way
     const pel = rig.bones.pelvis;
-    const base = pin ? (st.pinYaw || yaw) : yaw;
-    let hipAt;
-    if (pin) hipAt = pin.clone();
+    let base, hipAt;
+    if (pin) { base = st.pinYaw || yaw; hipAt = pin.clone(); st.body = null; }   // let go of the seat: the body starts there
     else {
-      hipAt = head.clone().add(rig.rest.pelvis.p.clone().sub(rig.rest.head.p).applyQuaternion(yaw));
-      hipAt.y = Math.min(hipAt.y, st.floor + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y + 0.08);   // never off the ground
+      const b = st.body || (st.body = { yaw: yaw.clone(), hip: null });
+      const ang = b.yaw.angleTo(yaw);
+      if (ang > YAW_SLACK) b.yaw.rotateTowards(yaw, ang - YAW_SLACK);
+      base = b.yaw;
+      const under = head.clone().add(rig.rest.pelvis.p.clone().sub(rig.rest.head.p).applyQuaternion(base));
+      under.y = Math.min(under.y, st.floor + rig.rest.pelvis.p.y - rig.rest.foot_l.p.y + 0.08);   // never off the ground
+      if (!b.hip) b.hip = under.clone();
+      const dx = under.x - b.hip.x, dz = under.z - b.hip.z, d = Math.hypot(dx, dz), slack = HIP_SLACK * s;
+      if (d > slack) { b.hip.x += dx * (d - slack) / d; b.hip.z += dz * (d - slack) / d; }
+      b.hip.y = under.y;
+      hipAt = b.hip.clone();
     }
-    st.lastHip = hipAt.clone(); st.lastYaw = yaw.clone();
+    st.lastHip = hipAt.clone(); st.lastYaw = base.clone();             // the body's facing, not the head's
     pel.parent.updateMatrixWorld(true);
     pel.position.copy(pel.parent.worldToLocal(hipAt.clone()));
     setWorldQ(pel, base.clone().multiply(rig.rest.pelvis.q));
-    // pinned: the spine leans from the seat toward where the user's head is (its length kept)
+    // the spine leans from the hips (or the seat) toward where the user's head is (its length kept)
     let lean = null;
-    if (pin) {
+    {
       const up = rig.rest.head.p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base).normalize();
       const to = head.clone().sub(hipAt).normalize();
       lean = new THREE.Quaternion().setFromUnitVectors(up, to);
@@ -266,13 +279,13 @@ export function initActors(ed, live) {
       const sgn = sd === 'l' ? 1 : -1;
       if (!hd || !hd.j || !hd.j[0]) {                      // the hand out of tracking: the arm hangs at the side
         const sh0 = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
-        const lat = rig.left.clone().applyQuaternion(yaw).multiplyScalar(sgn * 0.12);
+        const lat = rig.left.clone().applyQuaternion(base).multiplyScalar(sgn * 0.12);
         twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, sh0.clone().add(lat).add(new THREE.Vector3(0, -0.6, 0)),
-          sh0.clone().add(rig.fwd.clone().applyQuaternion(yaw).multiplyScalar(-1)));
+          sh0.clone().add(rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1)));
         return;
       }
-      const lateral = rig.left.clone().applyQuaternion(yaw).multiplyScalar(sgn);
-      const back = rig.fwd.clone().applyQuaternion(yaw).multiplyScalar(-1);
+      const lateral = rig.left.clone().applyQuaternion(base).multiplyScalar(sgn);
+      const back = rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1);
       const sh = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
       twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), sh.clone().add(new THREE.Vector3(0, -1, 0)).addScaledVector(lateral, 0.5).addScaledVector(back, 0.4));
       const jq = (i) => { const a = hd.j[i]; return a ? new THREE.Quaternion(a[3], a[4], a[5], a[6]) : null; };
@@ -306,7 +319,7 @@ export function initActors(ed, live) {
     }
     for (const sd of ['l', 'r']) {
       const ft = st.feet[sd];
-      const want = hipAt.clone().add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).applyQuaternion(yaw));
+      const want = hipAt.clone().add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base));
       want.y = st.floor + rig.rest[`foot_${sd}`].p.y;
       if (!ft.at) ft.at = want.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
@@ -317,9 +330,9 @@ export function initActors(ed, live) {
         at = ft.step.from.clone().lerp(ft.step.to, k); at.y += Math.sin(Math.PI * k) * LIFT;
         if (k >= 1) { ft.at = ft.step.to; ft.step = null; }
       }
-      const knee = rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()).addScaledVector(rig.fwd.clone().applyQuaternion(yaw), 1.0);
+      const knee = rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()).addScaledVector(rig.fwd.clone().applyQuaternion(base), 1.0);
       twoBone(rig, `thigh_${sd}`, `calf_${sd}`, `foot_${sd}`, at, knee);
-      setWorldQ(rig.bones[`foot_${sd}`], yaw.clone().multiply(rig.rest[`foot_${sd}`].q));
+      setWorldQ(rig.bones[`foot_${sd}`], base.clone().multiply(rig.rest[`foot_${sd}`].q));
     }
   }
 
@@ -421,13 +434,16 @@ export function initActors(ed, live) {
       alignInv: align.clone().invert(), feet: { l: {}, r: {} }, t0: performance.now(), it };
     const pins = anchors.get(person);
     if (pins) usePins(st, pins);
+    // the setup from the body, not a button (the user, 2026-10-08: a standing man came up with his feet locked and would
+    // not walk): seated (hips on a seat) stays put, a standing person walks with the user
+    if (!c.mode) st.mode = st.pins && st.pins.hips ? 'place' : 'walk';
     await useStart(st, c);
     playing.set(person, st);
     lastMirror.set(person, st.mirror);
     await control.onFollow(person);
     live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person),
-      start: st.start ? st.start.spec : null });
-    return { person, actor: who, following: true, scale: +s.toFixed(2) };
+      start: st.start ? st.start.spec : null, ...setupOf(person) });
+    return { person, actor: who, following: true, scale: +s.toFixed(2), ...setupOf(person) };
   }
   async function cloneRig(r) {                              // a second person on the same actor (couple 3)
     const { clone } = await import('three/addons/utils/SkeletonUtils.js');
@@ -517,12 +533,22 @@ export function initActors(ed, live) {
     if (st.mirrorN) st.mirrorN.applyQuaternion(r);
     return { person, turned: deg };
   }
+  // how a Follow is set up, in words for the panel and the agents: seated or standing, walking or on the spot
+  function setupOf(person) {
+    const st = playing.get(person);
+    if (!st || !st.live) return {};
+    const seated = !!(st.pins && st.pins.hips);
+    const says = seated ? 'Seated: the hips stay on the seat; your head leans the body, your hands move the arms.'
+      : st.mode === 'walk' ? 'Standing: walks as you walk. Leaning or turning your head bends the body, the feet stay.'
+        : 'On the spot: dances where they stand while you move around.';
+    return { body: seated ? 'seated' : 'standing', mode: st.mode, says };
+  }
   function setMode(person, mode) {
     const st = playing.get(person);
     if (!st || !st.live) return null;
     if (mode === 'walk' && st.mode === 'place') { st.anchor.add(st.drift); st.drift.set(0, 0, 0); }   // no jump when he starts walking
     st.mode = mode;
-    return { person, mode };
+    return { person, mode, ...setupOf(person) };
   }
   function moveTo(person, at) {                // his spot moves (the stand-in too, as an undoable edit): never during a take
     const st = playing.get(person);
@@ -576,10 +602,10 @@ export function initActors(ed, live) {
         t = t0 + (m.t - st.atMusic) * st.rate;
         if (st.loop) t = t0 + ((((t - t0) % span) + span) % span);
         else if (t > T) { stop({ person: st.person }); continue; } else if (t < t0) t = t0;
-        if (t < st.frames[st.i].t) { st.i = 0; st.feet = { l: {}, r: {} }; }   // the loop or the song wrapped
+        if (t < st.frames[st.i].t) { st.i = 0; st.feet = { l: {}, r: {} }; st.body = null; }   // the loop or the song wrapped
         st.t0 = performance.now() - (t - t0) / st.rate * 1000;    // the wall clock carries on from here if it stops
       }
-      if (t > T) { if (!st.loop) { stop({ person: st.person }); continue; } st.t0 = performance.now(); t = t0; st.i = 0; st.feet = { l: {}, r: {} }; }
+      if (t > T) { if (!st.loop) { stop({ person: st.person }); continue; } st.t0 = performance.now(); t = t0; st.i = 0; st.feet = { l: {}, r: {} }; st.body = null; }
       while (st.i < st.frames.length - 1 && st.frames[st.i + 1].t <= t) st.i++;
       // between the two samples around t, not the last one held (interp.js mixTake); a gap over GAP_S (tracking lost,
       // a cut) is held, not swept across
@@ -743,15 +769,25 @@ export function initActors(ed, live) {
     rig.root.updateMatrixWorld(true);
     if (!st.ref) st.ref = st.frames ? prep(st, st.frames[0]) : f;   // the user's pose at GO (a take: its first frame)
     const r = st.ref, I = new THREE.Quaternion();
-    const held = Object.fromEntries(SPINE.map(([n]) => [n, rig.bones[n].getWorldQuaternion(new THREE.Quaternion())]));
     const D = qA(f.head).multiply(qA(r.head).invert());
-    for (const [n, k] of SPINE) setWorldQ(rig.bones[n], new THREE.Quaternion().slerpQuaternions(I, D, k).multiply(held[n]));
+    // the whole body walks and turns with the user from the start pose, as a standing body does (poseBase): the user's
+    // steps since GO move the hips past HIP_SLACK, a head turn past YAW_SLACK turns the body, the feet step after it.
+    // (The user, 2026-10-08: Pete, who has a start pose, stood with his feet locked and would not walk; this path kept
+    // the start pose's hips and legs whatever the user did.) Pinned hips keep the seat.
+    const B = moveStartBody(st, f, r, D);
+    const Drel = D.clone().multiply(B.yaw.clone().invert());       // what the body's turn left for the spine and head
+    const held = Object.fromEntries(SPINE.map(([n]) => [n, rig.bones[n].getWorldQuaternion(new THREE.Quaternion())]));
+    for (const [n, k] of SPINE) {
+      const q = new THREE.Quaternion().slerpQuaternions(I, Drel, k);
+      if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
+      setWorldQ(rig.bones[n], q.multiply(held[n]));
+    }
     for (const [sd, h] of [['l', 'left'], ['r', 'right']]) {
       const now = f[h], was = r[h];
       if (!S.handW[sd] || !now || !now.j || !now.j[0] || !was || !was.j || !was.j[0]) continue;   // untracked: the start pose
       const target = S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
       const [up, lo, ha] = ARM[sd];
-      twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(new THREE.Vector3(0, -0.3, 0)));
+      twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(B.off).add(new THREE.Vector3(0, -0.3, 0)));
       setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
       for (const [fg, names] of Object.entries(FINGER_JOINTS)) names.forEach((jn, k) => {
         const b = rig.bones[`${fg}_0${k + 1}_${sd}`], i = st.J[jn];
@@ -760,11 +796,63 @@ export function initActors(ed, live) {
       });
     }
   }
+  // the start pose's body moved by the user's steps and turn (relative mode): hips and facing with slack, legs stepping
+  // from the start pose's feet; nothing moved, the start pose's legs as they are
+  function moveStartBody(st, f, r, D) {
+    const { rig, s } = st, pel = rig.bones.pelvis;
+    const P0 = pel.getWorldPosition(new THREE.Vector3()), Q0 = pel.getWorldQuaternion(new THREE.Quaternion());
+    const b = st.body || (st.body = { yaw: new THREE.Quaternion(), off: new THREE.Vector3(), feet0: null });
+    if (!b.feet0) b.feet0 = Object.fromEntries(['l', 'r'].map((sd) => [sd, {
+      p: rig.bones[`foot_${sd}`].getWorldPosition(new THREE.Vector3()), q: rig.bones[`foot_${sd}`].getWorldQuaternion(new THREE.Quaternion()),
+      knee: rig.bones[`calf_${sd}`].getWorldPosition(new THREE.Vector3()), thigh: rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()) }]));
+    const want = vA(f.head).sub(vA(r.head)).setY(0).multiplyScalar(s);
+    // a lean: the spine bends from the hips toward where the head went (what the hips did not follow), at most LEAN_MAX
+    const lean = () => {
+      const up = rig.bones.head.getWorldPosition(new THREE.Vector3()).sub(P0), to = up.clone().add(want.clone().sub(b.off));
+      b.lean = new THREE.Quaternion().setFromUnitVectors(up.normalize(), to.normalize());
+      const a = 2 * Math.acos(Math.min(1, Math.abs(b.lean.w)));
+      if (a > LEAN_MAX) b.lean = new THREE.Quaternion().slerp(b.lean, LEAN_MAX / a);
+    };
+    if (st.pins && st.pins.hips) { b.yaw.identity(); b.off.set(0, 0, 0); lean(); return b; }
+    const f0 = new THREE.Vector3(0, 0, -1).applyQuaternion(D).setY(0);
+    const yawD = f0.lengthSq() > 1e-6 ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), f0.normalize()) : new THREE.Quaternion();
+    const ang = b.yaw.angleTo(yawD);
+    if (ang > YAW_SLACK) b.yaw.rotateTowards(yawD, ang - YAW_SLACK);
+    const d = want.distanceTo(b.off), slack = HIP_SLACK * s;
+    if (d > slack) b.off.lerp(want, (d - slack) / d);
+    lean();
+    const moved = b.off.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3);
+    if (!moved) return b;
+    pel.parent.updateMatrixWorld(true);
+    pel.position.copy(pel.parent.worldToLocal(P0.clone().add(b.off)));
+    setWorldQ(pel, b.yaw.clone().multiply(Q0));
+    rig.root.updateMatrixWorld(true);
+    const hip = P0.clone().add(b.off), now = f.t;
+    for (const sd of ['l', 'r']) {
+      const F = b.feet0[sd], ft = st.feet[sd], other = st.feet[sd === 'l' ? 'r' : 'l'];
+      const goal = hip.clone().add(F.p.clone().sub(P0).applyQuaternion(b.yaw)); goal.y = F.p.y;
+      if (!ft.at) ft.at = F.p.clone();
+      if (!ft.step && !other.step && ft.at.distanceTo(goal) > STEP_AT) ft.step = { from: ft.at.clone(), to: goal.clone(), t0: now };
+      let at = ft.at;
+      if (ft.step) {
+        const k = Math.min(1, (now - ft.step.t0) / STEP_S);
+        at = ft.step.from.clone().lerp(ft.step.to, k); at.y += Math.sin(Math.PI * k) * LIFT;
+        if (k >= 1) { ft.at = ft.step.to; ft.step = null; }
+      }
+      // the knee bends the way it bent in the start pose, turned with the body
+      const bend = F.knee.clone().sub(F.thigh.clone().add(F.p).multiplyScalar(0.5)).applyQuaternion(b.yaw);
+      const knee = hip.clone().add(F.knee.clone().sub(P0).applyQuaternion(b.yaw)).addScaledVector(bend.lengthSq() > 1e-8 ? bend.normalize() : rig.fwd.clone().applyQuaternion(b.yaw), 0.5);
+      twoBone(rig, `thigh_${sd}`, `calf_${sd}`, `foot_${sd}`, at, knee);
+      setWorldQ(rig.bones[`foot_${sd}`], b.yaw.clone().multiply(F.q));
+    }
+    return b;
+  }
+  const I0 = new THREE.Quaternion();
   async function useStart(st, c) {                          // a Follow or a playback: the person's start pose, if any
     await readProfile(st.rig);
     const spec = c.start || (st.rig.profile && st.rig.profile.start);
     st.start = spec && spec.mode !== 'snap' ? await startPose(st, spec) : null;
-    st.ref = null;
+    st.ref = null; st.body = null;
   }
   // live: actor_pose {person, t}: where their joints are (Blender metres): now while they follow, at t seconds of
   // the take playing on them, or their start pose when nothing plays
@@ -805,5 +893,5 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock };
 }

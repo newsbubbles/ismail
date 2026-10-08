@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Stage: a Follow that sets itself up from the body
+
+- A Follow on a standing person now walks with you by default; a seated one (hips pinned to a seat) stays on it. A
+  standing man came up "with his feet locked" and would not walk (the user, 2026-10-08). The cause was deeper: a
+  person with a start pose (Pete) was followed by a path that kept the start pose's hips and legs whatever the user
+  did, so neither the walk nor the button moved him. That path now walks, turns and steps too, from the start pose.
+- Head moves stay in the upper body: the hips hold still while the head moves within 12 cm of above them and the body
+  turns only when the head turns more than 35 degrees from it, so a lean or a look aside bends the spine and the feet
+  stay put ("when I move my head ... sometimes the rest of my body moves, but that's not actually what's going on").
+- The Follow panel has four buttons (Stop, Walk with me or Stay on the spot, Turn, More) and says the setup in a
+  sentence; mirror, pinning the hips, the mic and moving the spot are under More.
+- `stage_actor_follow` leaves `mode` to the body unless given, and replies with `body`, `mode` and `says`.
+
 ### Stage: a thing whose code fails says so
 
 - Every behaviour failure, at load or on a press, goes to the agents as `behaviour_error` with its phase and the line

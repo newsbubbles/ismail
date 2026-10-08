@@ -203,7 +203,9 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   note, because they often send the next one at once.
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
-  `stage_take_keep_last`.
+  `stage_take_keep_last`. Leave everyone else unpinned: a Follow sets itself up from the body (seated stays on the
+  seat, standing walks with the person, and a lean or a look aside bends the body without moving the feet), and the
+  Follow panel says the setup in a sentence. Pin feet only when the person asks for it.
 - **Test on a copy, or move on trial.** A plain `stage_object_set` saves into the scene's edits, which the build
   reads; `trial=True` moves it without saving. Camera moves keyed on the clock want `stage_key_interp(mode="smooth")`.
 - **A Follow is a performance: be quick and quiet in it.** From the moment someone follows the person, the mic
