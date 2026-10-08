@@ -108,7 +108,7 @@ else is here (recreate a reference, build an instrument from recordings, play li
 5. **Fix** the worst line, re-render, re-check. Only then move to the next section.
 6. **Full render + structure check**: `analyze_structure(source='render')` must show the form you planned in the Sheet.
 7. **Master** (`references/mastering.md`): loudness for the genre or the reference, glue, mono low end, limiter ceiling -1 dB for mp3.
-8. **Play it to the user and ask** (`render(mp3='also')`): name one or two things to listen for, report what you measured, and write their answer in the song's `notes/feedback.md`. Their ear overrules every score. Do this after each instrument chunk and each draft, not only at the end.
+8. **Play it to the user and ask** (`render(mp3='also')`): hand them the song itself, not only a sound through the speakers (the file attached where your app shows a player, else a clickable link with its full path; `play_file` opens it in their own player after you say it will play), name one or two things to listen for, report what you measured, and write their answer in the song's `notes/feedback.md`. Their ear overrules every score. Do this after each instrument chunk and each draft, not only at the end.
 
 ## Session Sheet (template)
 

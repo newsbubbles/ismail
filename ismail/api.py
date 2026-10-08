@@ -730,7 +730,13 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     choices = SK.playful_choices(plans[0][2], plans[0][1]) if plainw else []
     if plainw:                           # hq:D-82: delight first, then 2 or 3 things to try, never a blank page
         say.append("Here's the new one, have a listen." if kept else "Here's the first one, have a listen.")
+        if not kept:                     # Nate 10-08: say it is a first try, and ask for their taste
+            say.append("It's a first try: I don't know your taste yet, so it's a starting point. What would you "
+                       "change? Or name a song you love and I'll aim for that.")
         say.append(SK.choices_line(choices))
+    elif not kept:
+        say.append("These are first tries: I don't know your taste yet. Which is closest, what would you change, or "
+                   "name a song you love and I'll aim for that.")
     L[1:1] = ['SAY TO THE PERSON (read it out as it is):'] + ['  ' + x for x in say]
     for (letter, pl, spec), job in zip(plans, built):
         sec = pl['bars'] * 4 * 60 / pl['bpm']
@@ -750,6 +756,12 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
                  f"the others.")
     L.append(f"Each is also at the top of the song folder as 'version {v1}' ... ({root}); every round adds its own "
              f"numbers and nothing is replaced.")
+    top = next((os.path.join(root, f"version {v1}{e}") for e in ('.mp3', '.wav')
+                if os.path.isfile(os.path.join(root, f"version {v1}{e}"))), None)
+    L.append(f"HAND IT OVER: your reply gives them the song itself, not only a sound through the speakers: attach "
+             f"{top or 'its file'} where your app shows a player, else a clickable link with its full path. "
+             f"play_file(path) opens it in their own player (say first that it will play out loud). End on the song "
+             f"and the SAY block's question: no setup report, tool counts or devices unless they ask.")
     song = _kept_version(root)
     keep_line = (f"The song is version {song} (kept); sketch_keep(project, '<version number>', replace=True) makes a "
                  f"new pick the song." if song else
@@ -773,6 +785,27 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
                  + " These are sketches: do not polish one (no Listening Report, no section fixes) before the person "
                  "picks.")
     return '\n'.join(L)
+
+
+@op()
+def play_file(path: str) -> str:
+    """Open a sound file (a sketch, a version, a render) in the person's own music player, so they hear it and can
+    play it again: Windows its default app, macOS `open`, Linux `xdg-open`. Say first that it will play out loud,
+    and also give them the file as a link in your reply: a sound played once is easy to miss."""
+    import subprocess
+    import sys
+    p = os.path.abspath(path)
+    if not os.path.isfile(p):
+        raise OpError(f"no file at {p}: sketch, sketch_wait and render name each file they write ('listen:', 'play:')")
+    try:
+        if sys.platform == 'win32':
+            os.startfile(p)
+        else:
+            subprocess.Popen(['open' if sys.platform == 'darwin' else 'xdg-open', p],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        raise OpError(f"could not open a player here ({e}): give them the file as a clickable link instead: {p}")
+    return f"opened in their player: {p}\nlink it in your reply as well, so they can play it again."
 
 
 @op()
@@ -862,11 +895,13 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
                f"sketch(project, '<their words>', base='{v}') keeps this tune and changes only that; play the new "
                f"version first and say in one plain line what changed. If they prefer it, "
                f"sketch_keep(project, '<its version>', replace=True). Say what changed in plain words: never keys, "
-               f"BPM or bars. Live changes come later; do not offer them yet. Then grow it a part at a time.")
+               f"BPM or bars. Offer live play once, in one line: 'Want me to play it live and change it while it "
+               f"plays? Call out more bass, a break, anything.' Then grow it a part at a time.")
     else:
         nxt = ("NEXT: offer one deliberate change ('change just one thing': a warmer bass from bar 5, drums out for "
-               "two bars), make only that, render a window, play before and after. Then the normal loop: extend the "
-               "form in a Session Sheet, a part at a time.")
+               "two bars), make only that, render a window, play before and after. Offer live play once: it plays "
+               "and changes while they listen. Then the normal loop: extend the form in a Session Sheet, a part at a "
+               "time.")
     return (f"kept version {v} ({hits[0]}) as the song in {root} ({d['bpm']} BPM, {d['length_bars']} bars, tracks: "
             f"{', '.join(d['tracks'])}). {done}{song}\n" + nxt)
 

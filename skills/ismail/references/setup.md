@@ -132,7 +132,9 @@ Call `guide`. Then make the smallest sound that proves the chain: `sketch` with 
 project rendered with `mp3='also'`. Say that something is about to play, then open the file for them in their
 default player: Windows `start "" "<file>.mp3"` (in PowerShell, `Invoke-Item "<file>.mp3"`), macOS
 `open "<file>.mp3"`, Linux `xdg-open "<file>.mp3"`. It is
-verified when they say they heard it, not when the render returns. If they hear nothing, check the volume, the
+verified when they say they heard it, not when the render returns. The end of setup is their first song, not a
+report: give them the file as a link, keep tool counts, devices and paths out of your reply unless they ask, and
+write no setup notes for them. If they hear nothing, check the volume, the
 output device and the file before anything else.
 
 ## 5. When something fails
