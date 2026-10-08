@@ -10,18 +10,18 @@ const FADE_MS = 1800;
 export function initConstruct(ed) {
   const g = new THREE.Group();
   g.name = '_construct';
-  const opacity = { value: 1 };
+  const opacity = { value: 1 }, dim = { value: 1 };     // dim: the void's brightness (a scene swap closes it dusky)
 
   const dome = new THREE.Mesh(new THREE.SphereGeometry(60, 48, 24), new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, transparent: true, toneMapped: false, uniforms: { opacity },
+    side: THREE.BackSide, depthWrite: false, transparent: true, toneMapped: false, uniforms: { opacity, dim },
     vertexShader: 'varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `uniform float opacity; varying vec3 vDir;
+    fragmentShader: `uniform float opacity; uniform float dim; varying vec3 vDir;
       void main() {
         float h = vDir.y;
         vec3 c = mix(vec3(0.80, 0.80, 0.82), vec3(0.93, 0.93, 0.95), smoothstep(0.0, 0.6, h));
         c = mix(c, vec3(0.66, 0.66, 0.68), smoothstep(0.0, -0.25, h));
         c -= vec3(0.06) * exp(-abs(h) * 40.0);                       // a faint horizon line
-        gl_FragColor = vec4(c, opacity);
+        gl_FragColor = vec4(c * dim, opacity);
       }`,
   }));
   // drawn after the night sky (editor.js: dome -10, stars -9, clouds -8; the manifest puts it up before the room comes),
@@ -80,7 +80,9 @@ export function initConstruct(ed) {
   }
   const head = new THREE.Vector3(), fwd = new THREE.Vector3(), want = new THREE.Vector3();
   let placed = false, fadeFrom = 0, gone = false, inFrom = 0, inDone = null;
-  const IN_MS = 600;
+  // a scene swap closes the void in slowly and dusky (the user, 2026-10-08: the whole room vanishing at once into the
+  // white void was striking; "maybe the fade out could be a little bit longer")
+  const IN_MS = 1600, SWAP_DIM = 0.32;
   ed.preRender.push(step);
   function step() {
     if (gone) return;
@@ -91,8 +93,8 @@ export function initConstruct(ed) {
     card.lookAt(head);
     dome.position.copy(head); floor.position.set(head.x, ed.rig.position.y, head.z);   // the void is always around the user
     if (inFrom) {                                             // cover(): the void closes back in around the user
-      const k = Math.min(1, (performance.now() - inFrom) / IN_MS);
-      opacity.value = k; card.material.opacity = k; hemi.intensity = 2.2 * k;
+      const k = Math.min(1, (performance.now() - inFrom) / IN_MS), e = k * k * (3 - 2 * k);
+      opacity.value = e; card.material.opacity = e; hemi.intensity = 2.2 * e * dim.value;
       if (k >= 1) {                                           // closed: the old room goes, the void is a backdrop again
         inFrom = 0;
         if (ed.root) ed.root.visible = false;
@@ -104,10 +106,11 @@ export function initConstruct(ed) {
       const k = Math.min(1, (performance.now() - fadeFrom) / FADE_MS);
       opacity.value = 1 - k;
       card.material.opacity = 1 - k;
-      hemi.intensity = 2.2 * (1 - k);
+      hemi.intensity = 2.2 * (1 - k) * dim.value;
       if (k >= 1) {                                           // kept, not disposed: a scene swap brings it back
         gone = true;
         fadeFrom = 0;
+        dim.value = 1;
         ed.scene.remove(g);
         ed.preRender.splice(ed.preRender.indexOf(step), 1);
       }
@@ -141,6 +144,7 @@ export function initConstruct(ed) {
       st.title = title || st.title; st.line = line || ''; st.k = 0; st.hint = ''; draw();
       fadeFrom = 0;
       layer(true);                                            // over everything while it closes
+      dim.value = SWAP_DIM;
       if (gone) { gone = false; ed.scene.add(g); ed.preRender.push(step); opacity.value = 0; card.material.opacity = 0; placed = false; }
       if (opacity.value >= 1) {                               // closed already: a backdrop, never over the hands
         if (ed.root) ed.root.visible = false;

@@ -12,6 +12,22 @@
   with what the person said and what the zoom found on the voice work, and the shared words for a spot (bands,
   shapes, movement) from the Voice agent (Nate 10-08).
 
+### Stage: things that do things, from saved code
+
+- A scene can give its objects their own small functions (`scenes/<scene>/behaviours.js`, written by an agent): a
+  press, a menu, inputs other objects can wire to, a state saved with the scene, and `apply` mapping state to the
+  room. The page runs them itself when the person pinches or triggers the object in VR, so a light switch flips the
+  lights at once with no agent listening (the user, 2026-10-08). The functions get a small handle on the stage:
+  lights (with fades), show and hide, moves and turns over time, sounds, any page command, timers, wiring, and
+  messages to agents. What a behaviour changes is never saved as an edit or into the Blender build.
+- Ops for agents: `stage_behaviours` (what is defined, load errors and warnings; `reload=True` after writing the file),
+  `stage_behaviour_run` (the same press or menu item the person makes, with its sound) and `stage_behaviour_state`.
+- Every interaction sounds: an object's own `sound`, else a click and a warning to the agent. The stage reference
+  says how, and where the line between the stage and the agents is.
+- A pinch still held from one menu press no longer presses the menu that replaces it (one press on Walk with me fired
+  three answers and Pete stayed put).
+- A scene switch closes the void in slowly (1.6 s, eased) and dusky, instead of the white flash.
+
 ### Stage: one body per person, and lights that start at 0 W
 
 - A person with a start pose no longer shows twice when a take or a Follow starts while something already plays on

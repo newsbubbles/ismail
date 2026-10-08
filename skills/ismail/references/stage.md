@@ -247,6 +247,37 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Say who you are.** Pass `sender=` (your name as the person knows it, e.g. "crossroads film") on `stage_say` and
   `stage_panel_show`: the card shows it in your colour, on your side. Several agents can be talking to them at once.
 
+## Things that do things: save the work as code
+
+When the person presses something in the room (a light switch, a door, a radio), the room answers by itself, at once,
+with no agent in the loop. You write what each thing does; the stage runs it. The person, 2026-10-08: a light switch
+should flip the lights "directly because the film agent was able to put code into the switch", and every press that
+needs a model to listen spends tokens on work that could have been saved as deterministic code.
+
+- **Where it lives.** `scenes/<scene>/behaviours.js`, plain JavaScript with no imports: `export default {
+  object_name: { sound, state, apply(s), press(s), menu: {label: (s) => ...}, inputs: {name: (s, value) => ...} } }`.
+  It reloads with the scene; after writing it, call `stage_behaviours(scene, reload=True)` and read the errors and
+  warnings, the only place a function that failed to load shows up.
+- **State, then room.** Keep what a thing is in `state` (`{club: true}`, `{open: false}`) and put the state-to-room
+  mapping in `apply(s)`: it runs at load and after every change, so a reload, a scene switch or an agent's
+  `stage_behaviour_state` shows the right room. `press` and menu items only change state. State is saved with the
+  scene.
+- **What `s` can do.** `get`, `set`, `state` (another object's), `send` (wire to another object's input, like a
+  switch to a lamp), `light` (watts and colour, with `seconds` to fade; `energy: null` puts a light back as built),
+  `show`, `move` (`by`, `to`, `turn` in degrees, `seconds`), `sound`, `emit` (a message to agents: `object_message`),
+  `do` (any page command, the same ones you send), `after`, `every`. Names take a list or a glob (`cf_floor_*`).
+- **Every interaction sounds.** Give each thing a `sound`: a file under the scene folder, rendered with ismail (a
+  switch should sound like a switch). Without one the page plays a plain click and warns you. The same goes for
+  anything else you build that the person touches: no silent controls.
+- **Turn hand work into functions.** When you have just lit, moved or dressed something by hand with stage ops and the
+  person will want it again, write it into the thing that should do it. Test it the way they will use it:
+  `stage_behaviour_run(scene, object, action)` runs the same function and plays its sound.
+- **Run time is not an edit.** What a behaviour changes (lights, moves, visibility) is never saved into the scene's
+  edits or the Blender build; the scene keeps how it was built and edited, and the behaviour state says what the
+  switch is doing now.
+- **Where the line is.** The stage (its runtime and the `s` calls) is the dev's; what each thing in a scene does is
+  yours. If a behaviour needs a call `s` does not have, ask the stage owner for it instead of working around it.
+
 ## Shared editing: never lose what the person did
 
 Every rule here cost the person work once.
