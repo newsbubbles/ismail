@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Stage: one body per person, and lights that start at 0 W
+
+- A person with a start pose no longer shows twice when a take or a Follow starts while something already plays on
+  them (the user, in VR: "double Pete" while following and recording). The stop a play begins with set their resting
+  body loading, and it could finish while the new play was still being set up. A play or Follow being set up now
+  claims its person, and a rest still loading stands down; if the play fails, the person rests again.
+- `stage_light_set` on a light saved at 0 W no longer divides by zero (it answered `energy: null` and the whole room
+  went black). Watts convert through the light's own ratio, or for a 0 W light an area light's size or the ratio of
+  the other lights of its kind. A light set to a negative or non-finite energy is refused.
+- NaN and Infinity never reach the page: the agent link refuses them with a clear error, and the server answers 400.
+  The page cannot parse them, and its command queue stalled.
+
 ### Two waiting jobs no longer take one slot together
 
 - `machine.slot`: a job goes on the board in the same lock as the check that let it start. It used to be registered

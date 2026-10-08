@@ -645,8 +645,25 @@ export class Editor extends THREE.EventDispatcher {
   }
 
   // ---- lights and materials
-  energy(it) { return this.manifest.lights[it.name].energy * it.light.intensity / it.intensity0; }
-  setEnergy(it, w) { it.light.intensity = it.intensity0 * w / this.manifest.lights[it.name].energy; this.emit('change'); }
+  // watts to the light's intensity: its own ratio, or for a light saved off (0 W, no ratio of its own), an area light's
+  // size, else the ratio of the other lights of its kind in the scene (the user, 2026-10-08: two house lights saved at
+  // 0 W, set to 300 and 900 W, divided by zero, and the whole room went black)
+  perW(it) {
+    if (it.perW) return it.perW;
+    const ratio = (o) => { const e = this.manifest.lights[o.name].energy; return e > 0 && o.intensity0 > 0 ? o.intensity0 / e : null; };
+    let k = ratio(it);
+    if (k == null && it.light.isRectAreaLight) k = 1 / (it.light.width * it.light.height * Math.PI);
+    if (k == null) {
+      const ks = this.items.filter((o) => o !== it && o.light && o.kind === it.kind).map(ratio).filter((x) => x).sort((x, y) => x - y);
+      k = ks.length ? ks[ks.length >> 1] : null;
+    }
+    return (it.perW = k || 1);
+  }
+  energy(it) { return it.light.intensity / this.perW(it); }
+  setEnergy(it, w) {
+    if (!Number.isFinite(+w) || +w < 0) throw new Error('energy: watts, a number 0 or more');
+    it.light.intensity = this.perW(it) * +w; this.emit('change');
+  }
   setLightColor(it, color) {
     it.light.color.copy(color);
     it.handle.material.color.copy(color);
@@ -690,7 +707,7 @@ export class Editor extends THREE.EventDispatcher {
       const dq = Math.min(Math.max(...qa.map((v, k) => Math.abs(v - qb[k]))), Math.max(...qa.map((v, k) => Math.abs(v + qb[k]))));
       if (p.distanceTo(p2) > 1e-7 || dq > 1e-7 || s.distanceTo(s2) > 1e-7) moved.push({ it, before: worldA ? worldA.get(it) : null });
       if (it.light && (Math.abs(li - li2) > 1e-9 * Math.max(1, li) || !lc.equals(lc2))) {
-        lights.push({ it, before: { energy: this.manifest.lights[it.name].energy * li / it.intensity0, color: rgbOf(lc) } });
+        lights.push({ it, before: { energy: li / this.perW(it), color: rgbOf(lc) } });
       }
     });
     mats.forEach(([name], i) => { if (!a.mats[i].equals(b.mats[i])) materials.push({ name, before: rgbOf(a.mats[i]) }); });
@@ -805,7 +822,7 @@ export class Editor extends THREE.EventDispatcher {
     return o.position.distanceTo(b.pos) > 1e-7 || dq > 1e-7 || o.scale.distanceTo(b.scale) > 1e-7;
   }
   lightChanged(it) {
-    return Math.abs(it.light.intensity / it.intensity0 - 1) > 1e-6 ||
+    return Math.abs(it.light.intensity - it.intensity0) > 1e-6 * Math.max(1e-6, it.intensity0) ||
       Math.max(...['r', 'g', 'b'].map((k) => Math.abs(it.light.color[k] - it.color0[k]))) > 1e-6;
   }
   blenderTransform(it) {
