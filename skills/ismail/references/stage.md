@@ -257,7 +257,12 @@ needs a model to listen spends tokens on work that could have been saved as dete
 - **Where it lives.** `scenes/<scene>/behaviours.js`, plain JavaScript with no imports: `export default {
   object_name: { sound, state, apply(s), press(s), menu: {label: (s) => ...}, inputs: {name: (s, value) => ...} } }`.
   It reloads with the scene; after writing it, call `stage_behaviours(scene, reload=True)` and read the errors and
-  warnings, the only place a function that failed to load shows up.
+  warnings.
+- **Listen for `behaviour_error`.** Every failure, at load or when someone presses the thing, goes out as
+  `behaviour_error {object, phase, action, error, line}` (line in behaviours.js), so the agent that wrote the thing can
+  fix it while the person is still there. The person, after a touch did nothing: "you should have an event hook on
+  object functionality errors". In VR a failed press buzzes and shows a short note at the object, so a broken switch
+  never passes for one that is off.
 - **State, then room.** Keep what a thing is in `state` (`{club: true}`, `{open: false}`) and put the state-to-room
   mapping in `apply(s)`: it runs at load and after every change, so a reload, a scene switch or an agent's
   `stage_behaviour_state` shows the right room. `press` and menu items only change state. State is saved with the
