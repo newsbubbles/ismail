@@ -30,6 +30,11 @@ def _audio(P, src, window=None, span=None):
     return y
 
 
+ZOOM_HINT = ("\nclose numbers but it still sounds different, or a voice or played instrument? zoom on the moment: "
+             "spectrogram(seconds=[t0, t1], f_lo=, f_hi=, ruler=True) of both, or exam_eye_crops for a blind look "
+             "(references/listening.md, When to zoom)")
+
+
 @op()
 def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window: list = None, a_span: list = None,
                   b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0) -> str:
@@ -39,7 +44,7 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
     P = _load(project)
     da = SD.descriptor(_audio(P, a, a_window, a_span))
     db = SD.descriptor(_audio(P, b, b_window, b_span))
-    return SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1]
+    return SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
 
 
 @op(mutates=True)

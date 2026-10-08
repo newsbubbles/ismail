@@ -28,7 +28,9 @@ def exam_eye_crops(pairs: list, out: str, windows: list = None, n_windows: int =
     the made clip of each pair, as spectrogram images side by side ("1" and "2" in a random order), with the key
     hidden. pairs: [[real_path, made_path], ...]; windows: per pair, [[t0, t1], ...] in seconds (a word +-60 ms),
     else n_windows through each clip. Look at every out/q*.png and pick the side that looks real, WITHOUT opening
-    out/key.json, then exam_eye_score(out, {1: '2', 2: '1', ...}). If you can tell from the picture, so can they."""
+    out/key.json, then exam_eye_score(out, {1: '2', 2: '1', ...}). If you can tell from the picture, so can they.
+    Not only before an exam: it is a measurement you can run alone whenever spectrogram's zoom triggers fire (a
+    texture word, numbers close but the ear says no, a voice or played instrument, two rounds without progress)."""
     from . import exam_check as EC
     try:
         n = EC.eye_crops(pairs, out, windows, n_windows, seed=seed)

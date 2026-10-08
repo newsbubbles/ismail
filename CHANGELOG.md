@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The zoom is easy to find, and says when to use it
+
+- `spectrogram` and `exam_eye_crops` say when to reach for the zoom: a texture word from the person (robotic,
+  digital, smeared, cut off), numbers that say close while the ear says no, voices and played instruments, two
+  rounds without progress, and checking that a fix made its spot fade. `sound_compare` and the `cmp` summary end
+  with a one-line pointer to it.
+- skills: the loop's Listen step names those triggers; listening.md drops "last resort" and gains "When to zoom",
+  with what the person said and what the zoom found on the voice work, and the shared words for a spot (bands,
+  shapes, movement) from the Voice agent (Nate 10-08).
+
 ### Stage: things that do things, from saved code
 
 - A scene can give its objects their own small functions (`scenes/<scene>/behaviours.js`, written by an agent): a
