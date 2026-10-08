@@ -346,7 +346,8 @@ def view_summary(rep):
         L.append(f"\n[{stem}] skipped: {why}")
     if tot:
         L.insert(2, f"OVERALL closeness (mean over scored stems): {np.mean(tot):.2f}")
-    L.append("\nnext: cmp_sections / cmp_bars / cmp_worst to find where; cmp_zoom(bar) to see the steps")
+    L.append("\nnext: cmp_sections / cmp_bars / cmp_worst to find where; cmp_zoom(bar) to see the steps; a part that "
+             "stays wrong while these numbers look fine: zoom both on it, spectrogram(seconds=, f_lo=, f_hi=)")
     return '\n'.join(L)
 
 
