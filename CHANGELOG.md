@@ -4,7 +4,7 @@
 
 ### A first session ends with the song in hand and a question
 
-- `guide`'s first session opens with two plain sentences on why this is different (every note and sound written by
+- `guide`'s first session opens with two short plain sentences on what this is (every note and sound written by
   the agent, a song changed one piece at a time, any part of music at their level), says to hand every sound over
   (the file attached or linked, never only a sound through the speakers once), and never to end on a setup report
   or to replace a sketch with hand-written notes. Live play is offered once they like or keep a song. A plain-words
