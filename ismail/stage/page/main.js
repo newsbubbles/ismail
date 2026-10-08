@@ -29,6 +29,7 @@ import { initAnchors } from './anchor.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
 import { initLoadSets } from './loadsets.js';
+import { initBehaviours } from './behaviours.js';
 import { setPickEmit } from './pickcycle.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
@@ -157,6 +158,8 @@ live.onEmit((type, d) => {
   else if (type === 'actor_stop' && d && d.live) { hands.shadowStop(); perform.stop(); }
 });
 live.handlers.take_keep_last = (c) => keepLast(c.name || null);
+// things that do things: a scene's own small functions, run on a press, a menu item or a wire (behaviours.js)
+window.VR_behaviours = initBehaviours(ed, live, panels);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,

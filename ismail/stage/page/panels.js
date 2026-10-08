@@ -10,6 +10,8 @@
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
 
+const PRESS_SETTLE_MS = 400;          // a panel takes no press this soon after it appears, or after the last press
+
 const CW = 1024;                         // canvas width; the height follows the content
 const WIDTH = 0.56;                      // metres
 const POKE_IN = 0.012, POKE_OUT = 0.03, HOVER = 0.08;   // fingertip to the surface, metres
@@ -154,9 +156,15 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     return c.wait === false ? { id, shown: true } : done;
   }
   function setHover(p, id) { if (p.hover !== id) { p.hover = id; draw(p); } }
+  // a pinch still held from the last press must not press the panel that replaced it (the user, 2026-10-08: one press
+  // on Walk with me fired three answers in the same instant, Walk, Dance in place, Walk, and Pete stayed put)
+  let lastPress = 0;
   function pressAt(p, uv, via) {
     const r = rectAt(p, uv);
     if (!r) return false;                                       // the frame, the title, the image: not a control
+    const now = performance.now();
+    if (now - p.t0 < PRESS_SETTLE_MS || now - lastPress < PRESS_SETTLE_MS) return true;   // taken, not answered
+    lastPress = now;
     if (r.id === '__close') { close(p.id, 'closed by the user'); return true; }
     answer(p, r.id, via);
     return true;

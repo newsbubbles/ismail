@@ -248,9 +248,10 @@ export function initLive(ed, desktop, xr) {
         const anc = it.path.find((x) => x !== it && ed.changed(x));
         if (anc) carried[anc.name] = (carried[anc.name] || 0) + 1;
       }
-      if (it.light && ed.lightChanged(it)) {
-        lights[it.name] = { energy: rn(ed.energy(it), 4), energy0: ed.manifest.lights[it.name].energy,
-          color: rv(rgbOf(it.light.color)), color0: ed.manifest.lights[it.name].color.map((x) => rn(x, 4)) };
+      const lh = it.light && it.lightHome;                       // set by a behaviour: the edit is what is reported
+      if (lh ? lh.changed : it.light && ed.lightChanged(it)) {
+        lights[it.name] = { energy: rn(lh ? lh.energy : ed.energy(it), 4), energy0: ed.manifest.lights[it.name].energy,
+          color: rv(lh ? lh.color : rgbOf(it.light.color)), color0: ed.manifest.lights[it.name].color.map((x) => rn(x, 4)) };
       }
     }
     for (const [name, e] of ed.materials) {
@@ -271,6 +272,7 @@ export function initLive(ed, desktop, xr) {
       changed, carried, lights, materials,
       unsaved: ed.dirty(),
       sets: window.VR_sets ? window.VR_sets.state() : null,   // load sets: which are unloaded (loadsets.js)
+      behaviours: window.VR_behaviours ? window.VR_behaviours.state() : null,   // things with their own functions
       edit_counts: Object.fromEntries(Object.entries(edits).map(([k, v]) => [k, Object.keys(v).length])),
       undo_depth: ed.undoStack.length,
       walk: desktop.walk.on ? { floor_z: rn(desktop.walk.floorY, 3), eye_above_floor: rn(p.y - desktop.walk.floorY, 3),
@@ -386,7 +388,7 @@ export function initLive(ed, desktop, xr) {
   // a real edit of a thing moved on trial (by hand, by an agent's plain set, by undo past it) makes it save again
   ed.addEventListener('edited', (e) => {
     if (e.via === 'claude-trial') return;
-    for (const m of e.moved || []) if (m.it && m.it.obj.userData.trialHome) delete m.it.obj.userData.trialHome;
+    for (const m of e.moved || []) if (m.it) { delete m.it.obj.userData.trialHome; delete m.it.obj.userData.behaviourHome; }
   });
 
   // many commands as one (stage_batch): run in order inside one command, so the ones that answer at once land in the

@@ -191,7 +191,8 @@ def save_edits(name, edits):
 CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoint_remove', 'waypoints_clear', 'waypoints_list', 'waypoint_go', 'sky', 'scene_go', 'scene_list', 'actor_follow', 'trees_reload', 'clock', 'key', 'key_delete', 'anim_save', 'anim_clear', 'timeline', 'growth', 'music', 'take_start', 'take_stop', 'eyecam', 'voice_rec', 'say', 'goto', 'goto_camera', 'focus', 'select', 'deselect', 'highlight', 'marker', 'clear_markers', 'set',
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release',
-             'take_keep_last', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'perform', 'batch', 'control_set', 'control_map', 'key_interp'}
+             'take_keep_last', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
+             'behaviours', 'behaviour_run', 'behaviour_state'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -695,6 +696,10 @@ class Handler(SimpleHTTPRequestHandler):
             name = parse_qs(u.query).get('scene', [''])[0]
             f = SCENES / name / (u.path[1:] + '.json')
             return self._json(200, json.loads(f.read_text(encoding='utf-8')) if NAME.match(name) and f.is_file() else [])
+        if u.path == '/behaviour_state':           # what each thing with a behaviour is now (behaviours.js), {} when none
+            name = parse_qs(u.query).get('scene', [''])[0]
+            f = SCENES / name / 'behaviour_state.json'
+            return self._json(200, json.loads(f.read_text(encoding='utf-8')) if NAME.match(name) and f.is_file() else {})
         if u.path == '/bundle.js':
             try:
                 f = bundle()
@@ -891,6 +896,21 @@ class Handler(SimpleHTTPRequestHandler):
             meta.update(body if isinstance(body, dict) else {})
             mf.write_text(json.dumps(meta, indent=1), encoding='utf-8')
             return self._json(200, {'ok': True})
+        if u.path == '/behaviour_state':           # the page saves it as it changes: state, not authored, so no history
+            name = parse_qs(u.query).get('scene', [''])[0]
+            if not NAME.match(name) or not (SCENES / name / 'scene.glb').is_file():
+                return self._json(400, {'error': 'bad scene'})
+            try:
+                body = self._body()
+                if not isinstance(body, dict) or not all(isinstance(v, dict) for v in body.values()):
+                    raise ValueError('behaviour_state must be {object: {key: value}}')
+            except (ValueError, json.JSONDecodeError) as e:
+                return self._json(400, {'error': str(e)})
+            out = SCENES / name / 'behaviour_state.json'
+            tmp = out.with_suffix('.tmp')
+            tmp.write_text(json.dumps(body, indent=1), encoding='utf-8')
+            tmp.replace(out)
+            return self._json(200, {'ok': True, 'objects': len(body)})
         if u.path in ('/waypoints', '/cues'):     # the whole list; the previous one kept in history/
             name = parse_qs(u.query).get('scene', [''])[0]
             if not NAME.match(name) or not (SCENES / name / 'scene.glb').is_file():
