@@ -159,31 +159,36 @@ export function initActions(ed, hands, panels, live, takes) {
     const near = head.clone().addScaledVector(look, 0.55).add(new THREE.Vector3(look.z, 0, -look.x).multiplyScalar(0.35));
     near.y = head.y - 0.35;
     const id = 'follow_' + it.name + '_' + Date.now();
-    let round = 0, cur = id;
+    let round = 0, cur = id, more = false;
     followPanels.set(it.name, id);
     try {
       while (takes.actors.playing.get(it.name)?.live) {
         const st = takes.actors.playing.get(it.name), rec = takes.recording();
-        // one action per button: stop; turn his facing; dance in place or walk with the user; move his spot here
-        // (not while a take records: a jump would be in the take)
+        // four buttons, the rest under More (the user, 2026-10-08: "there was like a lot of different buttons on the menu.
+        // I don't really know what each of them did"): the setup comes from the body (actors.setupOf) and the panel says
+        // it in a sentence; Stop, walk or stay, turn, More. More: mirror, pin the hips, the mic, move the spot (not while
+        // a take records: a jump would be in the take), Back.
         // a fresh panel id each round: re-showing the one that was closing made the panel vanish after Turn (the user,
         // 2026-10-03: "when I clicked turn him the menu disappeared")
         cur = id + '_' + (++round);
         followPanels.set(it.name, cur);
         const pinned = takes.actors.pinsOf ? takes.actors.pinsOf(it.name) : [];
-        // a Follow is a performance (perform.js): the voice records with it and gestures are off, so the panel says so
-        // and its buttons are poked
+        const setup = takes.actors.setupOf ? takes.actors.setupOf(it.name) : {};
+        // a Follow is a performance (perform.js): the voice records with it and gestures are off, so the buttons are poked
         const pf = takes.perform ? takes.perform.state() : { performing: false };
         const ctl = takes.actors.control ? takes.actors.control.summary(it.name) : '';   // control.js drives
-        const mic = pf.performing ? (pf.mic ? `🎙 Your voice records with it (clip ${pf.clip.n}).` : '🎙 Mic off.') : '';
-        const r = await panels.show({ panel_id: cur, title: (rec ? '● Recording: ' : 'Performing: ') + ed.label(it),
-          text: (pinned.length ? '📌 pinned: ' + pinned.join(', ') + '. ' : '') + (ctl ? '🎛 ' + ctl + '. ' : '') + mic + ' Gestures are off: poke the buttons.',
-          buttons: [rec ? '■ Stop take' : '■ Stop', '⟲ Turn him', st.mirror ? '⇄ Mirror: on' : '⇄ Mirror: off',
-            st.mode === 'walk' ? '📍 Dance in place' : '🚶 Walk with me', pinned.includes('hips') ? '📌 Unpin hips' : '📌 Pin hips',
-            ...(pf.performing ? [pf.mic ? '🎙 Mic off' : '🎙 Mic on'] : []), ...(rec ? [] : ['⇲ Move him here'])],
-          near, width: 0.46, quiet: true, wait: true });
+        const mic = pf.performing ? (pf.mic ? '🎙 Your voice records with it.' : '🎙 Mic off.') : '';
+        const feet = pinned.filter((p) => p !== 'hips');
+        const text = [setup.says || '', feet.length ? '📌 pinned: ' + feet.join(', ') + '.' : '', ctl ? '🎛 ' + ctl + '.' : '', mic].filter(Boolean).join(' ');
+        const buttons = more
+          ? [st.mirror ? '⇄ Mirror: on' : '⇄ Mirror: off', pinned.includes('hips') ? '📌 Unpin hips' : '📌 Pin hips',
+            ...(pf.performing ? [pf.mic ? '🎙 Mic off' : '🎙 Mic on'] : []), ...(rec ? [] : ['⇲ Move him here']), '← Back']
+          : [rec ? '■ Stop take' : '■ Stop', st.mode === 'walk' ? '📍 Stay on the spot' : '🚶 Walk with me', '⟲ Turn him', '⋯ More'];
+        const r = await panels.show({ panel_id: cur, title: (rec ? '● Recording: ' : 'Following you: ') + ed.label(it),
+          text, buttons, near, width: 0.46, quiet: true, wait: true });
         const ans = r && r.answer;
         if (!ans) break;
+        if (ans === '⋯ More' || ans === '← Back') { more = ans === '⋯ More'; continue; }
         if (ans === '🎙 Mic off' || ans === '🎙 Mic on') {
           try { await (ans === '🎙 Mic off' ? takes.perform.micOff('user') : takes.perform.clipStart('user')); }
           catch (e) { live.emit('voice_error', { where: 'performance mic', error: String(e.message || e) }); }
@@ -196,10 +201,11 @@ export function initActions(ed, hands, panels, live, takes) {
         }
         if (ans === '⟲ Turn him') { takes.actors.turnBy(it.name, 45); continue; }
         if (ans.startsWith('⇄ Mirror')) { takes.actors.setMirror(it.name, !st.mirror); continue; }
-        if (ans === '🚶 Walk with me' || ans === '📍 Dance in place') { takes.actors.setMode(it.name, ans === '🚶 Walk with me' ? 'walk' : 'place'); continue; }
+        if (ans === '🚶 Walk with me' || ans === '📍 Stay on the spot') { takes.actors.setMode(it.name, ans === '🚶 Walk with me' ? 'walk' : 'place'); continue; }
         if (ans === '⇲ Move him here') {                          // a metre in front of the user, on the floor
           const h = camera.getWorldPosition(new THREE.Vector3()), l = camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
           takes.actors.moveTo(it.name, h.addScaledVector(l, 1.0));
+          more = false;
           continue;
         }
         if (ans === '■ Stop take') { takes.actors.stop({ person: it.name }); const t = await takes.stop(); await review(it, t); }
