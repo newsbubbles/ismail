@@ -500,6 +500,43 @@ def stage_sky_set(scene: str, mode: str = 'scene') -> str:
     return page_cmd(scene, 'sky', {'mode': mode}, timeout=30)
 
 
+@op(mutates=False)
+def stage_behaviours(scene: str, reload: bool = False) -> str:
+    """What the things in a scene do on their own: the objects with a behaviour in scenes/<scene>/behaviours.js, what
+    each can do (press, its menu items, its inputs), its state now, its sound, and every load error and warning
+    (page command: behaviours). reload=True reads the file again first: after writing or changing it, call this with
+    reload and read the errors, the page has no other way to tell you a function failed to load.
+    The file is plain JavaScript, no imports: `export default { object_name: { sound, state, apply(s), press(s),
+    menu: {label: (s) => ...}, inputs: {name: (s, value) => ...} } }`. The page runs these itself when the person
+    pinches or triggers the object in VR (or picks a menu item), so the room answers with no agent in the loop: turn
+    anything you did by hand (lights, moves, visibility, music, any page command through s.do) into such a function.
+    `s` is the object's handle: get, set, state, send (wire to another object's input), light, show, move, sound,
+    emit (a message to agents: object_message), do, after, every. apply(s) runs at load and after every state change:
+    put the state-to-room mapping there, so a reload or a scene switch shows the right room. Every interaction needs
+    its own sound (`sound`: a file under the scene folder, rendered with ismail); without one the page clicks and
+    warns. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings}. Emits: behaviours_loaded."""
+    return page_cmd(scene, 'behaviours', {'reload': reload or None}, timeout=60)
+
+
+@op(mutates=True)
+def stage_behaviour_run(scene: str, object: str, action: str = 'press', value=None, sound: bool = True) -> str:
+    """Do what the person does in VR: press an object with a behaviour, pick one of its menu items (action = the label),
+    or send one of its inputs a value (page command: behaviour_run). The same function runs as for the person, and
+    its sound plays (sound=False for a silent test). Errors: no behaviour on that object, no such action (the reply
+    lists them). A function that fails answers with `error` and emits behaviour_error. Page replies {object, action,
+    via, state, error?}. Emits: behaviour_run, behaviour_state when the state changed."""
+    return page_cmd(scene, 'behaviour_run', {'object': object, 'action': action, 'value': value,
+                                             'sound': None if sound else False}, timeout=30)
+
+
+@op(mutates=True)
+def stage_behaviour_state(scene: str, object: str, state: dict = None) -> str:
+    """Read an object's behaviour state, or merge `state` into it (page command: behaviour_state). A change runs the
+    object's apply(s), so the room follows, and is saved with the scene (behaviour_state.json), so it is the same
+    after a reload. Page replies the state. Emits: behaviour_state."""
+    return page_cmd(scene, 'behaviour_state', {'object': object, 'state': state}, timeout=30)
+
+
 @op(mutates=True)
 def stage_light_set(scene: str, light: str, energy: float = None, color: list = None) -> str:
     """Set a light's energy (Blender watts) and / or colour (linear RGB) as one undoable edit (page command: light;
@@ -655,4 +692,4 @@ def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
     return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
 
 
-TYPED = {'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

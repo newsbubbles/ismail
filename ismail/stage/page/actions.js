@@ -330,6 +330,7 @@ export function initActions(ed, hands, panels, live, takes) {
     touchUse();
     if (ed.unlocked && ed.unlocked !== ed.selected) ed.unlocked = null;
     if (open && open.it !== ed.selected) panels.close(open.id, 'deselected');
+    if (ed.selected && window.VR_behaviours && window.VR_behaviours.onSelect(ed.selected, e.via)) return;   // it does its own thing (behaviours.js)
     if (ed.selected && ed.selected !== e.prev) show(ed.selected);
   });
   ed.addEventListener('edited', touchUse);

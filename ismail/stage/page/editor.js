@@ -663,11 +663,24 @@ export class Editor extends THREE.EventDispatcher {
   setEnergy(it, w) {
     if (!Number.isFinite(+w) || +w < 0) throw new Error('energy: watts, a number 0 or more');
     it.light.intensity = this.perW(it) * +w; this.emit('change');
+    if (it.lightHome) Object.assign(it.lightHome, { energy: +w, changed: true });   // an edit is what the build keeps
   }
   setLightColor(it, color) {
     it.light.color.copy(color);
     it.handle.material.color.copy(color);
     this.emit('change');
+    if (it.lightHome) Object.assign(it.lightHome, { color: rgbOf(color), changed: true });
+  }
+  // ---- run time (behaviours.js): what a thing does when pressed is not an edit. The first run-time change keeps the
+  // edited state (it.lightHome, userData.behaviourHome) and computeEdits saves that, never the switch of the moment
+  runLight(it, w, color) {
+    if (!it.lightHome) it.lightHome = { changed: this.lightChanged(it), energy: this.energy(it), color: rgbOf(it.light.color) };
+    if (w !== undefined && w !== null) it.light.intensity = this.perW(it) * Math.max(0, +w);
+    if (color) { it.light.color.copy(lin(color)); it.handle.material.color.copy(it.light.color); }
+    this.emit('change');
+  }
+  runHome(it) {
+    if (!it.obj.userData.behaviourHome) it.obj.userData.behaviourHome = { changed: this.changed(it), t: this.blenderTransform(it) };
   }
   materialsOf(it) {
     const names = new Set();
@@ -848,14 +861,15 @@ export class Editor extends THREE.EventDispatcher {
     const out = { objects: {}, lights: {}, materials: {} };
     for (const it of this.items) {
       // pinned to a hand (anchor.js), or moved on trial by an agent (live.js set trial): saved as it was before
-      const home = it.obj.userData.anchorHome || it.obj.userData.trialHome;
+      const home = it.obj.userData.anchorHome || it.obj.userData.trialHome || it.obj.userData.behaviourHome;
       if (home ? home.changed : this.changed(it)) {
         const t = home ? home.t : this.blenderTransform(it);
         out.objects[it.name] = { location: r7(t.location), quaternion: r7(t.quaternion) };
         if (!it.aimed) out.objects[it.name].scale = r7(t.scale);
       }
-      if (it.light && this.lightChanged(it)) {
-        out.lights[it.name] = { energy: r7([this.energy(it)])[0], color: r7(rgbOf(it.light.color)) };
+      const lh = it.light && it.lightHome;                       // a light a behaviour has set: as it was edited
+      if (lh ? lh.changed : it.light && this.lightChanged(it)) {
+        out.lights[it.name] = lh ? { energy: r7([lh.energy])[0], color: r7(lh.color) } : { energy: r7([this.energy(it)])[0], color: r7(rgbOf(it.light.color)) };
       }
     }
     for (const [name, e] of this.materials) {
