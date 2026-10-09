@@ -166,7 +166,7 @@ Each step ends in something you can point at:
 
 ## The inclusion review: is it general, and may it be public?
 
-The ismail repository is public (MIT). Before anything from a song is proposed for it, answer four questions in the
+The ismail repository is public (MIT). Before anything from a song is proposed for it, answer five questions in the
 ledger row and in the report to the user:
 
 1. **General?** It works beyond the song that made it: on a second piece of material, or on synthetic material with
@@ -182,6 +182,10 @@ ledger row and in the report to the user:
 4. **What does it carry?** No audio of the source, no absolute paths, no personal data, no private notes. Measured
    numbers and code only, with provenance: where the data came from, its licence, the human judgments that tuned it
    (the blind exams, by whom), and the song that built it.
+5. **Do its tests carry the song?** Tests on main test the engine with generic names (a "switch", a "room", a
+   "lead"), never an object, scene, character, take or line from the user's songs or VR scenes. A test that needs the
+   song's material stays in the song (Nate, 2026-10-09: a stage test built on a song scene's light switch was
+   removed from main).
 
 A held or local item is not a failure: it keeps working where it is. Record the reason in the ledger so nobody asks
 again.

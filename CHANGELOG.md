@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### No song content in the tests
+
+- Removed tests/test_stage_behaviours.py: it tested one song scene's light switch, which is the user's VR content
+  and never part of main. skills development.md, the inclusion review, gains a fifth question: tests on main use
+  generic names, never an object, scene, character or take from the user's songs (Nate 10-09).
+
 ### A first session ends with the song in hand and a question
 
 - `guide`'s first session opens with two short plain sentences on what this is (every note and sound written by
