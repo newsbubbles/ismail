@@ -31,7 +31,9 @@ merges.
   fork instruction once got read as making the maintainer the stage dev; it was saved and passed on, and both
   sessions had to be paused while the person settled it.
 - **Know every worktree and branch, and which session uses each.** The person will ask what can be cleaned up.
-  Remove only your own, only merged, only on their yes.
+  Clean up as part of every merge (development.md, must-have 2): the merged pull request's worktree, local branch
+  and merge copy go at once. Anything unmerged, or someone else's working copy, stays until its owner or the person
+  says otherwise. Check `git worktree list` at each intake: more than a handful is a sign the cleanup slipped.
 - **Keep the roster of session names current, and list the sessions again before sending.** Sessions get renamed;
   a message to an old name fails.
 

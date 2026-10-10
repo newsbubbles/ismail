@@ -64,7 +64,11 @@ worktree (`songs/` is git-ignored), so read a song's files by their path in the 
    says where it came from, check the branch copy is identical, and only then restore the checkout.
 2. **Nothing unmerged is deleted.** A worktree is removed and a branch deleted only when its work is in main
    (`git merge-base --is-ancestor <branch> main` succeeds) and pushed. Look at its untracked files first, and back
-   up anything that is not regenerable. Deleting a folder, a branch or a stash needs the user's yes.
+   up anything that is not regenerable. Deleting a folder, a branch or a stash needs the user's yes, with one
+   standing exception: **whoever merges a pull request removes its worktree, its local branch and any temporary
+   merge copy right after the merge** (the user's yes of 10-10, after 160 worktrees and 185 branches piled up). The
+   remote branch goes by itself: the repository deletes head branches on merge. A worktree its owner keeps as a
+   standing working copy across pull requests stays; say so in the pull request.
 3. **No stash in a shared repository.** The stash stack is shared by every worktree; another session can pop yours.
    Park work in a commit on your branch.
 4. **Every commit carries its own proof and its docs:** the tests the change touches passing locally, the full
