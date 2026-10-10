@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Phone: the music leaves call quality when a note ends
+
+- The level meter's audio context now closes with every voice note. Left running, it kept Android in call mode
+  after the note, so the stream played on in call quality through Bluetooth earbuds.
+
 ### Development: cleanup is part of every merge
 
 - development.md and maintainer.md: whoever merges a pull request removes its worktree, local branch and merge

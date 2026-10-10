@@ -417,6 +417,10 @@ function meterStart(stream) {
 function meterStop() {
   cancelAnimationFrame(meter.raf);
   try { meter.src && meter.src.disconnect(); } catch (e) {}
+  // Nate 10-10: after a note the music stayed in call quality. An audio context made while the earbuds are in call
+  // mode keeps Android in that mode for as long as it runs, so the meter's context closes with every note
+  try { meter.ctx && meter.ctx.close(); } catch (e) {}
+  meter.ctx = null; meter.src = null; meter.an = null;
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
