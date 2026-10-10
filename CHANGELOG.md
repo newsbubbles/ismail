@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Stage: a pinch on a thing whose menu is open does nothing
+
+- A thing with a menu keeps the one it has up: another pinch on it while the menu is open leaves the menu where it
+  is, so pinching it over and over no longer closes and reopens the menu each time.
+
 ### Phone: the music leaves call quality when a note ends
 
 - The level meter's audio context now closes with every voice note. Left running, it kept Android in call mode
