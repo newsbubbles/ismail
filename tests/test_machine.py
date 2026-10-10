@@ -395,7 +395,13 @@ def test_two_waiters_never_share_one_slot_when_it_frees(board, monkeypatch):
     monkeypatch.setattr(machine, 'METER_S', 0.05)
     monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
     monkeypatch.setattr(machine, 'gpu', lambda: None)
-    monkeypatch.setattr(machine, 'disks', lambda *a, **k: (time.sleep(0.3), [])[1])   # a slow reading widens the gap
+    import sys
+
+    def slow_after_the_check(*a, **k):   # slow only where slot reads it after the check: inside check() it held the
+        if sys._getframe(1).f_code.co_name == 'slot':   # board lock 0.3 s per poll, and a slow runner timed out on it
+            time.sleep(0.3)
+        return []
+    monkeypatch.setattr(machine, 'disks', slow_after_the_check)   # the slow reading widens the gap
     most, errors = [], []
 
     def take(who):
