@@ -190,6 +190,24 @@ def test_no_server_says_how_to_start_one(tmp_path, monkeypatch):
         OPS['stage_say'](scene='room', text='hello')
 
 
+def test_a_test_copy_of_a_scene_never_shadows_the_real_one(tmp_path, monkeypatch):
+    """A newer server whose scenes folder is under a hidden folder (.scratch) loses to the real one for that scene."""
+    import json, os, time
+    from ismail.stage import link
+    reg = tmp_path / 'reg'
+    reg.mkdir()
+    monkeypatch.setenv('ISMAIL_STAGE_REGISTRY', str(reg))
+    for port, folder, started in [(9001, tmp_path / 'song' / 'scenes', time.time() - 60),
+                                  (9002, tmp_path / 'work' / '.scratch' / 'scenes', time.time())]:
+        (folder / 'room').mkdir(parents=True)
+        (folder / 'room' / 'scene.glb').write_bytes(b'glb')
+        (reg / f'{port}.json').write_text(json.dumps({'port': port, 'pid': os.getpid(), 'scenes': str(folder),
+                                                      'started': started}), encoding='utf-8')
+    assert link.server_for('room')['port'] == 9001
+    assert link.server_for()['port'] == 9002                           # no scene named: still the newest
+    assert link.server_for(port=9002)['port'] == 9002                  # asked for by port: the test copy
+
+
 def test_a_page_seen_just_now_counts(stage, monkeypatch):
     """age_s 0.0 (Linux and macOS clocks) is a live page, not a missing one (CI caught `age or 1e9`)."""
     from ismail.stage import link

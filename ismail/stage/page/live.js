@@ -362,7 +362,7 @@ export function initLive(ed, desktop, xr) {
       ed.beginEdit(c.trial ? 'claude-trial' : 'claude');
       ed.setBlenderWorld(it, t);
       ed.endEdit();
-      if (ed.selected) ed.outline.setFromObject(ed.selected.obj);
+      if (ed.selected) ed.outline.setFromObject(ed.boxTarget(ed.selected));
       return { object: it.name, ...tf(ed.blenderTransform(it)), ...(it.obj.userData.trialHome ? { trial: true } : {}) };
     },
     light: (c) => {

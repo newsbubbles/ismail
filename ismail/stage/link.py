@@ -54,7 +54,10 @@ def server_for(scene=None, port=None):
                 return r
         raise OpError(f'no stage server on port {port}; running: {[r["port"] for r in srv]}')
     if scene:
-        for r in srv:
+        # a copy under a hidden folder (a test server's .scratch) never wins over the real scene: the newest first
+        # put every agent's ops for a scene on a test copy (2026-10-10)
+        hidden = lambda r: any(part.startswith('.') and part not in ('.', '..') for part in Path(r['scenes']).parts)
+        for r in sorted(srv, key=hidden):
             if (Path(r['scenes']) / scene / 'scene.glb').is_file():
                 return r
         raise OpError(f'no running stage server has a scene {scene!r}; servers: '

@@ -6,6 +6,8 @@ import { meshKey } from './reveal.js';
 const QUEST_UA = /OculusBrowser|Quest/i.test(navigator.userAgent);
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
+const SMALL_M = 0.6;          // a thing whose box is under this across is small: it is picked before a body box round it
+
 export const GIZMO = 3;
 
 // A night sky for exterior scenes: a dome from a dusky horizon (a faint warm glow, town lights far off) to deep blue
@@ -608,13 +610,36 @@ export class Editor extends THREE.EventDispatcher {
   // highest non-big ancestor (the group), a second click on the selected group drills one level down toward the
   // leaf, a click on a sibling of a drilled-in selection selects that sibling, and deep (Alt) goes to the leaf.
   pickLeaf(hits) {
-    for (const h of hits) {
-      if (!h.object.isMesh || !h.object.visible) continue;
+    for (const h of this.insideFirst(hits)) {
+      if (!h.object.isMesh || !this.pickable(h.object)) continue;
       const it = this.itemOf(h.object);
       if (it && !it.big) return { it, hit: h };
     }
     return null;
   }
+  // what a ray or a finger may take: shown with every parent shown (a person's hidden statue keeps its own meshes
+  // "visible" under the hidden item, and they caught every pick inside its box), or an unseen pick proxy
+  pickable(o) {
+    if (o.userData.pickProxy) return true;
+    for (let p = o; p; p = p.parent) if (!p.visible) return false;
+    return true;
+  }
+  // a person's unseen body box (actors.js) must not hide the small things inside it (a bottle on the bar in front of
+  // them): a hit on a small thing within the box goes before the box
+  insideFirst(hits) {
+    if (!hits.some((h) => h.object.userData.bodyBox)) return hits;
+    const out = hits.slice(), box = new THREE.Box3(), b = new THREE.Box3(), sz = new THREE.Vector3();
+    const small = (o) => { const it = this.itemOf(o); return !!it && !it.big && b.setFromObject(it.obj).getSize(sz).length() < SMALL_M; };
+    for (let i = 0; i < out.length; i++) {
+      if (!out[i].object.userData.bodyBox) continue;
+      box.setFromObject(out[i].object);
+      const j = out.findIndex((x, k) => k > i && !x.object.userData.pickProxy && box.containsPoint(x.point) && this.pickable(x.object) && small(x.object));
+      if (j > i) out.splice(i, 0, out.splice(j, 1)[0]);
+    }
+    return out;
+  }
+  // what the selection box goes round: the body a person shows (actors.js), else the item
+  boxTarget(it) { return (it && it.standIn) || (it && it.obj); }
   resolvePick(leaf, deep) {
     if (!leaf || deep) return leaf;
     const path = leaf.path.filter((x) => !x.big), s = this.selected;
@@ -640,7 +665,7 @@ export class Editor extends THREE.EventDispatcher {
     this.selected = it;
     if (this.unlocked && this.unlocked !== it) this.unlocked = null;
     this.outline.visible = !!it;
-    if (it) this.outline.setFromObject(it.obj);
+    if (it) this.outline.setFromObject(this.boxTarget(it));
     this.emit('select', { prev, via });
   }
 
@@ -806,7 +831,7 @@ export class Editor extends THREE.EventDispatcher {
       if (o.parent) o.parent.worldToLocal(wp);
       o.position.copy(wp);
       o.updateMatrixWorld(true);
-      if (this.selected === it) this.outline.setFromObject(o);
+      if (this.selected === it) this.outline.setFromObject(this.boxTarget(it));
       if (k >= 1) {
         this.preRender.splice(this.preRender.indexOf(step), 1);
         this.endEdit();
