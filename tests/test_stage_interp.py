@@ -48,13 +48,13 @@ def test_slerp_share_follows_the_mode():
 def test_key_interp_and_trial_set_reach_the_page(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        OPS['stage_key_interp'](scene='room', object='cf_hall_wide_cam', mode='smooth')
-        assert (page.seen[-1]['type'], page.seen[-1]['name'], page.seen[-1]['mode']) == ('key_interp', 'cf_hall_wide_cam', 'smooth')
+        OPS['stage_key_interp'](scene='room', object='hall_wide_cam', mode='smooth')
+        assert (page.seen[-1]['type'], page.seen[-1]['name'], page.seen[-1]['mode']) == ('key_interp', 'hall_wide_cam', 'smooth')
         with pytest.raises(OpError, match="'stop' or 'smooth'"):
             OPS['stage_key_interp'](scene='room', object='x', mode='bezier')
-        OPS['stage_object_set'](scene='room', object='cf_hall_wide_cam', offset=[0, 0, 0.5], trial=True)
+        OPS['stage_object_set'](scene='room', object='hall_wide_cam', offset=[0, 0, 0.5], trial=True)
         assert page.seen[-1]['trial'] is True
-        OPS['stage_object_set'](scene='room', object='cf_hall_wide_cam', offset=[0, 0, 0.5])
+        OPS['stage_object_set'](scene='room', object='hall_wide_cam', offset=[0, 0, 0.5])
         assert 'trial' not in page.seen[-1]
         with pytest.raises(OpError, match='stage_key_interp'):
             OPS['stage_cmd'](scene='room', type='key_interp')

@@ -145,9 +145,9 @@ def test_events_filtered_by_type(stage):
 
 def test_world_roundtrip_and_checks(stage):
     sc = str(stage['scenes'])
-    out = OPS['stage_world'](scene='room', scenes=sc, world={'actors': {'person_a': 'bf_pete'}, 'floor': 0.09,
+    out = OPS['stage_world'](scene='room', scenes=sc, world={'actors': {'person_a': 'body_a'}, 'floor': 0.09,
                                                             'build': {'script': 'video/rooms/room.py'}})
-    assert 'bf_pete' in out and _get(stage['port'], 'world?scene=room')[1]['floor'] == 0.09
+    assert 'body_a' in out and _get(stage['port'], 'world?scene=room')[1]['floor'] == 0.09
     with pytest.raises(OpError, match='keep_out'):
         OPS['stage_world'](scene='room', scenes=sc, world={'keep_out': [[1, 0, 0, 1, 0, 1]]})
     b = W.build_of(stage['scenes'], 'room')
@@ -220,13 +220,13 @@ def test_a_derived_scene_builds_from_its_parents_full_build(tmp_path):
         (song / 'video' / 'rooms' / f).write_text('# room', encoding='utf-8')
     _scene(d, 'club', {'build': {'script': 'video/rooms/club.py', 'env': {'VR_DETAIL': '1'}}, 'floor': 0.09},
            {'objects': {'stool': {'location': [1, 2, 0]}, 'door': {'location': [0, 0, 0]}}})
-    _scene(d, 'now', {'derives_from': 'club', 'pass': 'video/rooms/remodel.py', 'pass_env': {'CROSSFADE': '1'}},
+    _scene(d, 'now', {'derives_from': 'club', 'pass': 'video/rooms/remodel.py', 'pass_env': {'VARIANT': '1'}},
            {'objects': {'stool': {'location': [5, 5, 0]}}})
     _scene(d, 'dawn', {'derives_from': 'now', 'pass': 'video/rooms/dawn.py'})
     b, env = export_plan(d, 'dawn')
     assert b['line'] == ['dawn', 'now', 'club'] and b['script'].name == 'club.py'
     assert [p.name for p in b['passes']] == ['remodel.py', 'dawn.py']             # oldest first
-    assert env['VR_DETAIL'] == '1' and env['CROSSFADE'] == '1' and env['VR_DIET'] == '1' and env['STAGE_SCENE'] == 'dawn'
+    assert env['VR_DETAIL'] == '1' and env['VARIANT'] == '1' and env['VR_DIET'] == '1' and env['STAGE_SCENE'] == 'dawn'
     assert env['VR_EXPORT'].endswith('dawn') and env['VR_BRIDGE'].endswith('blender_bridge.py')
     merged = json.loads(Path(env['VR_EDITS']).read_text(encoding='utf-8'))
     assert merged['objects']['stool']['location'] == [5, 5, 0] and 'door' in merged['objects']   # the variant's win
@@ -249,7 +249,7 @@ def test_scene_new_copies_the_page_pieces_and_writes_the_lineage(tmp_path):
     (song / 'video' / 'rooms').mkdir(parents=True)
     (song / 'video' / 'rooms' / 'club.py').write_text('# room', encoding='utf-8')
     (song / 'video' / 'rooms' / 'remodel.py').write_text('# pass', encoding='utf-8')
-    _scene(d, 'club', {'build': {'script': 'video/rooms/club.py'}, 'actors': {'p': 'bf_pete'}, 'floor': 0.09, 'sky': 'night'})
+    _scene(d, 'club', {'build': {'script': 'video/rooms/club.py'}, 'actors': {'p': 'body_a'}, 'floor': 0.09, 'sky': 'night'})
     (d / 'club' / 'trees').mkdir()
     (d / 'club' / 'trees' / 'tree_1.json').write_text('{}', encoding='utf-8')
     (d / 'club' / 'names.json').write_text('{"stool": "a stool"}', encoding='utf-8')
@@ -257,7 +257,7 @@ def test_scene_new_copies_the_page_pieces_and_writes_the_lineage(tmp_path):
     out = OPS['stage_scene_new'](name='now', source='club', scenes=str(d), pass_script='video/rooms/remodel.py')
     assert 'derives from club' in out and 'stage_scene_export' in out
     w = W.load_world(d, 'now')
-    assert w['derives_from'] == 'club' and w['assets'] == 'club' and w['actors'] == {'p': 'bf_pete'} and w['sky'] == 'night'
+    assert w['derives_from'] == 'club' and w['assets'] == 'club' and w['actors'] == {'p': 'body_a'} and w['sky'] == 'night'
     assert (d / 'now' / 'trees' / 'tree_1.json').is_file() and (d / 'now' / 'names.json').is_file()
     assert not (d / 'now' / 'takes').exists()
     with pytest.raises(OpError, match='exists already'):
@@ -428,8 +428,8 @@ def test_a_panel_can_ride_with_the_person(stage):
         c = page.seen[-1]
         # a body panel is a message: it never holds the command queue unless asked to
         assert (c['type'], c['anchor'], c['side'], c['seconds'], c['wait']) == ('panel', 'body', 'left', 20, False)
-        OPS['stage_say'](scene='room', text='the cables are in', sender='crossroads film')
-        assert (page.seen[-1]['type'], page.seen[-1]['from']) == ('say', 'crossroads film')
+        OPS['stage_say'](scene='room', text='the cables are in', sender='film agent')
+        assert (page.seen[-1]['type'], page.seen[-1]['from']) == ('say', 'film agent')
         OPS['stage_panel_show'](scene='room', title='from the dev', anchor='body', sender='stage dev')
         c = page.seen[-1]
         assert c['from'] == 'stage dev' and 'side' not in c    # the page puts a sender on its own side
@@ -444,9 +444,9 @@ def test_a_panel_can_ride_with_the_person(stage):
 def test_an_ask_says_who_asks(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        OPS['stage_ask'](scene='room', text='Chrome riser?', seconds=5, sender='crossroads film')
+        OPS['stage_ask'](scene='room', text='Brighter lamp?', seconds=5, sender='film agent')
         c = page.seen[-1]
-        assert (c['type'], c['text'], c['from']) == ('ask', 'Chrome riser?', 'crossroads film')
+        assert (c['type'], c['text'], c['from']) == ('ask', 'Brighter lamp?', 'film agent')
     finally:
         page.stop = True
 
@@ -459,8 +459,8 @@ def test_an_agent_following_a_scene_can_name_itself(stage):
 def test_the_last_follow_can_be_kept_by_an_agent(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        out = OPS['stage_take_keep_last'](scene='room', name='bartender')
-        assert page.seen[-1]['type'] == 'take_keep_last' and page.seen[-1]['name'] == 'bartender'
+        out = OPS['stage_take_keep_last'](scene='room', name='person_a')
+        assert page.seen[-1]['type'] == 'take_keep_last' and page.seen[-1]['name'] == 'person_a'
         assert 'take_keep_last' in out
         with pytest.raises(OpError, match='stage_take_keep_last'):
             OPS['stage_cmd'](scene='room', type='take_keep_last')
@@ -471,10 +471,10 @@ def test_the_last_follow_can_be_kept_by_an_agent(stage):
 def test_a_follow_pin_goes_to_the_page(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        OPS['stage_follow_anchor'](scene='room', person='person_bar_lean', to='stool_3')
+        OPS['stage_follow_anchor'](scene='room', person='person_b', to='stool_3')
         c = page.seen[-1]
-        assert (c['type'], c['person'], c['joint'], c['to'], c['legs']) == ('follow_anchor', 'person_bar_lean', 'hips', 'stool_3', 'keep_pose')
-        OPS['stage_follow_anchor'](scene='room', person='person_bar_lean', joint='feet', to=[1.0, 2.0, 0.3])
+        assert (c['type'], c['person'], c['joint'], c['to'], c['legs']) == ('follow_anchor', 'person_b', 'hips', 'stool_3', 'keep_pose')
+        OPS['stage_follow_anchor'](scene='room', person='person_b', joint='feet', to=[1.0, 2.0, 0.3])
         assert page.seen[-1]['to'] == [1.0, 2.0, 0.3]
         with pytest.raises(OpError, match="joint is"):
             OPS['stage_follow_anchor'](scene='room', person='p', joint='knee', to='stool_3')
@@ -489,7 +489,7 @@ def test_follow_anchor_takes_to_from_the_cli_as_a_list_or_a_word(stage):
     page = FakePage(stage['port'], 'room')
     try:
         for arg, want in (('to=[1,2,0]', [1, 2, 0]), ('to=here', 'here'), ('to=stool_3', 'stool_3')):
-            kw = parse_args(['person=person_bar_lean', arg])
+            kw = parse_args(['person=person_b', arg])
             assert kw['to'] == want
             OPS['stage_follow_anchor'](scene='room', **kw)
             assert page.seen[-1]['to'] == want

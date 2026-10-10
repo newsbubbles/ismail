@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Stage: a quick pinch presses, a held pinch opens the menu
+
+- A thing with both a press and a menu ran its press AND opened its menu on every pinch, and every pinch stacked
+  another menu (the user, 2026-10-08, on a glowing orb). Now a quick pinch presses and a pinch held for 0.45 s opens
+  its menu instead; a thing with only a menu opens it on a pinch. Each thing has one menu: a second pinch replaces it.
+- A behaviour's `move` turn on two or more axes now matches Blender's XYZ order (it composed the axes the wrong way).
+- Behaviour tests are back with a generic switch, and the stage tests use generic names only.
+
 ### No song content in the tests
 
 - Removed tests/test_stage_behaviours.py: it tested one song scene's light switch, which is the user's VR content

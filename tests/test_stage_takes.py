@@ -33,7 +33,7 @@ def test_a_takes_audio_is_transcribed_when_it_lands(stage, monkeypatch, tmp_path
     wav = tmp_path / 'v.wav'
     _voice_wav(wav)                       # voice from 0.8 to 1.4 s
     monkeypatch.setattr(S, 'stt_words', lambda a, n: {'text': 'bartender take three', 'words': [
-        {'word': 'bartender', 'start': 0.3, 'end': 1.0}, {'word': 'take', 'start': 1.0, 'end': 1.2}, {'word': 'three', 'start': 1.2, 'end': 1.8}]})
+        {'word': 'person_a', 'start': 0.3, 'end': 1.0}, {'word': 'take', 'start': 1.0, 'end': 1.2}, {'word': 'three', 'start': 1.2, 'end': 1.8}]})
     _take(stage, '20261005_174800_person_bartender', name='person_bartender', seconds=12.0)
     _raw(port, 'voice/in?scene=room&kind=take&take=20261005_174800_person_bartender&seconds=12', wav.read_bytes(), 'audio/wav')
     ev = _wait(port, 'take_voice')[-1]
@@ -53,7 +53,7 @@ def test_a_take_from_a_follow_carries_its_performances_words(stage):
         {'n': 1, 'at': 1.0, 'words': [{'word': 'before', 'start': 0.0, 'end': 0.3}]},
         {'n': 2, 'at': 5.0, 'words': [{'word': 'glass', 'start': 0.5, 'end': 0.9}, {'word': 'up', 'start': 1.0, 'end': 1.2}]}]}),
         encoding='utf-8')
-    _take(stage, '20261005_175000_sam', name='person_bar_lean', **{'for': 'person_bar_lean'}, kept=True,
+    _take(stage, '20261005_175000_sam', name='person_b', **{'for': 'person_b'}, kept=True,
           performance='p1', perf_shift=3.0, seconds=10.0)
     out = OPS['stage_takes'](scene='room', query='glass', kept=True)
     # Follow clock 5.5 s is 2.5 s into the take (it began 3 s into the Follow); "before" fell before the take
@@ -62,22 +62,22 @@ def test_a_take_from_a_follow_carries_its_performances_words(stage):
 
 
 def test_takes_are_named_noted_and_filtered(stage, monkeypatch, tmp_path):
-    _take(stage, '20261005_175100_a', name='cyrus', seconds=4.0)
+    _take(stage, '20261005_175100_a', name='player', seconds=4.0)
     _take(stage, '20261005_175200_b', name='lucy', seconds=6.0, kept=True)
-    out = OPS['stage_take_note'](scene='room', take='20261005_175100_a', label='cyrus nod', note='too fast at the end', at=3.2, sender='crossroads film')
-    assert "label 'cyrus nod', 1 notes" in out
+    out = OPS['stage_take_note'](scene='room', take='20261005_175100_a', label='player nod', note='too fast at the end', at=3.2, sender='film agent')
+    assert "label 'player nod', 1 notes" in out
     lst = OPS['stage_takes'](scene='room')
     assert lst.index('20261005_175200_b') < lst.index('20261005_175100_a')          # newest first
-    assert '[cyrus nod]' in lst and 'note @3.2s (crossroads film): too fast at the end' in lst
+    assert '[player nod]' in lst and 'note @3.2s (film agent): too fast at the end' in lst
     assert '20261005_175100_a' in OPS['stage_takes'](scene='room', query='too fast')
-    assert '20261005_175200_b' not in OPS['stage_takes'](scene='room', person='cyrus')
+    assert '20261005_175200_b' not in OPS['stage_takes'](scene='room', person='player')
     assert '20261005_175100_a' not in OPS['stage_takes'](scene='room', kept=True)
     with pytest.raises(OpError, match='no take'):
         OPS['stage_take_note'](scene='room', take='nope', note='x')
     with pytest.raises(OpError, match='label= and/or note='):
         OPS['stage_take_note'](scene='room', take='20261005_175100_a')
     # an older take with audio and no words yet
-    d = _take(stage, '20261005_170000_old', name='cyrus', seconds=2.0)
+    d = _take(stage, '20261005_170000_old', name='player', seconds=2.0)
     wav = tmp_path / 'v.wav'
     _voice_wav(wav)
     (d / 'audio.wav').write_bytes(wav.read_bytes())
@@ -101,7 +101,7 @@ def _dance(d, seconds=8.0, hz=30.0, bounce_hz=2.0):
 
 
 def test_takes_keep_time_loop_and_warp_onto_the_beat(stage):
-    d = _take(stage, '20261006_120000_dance', name='person_couple_1_m', performance='p1', trim=[0, 8], label='dance')
+    d = _take(stage, '20261006_120000_dance', name='person_c', performance='p1', trim=[0, 8], label='dance')
     _dance(d)
     out = OPS['stage_take_sync'](scene='room', takes=['20261006_120000_dance'], bpm=120)
     import re
