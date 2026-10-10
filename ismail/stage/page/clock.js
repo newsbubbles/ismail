@@ -10,7 +10,7 @@
 // The timeline: a bar that floats in front of the user (the T button on the menu, or live `timeline`): tap or drag
 // along it to scrub, buttons to play, step, key, toggle AUTO, save. Saved to scenes/<scene>/anim.json (POST /anim),
 // read by blue_front_block.py for renders (BF_ANIM) so the moves made in the headset are the moves in the shot.
-// Live: clock {action: play|pause|seek|rate|span, t, rate, span}, key {name, t?}, key_delete {name, t?},
+// Live: clock {action: play|pause|seek|rate|span, t, rate, span}, key {name, t?} or {keys, replace?, interp?}, key_delete {name, t?},
 // anim_save, anim_clear {name?}, key_interp {name, mode}, timeline {show}, growth {name, t0, t1}. Events: clock {t, playing}, keyed, anim_saved.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
@@ -18,7 +18,7 @@ import { world } from './world.js';
 
 const W = 0.9, H = 0.16, CW = 1800, CH = 320;                  // the bar in metres and its canvas
 const BTN = [['play', '▶'], ['back', '⏮'], ['step-', '◀'], ['step+', '▶▶'], ['key', '◆'], ['auto', 'AUTO'], ['save', 'SAVE']];
-import { vec, segment, slerpK } from './interp.js';
+import { vec, segment, slerpK, lookQuat } from './interp.js';
 
 export function initClock(ed, live, xrApi, panels) {
   const scn = () => ed.sceneName;                      // live: scenes.js can switch it
@@ -40,6 +40,44 @@ export function initClock(ed, live, xrApi, panels) {
     live.emit('keyed', { name, t: k.t, keys: ks.length });
     draw();
     return { name, t: k.t, keys: ks.length };
+  }
+  // many keys in one command, from values (Film, 2026-10-10: a camera move or an object's path in one go, without
+  // moving the thing to each spot first): [{name, t, location?, quaternion?, scale?, look?}], Blender world values;
+  // what a key does not give is the object's transform now; look (a Blender point) aims the key's -Z at it, world Z
+  // up (a camera or a light). replace: names whose keys go first; interp: {name: 'stop' | 'smooth'}. Every key is
+  // checked before any is written. The span grows to take keys past its end.
+  function keyMany(list, { replace = [], interp = {} } = {}) {
+    const fin = (v, n) => Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+    list.forEach((k, i) => {
+      if (!k || !ed.byName.get(k.name)) throw new Error(`key ${i}: no object ${k && k.name}`);
+      if (typeof k.t !== 'number' || !Number.isFinite(k.t) || k.t < 0) throw new Error(`key ${i} (${k.name}): t is seconds, 0 or more`);
+      for (const [f, n] of [['location', 3], ['quaternion', 4], ['scale', 3], ['look', 3]]) {
+        if (k[f] != null && !fin(k[f], n)) throw new Error(`key ${i} (${k.name}): ${f} is ${n} numbers`);
+      }
+      if (k.look && k.quaternion) throw new Error(`key ${i} (${k.name}): look or quaternion, not both`);
+    });
+    for (const [n, m] of Object.entries(interp)) if (!['stop', 'smooth'].includes(m)) throw new Error(`interp ${n}: 'stop' or 'smooth'`);
+    for (const n of replace) delete anim.objects[n];
+    const r = (a) => a.map((v) => +v.toFixed(6)), touched = new Set();
+    for (const k of list) {
+      const tr = ed.blenderTransform(ed.byName.get(k.name)), ks = keysOf(k.name);
+      const location = k.location || tr.location;
+      const nk = { t: +k.t.toFixed(3), location: r(location), quaternion: r(k.look ? lookQuat(location, k.look) : k.quaternion || tr.quaternion),
+        scale: r(k.scale || tr.scale) };
+      const i = ks.findIndex((x) => Math.abs(x.t - nk.t) < 1e-3);
+      if (i >= 0) ks[i] = nk; else { ks.push(nk); ks.sort((a, b) => a.t - b.t); }
+      if (nk.t > anim.span[1]) anim.span[1] = nk.t;
+      touched.add(k.name);
+    }
+    if (Object.keys(interp).length) {
+      anim.interp = anim.interp || {};
+      for (const [n, m] of Object.entries(interp)) { if (m === 'stop') delete anim.interp[n]; else anim.interp[n] = m; }
+    }
+    st.dirty = true;
+    apply(); draw();
+    const keys = Object.fromEntries([...touched].map((n) => [n, anim.objects[n].length]));
+    live.emit('keyed', { names: keys, many: list.length });
+    return { keyed: list.length, keys, span: anim.span };
   }
   function keyDelete(name, t) {
     const ks = anim.objects[name];
@@ -271,7 +309,7 @@ vKoW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     if (c.t !== undefined) seek(c.t); else draw();
     return { t: st.t, playing: st.playing, rate: st.rate, span: anim.span };
   };
-  live.handlers.key = (c) => key(c.name, c.t ?? st.t);
+  live.handlers.key = (c) => (c.keys ? keyMany(c.keys, c) : key(c.name, c.t ?? st.t));
   live.handlers.key_delete = (c) => keyDelete(c.name, c.t);
   live.handlers.anim_save = () => save();
   // key_interp {name, mode}: how this object moves between its keys ("stop" or "smooth"; interp.js), saved with anim_save

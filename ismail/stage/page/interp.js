@@ -40,6 +40,25 @@ export function vec(ks, t, f, mode = 'stop') {
 // how far to slerp between keys i and i + 1 at u
 export const slerpK = (u, mode = 'stop') => (mode === 'smooth' ? u : ease(u));
 
+// a Blender rotation [w, x, y, z] whose -Z looks from pos at look, world Z up (a camera's or a light's aim; a key's
+// look in stage_keys_set); straight up or down, its right is +X
+export function lookQuat(pos, look) {
+  const norm = (v) => { const n = Math.hypot(...v) || 1; return v.map((x) => x / n); };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const f = norm(look.map((x, i) => x - pos[i]));
+  let r = cross(f, [0, 0, 1]);
+  r = Math.hypot(...r) < 1e-6 ? [1, 0, 0] : norm(r);
+  const u = cross(r, f);
+  const m = [[r[0], u[0], -f[0]], [r[1], u[1], -f[1]], [r[2], u[2], -f[2]]];   // columns: right, up, back
+  const tr = m[0][0] + m[1][1] + m[2][2];
+  let q;
+  if (tr > 0) { const s = Math.sqrt(tr + 1) * 2; q = [0.25 * s, (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s]; }
+  else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) { const s = Math.sqrt(1 + m[0][0] - m[1][1] - m[2][2]) * 2; q = [(m[2][1] - m[1][2]) / s, 0.25 * s, (m[0][1] + m[1][0]) / s, (m[0][2] + m[2][0]) / s]; }
+  else if (m[1][1] > m[2][2]) { const s = Math.sqrt(1 + m[1][1] - m[0][0] - m[2][2]) * 2; q = [(m[0][2] - m[2][0]) / s, (m[0][1] + m[1][0]) / s, 0.25 * s, (m[1][2] + m[2][1]) / s]; }
+  else { const s = Math.sqrt(1 + m[2][2] - m[0][0] - m[1][1]) * 2; q = [(m[1][0] - m[0][1]) / s, (m[0][2] + m[2][0]) / s, (m[1][2] + m[2][1]) / s, 0.25 * s]; }
+  return q[0] < 0 ? q.map((x) => -x) : q;
+}
+
 // ---- take playback between recorded samples (actors.js). The user, 2026-10-06 (voice note #20002): playback "looks
 // low frame rate and steppy"; a take recorded while the headset ran at 20 to 30 fps has about 20 samples a second,
 // and each one was held until the next. mixFrame(a, b, u, out) is the frame u (0..1) of the way from sample a to
