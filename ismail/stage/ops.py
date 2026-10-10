@@ -847,3 +847,121 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
 
 def _batch_index(line):
     return int(line[1:line.index(']')])
+
+
+@op(mutates=True)
+def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: str = None, cameras: str = None,
+                  path: dict = None, view: dict = None, fps: int = 30, size: list = None, clock_at: float = None,
+                  clock: bool = True, setup: list = None, audio: str = None, video: bool = True,
+                  keep_frames: bool = False, sets: bool = True, scenes: str = None, name: str = None) -> str:
+    """Capture the stage on the PC, frame-locked: frame n shows the song at t0 + n / fps (takes and loops, keyed
+    objects, tree growth, lights and behaviours all at that time), however long a frame takes to draw; nothing drops.
+    Runs in the background with no headset and without touching the stage the person uses (its own server and a
+    headless browser; nothing it does is saved to the scene or reaches the live link), on the GPU slot. Replies at
+    once with the job; stage_capture_status(scene, job) follows it.
+    The camera, one of: camera= a camera object in the scene (keyed ones fly their keys on the stage clock);
+    shot= a story path from cameras.json (cameras= its file; keys evenly spaced, eased in and out over the shot's
+    seconds from t0); path= {"keys": [{"pos", "look", "lens"}], "seconds", "at"} the same inline; view= {"pos",
+    "fwd", "up", "vfov"} fixed. All in Blender coordinates (metres, Z up), lens in mm on a 36 mm sensor; "vfov"
+    (degrees) in path or view overrides the lens.
+    t0, t1: song seconds. size [w, h] (default [1920, 1080]; [1440, 1080] for 4:3). The stage clock is set to
+    clock_at + (song t - t0) every frame (clock_at defaults to t0; clock=False leaves it alone). setup: live commands
+    run once before the first frame, e.g. [{"type": "actor_play", "person": "body_a", "take": "t1", "at_music": 0},
+    {"type": "sky", "mode": "night"}] (per-shot overrides; the scene files are not changed). Every load set is in
+    the shot unless sets=False (setup can unload one: {"type": "load_set", "name": ..., "loaded": false}).
+    audio: the song file, cut to t0..t1 under the video. Out: <scene>/captures/<job>/capture.mp4 (H.264, 4:2:0), frames/f_00000.png with
+    keep_frames (or video=False)."""
+    import re
+    import uuid
+    d = (Path(scenes).resolve() / scene) if scenes else _scene_dir(scene)
+    if not (d / 'scene.glb').is_file():
+        raise OpError(f'no scene {scene!r} in {d.parent}')
+    if not t1 > t0 >= 0:
+        raise OpError('t0 and t1 are song seconds with t1 > t0 >= 0')
+    size = list(size or [1920, 1080])
+    if len(size) != 2 or not all(isinstance(v, int) and 16 <= v <= 4096 for v in size) or any(v % 2 for v in size):
+        raise OpError('size is [width, height] in even pixels, 16 to 4096')
+    if not 1 <= int(fps) <= 120:
+        raise OpError('fps is 1 to 120')
+    given = [k for k, v in (('camera', camera), ('shot', shot), ('path', path), ('view', view)) if v]
+    if len(given) != 1:
+        raise OpError('give one camera: camera=, shot= (with cameras=), path= or view=' + (f' (got {given})' if given else ''))
+    if camera:
+        cam = {'object': camera}
+    elif shot:
+        if not cameras or not Path(cameras).is_file():
+            raise OpError('shot= needs cameras= (the cameras.json file)')
+        shots = json.loads(Path(cameras).read_text(encoding='utf-8')).get('shots', [])
+        s = next((x for x in shots if x.get('id') == shot), None)
+        if not s:
+            raise OpError(f'no shot {shot!r} in {cameras}; shots: {", ".join(x.get("id", "?") for x in shots)}')
+        cam = {'path': {'keys': s['keys'], 'seconds': float(s['seconds']), 'at': float(t0)}}
+    elif path:
+        if not path.get('keys') or not path.get('seconds'):
+            raise OpError('path is {"keys": [{"pos", "look", "lens"}, ...], "seconds", "at"?}')
+        cam = {'path': {'at': float(t0), **path}}
+        if path.get('vfov'):
+            cam['vfov'] = path['vfov']
+    else:
+        if not view.get('pos') or not view.get('fwd'):
+            raise OpError('view is {"pos": [x, y, z], "fwd": [x, y, z], "up"?, "vfov"?} in Blender coordinates')
+        cam = {k: view[k] for k in ('pos', 'fwd', 'up', 'vfov') if view.get(k) is not None}
+    if audio and not Path(audio).is_file():
+        raise OpError(f'no audio file {audio}')
+    for c in setup or []:
+        if not isinstance(c, dict) or not c.get('type'):
+            raise OpError('setup is a list of live commands: {"type": "actor_play", ...}')
+    job_id = name or time.strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:4]
+    if not re.match(r'^[A-Za-z0-9_\-]+$', job_id):
+        raise OpError('name: letters, digits, _ and - only')
+    jd = d / 'captures' / job_id
+    if jd.exists():
+        raise OpError(f'a capture {job_id!r} is already there ({jd}); pass another name')
+    from . import capture
+    if not capture.browser():
+        raise OpError('no Edge or Chrome to draw with (set ISMAIL_BROWSER to one)')
+    if video and not capture.ffmpeg():
+        raise OpError('no ffmpeg (on PATH or ISMAIL_FFMPEG); or video=False with keep_frames')
+    jd.mkdir(parents=True)
+    job = {'id': job_id, 'scene': scene, 'scenes': str(d.parent), 't0': float(t0), 't1': float(t1), 'fps': int(fps),
+           'size': size, 'camera': cam, 'clock': bool(clock), 'clock_at': float(t0 if clock_at is None else clock_at),
+           'setup': setup or [], 'audio': str(Path(audio).resolve()) if audio else None, 'video': bool(video),
+           'keep_frames': bool(keep_frames or not video), 'sets': bool(sets), 'made': time.strftime('%Y-%m-%d %H:%M:%S')}
+    capture.write_json(jd / 'job.json', job)
+    capture.write_json(jd / 'status.json', {'job': job_id, 'scene': scene, 'state': 'starting'})
+    env = {**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[2]) + os.pathsep + os.environ.get('PYTHONPATH', '')}
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == 'nt' else 0
+    subprocess.Popen([sys.executable, '-m', 'ismail.stage.capture', str(jd / 'job.json')], env=env,
+                     stdout=open(jd / 'worker.txt', 'w'), stderr=subprocess.STDOUT, creationflags=flags,
+                     start_new_session=os.name != 'nt')
+    frames = int(round((t1 - t0) * fps))
+    return (f'capture {job_id}: {scene}, song {t0:g} to {t1:g} s, {frames} frames at {fps} fps, {size[0]}x{size[1]}; '
+            f'started in the background (stage_capture_status(scene={scene!r}, job={job_id!r})). Out: {jd}')
+
+
+@op()
+def stage_capture_status(scene: str, job: str = None, scenes: str = None) -> str:
+    """Where a capture is (stage_capture): its state (waiting for the GPU, loading the room, rendering, done,
+    failed), frames drawn of all, frames a second, time left, the video when done and the page's errors. Without
+    job: the scene's captures, newest first."""
+    d = ((Path(scenes).resolve() / scene) if scenes else _scene_dir(scene)) / 'captures'
+    if not job:
+        js = sorted(d.glob('*/status.json'), key=lambda p: p.stat().st_mtime, reverse=True)[:10]
+        if not js:
+            return f'no captures in {d}'
+        return '\n'.join(_capture_line(json.loads(p.read_text(encoding='utf-8'))) for p in js)
+    f = d / job / 'status.json'
+    if not f.is_file():
+        raise OpError(f'no capture {job!r} in {d}')
+    return json.dumps(json.loads(f.read_text(encoding='utf-8')), indent=1)
+
+
+def _capture_line(s):
+    bits = [s.get('job', '?'), s.get('state', '?'), f"{s.get('frame', 0)}/{s.get('frames', '?')} frames"]
+    if s.get('eta_s') is not None and s.get('state') == 'rendering':
+        bits.append(f"about {s['eta_s']} s left")
+    if s.get('video'):
+        bits.append(s['video'])
+    if s.get('error'):
+        bits.append('error: ' + str(s['error'])[:200])
+    return ', '.join(bits)
