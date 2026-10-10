@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Auto-tune: a voice moved onto notes, its character kept
+
+- New effect `autotune` (Nate 10-10): WORLD splits the voice into pitch, envelope and breath, moves only the pitch
+  onto `key` + `scale` or onto the notes of the track named in `notes_from` (in the singer's own octave), and puts
+  the voice back together. `speed_ms` is the retune speed (0 = the hard robotic snap; slower keeps vibrato and
+  scoops), `amount` corrects part way, `formant` moves the voice's character without its pitch. Studio first: in a
+  live set it is baked. Built on the Voice agent's guidance: the WORLD round trip passes blind, and what sounds
+  "autotuned" is a rule-made pitch curve, so quick pitch moves pass through unless the speed is 0.
+- New op `sound_autotune(path, ...)`: the same on a take on disk (a phone voice note or a mic take), written beside
+  it. live.md: sung takes tuned and played back in a set.
+- WORLD is optional: `pip install 'ismail[voice]'` (pyworld); the effect says so when it is missing.
+
 ### Stage: a person's box is where their body is; a test copy never takes a scene's ops
 
 - A person's selection box, ray pick and hand pick follow the body they show (resting in a start pose, playing a

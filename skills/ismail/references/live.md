@@ -378,7 +378,7 @@ When the session itself is the show (the viewer sees your turns and hears the se
 Live: every instrument type including mimic profiles and performer voices, every effect, send buses,
 sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 
-Effects run two ways. An effect with a live processor (every built-in type today, the guitar rig included) runs
+Effects run two ways. An effect with a live processor (every built-in type but `autotune`, the guitar rig included) runs
 block by block on the mixer and matches the studio version (held by tests): a wah's `pos`, a rotary's `speed`, a
 univibe's `rate_hz` move with `live_fx` like any filter. An amp or tape with hiss on keeps hissing while its track
 plays, as in the studio, and sleeps with the track when its notes stop. An effect that exists only in the studio
@@ -399,6 +399,16 @@ from earlier bars are not played).
 Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
 instrument-param automation on your own live tracks (a deck's song has it; otherwise use fx params, or expr
 lanes on a performer), tempo changes inside a run, placed audio clips and the master effect chain on a deck.
+
+### Sung takes, tuned
+
+The person can sing over the set, from the phone (a voice note) or a microphone. `sound_autotune(path, key=,
+scale=, speed_ms=)` tunes the take to the set's key and scale, or to `notes=[[start_s, midi, dur_s], ...]` (the
+part it should follow, timed from the take's start), and writes `<take>_tuned.wav` beside it, never over it. A
+phone note keeps the master it was sung over (`<id>_ref.wav`, with the beats in `<id>_ref.json`; phone.md, "A hum
+is a part"), so the tuned take can go back in on the beat it was sung to, the way the set plays any recorded
+phrase. Say it is coming before it plays. Ask which sound they want first: `speed_ms` 0 is the hard robotic effect,
+slower keeps their own wobble. Then ask what they hear.
 
 ## Numbers worth knowing
 

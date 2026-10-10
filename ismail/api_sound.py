@@ -516,3 +516,53 @@ def _audio_note(ys, measured, n):
             on = int(np.argmax(env > 0.02 * env.max()))
             return y[max(0, on - 220):]
     return ys[0][0]
+
+
+@op()
+def sound_autotune(path: str, key: str = 'C', scale: str = 'chromatic', notes: list = None, speed_ms: float = 20.0,
+                   amount: float = 1.0, formant: float = 0.0, out: str = None) -> str:
+    """Auto-tune a recorded voice file (a phone voice note, a mic take, a stem): its pitch moved onto key + scale, or
+    onto notes = [[start_s, midi_pitch, dur_s], ...] (times from the file's start), its character kept (WORLD; needs
+    pyworld). speed_ms is the retune speed: 0 = the hard robotic snap, 20-60 firm, 100+ keeps vibrato and scoops.
+    formant = semitones to move the voice's character without its pitch. Writes a new wav next to the take (or
+    out=) and never overwrites; the same as the autotune effect on a track (fx_help type='autotune')."""
+    from . import tune
+    if not os.path.exists(path):
+        raise OpError(f"no such file {path!r}")
+    try:
+        y, sr = sf.read(path, dtype='float64', always_2d=True)
+        y = y.mean(1)
+    except RuntimeError:                         # a phone note (webm, ogg, m4a): decode with ffmpeg
+        import shutil
+        from .phone.hum import decode
+        ff = shutil.which('ffmpeg')
+        if not ff:
+            raise OpError(f"{path!r} is not a wav/flac and ffmpeg is not installed to decode it")
+        sr = SD.SR
+        y = decode(path, ff, sr).astype(np.float64)
+    if sr != SD.SR:
+        from scipy.signal import resample_poly
+        y, sr = resample_poly(y, SD.SR, sr), SD.SR
+    nl = None
+    if notes:
+        try:
+            nl = [(float(s), int(p), float(d), 100) for s, p, d in notes]
+        except (TypeError, ValueError):
+            raise OpError("notes = [[start_s, midi_pitch, dur_s], ...], e.g. [[0, 62, 0.5], [0.5, 64, 1]]")
+    try:
+        tuned, r = tune.retune(y, sr, key, scale, nl, speed_ms, amount, formant)
+    except tune.TuneError as e:
+        raise OpError(str(e))
+    if out is None:
+        base = os.path.splitext(path)[0] + '_tuned'
+        out, k = base + '.wav', 2
+        while os.path.exists(out):
+            out, k = f"{base}_{k}.wav", k + 1
+    elif os.path.exists(out):
+        raise OpError(f"{out!r} exists; give a new name (takes are never overwritten)")
+    peak = float(np.max(np.abs(tuned))) or 1.0
+    sf.write(out, (tuned / max(peak, 1.0)).astype(np.float32), sr)
+    return (f"tuned -> {out}\n{r['voiced_s']:.1f} s voiced; moved {r['median_cents_moved']:.0f} cents typical, "
+            f"{r['max_cents_moved']:.0f} at most ({'notes given' if nl else f'{key} {scale}'}, speed {speed_ms:g} ms)\n"
+            "next: listen against the music it was sung over; a phone note keeps that music beside it "
+            "(<id>_ref.wav, beats in <id>_ref.json) so the take can be placed on the beat it was sung to")
