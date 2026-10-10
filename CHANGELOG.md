@@ -11,6 +11,25 @@
   place in line and a cleared priority are now removed with retries until the reader lets go (2 s at most, then a
   warning). Test: a reader holds the job file open while the slot ends, and the board is empty after.
 
+### No song content in the tests
+
+- Removed tests/test_stage_behaviours.py: it tested one song scene's light switch, which is the user's VR content
+  and never part of main. skills development.md, the inclusion review, gains a fifth question: tests on main use
+  generic names, never an object, scene, character or take from the user's songs (Nate 10-09).
+
+### A first session ends with the song in hand and a question
+
+- `guide`'s first session opens with two short plain sentences on what this is (every note and sound written by
+  the agent, a song changed one piece at a time, any part of music at their level), says to hand every sound over
+  (the file attached or linked, never only a sound through the speakers once), and never to end on a setup report
+  or to replace a sketch with hand-written notes. Live play is offered once they like or keep a song. A plain-words
+  session also gets the "one piece changed, the rest kept" moment.
+- `sketch`: the first round's SAY block says it is a first try ("I don't know your taste yet") and asks what they
+  would change or for a song they love; a HAND IT OVER line names the file. `sketch_keep` offers live play.
+- New op `play_file(path)`: opens a sound in the person's own player (Windows, macOS, Linux).
+- skills: step 8, setup's last step ("the end of setup is their first song, not a report"), user-experience.md
+  (Nate 10-08, after a Codex dress rehearsal ended on a setup report with the song buried in it).
+
 ### Stage: a thing whose code fails says so
 
 - Every behaviour failure, at load or on a press, goes to the agents as `behaviour_error` with its phase and the line

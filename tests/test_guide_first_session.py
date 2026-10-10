@@ -128,7 +128,13 @@ def test_the_first_session_has_a_musician_branch_and_a_plain_words_branch():
     assert '2 or 3 playful, concrete choices' in plain and 'or tell me anything' in plain
     assert 'new version first' in plain and 'no BPM, key or chord names' in plain
     assert 'Want to keep this as your song?' in plain and 'sketch_keep' in plain
-    assert 'do not offer them yet' in plain                                              # live changes come later
+    assert 'Want me to play it live' in plain and 'do not offer them yet' not in plain  # live once they like it
+    assert 'show that it changes one piece and keeps the rest' in plain                  # the generator contrast
+    # Nate 10-08 (a Codex dress rehearsal ended on a setup report): the opening says why this is different, and
+    # every sound is handed over as a file with a question
+    assert "I'm a studio you talk to" in g and 'one piece at a time' in g and 'sounds, the mix' in g
+    assert 'not a generator' not in g                                    # no "this isn't X, it's Y" (Marketing 10-08)
+    assert 'HAND IT OVER' in g and 'play_file(path)' in g and 'never a setup report' in g
     m = api.guide(first_answer="I play the organ at church and read music")
     assert 'PLAIN WORDS' not in m and 'Want it different' not in m
 
