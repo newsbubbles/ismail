@@ -383,9 +383,18 @@ export function initBehaviours(ed, live, panels, hands = null) {
     holding = h;
     if (session) session.addEventListener('selectend', onEnd);
   }
+  // a pinch on a thing whose menu is up does nothing: the menu stays where it is (the user, 2026-10-10: "if I want to
+  // be like a kid with a light switch, I could DDOS the menu system")
+  const menusUp = new Set();
   async function menu(name, it) {
+    const id = 'behaviour_' + name;
+    if (menusUp.has(id) || (panels.panels && panels.panels.has(id))) return;
+    menusUp.add(id);
+    try { await menuOpen(name, it, id); } finally { menusUp.delete(id); }
+  }
+  async function menuOpen(name, it, id) {
     const d = defs[name], labels = Object.keys(d.menu);
-    const r = await panels.show({ panel_id: 'behaviour_' + name, title: d.title || ed.label(it),     // one per thing: re-shown, never stacked
+    const r = await panels.show({ panel_id: id, title: d.title || ed.label(it),     // one per thing
       text: d.text || '', buttons: [...labels, '⚙ Edit', '✕'], near: nearHead(), width: labels.length > 3 ? 0.42 : 0.34, quiet: true });
     const a = r && r.answer;
     if (!a || a === '✕') return;
