@@ -35,6 +35,9 @@ jobs:
           sudo apt-get $APT install -y --no-install-recommends espeak-ng ffmpeg libsndfile1
       - name: install
         run: pip install -e ".[dev]"
+      - name: WORLD for autotune (optional; its tests skip without it)
+        continue-on-error: true
+        run: pip install "pyworld>=0.3.4"
       - name: tests
         run: python -m pytest tests -q
 

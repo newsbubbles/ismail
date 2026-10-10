@@ -485,7 +485,7 @@ def track_set(project: str, track: str, volume_db: float = None, pan: float = No
             sm[rename] = sm.pop(track)
         for tr in P.d['tracks'].values():
             for f in tr.get('fx', []):
-                for key in ('sidechain', 'source', 'modulator'):
+                for key in ('sidechain', 'source', 'modulator', 'notes_from'):
                     if f.get(key) == track:
                         f[key] = rename
     P.save()
@@ -1638,6 +1638,8 @@ def fx_add(project: str, target: str, fx: dict, index: int = None) -> str:
         P.track(fx['sidechain'])
     if fx['type'] == 'duck' and fx.get('source'):
         P.track(fx['source'])
+    if fx['type'] == 'autotune' and fx.get('notes_from'):
+        P.track(fx['notes_from'])
     i = len(lst) if index is None else index
     lst.insert(i, fx)
     P.save()
@@ -1698,7 +1700,10 @@ def fx_help(project: str = None, type: str = None) -> str:
         if t in rigmod.DOCS:
             out.append(f"    {rigmod.DOCS[t]}")
     out.append("notes: compressor.sidechain = track name; duck.source = track name (ducks on its note-ons) or every_beats;"
-               " gate.pattern uses step chars; vocoder.modulator = track name or 'sound:<name>'; eq.bands = "
+               " gate.pattern uses step chars; vocoder.modulator = track name or 'sound:<name>'; "
+               "autotune: on a vocal track, pitch onto key + scale (major, minor, chromatic, dorian, blues ...), or "
+               "notes_from = a track whose notes it follows; speed_ms 0 = hard robot snap, 20-60 firm, 100+ keeps "
+               "vibrato; formant = semitones to move the voice's character without its pitch (needs pyworld); eq.bands = "
                "[{type: peak|lowshelf|highshelf|lowcut|highcut|notch|bandpass, freq, gain_db, q, slope 12|24}]")
     return '\n'.join(out)
 

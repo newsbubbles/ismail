@@ -58,6 +58,12 @@ class Ctx:
             raise RenderError(f"duck source {name!r} is not a track; tracks: {list(self.r.project['tracks'])}")
         return [s for s, *_ in self.r.track_notes_sec(tr)]
 
+    def track_notes(self, name):
+        tr = self.r.project['tracks'].get(name)
+        if tr is None:
+            raise RenderError(f"autotune notes_from {name!r} is not a track; tracks: {list(self.r.project['tracks'])}")
+        return self.r.track_notes_sec(tr)
+
     def modulator_audio(self, ref, n):
         if ref.startswith('sound:'):
             snd = self.r.load_sound(ref[6:])
