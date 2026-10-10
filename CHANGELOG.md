@@ -13,6 +13,8 @@
 
 ### Auto-tune: a voice moved onto notes, its character kept
 
+- Playbook: where `autotune` goes in a vocal chain (first, on the dry take; sound-design.md), and in a live set
+  tune to the set's key, the three settings that cover most asks, and tune the file before playing it (live.md).
 - New effect `autotune` (Nate 10-10): WORLD splits the voice into pitch, envelope and breath, moves only the pitch
   onto `key` + `scale` or onto the notes of the track named in `notes_from` (in the singer's own octave), and puts
   the voice back together. `speed_ms` is the retune speed (0 = the hard robotic snap; slower keeps vibrato and

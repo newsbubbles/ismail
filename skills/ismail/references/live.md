@@ -410,6 +410,11 @@ is a part"), so the tuned take can go back in on the beat it was sung to, the wa
 phrase. Say it is coming before it plays. Ask which sound they want first: `speed_ms` 0 is the hard robotic effect,
 slower keeps their own wobble. Then ask what they hear.
 
+Tune to the set's key and scale whenever you know them: `chromatic` pulls each note to the nearest semitone, so a
+note sung between two lands on whichever is closer, and the take locks less firmly. Three settings cover most asks:
+0 (robotic), 40 (firm, the pop sound), 150 (natural). Autotune has no live processor: tune the file first, then play
+it like any recorded phrase.
+
 ## Numbers worth knowing
 
 - Output trails the mix by ~96 ms (a fixed 4096-sample alignment budget for effect lookahead, plus the safety
