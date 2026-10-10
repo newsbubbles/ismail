@@ -24,8 +24,8 @@ def run(eng, seconds):
 @pytest.fixture
 def eng(tmp_path):
     e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
-    e.cmd_bus('lucy')
-    e.cmd_track('p', instrument='preset:pluck', output='lucy')
+    e.cmd_bus('singer')
+    e.cmd_track('p', instrument='preset:pluck', output='singer')
     e.cmd_track('k', instrument={'type': 'kick'})
     e.cmd_queue([{'track': 'p', 'notes': '0 C4 1; 1 E4 1; 2 G4 1; 3 C5 1', 'bars': 1},
                  {'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}}])
@@ -38,23 +38,23 @@ def pcm(b):
 
 def test_a_bus_streams_on_its_own_and_the_master_streams_everything(eng):
     run(eng, 4.0)                                   # the clips start on bar 2; one loop in, every render is done
-    lucy, master = eng.hub.subscribe('bus:lucy'), eng.hub.subscribe('master')
+    singer, master = eng.hub.subscribe('bus:singer'), eng.hub.subscribe('master')
     run(eng, 0.9)                                   # under the 1 s a listener's queue keeps
-    a, m = pcm(lucy.get(0.1)), pcm(master.get(0.1))
+    a, m = pcm(singer.get(0.1)), pcm(master.get(0.1))
     assert len(a) > 0.8 * SR and len(m) > 0.8 * SR
     assert np.max(np.abs(a)) > 0.01 and np.max(np.abs(m)) > 0.01
-    # the kick is not on lucy: lucy's stream has the pluck only, so it has next to no energy under 100 Hz where the
+    # the kick is not on singer: singer's stream has the pluck only, so it has next to no energy under 100 Hz where the
     # master has the kicks (a loudness comparison flaked: the master's trim and the window's alignment move it)
     def low(x):
         f = np.fft.rfftfreq(len(x), 1 / SR)
         return float(np.sum(np.abs(np.fft.rfft(x.mean(1))[(f > 30) & (f < 100)]) ** 2))
     assert low(a) < 0.1 * low(m)
     assert np.max(np.abs(a)) <= 1.0
-    s = eng.cmd_stream('bus:lucy')
-    assert s['path'] == '/stream?name=bus:lucy' and s['format'] == 's16le' and s['listening'] == 1
-    with pytest.raises(LiveError, match="'bus:lucy'"):
+    s = eng.cmd_stream('bus:singer')
+    assert s['path'] == '/stream?name=bus:singer' and s['format'] == 's16le' and s['listening'] == 1
+    with pytest.raises(LiveError, match="'bus:singer'"):
         eng.cmd_stream('bus:radio')
-    assert 'streams: bus:lucy (1 listening)' in eng.cmd_status()
+    assert 'streams: bus:singer (1 listening)' in eng.cmd_status()
 
 
 def test_a_slow_listener_loses_its_oldest_audio_and_never_slows_the_set(eng):
@@ -71,13 +71,13 @@ def test_a_stream_is_a_plain_http_get_on_localhost(eng):
     got = {}
 
     def listen():
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/stream?name=bus:lucy", timeout=10) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/stream?name=bus:singer", timeout=10) as r:
             got['headers'] = dict(r.headers)
             got['body'] = r.read(SR * 4 // 2)          # half a second of stereo int16
     t = threading.Thread(target=listen)
     t.start()
     for _ in range(200):
-        if eng.hub.wants('bus:lucy'):
+        if eng.hub.wants('bus:singer'):
             break
         threading.Event().wait(0.01)
     run(eng, 1.5)
@@ -94,23 +94,23 @@ def test_a_knob_drives_a_live_param_at_once_and_is_logged_by_bar(eng):
     assert 'p -> ' not in eng.cmd_status()
     eng.cmd_track('p', fx=[{'type': 'filter', 'mode': 'lp', 'cutoff': 8000}], at='now')
     run(eng, 0.5)
-    out = eng.cmd_map('lucy.volume', target='bus:lucy', param='volume_db', range=[-40, 0])
-    assert 'lucy.volume -> bus:lucy volume_db (linear -40..0)' in out
-    eng.cmd_map('lucy.tone', target='p', param='fx:filter.cutoff', range=[200, 8000], curve='log')
-    eng.cmd_map('lucy.power', target='k', param='volume_db', range=[-120, 0], curve='switch')
-    r = eng.cmd_control('lucy.volume', 0.5)
-    assert r['applied'] == -20 and eng.buses['lucy']['volume_db'] == -20
-    r = eng.cmd_control('lucy.tone', 0.5)
+    out = eng.cmd_map('singer.volume', target='bus:singer', param='volume_db', range=[-40, 0])
+    assert 'singer.volume -> bus:singer volume_db (linear -40..0)' in out
+    eng.cmd_map('singer.tone', target='p', param='fx:filter.cutoff', range=[200, 8000], curve='log')
+    eng.cmd_map('singer.power', target='k', param='volume_db', range=[-120, 0], curve='switch')
+    r = eng.cmd_control('singer.volume', 0.5)
+    assert r['applied'] == -20 and eng.buses['singer']['volume_db'] == -20
+    r = eng.cmd_control('singer.tone', 0.5)
     assert r['applied'] == pytest.approx(1264.9, abs=0.5)
-    eng.cmd_control('lucy.power', 0.2)
+    eng.cmd_control('singer.power', 0.2)
     assert eng.tracks['k']['volume_db'] == -120
     run(eng, 1.0)
-    eng.cmd_control('lucy.volume', 1.0)
-    assert 'controls: lucy.volume -> bus:lucy volume_db' in eng.cmd_status()
-    back = eng.cmd_controls('lucy.volume')
+    eng.cmd_control('singer.volume', 1.0)
+    assert 'controls: singer.volume -> bus:singer volume_db' in eng.cmd_status()
+    back = eng.cmd_controls('singer.volume')
     pts = json.loads(back.split('automation points [bar, value]: ')[1])
     assert [p[1] for p in pts] == [-20, 0] and pts[1][0] > pts[0][0] >= 1
-    assert 'lucy.tone -> p fx:filter.cutoff: 1 moves' in eng.cmd_controls()
+    assert 'singer.tone -> p fx:filter.cutoff: 1 moves' in eng.cmd_controls()
 
 
 def test_controls_say_what_to_do_when_they_are_wrong(eng):
@@ -181,7 +181,7 @@ def test_the_mapping_curves():
 
 
 def test_a_quiet_bus_streams_silence_and_live_stream_takes_a_name(eng, tmp_path):
-    # from the Crossroads stage: a dormant bus pushed nothing, so listeners saw gaps and fell out of step;
+    # from the VR stage: a dormant bus pushed nothing, so listeners saw gaps and fell out of step;
     # live_stream(project, name=...) clashed with the dispatcher's own `name`
     eng.cmd_bus('radio')                             # nothing plays on it: it goes dormant
     run(eng, 2.0)
