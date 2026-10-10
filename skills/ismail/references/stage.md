@@ -214,6 +214,8 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   `stage_take_keep_last`.
 - **Test on a copy, or move on trial.** A plain `stage_object_set` saves into the scene's edits, which the build
   reads; `trial=True` moves it without saving. Camera moves keyed on the clock want `stage_key_interp(mode="smooth")`.
+  A whole move goes in one call: `stage_keys_set(keys=[{name, t, location, look}, ...], interp={name: "smooth"})`
+  keys from values (`look` aims a camera at a point) without moving anything to each spot first.
 - **A Follow is a performance: be quick and quiet in it.** From the moment someone follows the person, the mic
   records in clips and their gestures do nothing. Watch the `perform_*` events; when a part is worth reading,
   `stage_perform(action="next_clip")` cuts the clip there (its words come back as `perform_clip`, on the Follow

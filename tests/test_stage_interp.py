@@ -128,3 +128,47 @@ def test_take_playback_mixes_only_what_posing_reads():
     got = _node(f"""(() => {{ const a = {json.dumps(a)}, b = {json.dumps(b)}, o = m.mixTake(a, b, 0.5);
         return {{ x: o.head[0], t: o.t, bodySame: o.body === a.body, again: m.mixTake(b, a, 0.5, o) === o }}; }})()""")
     assert got == {'x': 0.5, 't': 0.05, 'bodySame': True, 'again': True}
+
+
+LOOKS = [([-9, -10, 1.3], [-4.5, -4.5, 1.6]), ([7.3, 10.5, 1.6], [12, 12, 1.2]), ([0, 0, 5], [1, 0, 0]),
+         ([0, 0, 5], [0, 0, 0]), ([1, 2, 3], [1, 2, 9])]
+
+
+def _turn(q, v):                                     # rotate v by the unit quaternion q (w, x, y, z)
+    w, x, y, z = q
+    u = (x, y, z)
+    c = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+    c2 = (u[1] * c[2] - u[2] * c[1], u[2] * c[0] - u[0] * c[2], u[0] * c[1] - u[1] * c[0])
+    return [v[i] + 2 * (w * c[i] + c2[i]) for i in range(3)]
+
+
+def test_a_look_key_aims_minus_z_at_the_point_the_same_on_page_and_in_python():
+    page = _node(f"{json.dumps(LOOKS)}.map(([p, l]) => m.lookQuat(p, l))")
+    for (pos, look), q in zip(LOOKS, page):
+        assert q == pytest.approx(PI.look_quat(pos, look), abs=1e-9)
+        f = [look[i] - pos[i] for i in range(3)]
+        n = math.sqrt(sum(x * x for x in f))
+        assert _turn(q, (0, 0, -1)) == pytest.approx([x / n for x in f], abs=1e-9)   # -Z looks at the point
+        if abs(f[2]) < n * 0.99:
+            assert _turn(q, (0, 1, 0))[2] > 0                                        # up stays up
+
+
+def test_many_keys_go_to_the_page_as_one_command(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        keys = [{'name': 'cam_a', 't': 0, 'location': [0, -5, 1.5], 'look': [0, 0, 1.5]},
+                {'name': 'cam_a', 't': 4, 'location': [0, -2, 1.5], 'look': [0, 0, 1.5]},
+                {'name': 'door', 't': 2, 'quaternion': [1, 0, 0, 0]}]
+        OPS['stage_keys_set'](scene='room', keys=keys, replace=['cam_a'], interp={'cam_a': 'smooth'})
+        c = page.seen[-1]
+        assert (c['type'], c['keys'], c['replace'], c['interp']) == ('key', keys, ['cam_a'], {'cam_a': 'smooth'})
+        n = len(page.seen)
+        with pytest.raises(OpError, match='needs "name" and "t"'):
+            OPS['stage_keys_set'](scene='room', keys=[{'name': 'cam_a'}])
+        with pytest.raises(OpError, match='unknown fields'):
+            OPS['stage_keys_set'](scene='room', keys=[{'name': 'cam_a', 't': 0, 'rotation': [0, 0, 0]}])
+        with pytest.raises(OpError, match="'stop' or 'smooth'"):
+            OPS['stage_keys_set'](scene='room', keys=keys, interp={'cam_a': 'bezier'})
+        assert len(page.seen) == n                                                   # nothing sent
+    finally:
+        page.stop = True

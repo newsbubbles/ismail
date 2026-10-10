@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Stage: many keys in one call
+
+- New op `stage_keys_set(scene, keys, replace, interp, save)`: a whole key list for any objects in one page
+  command, from values (location, quaternion, scale, or `look`: aim a camera or light at a point), without moving
+  the object to each spot first. Every key is checked before any is written; the clock's span grows to take keys
+  past its end. `look` is stored as a quaternion (`interp.js lookQuat`, `interp.py look_quat`, held equal by a test),
+  so renders read it as any key.
+
 ### Stage: capture a shot on the PC, frame-locked
 
 - New ops `stage_capture` and `stage_capture_status`: a scene, a camera (a camera object, a story path from a

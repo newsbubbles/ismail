@@ -414,6 +414,33 @@ def stage_key_set(scene: str, name: str, t: float = None) -> str:
 
 
 @op(mutates=True)
+def stage_keys_set(scene: str, keys: list, replace: list = None, interp: dict = None, save: bool = False) -> str:
+    """Many keys in one call, from values, on any objects (page command: key with keys): a camera move or an object's
+    path without moving the thing to each spot first. keys = [{"name": "cam_a", "t": 0, "location": [x, y, z],
+    "look": [x, y, z]}, {"name": "cam_a", "t": 4, ...}, {"name": "door", "t": 2, "quaternion": [w, x, y, z]}]: Blender
+    world values, t in stage clock seconds; what a key leaves out (location, quaternion, scale) is the object's
+    transform now; look aims the key's -Z at a point, world Z up (cameras and lights; stored as a quaternion, so
+    renders read it as any key). A key at the same t replaces the old one. replace: objects whose old keys go first;
+    interp: {"cam_a": "smooth"} (stage_key_interp). Every key is checked before any is written; the clock's span grows
+    to take keys past its end. save=True also saves anim.json (stage_anim_save). Page replies {keyed, keys (per
+    object, its key count), span}. Emits: keyed."""
+    if not isinstance(keys, list) or not keys:
+        raise OpError('keys is a list of {"name", "t", "location"?, "quaternion"?, "scale"?, "look"?}')
+    for i, k in enumerate(keys):
+        if not isinstance(k, dict) or not k.get('name') or not isinstance(k.get('t'), (int, float)):
+            raise OpError(f'key {i}: needs "name" and "t" (seconds)')
+        extra = set(k) - {'name', 't', 'location', 'quaternion', 'scale', 'look'}
+        if extra:
+            raise OpError(f'key {i} ({k["name"]}): unknown fields {sorted(extra)}')
+    if interp and any(m not in ('stop', 'smooth') for m in interp.values()):
+        raise OpError("interp values are 'stop' or 'smooth'")
+    r = page_cmd(scene, 'key', {'keys': keys, 'replace': replace or [], 'interp': interp or {}}, timeout=60)
+    if save:
+        r += '; ' + page_cmd(scene, 'anim_save', {}, timeout=30)
+    return r
+
+
+@op(mutates=True)
 def stage_key_delete(scene: str, name: str, t: float = None) -> str:
     """Delete an object's key at time t, or all its keys when t is None (page command: key_delete). Not saved until
     anim_save. Page replies {deleted} (a count, 0 when it had none). Emits: nothing."""
