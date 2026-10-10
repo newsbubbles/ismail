@@ -199,9 +199,9 @@ export function initXR(ed, desktop) {
     // the first surface stops the beam: a wall or the floor ends it there and picks nothing (the user: the beams
     // "literally go through all the walls" and picked things they could not see)
     // (panels live on the GIZMO layer like every helper; they are hit on purpose, the other helpers never)
-    const ok = (h) => h.object.isMesh && h.object.visible && h.object !== monitor &&
+    const ok = (h) => h.object.isMesh && ed.pickable(h.object) && h.object !== monitor &&
       (h.object === panelMesh || h.object.userData.panelApi || ((!h.object.layers.isEnabled(GIZMO) || h.object.userData.pickProxy) && ed.itemOf(h.object)));
-    const hits = ray.intersectObjects(targets, true).filter(ok), hit = hits[0];
+    const hits = ed.insideFirst(ray.intersectObjects(targets, true).filter(ok)), hit = hits[0];
     if (!hit) return null;
     if (hit.object.userData.panelApi) return { extra: hit.object, uv: hit.uv, point: hit.point, dist: hit.distance };
     if (hit.object !== panelMesh && ed.itemOf(hit.object).big) return { wall: true, point: hit.point, dist: hit.distance };

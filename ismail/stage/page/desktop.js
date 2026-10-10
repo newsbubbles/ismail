@@ -134,7 +134,7 @@ export function initDesktop(ed) {
     const cam = view.through ? view.through.obj : camera;
     cam.updateMatrixWorld(true);
     lookRay.setFromCamera(new THREE.Vector2(0, 0), cam);
-    const h = lookRay.intersectObject(ed.root, true).find((x) => x.object.isMesh && x.object.visible && ed.itemOf(x.object));
+    const h = lookRay.intersectObject(ed.root, true).find((x) => x.object.isMesh && ed.pickable(x.object) && !x.object.userData.pickProxy && ed.itemOf(x.object));
     return h ? { it: ed.itemOf(h.object), distance: h.distance, point: h.point } : null;
   }
 
@@ -413,7 +413,7 @@ export function initDesktop(ed) {
     downRay.set(new THREE.Vector3(p.x, p.y + 0.05, p.z), new THREE.Vector3(0, -1, 0));
     const n = new THREE.Vector3();
     for (const h of downRay.intersectObject(ed.root, true)) {
-      if (!h.object.isMesh || !h.object.visible || !h.face) continue;
+      if (!h.object.isMesh || !ed.pickable(h.object) || !h.face) continue;
       n.copy(h.face.normal).transformDirection(h.object.matrixWorld);
       const it = ed.itemOf(h.object);
       if (n.y > 0.7 && it && it.big) return h.point.y;

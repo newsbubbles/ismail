@@ -114,7 +114,7 @@ export function initHands(ed, xrApi, emit) {
         rc.far = p.distanceTo(q);
         // walls, doors and windows do not stop the arc: it lands on the first floor-like surface (the user could not
         // jump into the club through its closed front)
-        const h = rc.intersectObjects(ed.pickRoots, true).find((x) => x.object.isMesh && x.object.visible && x.face &&
+        const h = rc.intersectObjects(ed.pickRoots, true).find((x) => x.object.isMesh && ed.pickable(x.object) && !x.object.userData.pickProxy && x.face &&
           x.face.normal.clone().transformDirection(x.object.matrixWorld).y > 0.9);   // 0.9: the 40 deg roof is not a floor
         if (h) {
           hit = { point: h.point, ok: true };
@@ -133,7 +133,7 @@ export function initHands(ed, xrApi, emit) {
   const TRAVEL_FAR = 40;
   function castStraight(origin, dir) {
     rc.set(origin, dir); rc.far = TRAVEL_FAR;
-    const hits = rc.intersectObjects(ed.pickRoots, true).filter((x) => x.object.isMesh && x.object.visible && x.face);
+    const hits = rc.intersectObjects(ed.pickRoots, true).filter((x) => x.object.isMesh && ed.pickable(x.object) && !x.object.userData.pickProxy && x.face);
     const floorish = (x) => x.face.normal.clone().transformDirection(x.object.matrixWorld).y > 0.9;
     let h = hits.find(floorish);
     // pointing at a door or a wall means "go through there": land on the floor half a metre past the first surface
@@ -141,7 +141,7 @@ export function initHands(ed, xrApi, emit) {
     if (hits.length && !floorish(hits[0]) && (!h || h.distance > hits[0].distance + 0.6)) {
       const past = hits[0].point.clone().addScaledVector(dir, 0.5);
       rc.set(past.clone().setY(past.y + 0.05), new THREE.Vector3(0, -1, 0)); rc.far = 4;
-      const down = rc.intersectObjects(ed.pickRoots, true).find((x) => x.object.isMesh && x.object.visible && x.face && floorish(x));
+      const down = rc.intersectObjects(ed.pickRoots, true).find((x) => x.object.isMesh && ed.pickable(x.object) && !x.object.userData.pickProxy && x.face && floorish(x));
       if (down) h = down;
     }
     const end = h ? h.point : origin.clone().addScaledVector(dir, TRAVEL_FAR);

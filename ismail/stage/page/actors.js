@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { JOINTS } from './hands.js';
-import { cutout, b2tPos } from './editor.js';
+import { cutout, b2tPos, GIZMO } from './editor.js';
 import { world } from './world.js';
 import { initControl } from './control.js';
 import { mixTake } from './interp.js';
@@ -451,11 +451,54 @@ export function initActors(ed, live) {
     root.traverse((o) => { if (o.isBone) bones[o.name] = o; });
     return { ...r, root, bones };
   }
+  // a person's selection box and pick follow the body they show, not the statue it stands in for (the user,
+  // 2026-10-10: a person with a start pose stood about a foot in front of their box, and what stood inside the box
+  // could not be picked): an unseen box round the body's bones, a child of the person's item, so the ray, the fingers
+  // and the outline find the person where they are
+  const PROXY_PAD = 0.1, PROXY_HEAD = 0.14;                 // metres past the bones; the head bone sits low in the head
+  const proxies = new Map();                                // person -> unseen box mesh
+  const pb = new THREE.Box3(), pv = new THREE.Vector3(), ps = new THREE.Vector3(), pm = new THREE.Matrix4(), pq = new THREE.Quaternion();
+  function fitProxy(person, rig) {
+    const it = ed.byName.get(person);
+    if (!it) return;
+    let m = proxies.get(person);
+    if (!m) {
+      m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ visible: false }));
+      m.name = `${person}:body`;
+      m.userData.pickProxy = true; m.userData.bodyBox = true; m.userData.gizmo = true;
+      m.matrixAutoUpdate = false;
+      m.layers.set(GIZMO);
+      proxies.set(person, m);
+    }
+    const fresh = m.parent !== it.obj;
+    if (fresh) it.obj.add(m);
+    rig.root.updateMatrixWorld(true);
+    pb.makeEmpty();
+    // the body's bones from the pelvis down the tree (the armature's Root stays at the origin whatever the pose)
+    (rig.bones.pelvis || rig.root).traverse((b) => { if (b.isBone) pb.expandByPoint(pv.setFromMatrixPosition(b.matrixWorld)); });
+    if (pb.isEmpty()) return;
+    pb.expandByScalar(PROXY_PAD); pb.max.y += PROXY_HEAD;
+    it.obj.updateWorldMatrix(true, false);
+    m.matrix.copy(it.obj.matrixWorld).invert().multiply(pm.compose(pb.getCenter(pv), pq.identity(), pb.getSize(ps)));
+    m.updateMatrixWorld(true);
+    it.standIn = m;
+    if (fresh && ed.selected === it) ed.outline.setFromObject(m);
+  }
+  function dropProxy(person) {
+    const m = proxies.get(person), it = ed.byName.get(person);
+    if (!m) return;
+    proxies.delete(person);
+    if (it && it.standIn === m) { delete it.standIn; if (ed.selected === it) ed.outline.setFromObject(it.obj); }
+    m.removeFromParent();
+    m.geometry.dispose(); m.material.dispose();
+  }
+
   function stop(c) {
     const st = playing.get(c.person);
     if (!st) return { stopped: false };
     playing.delete(c.person);
     scene.remove(st.rig.root);
+    dropProxy(c.person);
     if (st.it) st.it.obj.visible = true;
     live.emit('actor_stop', { person: c.person, why: c.why || 'stopped', live: !!st.live });
     rest(c.person).catch(() => {});                       // back to their resting pose, if they have one
@@ -487,6 +530,7 @@ export function initActors(ed, live) {
     if (!r) return;
     resting.delete(person);
     scene.remove(r.rig.root);
+    dropProxy(person);
   }
   async function rest(person) {
     if (busy(person) || !world().actors[person]) return null;
@@ -508,6 +552,7 @@ export function initActors(ed, live) {
     resting.set(person, r);
     scene.add(r.rig.root);
     it.obj.visible = false;
+    fitProxy(person, r.rig);
     live.emit('actor_rest', { person, start: spec });
     return { person, resting: true, start: spec };
   }
@@ -521,7 +566,7 @@ export function initActors(ed, live) {
   // at load and on a scene switch (the bodies of the new scene), and on an agent's word after a start pose changed
   // restP: the room's people are in their poses (a capture waits for it before its first frame)
   let restP = Promise.resolve();
-  ed.addEventListener('revealed', () => { for (const r of resting.values()) scene.remove(r.rig.root); resting.clear(); restDone.clear(); restP = restAll(); });
+  ed.addEventListener('revealed', () => { for (const r of resting.values()) scene.remove(r.rig.root); resting.clear(); for (const p of [...proxies.keys()]) dropProxy(p); restDone.clear(); restP = restAll(); });
   const notResting = () => Object.keys(world().actors || {}).filter((p) => !restDone.has(p) && !playing.has(p));
   live.handlers.actor_rest = (c) => (c.person ? rest(c.person) : restAll().then(() => ({ resting: [...resting.keys()] })));
   const cur = new THREE.Vector3(), jump = new THREE.Vector3(), WALK_AWAY_M = 6;
@@ -620,6 +665,7 @@ export function initActors(ed, live) {
       if (fb && fb.t - fa.t < GAP_S && t > fa.t) st.mix = mixTake(fa, fb, (t - fa.t) / (fb.t - fa.t), st.mix);
       pose(st, fb && fb.t - fa.t < GAP_S && t > fa.t ? st.mix : fa);
     }
+    for (const st of playing.values()) fitProxy(st.person, st.rig);
   }
   ed.preRender.push(update);
   const canPlay = (person) => !!world().actors[person];

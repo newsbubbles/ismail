@@ -23,7 +23,7 @@ export function initTouch(ed, xrApi, hands, emit) {
     if (!ed.root) return;
     ed.root.updateMatrixWorld(true);
     ed.root.traverse((o) => {
-      if (!o.isMesh || !o.visible) return;
+      if (!o.isMesh || !ed.pickable(o)) return;
       const it = ed.itemOf(o);
       if (!it || it.big) return;
       const b = new THREE.Box3().setFromObject(o);

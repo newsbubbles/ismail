@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Stage: a person's box is where their body is; a test copy never takes a scene's ops
+
+- A person's selection box, ray pick and hand pick follow the body they show (resting in a start pose, playing a
+  take, following), not the hidden statue it stands in for. A person with a start pose stood about 30 cm in front of
+  their box, and the hidden statue's meshes caught every pick inside the old box, so what stood there could not be
+  taken (the user, 2026-10-10). Small things inside the body's box (a bottle on the bar in front of them) are picked
+  before the person.
+- Nothing hidden takes a pick any more: a mesh counts only when it and every parent are shown.
+- When two stage servers have the same scene, ops go to the one whose scenes folder is not under a hidden folder (a
+  test server's `.scratch` copy took every agent's ops for the real scene for ten minutes).
+
 ### Stage: a running take always has a stop beside you
 
 - While a take records, a small "■ Stop take" panel rides beside the person until the take stops, however it was
