@@ -31,6 +31,7 @@ import { loadWorld } from './world.js';
 import { initLoadSets } from './loadsets.js';
 import { initBehaviours } from './behaviours.js';
 import { setPickEmit } from './pickcycle.js';
+import { CAPTURE, runCapture } from './capture.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -354,3 +355,4 @@ wake();
 const st0 = ed.selftest();
 console.log('[vr] ready:', ed.items.length, 'objects; selftest on load:', st0.pass ? 'PASS' : 'FAIL');
 live.pageLoaded(st0);
+if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets });   // a frame-locked capture (capture.js)

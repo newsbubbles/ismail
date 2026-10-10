@@ -33,6 +33,14 @@ person and an agent change the same scene.
 - **Rebuild a room:** `stage_scene_export(scene)` runs `world.json` `build.script` in Blender in a heavy-job slot.
   An open page swaps it in under the construct, never while the person is in VR.
 - **Changes they will notice:** `stage_note(scenes, title, level)` feeds the "updates ready" card in the headset.
+- **Capture a shot on the PC:** `stage_capture(scene, t0, t1, camera=|shot= cameras=|path=|view=, size=, fps=,
+  setup=, audio=)` draws the stage frame-locked (frame n is the song at t0 + n / fps, however slow the frame) in a
+  headless browser with its own server, in the background on the GPU slot, and writes
+  `<scene>/captures/<job>/capture.mp4` (PNGs with `keep_frames`). No headset, and the stage the person uses is
+  untouched: the capture's page saves nothing and takes no live commands, so per-shot changes (a take playing, the
+  sky, a light, a set unloaded) go in `setup` as live commands. Every load set is in the shot unless
+  `sets=False`. `stage_capture_status(scene, job)` follows it. Timers inside behaviours (setTimeout) still run on
+  the wall clock.
 
 ## Listening while the person is in
 
