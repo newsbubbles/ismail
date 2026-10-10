@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Development: cleanup is part of every merge
+
+- development.md and maintainer.md: whoever merges a pull request removes its worktree, local branch and merge
+  copy right after; the repository now deletes head branches on merge. 160 worktrees and 185 branches had piled up
+  because removal waited on a yes that was never asked for.
+
 ### Phone: an exam's voice notes land in its answers file
 
 - A voice note said on an exam card is written into that exam's `answers_path` (kind 'voice_note': text, audio
