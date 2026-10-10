@@ -254,6 +254,9 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   pose the scene shows); every Follow and playback then starts there, and the user's motion plays as changes from
   their pose at GO. Check it by number with `stage_actor_pose` (the hands on the bar top, the pelvis over the seat).
   With a start pose they also rest in it whenever nothing plays on them, instead of the statue baked into the scene.
+  From GO their hands and fingers are the user's own, placed from the eyes and turned to the person's facing, and the
+  shoulders follow the arms. For a grip that must hold (sticks, a guitar neck), `hands='pose'` keeps the start pose's
+  hands and adds the user's motion to them.
 - **Keep the headset light with load sets.** When the work moves to one group (the band), unload the others (the
   dancers): `stage_set_define(scene, 'dancers', items=['person_couple_*'], note='the six dancers')` once, then
   `stage_set_load(scene, 'dancers', loaded=False)`. They are not drawn, compiled or uploaded, their people neither

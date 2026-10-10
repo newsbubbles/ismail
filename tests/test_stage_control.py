@@ -154,12 +154,16 @@ def test_a_start_pose_is_kept_with_the_body(stage):
     assert 'the page shows it at its next load' in out                 # no page open: it applies at the next load
     out = OPS['stage_actor_start'](scene='room', person='person_b', pose='rest', idle=False)
     assert 'rests in it' not in out and json.loads((d / 'body_b.json').read_text(encoding='utf-8'))['start']['idle'] is False
+    out = OPS['stage_actor_start'](scene='room', person='person_b', pose='rest', hands='pose')      # a grip held from the pose
+    assert 'hands from the pose' in out and json.loads((d / 'body_b.json').read_text(encoding='utf-8'))['start']['hands'] == 'pose'
+    OPS['stage_actor_start'](scene='room', person='person_b', pose='rest')                       # the user's own hands: the default
+    assert 'hands' not in json.loads((d / 'body_b.json').read_text(encoding='utf-8'))['start']
     fr = {'head': [0, 0, 1], 'tail': [0, 0, 1.1], 'x': [1, 0, 0]}
     out = OPS['stage_actor_start'](scene='room', person='person_b', pose={'bones': {'pelvis': {'rest': fr, 'pose': fr}}}, mode='snap')
     assert 'a Blender pose of 1 bones, snap' in out
     got = _get(stage['port'], 'actor/profile?scene=room&who=body_b')[1]
     assert got['start']['pose']['bones']['pelvis']['pose']['tail'] == [0, 0, 1.1] and got['start']['mode'] == 'snap'
-    for kw, msg in [({'mode': 'slow'}, "mode is 'relative'"), ({'pose': 'lean'}, "pose is 'rest'"),
+    for kw, msg in [({'mode': 'slow'}, "mode is 'relative'"), ({'pose': 'lean'}, "pose is 'rest'"), ({'hands': 'both'}, "hands is 'user'"),
                     ({'pose': {'bones': {'pelvis': {'rest': fr}}}}, 'pose needs head, tail and x'),
                     ({'pose': {'bones': {'head': {'rest': fr, 'pose': fr}}}}, 'at least the pelvis')]:
         with pytest.raises(OpError, match=msg):

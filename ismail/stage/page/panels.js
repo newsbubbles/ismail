@@ -168,7 +168,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   }
   function setHover(p, id) { if (p.hover !== id) { p.hover = id; draw(p); } }
   // a pinch still held from the last press must not press the panel that replaced it (the user, 2026-10-08: one press
-  // on Walk with me fired three answers in the same instant, Walk, Dance in place, Walk, and Pete stayed put)
+  // on Walk with me fired three answers in the same instant, Walk, Dance in place, Walk, and the person stayed put)
   let lastPress = 0;
   function pressAt(p, uv, via) {
     const r = rectAt(p, uv);

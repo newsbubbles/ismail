@@ -120,11 +120,21 @@ def check_drive(d, parts):
     return {k: v for k, v in d.items() if v is not None}
 
 
-def check_start(pose, mode, idle=True):
+def check_start(pose, mode, idle=True, hands='user'):
     """A start pose: 'rest', {take, frame}, or {bones: {name: {rest: {head, tail, x}, pose: {head, tail, x}}}} (Blender
-    metres; rest in armature space, pose in world). Raises ValueError."""
+    metres; rest in armature space, pose in world). hands: 'user' (the user's own hands from GO) or 'pose' (the start
+    pose's grip, the user's motion added to it). Raises ValueError."""
     if mode not in ('relative', 'snap'):
         raise ValueError("mode is 'relative' (hold the start pose, the user's motion as changes from GO) or 'snap'")
+    if hands not in ('user', 'pose'):
+        raise ValueError("hands is 'user' (the user's own hands from GO) or 'pose' (the start pose's grip plus the user's motion)")
+    out = _check_start_pose(pose, mode, idle)
+    if hands == 'pose':
+        out['hands'] = 'pose'
+    return out
+
+
+def _check_start_pose(pose, mode, idle):
     if pose == 'rest':
         return {'pose': 'rest', 'mode': mode, 'idle': bool(idle)}
     if isinstance(pose, dict) and pose.get('take'):
