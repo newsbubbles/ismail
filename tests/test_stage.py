@@ -216,21 +216,21 @@ def test_a_derived_scene_builds_from_its_parents_full_build(tmp_path):
     song = tmp_path / 'song'
     d = song / 'video' / 'vr' / 'scenes'
     (song / 'video' / 'rooms').mkdir(parents=True)
-    for f in ('club.py', 'remodel.py', 'dawn.py'):
+    for f in ('hall.py', 'remodel.py', 'late.py'):
         (song / 'video' / 'rooms' / f).write_text('# room', encoding='utf-8')
-    _scene(d, 'club', {'build': {'script': 'video/rooms/club.py', 'env': {'VR_DETAIL': '1'}}, 'floor': 0.09},
+    _scene(d, 'hall', {'build': {'script': 'video/rooms/hall.py', 'env': {'VR_DETAIL': '1'}}, 'floor': 0.09},
            {'objects': {'stool': {'location': [1, 2, 0]}, 'door': {'location': [0, 0, 0]}}})
-    _scene(d, 'now', {'derives_from': 'club', 'pass': 'video/rooms/remodel.py', 'pass_env': {'VARIANT': '1'}},
+    _scene(d, 'variant', {'derives_from': 'hall', 'pass': 'video/rooms/remodel.py', 'pass_env': {'VARIANT': '1'}},
            {'objects': {'stool': {'location': [5, 5, 0]}}})
-    _scene(d, 'dawn', {'derives_from': 'now', 'pass': 'video/rooms/dawn.py'})
-    b, env = export_plan(d, 'dawn')
-    assert b['line'] == ['dawn', 'now', 'club'] and b['script'].name == 'club.py'
-    assert [p.name for p in b['passes']] == ['remodel.py', 'dawn.py']             # oldest first
-    assert env['VR_DETAIL'] == '1' and env['VARIANT'] == '1' and env['VR_DIET'] == '1' and env['STAGE_SCENE'] == 'dawn'
-    assert env['VR_EXPORT'].endswith('dawn') and env['VR_BRIDGE'].endswith('blender_bridge.py')
+    _scene(d, 'late', {'derives_from': 'variant', 'pass': 'video/rooms/late.py'})
+    b, env = export_plan(d, 'late')
+    assert b['line'] == ['late', 'variant', 'hall'] and b['script'].name == 'hall.py'
+    assert [p.name for p in b['passes']] == ['remodel.py', 'late.py']             # oldest first
+    assert env['VR_DETAIL'] == '1' and env['VARIANT'] == '1' and env['VR_DIET'] == '1' and env['STAGE_SCENE'] == 'late'
+    assert env['VR_EXPORT'].endswith('late') and env['VR_BRIDGE'].endswith('blender_bridge.py')
     merged = json.loads(Path(env['VR_EDITS']).read_text(encoding='utf-8'))
     assert merged['objects']['stool']['location'] == [5, 5, 0] and 'door' in merged['objects']   # the variant's win
-    b0, env0 = export_plan(d, 'club')
+    b0, env0 = export_plan(d, 'hall')
     assert 'VR_PASS' not in env0 and 'VR_DIET' not in env0                        # a root scene builds as it always did
 
 
@@ -247,21 +247,21 @@ def test_scene_new_copies_the_page_pieces_and_writes_the_lineage(tmp_path):
     song = tmp_path / 'song'
     d = song / 'video' / 'vr' / 'scenes'
     (song / 'video' / 'rooms').mkdir(parents=True)
-    (song / 'video' / 'rooms' / 'club.py').write_text('# room', encoding='utf-8')
+    (song / 'video' / 'rooms' / 'hall.py').write_text('# room', encoding='utf-8')
     (song / 'video' / 'rooms' / 'remodel.py').write_text('# pass', encoding='utf-8')
-    _scene(d, 'club', {'build': {'script': 'video/rooms/club.py'}, 'actors': {'p': 'body_a'}, 'floor': 0.09, 'sky': 'night'})
-    (d / 'club' / 'trees').mkdir()
-    (d / 'club' / 'trees' / 'tree_1.json').write_text('{}', encoding='utf-8')
-    (d / 'club' / 'names.json').write_text('{"stool": "a stool"}', encoding='utf-8')
-    (d / 'club' / 'takes').mkdir()                                                 # the person's: stays with its scene
-    out = OPS['stage_scene_new'](name='now', source='club', scenes=str(d), pass_script='video/rooms/remodel.py')
-    assert 'derives from club' in out and 'stage_scene_export' in out
-    w = W.load_world(d, 'now')
-    assert w['derives_from'] == 'club' and w['assets'] == 'club' and w['actors'] == {'p': 'body_a'} and w['sky'] == 'night'
-    assert (d / 'now' / 'trees' / 'tree_1.json').is_file() and (d / 'now' / 'names.json').is_file()
-    assert not (d / 'now' / 'takes').exists()
+    _scene(d, 'hall', {'build': {'script': 'video/rooms/hall.py'}, 'actors': {'p': 'body_a'}, 'floor': 0.09, 'sky': 'night'})
+    (d / 'hall' / 'trees').mkdir()
+    (d / 'hall' / 'trees' / 'tree_1.json').write_text('{}', encoding='utf-8')
+    (d / 'hall' / 'names.json').write_text('{"stool": "a stool"}', encoding='utf-8')
+    (d / 'hall' / 'takes').mkdir()                                                 # the person's: stays with its scene
+    out = OPS['stage_scene_new'](name='variant', source='hall', scenes=str(d), pass_script='video/rooms/remodel.py')
+    assert 'derives from hall' in out and 'stage_scene_export' in out
+    w = W.load_world(d, 'variant')
+    assert w['derives_from'] == 'hall' and w['assets'] == 'hall' and w['actors'] == {'p': 'body_a'} and w['sky'] == 'night'
+    assert (d / 'variant' / 'trees' / 'tree_1.json').is_file() and (d / 'variant' / 'names.json').is_file()
+    assert not (d / 'variant' / 'takes').exists()
     with pytest.raises(OpError, match='exists already'):
-        OPS['stage_scene_new'](name='now', source='club', scenes=str(d))
+        OPS['stage_scene_new'](name='variant', source='hall', scenes=str(d))
 
 
 def test_a_fixed_pool_serves_thousands_of_requests_without_new_threads(stage):
