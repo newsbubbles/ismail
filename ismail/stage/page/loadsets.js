@@ -9,6 +9,7 @@
 // one label with the set's name, two draw calls for the whole set. Loading it stages it back in, paced like the room.
 import * as THREE from 'three';
 import { world } from './world.js';
+import { GIZMO } from './editor.js';
 
 export function initLoadSets(ed, live, getActors) {
   const out = new Map();                       // set name -> { items, persons, meshes, ghost }
@@ -65,6 +66,7 @@ export function initLoadSets(ed, live, getActors) {
       s.userData.gizmo = true;
       ghost.add(s);
     }
+    ghost.traverse((o) => o.layers.set(GIZMO));   // a helper: seen in the editor and the headset, never in a capture
     ed.scene.add(ghost);
     return ghost;
   }

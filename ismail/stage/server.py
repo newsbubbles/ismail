@@ -63,6 +63,10 @@ FOOTAGE = STATE / 'footage'                                # headset recordings 
 PHRASES = STATE / 'speech'                                 # short lines Claude says, rendered once (spoken earcons)
 CONFIG = {}                                                # ~/.ismail/stage.json: {"esbuild": path, "speak": url}
 NAME = re.compile(r'^[A-Za-z0-9_\-]+$')
+# a capture (capture.py) runs its own server in its own process with CAPTURE set: the page gets its job, sends its
+# frames and status there, and every other write is answered "not saved" so a capture never changes the scene or
+# reaches the live link (no commands in, no events out)
+CAPTURE = None
 
 
 def registry_dir():
@@ -655,6 +659,11 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
+        if CAPTURE is not None:
+            if u.path == '/capture/job':
+                return self._json(200, CAPTURE.job)
+            if u.path == '/live/cmd':
+                return self._json(200, {'scene': CAPTURE.job.get('scene'), 'last': 0, 'cmds': []})
         if u.path == '/live' or u.path.startswith('/live/'):
             try:
                 return self._live_get(u)
@@ -758,6 +767,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        if CAPTURE is not None:
+            return self._capture_post(u)
         if u.path == '/upload/file':               # footage from the headset (upload.html): streamed to the song's footage folder
             q = parse_qs(u.query)
             raw = Path(q.get('name', ['clip.mp4'])[0]).name
@@ -976,6 +987,19 @@ class Handler(SimpleHTTPRequestHandler):
             print('WARNING: server.py changed since this server started; restart it', flush=True)
         self._json(200, {'ok': True, 'path': str(out), 'previous': str(moved) if moved else None,
                          'counts': {k: len(v) for k, v in edits.items()}, 'server_stale': stale()})
+
+    def _capture_post(self, u):
+        n = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(n) if n else b''
+        try:
+            if u.path == '/capture/frame':
+                return self._json(200, CAPTURE.frame(int(parse_qs(u.query).get('n', ['-1'])[0]), body))
+            if u.path in ('/capture/status', '/clientlog'):
+                j = json.loads(body or b'{}', parse_constant=_not_finite)
+                return self._json(200, CAPTURE.status(j) if u.path == '/capture/status' else CAPTURE.log(j))
+        except (ValueError, OSError) as e:
+            return self._json(400, {'error': str(e)})
+        return self._json(200, {'ok': True, 'capture': 'not saved: a capture never writes to the scene'})
 
     def log_message(self, fmt, *args):
         a0 = str(args[0]) if args else ''

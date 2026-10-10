@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Stage: capture a shot on the PC, frame-locked
+
+- New ops `stage_capture` and `stage_capture_status`: a scene, a camera (a camera object, a story path from a
+  cameras.json, an inline path, or a fixed view) and a song time span in, an H.264 video (and PNGs if asked) out.
+  Frame n shows the song at t0 + n / fps: the page's clock stands still between frames, takes played on the music
+  follow the song time, and the stage clock is set every frame. It runs in the background with its own server and a
+  headless Edge or Chrome, on the GPU slot, with no headset; the capture's server answers every write "not saved"
+  and passes no live commands, so the scene files and the stage in use are never touched. Every load set is in
+  the shot (the headset unloads some to stay light) unless `sets=False`.
+- The outline of an unloaded set is a helper now (the editor and headset see it, a capture or a camera view does
+  not).
+
 ### No song content in the tests
 
 - Removed tests/test_stage_behaviours.py: it tested one song scene's light switch, which is the user's VR content

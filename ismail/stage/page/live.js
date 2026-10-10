@@ -3,6 +3,7 @@
 // highlights, 3D markers, moving objects, lights, walk). Everything crossing the wire is in Blender world space, Z-up.
 import * as THREE from 'three';
 import { GIZMO, b2tPos, t2bPos } from './editor.js';
+import { CAPTURE } from './capture.js';
 
 const POLL_MS = 400, DEBOUNCE_MS = 300, HEARTBEAT_MS = 2000;
 const rn = (x, n = 4) => Math.round(x * 10 ** n) / 10 ** n;
@@ -53,6 +54,7 @@ export function initLive(ed, desktop, xr) {
   const watchers = [];                               // cues.js: menus Claude pre-attaches to the user's events
   function emit(type, data = {}) {
     for (const w of watchers) { try { w(type, data); } catch (_) { /* a watcher never breaks the event */ } }
+    if (CAPTURE) return;                             // a capture page (capture.js) sends nothing to the live link
     pending.push({ page: pageId, ...data, type });   // the event type always wins
     if (pending.length > 300) pending.shift();
     flush();
@@ -284,6 +286,7 @@ export function initLive(ed, desktop, xr) {
     };
   }
   async function postState() {
+    if (CAPTURE) return;
     if (inflight) { again = true; return; }
     inflight = true;
     try {
