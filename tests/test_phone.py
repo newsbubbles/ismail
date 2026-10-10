@@ -1052,8 +1052,9 @@ def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, 
     q = urllib.parse.urlencode({'sid': '', 't': '', 'panel': 'cx-1', 'ctx': json.dumps(ctx)})
     req = urllib.request.Request(base + '/api/voice?' + q, data=b'\x1a' * 2000, headers={'Content-Type': 'audio/webm'})
     vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
-    for _ in range(50):
-        vt = [x for x in json.loads(P.phone_listen('film', since=0, wait=0))['lines'] if x['kind'] == 'voice_text']
+    for _ in range(100):                     # its own row: a slow runner can transcribe an earlier test's note late
+        vt = [x for x in json.loads(P.phone_listen('film', since=0, wait=0))['lines']
+              if x['kind'] == 'voice_text' and x.get('id') == vid]
         if vt:
             break
         time.sleep(0.1)
