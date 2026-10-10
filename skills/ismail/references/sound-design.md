@@ -65,6 +65,10 @@ Drum synths are mono; width comes from effects. Sidechain feel: `duck` with `sou
 
 instrument -> eq (cleanup) -> distortion -> filter -> duck/compressor -> chorus -> delay; reverb on a bus with sends. Master: limiter last, ceiling -1.0 dB for anything that becomes an mp3 (`references/mastering.md`). A drum bus (tracks output to a bus with compressor attack ~8 ms, ratio 3, plus a short room reverb mix 0.1) glues drums; fast attack plus clipping made them worse in testing.
 
+A sung take: `autotune` first, on the dry take, then eq, compressor, delay and reverb. It reads the voice's pitch,
+and an echo or a reverb tail in front of it gives it two pitches at once, so the correction wanders. A doubled or
+harmonised voice is a second track with its own `autotune`, not a second one in the same chain.
+
 ## Guitars and other played strings
 
 Learned matching a 1970 guitar record until 20 of 22 single notes passed a blind exam (`references/blind-tests.md`).
