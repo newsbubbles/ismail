@@ -26,6 +26,7 @@ import { initScenes } from './scenes.js';
 import { initWaypoints } from './waypoints.js';
 import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
+import { initProps } from './props.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
 import { initLoadSets } from './loadsets.js';
@@ -337,6 +338,7 @@ window.VR_waypoints = waypoints;
 // menus Claude attaches ahead of time to the user's actions, opened where they happen (cues.js)
 window.VR_cues = initCues(ed, live, panels);
 window.VR_anchors = initAnchors(ed, xr, live);   // objects pinned to a hand joint, session only
+window.VR_props = initProps(ed, live, actors);   // props pinned to a person's bone, saved with the scene (props.js)
 live.emit('page_boot', { scene: name, in_construct: true });
 for (let n = 1; !ed.loaded; n++) {                 // keep trying: the user can stand and talk in the construct meanwhile
   try {

@@ -729,6 +729,54 @@ def stage_actor_start(scene: str, person: str, pose: str | dict = 'rest', mode: 
             f"{', rests in it' if idle else ''}; saved in {f}" + rested)
 
 
+@op(mutates=True)
+def stage_prop_pin(scene: str, object: str, person: str = None, bone: str = 'hand_r', clear: bool = False,
+                   scenes: str = None) -> str:
+    """Pin a prop to a bone of a person's body (sticks in a drummer's hands, a guitar on a player), where it stands
+    now: it then rides whichever body the person shows, resting in a start pose, playing a take or following the
+    user, and stands where it was when they show none. Place the prop and the person first (stage_set, a start pose),
+    then pin. bone: a bone of the body (hand_r, hand_l, lowerarm_r, spine_03, head, pelvis, ...; a wrong name lists
+    them). Saved with the scene in world.json props (object -> {person, bone, rel}, rel the prop's matrix in the
+    bone's frame), the old file kept in history/. The edits file keeps the prop where it stood before the pin.
+    clear=True unpins it and puts it back there. Needs the scene open on a page (the page measures the prop against the
+    body it shows). Emits: prop_pinned / prop_unpinned."""
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    props = dict(w.get('props') or {})
+    if clear:
+        if object not in props:
+            raise OpError(f'{object} is not pinned in {scene} (pinned: {", ".join(props) or "none"})')
+        props.pop(object)
+        w['props'] = props
+        worldmod.save_world(d, scene, w)
+        try:
+            link.page_cmd(scene, 'prop_pin', {'object': object, 'clear': True}, timeout=20)
+            now = '; the page put it back'
+        except Exception:                                  # noqa: BLE001  (no page open)
+            now = '; the page takes it at its next load'
+        return f'unpinned {object} in {scene}' + now
+    if not person:
+        raise OpError('person: who holds the prop (a person of the scene, as in world.json actors)')
+    if person not in (w.get('actors') or {}):
+        raise OpError(f'{person!r} is not a person of {scene} (world.json actors: {", ".join(sorted(w.get("actors") or {}))})')
+    e = link.send(scene, 'prop_pin', {'object': object, 'person': person, 'bone': bone}, timeout=30)
+    if e.get('ok') is False or e.get('error'):
+        raise OpError(f'prop_pin: {e.get("error") or "the page refused it"}')
+    r = e.get('result')
+    if not isinstance(r, dict) or len(r.get('rel') or []) != 16:
+        raise OpError(f'the page did not measure the prop: {r}')
+    props[object] = {'person': person, 'bone': bone, 'rel': r['rel']}
+    w['props'] = props
+    try:
+        f = worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+    off = r['rel'][12:15]
+    at = ', '.join(f'{x:+.2f}' for x in off)
+    return (f"pinned {object} to {person}'s {bone}, {at} m from the bone in its frame; "
+            f'saved in {f}')
+
+
 def _rest_now(scene, person):
     """Re-pose a resting person on the open page (best effort: no page, no harm; it applies at the next load)."""
     try:

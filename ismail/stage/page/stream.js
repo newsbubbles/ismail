@@ -1,6 +1,6 @@
 // Live sound in the room: ismail live's buses streamed from the PC (server.py relays the engine's /stream), each one
-// played from an object's place through an HRTF panner, so the guitar comes out of Lucy and the drums from Dell's kit
-// (the user, 2026-10-03: "making the track or playing something live originate from lucy the amp"). Only ever on a
+// played from an object's place through an HRTF panner, so the guitar comes out of its amp and the drums from the kit
+// (the user, 2026-10-03: "making the track or playing something live originate from ... the amp"). Only ever on a
 // command (live `stream`); the HUD sounds (earcons, Claude's voice) stay in the ears as before.
 import * as THREE from 'three';
 

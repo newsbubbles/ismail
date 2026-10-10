@@ -83,7 +83,7 @@ export function initTouch(ed, xrApi, hands, emit) {
     const { cv, t } = sp.userData, g = cv.getContext('2d');
     g.clearRect(0, 0, cv.width, cv.height);
     // a long name shrinks to fit, then ends in an ellipsis: centred text wider than the canvas lost its start (the
-    // user, 2026-10-10: Dell's tag read "L, drums")
+    // user, 2026-10-10: a drummer's tag read "L, drums")
     let px = 34;
     g.font = `bold ${px}px system-ui, sans-serif`;
     while (px > 20 && g.measureText(text).width > cv.width - 40) { px -= 2; g.font = `bold ${px}px system-ui, sans-serif`; }

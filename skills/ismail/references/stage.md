@@ -257,6 +257,9 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   From GO their hands and fingers are the user's own, placed from the eyes and turned to the person's facing, and the
   shoulders follow the arms. For a grip that must hold (sticks, a guitar neck), `hands='pose'` keeps the start pose's
   hands and adds the user's motion to them.
+- **Props in a person's hands.** Place the prop where it belongs on the person (in the hand, on the strap), then
+  `stage_prop_pin(scene, object, person, bone='hand_r')`: it rides their body from then on, at rest, in a take and in
+  a Follow, and is saved with the scene. `clear=True` unpins it.
 - **Keep the headset light with load sets.** When the work moves to one group (the band), unload the others (the
   dancers): `stage_set_define(scene, 'dancers', items=['person_couple_*'], note='the six dancers')` once, then
   `stage_set_load(scene, 'dancers', loaded=False)`. They are not drawn, compiled or uploaded, their people neither

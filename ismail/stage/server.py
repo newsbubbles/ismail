@@ -194,7 +194,7 @@ def save_edits(name, edits):
 # ---- live link
 CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoint_remove', 'waypoints_clear', 'waypoints_list', 'waypoint_go', 'sky', 'scene_go', 'scene_list', 'actor_follow', 'trees_reload', 'clock', 'key', 'key_delete', 'anim_save', 'anim_clear', 'timeline', 'growth', 'music', 'take_start', 'take_stop', 'eyecam', 'voice_rec', 'say', 'goto', 'goto_camera', 'focus', 'select', 'deselect', 'highlight', 'marker', 'clear_markers', 'set',
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
-             'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release',
+             'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release', 'prop_pin',
              'take_keep_last', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
              'behaviours', 'behaviour_run', 'behaviour_state'}
 COND = threading.Condition()

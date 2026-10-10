@@ -30,7 +30,8 @@ import json
 from pathlib import Path
 
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
-            'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': []}
+            'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': [],
+            'props': {}}
 
 
 def NAME_OK(name):
@@ -96,6 +97,15 @@ def check_world(w):
         for x in un:
             if x not in sets:
                 out.append(f'unloaded names {x!r}, which is not in sets')
+    props = w.get('props')
+    if not isinstance(props, dict):
+        out.append('props must be an object {object: {"person", "bone", "rel"}}')
+        props = {}
+    for n, p in props.items():
+        if not (isinstance(p, dict) and isinstance(p.get('person'), str) and isinstance(p.get('bone'), str)
+                and isinstance(p.get('rel'), list) and len(p['rel']) == 16
+                and all(isinstance(x, (int, float)) for x in p['rel'])):
+            out.append(f'props.{n} must be {{"person": name, "bone": name, "rel": [16 numbers]}}')
     if w.get('derives_from') and b:
         out.append('a derived scene has no build of its own (it is built from derives_from); drop "build"')
     return out
