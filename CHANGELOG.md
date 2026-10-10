@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Stage: a running take always has a stop beside you
+
+- While a take records, a small "■ Stop take" panel rides beside the person until the take stops, however it was
+  started (the menu, the REC button, an agent). A Follow's own panel already has one, so it is not doubled.
+
 ### Stage: pinned hips hold over a start pose, a failed Play says why, captures wait for everyone's pose
 
 - A person whose hips are pinned to a seat stays on it in playback and in a Follow when they also have a start pose
