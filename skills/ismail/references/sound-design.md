@@ -45,6 +45,7 @@ One synth voice peaks near -9 dBFS and one drum hit near -6 dBFS at full velocit
 | pad | saw unison 3-5 + noise 0.1-0.3 | lp 1.5-3 kHz, amp a 0.005-0.6, s 0.3-0.8, chorus + reverb send -8 dB |
 | lead | square pw 0.3 + saw | lp 3-6 kHz with env, delay 0.75 beats pingpong, reverb send |
 | voice (sung vowel) | saw + pulse + noise 0.04 | fx `formant` vowel '@' / 'e' / 'a' (see analyze_formants), vibrato lfo pitch 5 Hz depth 0.1 delay 0.3 |
+| sung voice, in tune | the take as an audio clip on its own track | `autotune` fx on that track: `key` + `scale`, or `notes_from` = the melody track it should follow; `speed_ms` 0 for the hard robotic sound, 20 to 60 firm, 100 and up keeps vibrato (a pitch curve made by rules is what people hear as "autotune"); `formant` moves the voice's character without its pitch. A take outside a song: `sound_autotune(path, ...)` |
 | voice (words) | `sound_speak(text)` on a muted track as audio clips | `vocoder` fx on a synth track, modulator = that track; speech is short, so hold vowels with a formant voice |
 
 Drum synths are mono; width comes from effects. Sidechain feel: `duck` with `source='kick'` is deterministic and cheap; `compressor` with `sidechain` reacts to the kick's audio.

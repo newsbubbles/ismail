@@ -3,6 +3,7 @@
 ctx.param(fx_index, name, default) returns a per-sample curve when the param is automated, else the scalar.
 ctx.track_audio(name) returns another track's post-fx audio (for sidechain/vocoder).
 ctx.track_onsets(name) returns note-on times (sec) of another track (for duck).
+ctx.track_notes(name) returns [(start_sec, pitch, dur_sec, vel)] of another track (for autotune.notes_from).
 """
 import numpy as np
 from scipy import signal
@@ -42,6 +43,8 @@ FX_DEFAULTS = {
     "bitcrush": {"bits": 8, "rate_hz": 11025.0, "mix": 1.0},
     "formant": {"vowel": "@", "f1": None, "f2": None, "f3": None, "q": 8.0, "gains_db": [0.0, -4.0, -10.0],
                 "mix": 1.0, "shift": 1.0},
+    "autotune": {"key": "C", "scale": "chromatic", "notes_from": None, "speed_ms": 20.0, "amount": 1.0,
+                 "formant": 0.0, "lo_hz": 70.0, "hi_hz": 1000.0, "mix": 1.0},
 }
 from . import rig as _rig
 FX_DEFAULTS.update(_rig.DEFAULTS)
@@ -55,7 +58,7 @@ AUTOMATABLE = {
     "gain": ("gain_db", "pan"), "filter": ("cutoff", "res", "mix"), "distortion": ("drive_db", "mix"),
     "delay": ("mix",), "reverb": ("mix",), "hall": ("mix",), "chorus": ("mix",), "flanger": ("mix", "feedback"),
     "phaser": ("mix",), "tremolo": ("depth",), "formant": ("mix",), "width": ("width",), "compressor": ("threshold_db",),
-    "duck": ("depth_db",), "gate": ("depth",), "vocoder": ("mix",), "bitcrush": ("mix",),
+    "duck": ("depth_db",), "gate": ("depth",), "vocoder": ("mix",), "bitcrush": ("mix",), "autotune": ("mix",),
 }
 AUTOMATABLE.update(_rig.AUTOMATABLE)
 
@@ -71,6 +74,12 @@ def normalize(fx):
     if unknown:
         raise FxError(f"unknown {fx['type']} params {sorted(unknown)}; valid: {sorted(FX_DEFAULTS[fx['type']])}")
     full = dict(FX_DEFAULTS[fx['type']], **fx)
+    if fx['type'] == 'autotune':
+        from . import tune
+        try:
+            tune.scale_classes(full['key'], full['scale'])
+        except tune.TuneError as e:
+            raise FxError(str(e))
     if fx['type'] == 'eq':
         for b in full['bands']:
             if b.get('type', 'peak') not in EQ_BAND_TYPES:
@@ -375,7 +384,30 @@ def apply_fx(x, fx, ctx, idx):
                 wet[:, a:b] += signal.sosfilt(hp, m) * fx['unvoiced']
         wet *= 8.0
         return _mix(x, wet, P('mix'))
+    if t == 'autotune':
+        return _autotune(x, fx, ctx, sr, P)
     raise FxError(f"unknown fx {t}")
+
+
+def _autotune(x, fx, ctx, sr, P):
+    """The voice's pitch moved onto the key's scale, or onto the notes of fx['notes_from'] (tune.py)."""
+    from . import tune
+    notes = None
+    if fx['notes_from']:
+        get = getattr(ctx, 'track_notes', None)
+        if get is None:
+            raise FxError("autotune.notes_from works in a render; here, tune to key and scale instead")
+        notes = get(fx['notes_from'])
+    mono = x.mean(0)
+    wet = x.copy()
+    try:
+        for a, b in _active_spans(mono, sr, pad_s=0.1, tail_s=0.1, gap_s=0.5):
+            y, _ = tune.retune(mono[a:b], sr, fx['key'], fx['scale'], notes, fx['speed_ms'], fx['amount'],
+                               fx['formant'], fx['lo_hz'], fx['hi_hz'], t0=a / sr)
+            wet[:, a:b] = y
+    except tune.TuneError as e:
+        raise FxError(str(e))
+    return _mix(x, wet, P('mix'))
 
 
 _IR_CACHE = {}
