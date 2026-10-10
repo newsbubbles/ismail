@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Stage: a Follow from a start pose takes the user's hands, shoulders follow the arms, labels fit
+
+- At GO, a person with a start pose now has the user's own hands and fingers, placed from the eyes and turned to the
+  person's facing, instead of the start pose's hands moved by the user's change since GO. A posed start (a drummer
+  holding sticks) had the fingertips twisting up and the hands reaching from the wrong place (the user, 2026-10-10:
+  "the starting position of the hands is not reset to what my hands' position is when we start").
+  `stage_actor_start(hands='pose')` keeps the old way, for a grip that must hold.
+- The shoulders take a share of the arms' swing (30%, at most 25 degrees), so a reach no longer pushes the arm
+  through the body. Forearm twist bones, where a body has them, share the hand's turn about the forearm.
+- Name tags, load set labels and the countdown shrink their text to fit instead of cutting it off.
+
 ### Stage: a running take always has a stop beside you
 
 - While a take records, a small "■ Stop take" panel rides beside the person until the take stops, however it was
@@ -118,7 +129,7 @@
 
 - A Follow on a standing person now walks with you by default; a seated one (hips pinned to a seat) stays on it. A
   standing man came up "with his feet locked" and would not walk (the user, 2026-10-08). The cause was deeper: a
-  person with a start pose (Pete) was followed by a path that kept the start pose's hips and legs whatever the user
+  person with a start pose was followed by a path that kept the start pose's hips and legs whatever the user
   did, so neither the walk nor the button moved him. That path now walks, turns and steps too, from the start pose.
 - Head moves stay in the upper body: the hips hold still while the head moves within 12 cm of above them and the body
   turns only when the head turns more than 35 degrees from it, so a lean or a look aside bends the spine and the feet
@@ -159,13 +170,13 @@
 - Every interaction sounds: an object's own `sound`, else a click and a warning to the agent. The stage reference
   says how, and where the line between the stage and the agents is.
 - A pinch still held from one menu press no longer presses the menu that replaces it (one press on Walk with me fired
-  three answers and Pete stayed put).
+  three answers and the person stayed put).
 - A scene switch closes the void in slowly (1.6 s, eased) and dusky, instead of the white flash.
 
 ### Stage: one body per person, and lights that start at 0 W
 
 - A person with a start pose no longer shows twice when a take or a Follow starts while something already plays on
-  them (the user, in VR: "double Pete" while following and recording). The stop a play begins with set their resting
+  them (the user, in VR, 2026-10-08: a person showed twice while following and recording). The stop a play begins with set their resting
   body loading, and it could finish while the new play was still being set up. A play or Follow being set up now
   claims its person, and a rest still loading stands down; if the play fails, the person rests again.
 - `stage_light_set` on a light saved at 0 W no longer divides by zero (it answered `energy: null` and the whole room

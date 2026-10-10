@@ -82,7 +82,12 @@ export function initTouch(ed, xrApi, hands, emit) {
     sp.userData.text = text + bg;
     const { cv, t } = sp.userData, g = cv.getContext('2d');
     g.clearRect(0, 0, cv.width, cv.height);
-    g.font = 'bold 34px system-ui, sans-serif';
+    // a long name shrinks to fit, then ends in an ellipsis: centred text wider than the canvas lost its start (the
+    // user, 2026-10-10: Dell's tag read "L, drums")
+    let px = 34;
+    g.font = `bold ${px}px system-ui, sans-serif`;
+    while (px > 20 && g.measureText(text).width > cv.width - 40) { px -= 2; g.font = `bold ${px}px system-ui, sans-serif`; }
+    while (text.length > 4 && g.measureText(text).width > cv.width - 40) text = text.slice(0, -2) + '…';
     const w = Math.min(cv.width - 4, g.measureText(text).width + 36);
     g.fillStyle = bg; g.beginPath(); g.roundRect((cv.width - w) / 2, 2, w, cv.height - 4, 16); g.fill();
     g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, cv.width / 2, cv.height / 2 + 2);
