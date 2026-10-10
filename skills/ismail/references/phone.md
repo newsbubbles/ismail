@@ -82,6 +82,12 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
 
 ## A hum is a part: the music under every note
 
+Every voice note also says what was on the page while it was said. `media` lists each video and clip on the open
+panel when the note began: which file, the second they were at (`t`), its length, and whether it was playing (the page
+pauses a panel's video when a note starts, so `t` is where they stopped it). `acts` lists what they did on the page
+while it recorded (a seek, a tab, a clip played), each `ms` from the note's start. Both ride on the `voice_text` row
+and on the exam's answers file, so "this bit" in a note can be found in the video it was about.
+
 Every voice note keeps the master the page played under it, from 3 s before the person began to 2 s after they
 stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `<id>_ref.json`). The server keeps the
 last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing

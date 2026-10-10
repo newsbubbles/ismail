@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Phone: a voice note says what was playing and what they did
+
+- A note carries `media` (each video and clip on the open panel when it began: file, the second they were at,
+  length, playing or not) and `acts` (what they did on the page while it recorded, timed from its start), on its
+  `voice_text` row and in the exam's answers file. A panel video's play, pause and seek are page events now.
+
 ### Stage: a pinch on a thing whose menu is open does nothing
 
 - A thing with a menu keeps the one it has up: another pinch on it while the menu is open leaves the menu where it

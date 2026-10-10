@@ -132,7 +132,23 @@ function mediaSession() {
 // ---- the phone's take: what happens on the page, timed, so an agent can lay it over the voice notes
 // (Nate 10-06: "kind of like the same thing [as a VR take], but for the mobile interface")
 const evq = [];
-function ev(what, f) { evq.push(Object.assign({ what, at: Date.now(), t: heardNow() }, f || {})); if (evq.length > 40) flushEv(); }
+function ev(what, f) {
+  evq.push(Object.assign({ what, at: Date.now(), t: heardNow() }, f || {})); if (evq.length > 40) flushEv();
+  try { if (talk.rec && talk.acts && talk.acts.length < 40) talk.acts.push(Object.assign({ what, ms: Date.now() - talk.started }, f || {})); } catch (e) {}   // talk is declared further down
+}
+// what was on the page when a note began (Nate 10-10): each video and clip on the open panel, where in it they
+// were and whether it played, so "this bit" in a note can be found in the media it was about
+function mediaNow() {
+  const out = [], name = (u) => String(u || '').split('?')[0].split('/').pop().slice(-80);
+  if (shown) $('panel').querySelectorAll('video').forEach((v) => out.push({ kind: 'video', panel: shown, src: name(v.currentSrc || v.getAttribute('src')),
+    t: Math.round(v.currentTime * 100) / 100, dur: isFinite(v.duration) ? Math.round(v.duration * 10) / 10 : null, playing: !v.paused && !v.ended }));
+  if (clip.el) {
+    const box = document.querySelector('.clip.playing');
+    out.push({ kind: 'clip', panel: shown, src: name(clip.el.dataset.url), label: box ? (box.dataset.label || box.textContent || '').trim().slice(0, 40) : '',
+      t: Math.round(clip.el.currentTime * 100) / 100, playing: !clip.el.paused && !clip.el.ended });
+  }
+  return out;
+}
 function flushEv(beacon) {
   if (!evq.length) return;
   const events = evq.splice(0).map((e) => { const { at, ...rest } = e; return Object.assign(rest, { age_ms: Date.now() - at }); });
@@ -319,15 +335,16 @@ $('mickeep').textContent = micKeep ? 'Mic: kept open' : 'Mic: per note';
 $('micsrc').textContent = micSrc === 'phone' ? 'Record: phone mic' : 'Record: earbuds';
 async function micStart() {
   if (talk.rec) return;
+  if (!talk.media) talk.media = mediaNow();
   try {
     if (!talk.stream || !talk.stream.active) { const t0 = Date.now(); talk.stream = await openMic(); talk.openMs = Date.now() - t0; }
   } catch (e) {
     cue('error'); buzz([300]);
     toast(document.hidden ? 'the phone would not open the mic with the screen off: turn it on, or set Mic: kept open' : 'the microphone is blocked: allow it for this page');
-    keyState('talk', 'blocked', 'Mic blocked'); return;
+    keyState('talk', 'blocked', 'Mic blocked'); talk.media = null; return;
   }
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
-  talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press';
+  talk.chunks = []; talk.t = heardNow(); talk.sid = sid; talk.started = Date.now(); talk.end = 'press'; talk.acts = [];
   try {                                     // what the browser actually applied, so each route's numbers stay apart
     const g = talk.stream.getAudioTracks()[0].getSettings(), f = (k) => (g[k] === undefined ? '?' : g[k] ? 1 : 0);
     talk.mic = `${micSrc} ${micRaw ? 'raw' : 'cleaned'} ec${f('echoCancellation')} ns${f('noiseSuppression')} agc${f('autoGainControl')}`;
@@ -385,10 +402,11 @@ function micStop(sendIt) {
   meterStop();
   clearTimeout(noteTimer); clearInterval(talk.quietT); cue('end');
   const dur = (Date.now() - (talk.started || Date.now())) / 1000, endBy = talk.end;
+  const ctx = { media: talk.media || [], acts: talk.acts || [] }; talk.media = null; talk.acts = null;
   ev('note_end', { dur: Math.round(dur * 10) / 10, by: endBy, sent: !!sendIt });
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
-    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel, onField);
+    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel, onField, ctx);
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
     if (!micKeep) closeMic();
   };
@@ -424,10 +442,11 @@ function meterStop() {
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
-async function upload(blob, s, t, dur, endBy, mic, ended, panel, field) {
+async function upload(blob, s, t, dur, endBy, mic, ended, panel, field, ctx) {
   const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '') +
     (mic ? `&mic=${encodeURIComponent(mic)}` : '') + (ended ? `&ago=${((Date.now() - ended) / 1000).toFixed(2)}` : '') +
-    (panel ? `&panel=${encodeURIComponent(panel)}` : '') + (panel && field ? `&field=${encodeURIComponent(field)}` : '');
+    (panel ? `&panel=${encodeURIComponent(panel)}` : '') + (panel && field ? `&field=${encodeURIComponent(field)}` : '') +
+    (ctx && (ctx.media.length || ctx.acts.length) ? `&ctx=${encodeURIComponent(JSON.stringify(ctx).slice(0, 6000))}` : '');
   try {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
@@ -441,7 +460,7 @@ async function upload(blob, s, t, dur, endBy, mic, ended, panel, field) {
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
     if (!talk.rec) { keyState('talk', 'sent', 'Sent', 'sent'); setTimeout(() => { if (!talk.rec) keyState('talk', 'mic', 'Hold to talk'); }, 1400); }
   } catch (e) {
-    pending.push([blob, s, t, dur, endBy, mic, ended, panel, field]); toast('offline: the note waits and sends when you are back'); cue('error');
+    pending.push([blob, s, t, dur, endBy, mic, ended, panel, field, ctx]); toast('offline: the note waits and sends when you are back'); cue('error');
     if (!talk.rec) keyState('talk', 'blocked', 'Waiting to send');
   }
 }
@@ -831,6 +850,10 @@ function watchVideo(v, id) {
   v.addEventListener('loadedmetadata', () => { say.textContent = ''; ev('video_ok', { id, ms: Date.now() - t0 }); }, { once: true });
   v.addEventListener('waiting', () => { if (!v.error) say.textContent = 'loading'; });
   v.addEventListener('playing', () => { say.textContent = ''; });
+  const pos = () => Math.round(v.currentTime * 100) / 100;
+  v.addEventListener('play', () => ev('video_play', { id, pos: pos() }));
+  v.addEventListener('pause', () => ev('video_pause', { id, pos: pos() }));
+  v.addEventListener('seeked', () => ev('video_seek', { id, pos: pos() }));
   v.addEventListener('error', () => {
     const code = v.error ? v.error.code : 0;
     say.innerHTML = `This video could not play here${code === 4 ? ' (the phone cannot read this file)' : code === 2 ? ' (the connection dropped)' : ''}.` + open;
@@ -874,7 +897,7 @@ function showPanel(p) {
   box.querySelectorAll('.tamic').forEach((b) => { b.onclick = async () => {
     if (talk.rec && talk.panel === p.id && talk.field === b.dataset.field) { micStop(true); return; }
     if (talk.rec) { toast('finish the note you are recording first'); return; }
-    box.querySelectorAll('video').forEach((v) => v.pause());
+    talk.media = mediaNow(); box.querySelectorAll('video').forEach((v) => v.pause());
     talk.panel = p.id; talk.field = b.dataset.field; await micStart();
     if (talk.rec) { talk.toggle = true; b.classList.add('on'); }
     else { talk.panel = null; talk.field = null; }
@@ -903,7 +926,7 @@ function showPanel(p) {
   $('panelrec').onclick = async () => {
     if (talk.rec && talk.panel === p.id) { micStop(true); return; }
     if (talk.rec) { toast('finish the note you are recording first'); return; }
-    box.querySelectorAll('video').forEach((v) => v.pause());       // the note is not said over the video
+    talk.media = mediaNow(); box.querySelectorAll('video').forEach((v) => v.pause());       // the note is not said over the video
     talk.panel = p.id; await micStart();
     if (talk.rec) { talk.toggle = true; $('panelrec').classList.add('on'); $('panelrec').textContent = 'Recording: tap to send'; }
     else talk.panel = null;
