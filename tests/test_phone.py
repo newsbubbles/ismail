@@ -1036,3 +1036,29 @@ def test_a_panel_text_box_said_by_voice_carries_its_audio(phone, monkeypatch):
                                'values_voice': {'why': [vid]}})
     a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
     assert a['values'] == {'why': 'warmer'} and a['values_audio']['why'][0].endswith(f'{vid}.webm')
+
+
+def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, monkeypatch, tmp_path):
+    """Nate 10-10: a note said over a panel's video should say where in the video they were when it began, and what
+    they did on the page while it recorded."""
+    ph, base, _ = phone
+    monkeypatch.setattr(S, 'stt', lambda audio, name: 'this bit, the turn')
+    ans = tmp_path / 'answers.jsonl'
+    P.phone_panel_show(panel_id='cx-1', title='The cut', sender='film', text='watch it', inputs=[])
+    ph.answer_files['cx-1'] = str(ans)
+    ctx = {'media': [{'kind': 'video', 'panel': 'cx-1', 'src': 'cut3.mp4', 't': 42.37, 'dur': 90.0, 'playing': True,
+                      'junk': {'x': 1}}],
+           'acts': [{'what': 'video_seek', 'ms': 1800, 'id': 'cx-1', 'pos': 38.0}, {'what': 'Bad What', 'ms': 1}]}
+    q = urllib.parse.urlencode({'sid': '', 't': '', 'panel': 'cx-1', 'ctx': json.dumps(ctx)})
+    req = urllib.request.Request(base + '/api/voice?' + q, data=b'\x1a' * 2000, headers={'Content-Type': 'audio/webm'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    for _ in range(50):
+        vt = [x for x in json.loads(P.phone_listen('film', since=0, wait=0))['lines'] if x['kind'] == 'voice_text']
+        if vt:
+            break
+        time.sleep(0.1)
+    m = vt[-1]['media'][0]
+    assert (m['src'], m['t'], m['playing']) == ('cut3.mp4', 42.37, True) and 'junk' not in m
+    assert vt[-1]['acts'] == [{'what': 'video_seek', 'ms': 1800, 'id': 'cx-1', 'pos': 38.0}]
+    row = json.loads(ans.read_text(encoding='utf8').splitlines()[-1])
+    assert row['id'] == vid and row['media'][0]['t'] == 42.37                    # the answers file has it too

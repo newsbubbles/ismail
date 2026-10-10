@@ -121,6 +121,31 @@ def readable_name(text):
     return s or 'ismail'
 
 
+def note_context(raw):
+    """A voice note's context from the page: `media` (each video or clip on the open panel when the note began:
+    kind, panel, src, t in seconds, dur, playing, label) and `acts` (page events while it recorded, `ms` from its
+    start). Bounded and typed; anything else is dropped."""
+    try:
+        c = json.loads(raw or '{}')
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(c, dict):
+        return {}
+    def clean(d, keys):
+        return {k: (v[:120] if isinstance(v, str) else v) for k, v in d.items()
+                if k in keys and (v is None or isinstance(v, (str, int, float, bool)))}
+    out = {}
+    media = [clean(m, ('kind', 'panel', 'src', 't', 'dur', 'playing', 'label'))
+             for m in (c.get('media') or [])[:8] if isinstance(m, dict)]
+    acts = [clean(a, [k for k in a if re.fullmatch(r'[a-z_]{1,24}', str(k))])
+            for a in (c.get('acts') or [])[:40] if isinstance(a, dict) and re.fullmatch(r'[a-z_]+', str(a.get('what', '')))]
+    if media:
+        out['media'] = media
+    if acts:
+        out['acts'] = acts
+    return out
+
+
 def clip_seconds(path):
     """A sound file's length in seconds, or None when it cannot be read here."""
     try:
@@ -832,8 +857,8 @@ class Phone:
         rec = self.post({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'sid': sid,
                          'heard': heard, **({'ref': meta['ref']} if meta.get('ref') else {}), **(extra or {})})
         self.voice_state[vid] = 'queued'
-        if extra.get('panel'):
-            self.voice_panel[vid] = {k: extra[k] for k in ('panel', 'for', 'field') if k in extra}
+        if extra.get('panel') or extra.get('media') or extra.get('acts'):
+            self.voice_panel[vid] = {k: extra[k] for k in ('panel', 'for', 'field', 'media', 'acts') if k in extra}
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
 
@@ -927,7 +952,8 @@ class Phone:
         try:
             with open(ap, 'a', encoding='utf8') as fh:
                 fh.write(json.dumps({'ts': now_iso(), 'exam': pid, 'kind': 'voice_note', 'id': vid, 'text': text,
-                                     'audio_path': str(f), 'field': vp.get('field') or 'card'},
+                                     'audio_path': str(f), 'field': vp.get('field') or 'card',
+                                     **{k: vp[k] for k in ('media', 'acts') if vp.get(k)}},
                                     ensure_ascii=False) + '\n')
         except OSError as e:
             print(f'[phone] voice note {vid} to {ap}: {e}', flush=True)
@@ -1799,6 +1825,7 @@ class Handler(BaseHTTPRequestHandler):
                     extra['field'] = re.sub(r'[^\w .-]', '', g('field'))[:60] or 'card'   # the box it was said into
                 if g('mic'):
                     extra['mic'] = g('mic')[:80]                          # route and processing: 'phone raw ec0 ns0 agc0'
+                extra.update(note_context(g('ctx')))                      # what played, and what they did, while they spoke
                 try:
                     if g('ago'):
                         extra['_ago'] = min(3600.0, max(0.0, float(g('ago'))))   # how long since it ended (an upload
