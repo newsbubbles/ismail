@@ -47,10 +47,12 @@ def stage(tmp_path, monkeypatch):
 
 
 class FakePage:
-    """Posts its state and answers each command with cmd_done, like live.js (refuse= types answer with an error)."""
+    """Posts its state and answers each command with cmd_done, like live.js (refuse= types answer with an error;
+    answers= {type: fields} are added to that type's result, as the page's own measurement)."""
 
-    def __init__(self, port, scene, refuse=()):
+    def __init__(self, port, scene, refuse=(), answers=None):
         self.port, self.scene, self.refuse, self.stop = port, scene, set(refuse), False
+        self.answers = answers or {}
         self.seen = []
         _post(port, f'live/state?scene={scene}', {'scene': scene, 'xr': False, 'camera': {'position': [1, 2, 1.6]}})
         self.since = _get(port, f'live/cmd?scene={scene}&since=-1')[1]['last']
@@ -73,7 +75,8 @@ class FakePage:
                     ev = {'type': 'cmd_done', 'cmd_id': c['id'], 'cmd': c['type'], 'ok': False, 'error': 'no object chair', 'ms': 3}
                 else:
                     ev = {'type': 'cmd_done', 'cmd_id': c['id'], 'cmd': c['type'], 'ok': True, 'ms': 4,
-                          'result': {k: v for k, v in c.items() if k not in ('id', 'ts', 'type')}}
+                          'result': {**{k: v for k, v in c.items() if k not in ('id', 'ts', 'type')},
+                                     **self.answers.get(c['type'], {})}}
                 _post(self.port, f'live/event?scene={self.scene}', ev)
 
 

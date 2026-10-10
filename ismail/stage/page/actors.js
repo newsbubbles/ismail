@@ -1008,6 +1008,10 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
+  // a bone of the body a person shows now (playing, following or resting), for props pinned to it (props.js)
+  const shownRig = (person) => { const st = playing.get(person) || resting.get(person); return st ? st.rig : null; };
+  const boneOf = (person, bone) => { const r = shownRig(person); return (r && r.bones[bone]) || null; };
+  const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
   return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
-    rested: () => restP, notResting };
+    rested: () => restP, notResting, boneOf, bonesOf };
 }

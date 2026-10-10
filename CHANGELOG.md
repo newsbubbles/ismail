@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Stage: props pinned to a person's bone
+
+- `stage_prop_pin(scene, object, person, bone)` pins a prop (sticks, a guitar, a bass) to a bone of a person's body
+  where it stands now. It then rides whichever body the person shows (resting in a start pose, playing a take,
+  following the user) and stands where it was when they show none. Saved with the scene in world.json `props`; the
+  edits file keeps the prop where it stood before the pin, and `clear=True` puts it back there. A wrong bone name
+  lists the body's bones. (The user, 2026-10-10: a drummer's sticks and a player's guitar stay in their hands.)
+- Two code comments that named scene characters are generic now.
+
 ### Stage: a person's box is where their body is; a test copy never takes a scene's ops
 
 - A person's selection box, ray pick and hand pick follow the body they show (resting in a start pose, playing a

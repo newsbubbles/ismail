@@ -195,6 +195,36 @@ def test_a_start_pose_is_shown_now_on_an_open_page(stage):
         page.stop = True
 
 
+def test_a_prop_is_pinned_to_a_bone_and_saved_with_the_scene(stage):
+    sc = stage['scenes']
+    OPS['stage_world'](scene='room', world={'actors': {'player': 'body_c'}})
+    rel = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.05, 0.1, -0.02, 1]
+    with pytest.raises(OpError, match="'nobody' is not a person of room"):
+        OPS['stage_prop_pin'](scene='room', object='sticks', person='nobody')
+    page = FakePage(stage['port'], 'room', answers={'prop_pin': {'rel': rel}})
+    try:
+        out = OPS['stage_prop_pin'](scene='room', object='sticks', person='player', bone='hand_r')
+        assert "pinned sticks to player's hand_r, +0.05, +0.10, -0.02 m" in out
+        assert (page.seen[-1]['type'], page.seen[-1]['bone']) == ('prop_pin', 'hand_r')
+        assert W.load_world(sc, 'room')['props'] == {'sticks': {'person': 'player', 'bone': 'hand_r', 'rel': rel}}
+        out = OPS['stage_prop_pin'](scene='room', object='sticks', clear=True)
+        assert out.startswith('unpinned sticks in room') and page.seen[-1].get('clear') is True
+        assert W.load_world(sc, 'room')['props'] == {}
+        with pytest.raises(OpError, match='sticks is not pinned'):
+            OPS['stage_prop_pin'](scene='room', object='sticks', clear=True)
+    finally:
+        page.stop = True
+        page.t.join(5)                                                  # it must not answer the next page's commands
+    page = FakePage(stage['port'], 'room', refuse=('prop_pin',))
+    try:
+        with pytest.raises(OpError, match='prop_pin: no object chair'):
+            OPS['stage_prop_pin'](scene='room', object='chair', person='player')
+    finally:
+        page.stop = True
+    assert W.check_world({**W.DEFAULTS, 'props': {'x': {'person': 'p', 'bone': 'b', 'rel': [1, 2]}}})
+    assert 'stage_prop_pin' in __import__('ismail.api', fromlist=['MUTATING']).MUTATING
+
+
 def test_load_sets_define_unload_and_tell_an_open_page(stage):
     sc = stage['scenes']
     (sc / 'room' / 'manifest.json').write_text(json.dumps({'objects': {
