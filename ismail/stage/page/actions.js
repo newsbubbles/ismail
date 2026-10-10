@@ -339,6 +339,7 @@ export function initActions(ed, hands, panels, live, takes) {
   function update() {
     const it = ed.selected;
     if (!it || ed.editing || !ed.renderer.xr.isPresenting) return;
+    if (panels.talking && panels.talking()) { lastUse = performance.now(); return; }   // nothing goes away while they talk
     camera.getWorldPosition(head);
     box.setFromObject(it.obj).getCenter(c);
     const d = Math.max(0.7, c.distanceTo(head));

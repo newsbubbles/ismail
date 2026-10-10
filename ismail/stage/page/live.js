@@ -414,19 +414,27 @@ export function initLive(ed, desktop, xr) {
 
   const queue = [];
   let running = false, since = -1;
+  // commands that wait for the person (a sign-off on the thumbs, a panel's answer) run beside the queue, so one agent's
+  // open question never holds another's captions or moves (the user, 2026-10-10: sign-offs go on the right thumbs up)
+  const ASIDE = new Set(['ask', 'panel']);
+  async function exec(c) {
+    const t0 = performance.now();
+    let result, error = null;
+    try {
+      const h = handlers[c.type];
+      if (!h) throw new Error(`unknown command "${c.type}"`);
+      result = await h(c);
+    } catch (e) { error = e.message || String(e); }
+    emit('cmd_done', { cmd_id: c.id, cmd: c.type, ok: !error, ...(error ? { error } : { result }), ms: Math.round(performance.now() - t0) });
+    markDirty();
+  }
   async function run() {
     if (running) return;
     running = true;
     while (queue.length) {
-      const c = queue.shift(), t0 = performance.now();
-      let result, error = null;
-      try {
-        const h = handlers[c.type];
-        if (!h) throw new Error(`unknown command "${c.type}"`);
-        result = await h(c);
-      } catch (e) { error = e.message || String(e); }
-      emit('cmd_done', { cmd_id: c.id, cmd: c.type, ok: !error, ...(error ? { error } : { result }), ms: Math.round(performance.now() - t0) });
-      markDirty();
+      const c = queue.shift();
+      if (ASIDE.has(c.type)) exec(c);
+      else await exec(c);
     }
     running = false;
   }

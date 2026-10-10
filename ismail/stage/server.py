@@ -323,8 +323,11 @@ def say_cached(text, voice=None):
 
 def during_note(name, seconds, end):
     """What the user pointed at, selected, grabbed or framed while they talked (the user: Claude must see which table
-    they meant when they said "this table right here"), as short lines with the second into the note."""
-    keep = {'select', 'touch', 'grab', 'release', 'user_snapshot', 'teleport', 'transform_end'}
+    they meant when they said "this table right here"), as short lines with the second into the note. Menus count too
+    (the user, 2026-10-10: "how can you debug what I'm doing here if you don't do that?"): what opened, what was pressed,
+    what closed and why, and a press on a thing's own code."""
+    keep = {'select', 'touch', 'grab', 'release', 'user_snapshot', 'teleport', 'transform_end', 'menu', 'panel_shown',
+            'panel_answer', 'panel_closed', 'panel_held', 'behaviour_run', 'deselect_idle', 'waypoint_pinned'}
     start = end - float(seconds or 0) - 1.0
     out = []
     with COND:
@@ -338,6 +341,11 @@ def during_note(name, seconds, end):
             continue
         if start <= t <= end + 1:
             what = e.get('item') or e.get('name') or e.get('object') or (e.get('to') and 'to ' + str(e.get('to'))) or e.get('path', '')
+            if e['type'].startswith('panel_'):
+                what = ' '.join(str(x) for x in (e.get('title') or e.get('id', ''), e.get('answer') and '-> ' + str(e['answer']),
+                                                 e.get('why')) if x)
+            elif e.get('action'):
+                what = f"{what} {e['action']}"
             out.append(f"{max(0, round(t - start - 1))}s {e['type']} {e.get('hand', '')} {what}".replace('  ', ' ').strip())
     return out[-30:]
 
