@@ -208,6 +208,25 @@ export function initActions(ed, hands, panels, live, takes) {
       }
     } finally { followPanels.delete(it.name); }
   }
+  // a running take always has a stop the user can reach (the user, 2026-10-08: the take menu went away mid-take and
+  // "turn my take off" needed an agent): unless a Follow panel already carries one, a small panel rides beside them
+  // until the take stops, however it stops
+  const TAKE_STOP_ID = 'take_stop';
+  live.onEmit((type, d) => {
+    if (type === 'take_stop') { panels.close(TAKE_STOP_ID, 'take stopped'); return; }
+    if (type !== 'take_start') return;
+    const name = (d && d.name) || '';
+    setTimeout(async () => {                                   // after the menu's own Follow panel, if there is one
+      if (!takes.recording() || (name && followPanels.has(name))) return;
+      const it = name ? ed.byName.get(name) : null;
+      const r = await panels.show({ panel_id: TAKE_STOP_ID, title: '● Recording' + (it ? ': ' + ed.label(it) : ''),
+        text: 'Stop it here whenever you like.', buttons: ['■ Stop take'], anchor: 'body', stay: true, quiet: true, wait: true });
+      if (!r || r.answer !== '■ Stop take' || !takes.recording()) return;
+      if (it && takes.actors && takes.actors.playing.get(it.name)?.live) takes.actors.stop({ person: it.name });
+      const t = await takes.stop();
+      if (it) await review(it, t);
+    }, 1500);
+  });
   // after a plain Follow: keep it as a take? (hands.js buffered it; the user, 2026-10-04, lost a liked follow)
   let offerId = null;
   live.onEmit((type) => { if (type === 'follow_kept' && offerId) panels.close(offerId, 'kept by an agent'); });   // stage_take_keep_last
