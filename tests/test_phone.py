@@ -985,3 +985,54 @@ def test_phone_listen_returns_exam_round_lines_without_page_true(phone, tmp_path
     assert [x['kind'] for x in lines] == ['exam_round']    # the page's own panel_open line is not shown
     assert lines[0]['state'] == 'started' and lines[0]['for'] == 'music' and lines[0]['id'] == 'r5'
     assert any(x['kind'] == 'page' for x in json.loads(P.phone_listen('watcher', since=0, wait=0, page=True))['lines'])
+
+
+def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(phone, monkeypatch, tmp_path):
+    """Voice 10-08: 30 voice notes said on exam cards went only to the inbox, the answer row's empty note read as "no
+    comment", and a note lands seconds after the answer. Now one answers file holds the answer and every note."""
+    import soundfile as sf
+    ph, base, _ = phone
+    gate = threading.Event()
+    monkeypatch.setattr(S, 'stt', lambda audio, name: (gate.wait(10), 'lisp buzz on the S')[1])
+    a, b = tmp_path / 'a.wav', tmp_path / 'b.wav'
+    t = np.arange(22050) / 44100
+    sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
+    sf.write(str(b), 0.1 * np.sin(2 * np.pi * 230 * t), 44100)
+    ans = tmp_path / 'exam' / 'answers.jsonl'
+    out = P.phone_exam('round 50', [{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
+                       choices=['A', 'B'], answers_path=str(ans), exam_id='r50')
+    assert 'clips:' in out and f'{a.resolve()}  0.5 s' in out and "kind 'voice_note'" in out   # the manifest
+    assert json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))['answer_files']['r50'] == str(ans.resolve())
+    # said into the note box with its mic, then submitted before the words are written down
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&panel=r50&field=note', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    post(base, '/api/answer', {'id': 'r50', 'answers': {'choice': 'A', 'note': '', 'note_voice': [vid]}})
+    row = json.loads(ans.read_text(encoding='utf8').splitlines()[0])
+    assert row['kind'] == 'answer' and row['voice_notes_pending'] == [vid]
+    assert row['answers']['note_source'] == 'voice' and row['answers']['note_audio'][0].endswith(f'{vid}.webm')
+    assert 'note_voice' not in row['answers']
+    gate.set()
+    for _ in range(50):
+        rows = [json.loads(x) for x in ans.read_text(encoding='utf8').splitlines()]
+        if len(rows) > 1:
+            break
+        time.sleep(0.1)
+    note = rows[1]
+    assert (note['kind'], note['exam'], note['id'], note['field']) == ('voice_note', 'r50', vid, 'note')
+    assert note['text'] == 'lisp buzz on the S' and os.path.exists(note['audio_path'])
+    vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines'] if x['kind'] == 'voice_text'][-1]
+    assert vt['panel'] == 'r50' and vt['field'] == 'note'                          # the inbox still has it
+
+
+def test_a_panel_text_box_said_by_voice_carries_its_audio(phone, monkeypatch):
+    ph, base, _ = phone
+    monkeypatch.setattr(S, 'stt', lambda audio, name: 'warmer')
+    P.phone_panel_show(panel_id='vb-1', title='Which?', sender='dj', inputs=[{'id': 'why', 'kind': 'text'}])
+    req = urllib.request.Request(base + '/api/voice?sid=&t=&panel=vb-1&field=why', data=b'\x1a' * 2000,
+                                 headers={'Content-Type': 'audio/webm'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    post(base, '/api/answer', {'id': 'vb-1', 'answer': 'Send', 'values': {'why': 'warmer'},
+                               'values_voice': {'why': [vid]}})
+    a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
+    assert a['values'] == {'why': 'warmer'} and a['values_audio']['why'][0].endswith(f'{vid}.webm')

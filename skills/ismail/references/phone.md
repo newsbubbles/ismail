@@ -252,7 +252,14 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
 - `phone_ask(text)`: yes or no. `phone_panel_show(title, text, image, buttons)`: anything else (the
   stage_panel_show shape). Either one with `wait=N` blocks for the answer.
 - `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
-  live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed.
+  live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed. That one file holds
+  everything about the exam: the answer (kind 'answer'), and every voice note said on the card (kind 'voice_note',
+  with `text`, `audio_path` and `field`, the box it was said into, or 'card'), before or after the answer. An answer
+  row with `voice_notes_pending` has more rows coming. The answer's note says whether it was typed or said
+  (`note_source`, and `note_audio` for the recordings). The reply lists each clip's url, path and length, so the
+  post can be checked against what was meant.
+- Every text box on a panel or exam card has a mic: they say the note, its words go into the box to edit, and the
+  answer carries the recording too (`values_audio` on a panel).
 - `phone_offer(path, label=, auto=True)`: a download (a render, a take, a PDF). The label is the card and the file's
   name, so write it for a person ("Clair de lune, rain bed (highlight)"), not a slug. An mp3 goes out as a tagged copy:
   title, artist, album (`title=`, `artist=`, `album=`), the date, and ismail with its GitHub link (provenance travels
