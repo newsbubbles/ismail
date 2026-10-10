@@ -7,6 +7,7 @@
 // scenes/<scene>/snapshots/shot_<time>.png beside the full eye view (user_<time>.png), and listed by GET /snapshots.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
+import { OVER_WORLD } from './panels.js';
 
 export function initGallery(ed, hands, voice, panels, live) {
   const { scene, camera } = ed;
@@ -32,7 +33,7 @@ export function initGallery(ed, hands, voice, panels, live) {
     return { n: shots.length };
   }
 
-  const mat = (o) => new THREE.MeshBasicMaterial(Object.assign({ transparent: true, toneMapped: false, depthTest: false,
+  const mat = (o) => new THREE.MeshBasicMaterial(Object.assign({ transparent: true, toneMapped: false, ...OVER_WORLD,
     side: THREE.DoubleSide }, o));
   const unit = new THREE.PlaneGeometry(1, 1);
   const add = (m) => { m.layers.set(GIZMO); m.renderOrder = 995; m.visible = false; scene.add(m); return m; };

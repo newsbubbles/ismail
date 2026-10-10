@@ -207,8 +207,13 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   take it with the update gesture (a left-hand thumbs up on the updates card).
 - **A message to the person rides with them; a note about a place stays there.** `stage_panel_show(anchor="body")`
   puts it just out of view beside where their body faces (not their head: looking left or right finds it, looking
-  ahead does not), with `seconds` or until they close it, and never holds your command queue. Panels and speech wait while they talk, and for 3 s after a
-  note, because they often send the next one at once.
+  ahead does not), with `seconds` or until they close it, and never holds your command queue. Your panels and speech
+  wait while they talk, and for 3 s after a note, because they often send the next one at once. Menus they open
+  themselves never wait, and nothing times out while they talk. A voice note's `during` lists what they did while it
+  recorded (selections, menus shown and pressed, presses on things), so "this one" can be read without the event log.
+- **A sign-off in the headset is a right thumbs up.** Before anything that hitches or changes the room around them (a
+  reload, a re-export, a scene switch), ask with `stage_ask`: right thumbs up is yes, down is no. Never wait for them
+  to say a word for it, and never use the left hand, which takes updates. An open ask holds no other command.
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
   `stage_take_keep_last`.

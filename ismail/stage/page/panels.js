@@ -6,9 +6,16 @@
 // anchor 'body' (the user, 2026-10-04: a message "needs to stick to me, just like my utility belt"): the panel rides
 // with the user, just out of view to the right (side 'right', the default) or left of where their BODY faces
 // (body.js), so turning the head finds it; seconds or the X closes it; dragging it moves its place around them.
-// A panel that tells about a place stays in the world (the default). No panel opens while the user is talking.
+// A panel that tells about a place stays in the world (the default). An agent's panel never opens while the user is talking; one
+// the user opens themself (a select, a gesture) opens at once, and nothing times out while they talk.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
+
+// panels draw over the world (always pass the depth test) but write their depth, so a hand in front of a panel shows
+// over it and one behind it does not (the user, 2026-10-10: "my hand goes behind the menu, which is kind of
+// disorienting"). Back to front: the room, panels (990-995), hands (996), beams and cursors (997-999). Clear pixels
+// (alphaTest) write no depth, so a hand beside a panel's rounded corner stays seen.
+export const OVER_WORLD = { depthTest: true, depthFunc: THREE.AlwaysDepth, depthWrite: true, alphaTest: 0.02 };
 
 const PRESS_SETTLE_MS = 400;          // a panel takes no press this soon after it appears, or after the last press
 
@@ -112,8 +119,10 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   }
   async function show(c) {
     const id = String(c.panel_id || 'panel_' + Date.now());   // (c.id is the server's command id)
-    // never while the user is talking (the user, 2026-10-04: "your message interrupted me" and the thought was lost)
-    if (renderer.xr.isPresenting && voice.talking()) {
+    // an agent's panel never while the user is talking (the user, 2026-10-04: "your message interrupted me" and the
+    // thought was lost); a menu they open themself shows at once (the user, 2026-10-10: "we don't need menus [that]
+    // wait while you talk")
+    if (c.agent && renderer.xr.isPresenting && voice.talking()) {
       live.emit('panel_held', { id, why: 'the user is talking' });
       while (renderer.xr.isPresenting && voice.talking()) await new Promise((res) => setTimeout(res, 300));
     }
@@ -123,7 +132,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     const cv = document.createElement('canvas'); cv.width = CW; cv.height = 256;
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, width / 4),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, ...OVER_WORLD }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
     mesh.layers.set(GIZMO); mesh.renderOrder = 990;
     const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh, stay: !!c.stay,
       width, from: c.from ? String(c.from) : null, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
@@ -151,7 +160,9 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
       ...(p.body ? { side: p.body.deg < 0 ? 'left' : 'right' } : {}) });
     const done = new Promise((resolve) => {
       p.resolve = resolve;
-      if (c.seconds) p.timer = setTimeout(() => close(id, 'timeout'), c.seconds * 1000);
+      // a panel does not time out while the user talks (the user, 2026-10-10: a menu closed mid-note); it goes once they stop
+      const expire = () => { if (renderer.xr.isPresenting && voice.talking()) p.timer = setTimeout(expire, 1000); else close(id, 'timeout'); };
+      if (c.seconds) p.timer = setTimeout(expire, c.seconds * 1000);
     });
     return c.wait === false ? { id, shown: true } : done;
   }
@@ -426,5 +437,5 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   // a surface the pointer ray stops on, highlights and pinches, like a panel (waypoints.js: the pins' cards)
   function addRayTarget(mesh, api) { mesh.userData.panelApi = api; xrApi.addTarget(mesh); }
   function removeRayTarget(mesh) { xrApi.removeTarget(mesh); delete mesh.userData.panelApi; }
-  return { show, rewrite, close, update, registerPokeable, panels, uiDistance, addRayTarget, removeRayTarget };
+  return { show, rewrite, close, update, talking: () => renderer.xr.isPresenting && voice.talking(), registerPokeable, panels, uiDistance, addRayTarget, removeRayTarget };
 }

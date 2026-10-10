@@ -150,8 +150,8 @@ def send(scene, ctype, fields, timeout=30):
                     return e
                 if ctype == 'scene_go' and s != scene and e.get('type') == 'scene_switched':
                     return f'scene_go: switched to {s} ({e.get("objects")} objects, {e.get("ms")} ms); send further ops with scene="{s}"'
-    raise OpError(f'the page took no answer to {ctype} within {timeout:.0f} s (command {ids[0]}); a panel or question '
-                  f'waiting for the person blocks the queue: stage_events(scene="{scene}", types=["cmd_done"]) shows it')
+    raise OpError(f'the page took no answer to {ctype} within {timeout:.0f} s (command {ids[0]}); a long command before '
+                  f'it (a flight, a load) holds the queue: stage_events(scene="{scene}", types=["cmd_done"]) shows it')
 
 
 def reply(ctype, e):
