@@ -221,6 +221,11 @@ $('quality').textContent = kbps + ' kbps'; $('buzzset').textContent = buzzOn ? '
 
 // ---- talk: hold to talk, or tap once to talk hands-free and tap again to send
 const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: null, sid: null };
+// a note said into a text box (its mic): voice id -> {panel, field}; the words go into that box when heard, and
+// wait here when the panel is not on screen (Voice 10-08: an empty note box hid 30 voice notes)
+const fieldNotes = {}, fieldDrafts = {};
+const MIC_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>';
+const micBox = (field, inner) => `<div class="tawrap">${inner}<button class="tamic" data-field="${esc(field)}" aria-label="Say it instead of typing">${MIC_SVG}</button></div>`;
 // Nate 10-06 14:39: with the mic open, Bluetooth earbuds (his Dime 3) switch to call mode (HFP: mono, narrowband) and
 // the music sounds bad. So by default the mic opens for a note and closes after it, and the earbuds go back to music
 // quality. 'Mic: kept open' is the old way (an earbud press starts a note even with the screen off, in call quality).
@@ -353,10 +358,26 @@ async function micStart() {
   }, 500);
 }
 const NOTE_QUIET_MS = 30000, NOTE_MAX_MS = 10 * 60000;
+// the words of a note said into a text box go into that box, editable, so they see they were heard and can fix a
+// mis-hearing; the box remembers the note's id, and the answer carries both
+function fillField(vid, text) {
+  const f = fieldNotes[vid]; if (!f) return;
+  delete fieldNotes[vid];
+  if (shown !== f.panel) { (fieldDrafts[f.panel] = fieldDrafts[f.panel] || []).push([f.field, vid, text]); return; }
+  putInBox($('panel'), f.field, vid, text);
+}
+function putInBox(box, field, vid, text) {
+  const ta = box.querySelector(`textarea[data-field="${CSS.escape(field)}"]`); if (!ta) return;
+  ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + (text || '').trim();
+  ta.dataset.voice = (ta.dataset.voice ? ta.dataset.voice + ',' : '') + vid;
+  ta.placeholder = '';
+}
 function micStop(sendIt) {
   const r = talk.rec; if (!r) return;
   talk.rec = null; talk.toggle = false;
   const onPanel = talk.panel; talk.panel = null;
+  const onField = talk.field; talk.field = null;
+  document.querySelectorAll('.tamic.on').forEach((b) => b.classList.remove('on'));
   const pb = document.getElementById('panelrec');
   if (pb) { pb.classList.remove('on'); pb.textContent = sendIt ? 'Sent. Say more' : 'Say more'; }
   $('talk').classList.remove('on'); keyState('talk', sendIt ? 'sending' : 'mic', sendIt ? 'Sending' : 'Hold to talk', sendIt ? 'sending' : null); audio.volume = 1;
@@ -367,7 +388,7 @@ function micStop(sendIt) {
   ev('note_end', { dur: Math.round(dur * 10) / 10, by: endBy, sent: !!sendIt });
   r.onstop = () => {
     const blob = new Blob(talk.chunks, { type: r.mimeType || 'audio/webm' });
-    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel);
+    if (sendIt && blob.size > 1500) upload(blob, talk.sid, talk.t, dur, endBy, talk.mic, Date.now(), onPanel, onField);
     else if (sendIt) { toast('too short: hold a little longer'); keyState('talk', 'mic', 'Hold to talk'); }
     if (!micKeep) closeMic();
   };
@@ -399,19 +420,24 @@ function meterStop() {
   [...$('meter').children].forEach((b) => b.classList.remove('lit'));
 }
 const pending = [];
-async function upload(blob, s, t, dur, endBy, mic, ended, panel) {
+async function upload(blob, s, t, dur, endBy, mic, ended, panel, field) {
   const u = `api/voice?sid=${encodeURIComponent(s || '')}&t=${t == null ? '' : t}` + (dur ? `&dur=${dur.toFixed(1)}&end=${endBy || 'press'}` : '') +
     (mic ? `&mic=${encodeURIComponent(mic)}` : '') + (ended ? `&ago=${((Date.now() - ended) / 1000).toFixed(2)}` : '') +
-    (panel ? `&panel=${encodeURIComponent(panel)}` : '');
+    (panel ? `&panel=${encodeURIComponent(panel)}` : '') + (panel && field ? `&field=${encodeURIComponent(field)}` : '');
   try {
     const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
     addFeed({ me: true, id: j.id, ts: new Date().toTimeString().slice(0, 5), text: 'voice note' + (j.heard && j.heard.of ? ' at ' + j.heard.of : '') + ', transcribing' });
+    if (panel && field) {
+      fieldNotes[j.id] = { panel, field };
+      const ta = shown === panel ? $('panel').querySelector(`textarea[data-field="${CSS.escape(field)}"]`) : null;
+      if (ta && !ta.value) ta.placeholder = 'writing down what you said...';
+    }
     toast('sent'); buzz([30, 60, 30]); setTimeout(() => cue('sent'), 350);
     if (!talk.rec) { keyState('talk', 'sent', 'Sent', 'sent'); setTimeout(() => { if (!talk.rec) keyState('talk', 'mic', 'Hold to talk'); }, 1400); }
   } catch (e) {
-    pending.push([blob, s, t, dur, endBy, mic, ended, panel]); toast('offline: the note waits and sends when you are back'); cue('error');
+    pending.push([blob, s, t, dur, endBy, mic, ended, panel, field]); toast('offline: the note waits and sends when you are back'); cue('error');
     if (!talk.rec) keyState('talk', 'blocked', 'Waiting to send');
   }
 }
@@ -823,11 +849,11 @@ function showPanel(p) {
     if (p.choices && p.choices.length) h += `<div class="btns">${p.choices.map((c) => `<button class="choice" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
     const dev = store.get('listen_on', '');
     h += `<div class="hint">Listening on</div><div class="chips" id="listenon">${['Earbuds', 'Headphones', 'Phone speaker', 'Speaker'].map((w) => `<button data-on="${w}" class="${w === dev ? 'sel' : ''}">${w}</button>`).join('')}</div>`;
-    h += `<textarea id="examnote" placeholder="a note (optional)"></textarea><div class="btns"><button id="submit" style="font-weight:700">Submit</button><button data-notnow>Not now</button></div>`;
+    h += micBox('note', `<textarea id="examnote" data-field="note" placeholder="a note (optional): type, or tap the mic"></textarea>`) + `<div class="btns"><button id="submit" style="font-weight:700">Submit</button><button data-notnow>Not now</button></div>`;
   } else {
     h += (p.inputs || []).map((x) => {
       const lab = x.label ? `<div class="inlab">${esc(x.label)}</div>` : '';
-      if (x.kind === 'text') return lab + `<textarea data-in="${esc(x.id)}" data-kind="text">${esc(x.value || '')}</textarea>`;
+      if (x.kind === 'text') return lab + micBox(x.id, `<textarea data-in="${esc(x.id)}" data-field="${esc(x.id)}" data-kind="text">${esc(x.value || '')}</textarea>`);
       if (x.kind === 'toggle') return `<div class="chips"><button data-in="${esc(x.id)}" data-kind="toggle" class="${x.value ? 'sel' : ''}">${esc(x.label || x.id)}: ${x.value ? 'on' : 'off'}</button></div>`;
       const val = [].concat(x.value || []);
       return lab + `<div class="chips" data-in="${esc(x.id)}" data-kind="${x.kind}">${(x.options || []).map((o) => `<button data-opt="${esc(o)}" class="${val.includes(o) ? 'sel' : ''}">${esc(o)}</button>`).join('')}</div>`;
@@ -839,6 +865,16 @@ function showPanel(p) {
   // record, tap again to send; it reaches the agent that sent the panel, and the panel stays open
   h += `<div class="btns"><button id="panelrec" class="rec">Say more</button></div>`;
   box.innerHTML = h;
+  (fieldDrafts[p.id] || []).forEach(([field, vid, text]) => putInBox(box, field, vid, text));
+  delete fieldDrafts[p.id];
+  box.querySelectorAll('.tamic').forEach((b) => { b.onclick = async () => {
+    if (talk.rec && talk.panel === p.id && talk.field === b.dataset.field) { micStop(true); return; }
+    if (talk.rec) { toast('finish the note you are recording first'); return; }
+    box.querySelectorAll('video').forEach((v) => v.pause());
+    talk.panel = p.id; talk.field = b.dataset.field; await micStart();
+    if (talk.rec) { talk.toggle = true; b.classList.add('on'); }
+    else { talk.panel = null; talk.field = null; }
+  }; });
   box.querySelectorAll('video').forEach((v) => watchVideo(v, p.id));
   box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { b.onclick = () => {
     const on = !b.classList.contains('sel'); b.classList.toggle('sel', on);
@@ -853,6 +889,11 @@ function showPanel(p) {
     box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { v[b.dataset.in] = b.classList.contains('sel'); });
     box.querySelectorAll('.chips[data-kind="choice"]').forEach((g) => { const s = g.querySelector('.sel'); v[g.dataset.in] = s ? s.dataset.opt : null; });
     box.querySelectorAll('.chips[data-kind="check"]').forEach((g) => { v[g.dataset.in] = [...g.querySelectorAll('.sel')].map((s) => s.dataset.opt); });
+    return v;
+  };
+  const valuesVoice = () => {                                   // the voice notes said into each text box
+    const v = {};
+    box.querySelectorAll('[data-kind="text"]').forEach((t) => { if (t.dataset.voice) v[t.dataset.in] = t.dataset.voice.split(','); });
     return v;
   };
   $('panelrec').onclick = async () => {
@@ -871,7 +912,7 @@ function showPanel(p) {
       && !box.querySelector(`.chips[data-in="${CSS.escape(x.id)}"] .sel`));
     if (unpicked) { toast(`${unpicked.label ? unpicked.label + ': ' : ''}pick one first, or tap Not now`); return; }
     if (talk.rec && talk.panel === p.id) micStop(true);        // what they were saying goes too
-    const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer, ...(p.inputs ? { values: values() } : {}) });
+    const j = await send('/api/answer', { id: p.id, answer: b.dataset.answer, ...(p.inputs ? { values: values(), values_voice: valuesVoice() } : {}) });
     if (j) { if (!j.gone) toast('sent: ' + b.dataset.answer); answeredHere(p.id); } } });
   const nn = box.querySelector('[data-notnow]');
   if (nn) nn.onclick = async () => {                          // set aside: the agent reads a dismissal, not an answer
@@ -886,7 +927,8 @@ function showPanel(p) {
   const sub = box.querySelector('#submit');
   if (sub) sub.onclick = async () => {
     const answers = { clips: {}, choice: (box.querySelector('.choice.sel') || {}).dataset ? (box.querySelector('.choice.sel') || { dataset: {} }).dataset.choice || null : null,
-      note: (box.querySelector('#examnote') || {}).value || '' };
+      note: (box.querySelector('#examnote') || {}).value || '',
+      note_voice: (((box.querySelector('#examnote') || {}).dataset || {}).voice || '').split(',').filter(Boolean) };
     box.querySelectorAll('.clip').forEach((c) => { const lab = p.clips[+c.dataset.i].label; answers.clips[lab] = [...c.querySelectorAll('[data-chip].sel')].map((x) => x.dataset.chip); });
     if (p.choices && p.choices.length && !answers.choice) { toast('pick one answer first'); return; }
     answers.device = await deviceInfo((box.querySelector('[data-on].sel') || { dataset: {} }).dataset.on || '');
@@ -979,7 +1021,7 @@ function onCmd(c) {
     const a = new Audio(c.url); a.play().catch(() => { toast((c.who || 'DJ') + ': ' + c.text); buzz([150, 80, 150]); });
   }
   else if (c.type === 'stop_listening') { if (want) { setPlaying(false); cue('end'); toast('stopped listening: press the earbud or Listen to start again'); } }
-  else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, ts: new Date().toTimeString().slice(0, 5), text: '“' + c.text + '”' }); }
+  else if (c.type === 'heard') { const it = feedItems.find((x) => x.id === c.ref); if (it) it.text = '“' + c.text + '”'; else addFeed({ me: true, id: c.ref, ts: new Date().toTimeString().slice(0, 5), text: '“' + c.text + '”' }); fillField(c.ref, c.text); }
   if (c.type === 'offer') sound('offer');
   if (c.type === 'offer' && c.offer && c.offer.auto && document.visibilityState === 'visible') {
     const a = document.createElement('a'); a.href = c.offer.url + '?dl=1'; a.download = c.offer.name; document.body.appendChild(a); a.click(); a.remove(); toast('downloading ' + c.offer.name);

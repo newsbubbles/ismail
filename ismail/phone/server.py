@@ -121,6 +121,15 @@ def readable_name(text):
     return s or 'ismail'
 
 
+def clip_seconds(path):
+    """A sound file's length in seconds, or None when it cannot be read here."""
+    try:
+        import soundfile as sf
+        return float(sf.info(path).duration)
+    except Exception:
+        return None
+
+
 def now_iso(at=None):
     t = datetime.datetime.fromtimestamp(at) if at else datetime.datetime.now()
     return t.isoformat(timespec='seconds')
@@ -305,6 +314,9 @@ class Phone:
         except (ValueError, TypeError):
             self.view['vibe'] = vibe.resolve({})
         self.files = {k: Path(v) for k, v in (saved.get('files') or {}).items()}   # token -> path (only what an op offered is served); a panel
+        # exam id -> its answers file, kept after the panel closes: a voice note said on the card lands there too,
+        # late ones included (Voice 10-08: 30 notes missed because they went only to the inbox)
+        self.answer_files = dict(saved.get('answer_files') or {})
                                                       # or exam left open survives a restart with its clips
         self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
@@ -605,6 +617,7 @@ class Phone:
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
+            st['answer_files'] = dict(list(self.answer_files.items())[-300:])
             (HOME / 'state.json').write_text(json.dumps(st), encoding='utf8')
         except OSError:
             pass
@@ -820,7 +833,7 @@ class Phone:
                          'heard': heard, **({'ref': meta['ref']} if meta.get('ref') else {}), **(extra or {})})
         self.voice_state[vid] = 'queued'
         if extra.get('panel'):
-            self.voice_panel[vid] = {k: extra[k] for k in ('panel', 'for') if k in extra}
+            self.voice_panel[vid] = {k: extra[k] for k in ('panel', 'for', 'field') if k in extra}
         self.voice_q.append((vid, f, rec['heard'], sid))
         return rec
 
@@ -904,6 +917,35 @@ class Phone:
         self.hums[vid] = chk
         return meta, chk
 
+    def note_to_answers(self, vid, f, text, vp):
+        """A voice note said on an exam card goes into that exam's answers file as a kind 'voice_note' row, before or
+        after the answer, so a reader of that one file misses nothing (the inbox still gets voice_text)."""
+        pid = vp.get('panel')
+        ap = self.answer_files.get(pid) if pid else None
+        if not ap:
+            return
+        try:
+            with open(ap, 'a', encoding='utf8') as fh:
+                fh.write(json.dumps({'ts': now_iso(), 'exam': pid, 'kind': 'voice_note', 'id': vid, 'text': text,
+                                     'audio_path': str(f), 'field': vp.get('field') or 'card'},
+                                    ensure_ascii=False) + '\n')
+        except OSError as e:
+            print(f'[phone] voice note {vid} to {ap}: {e}', flush=True)
+
+    def voice_pending(self, pid):
+        """Voice notes said on panel pid that are still being transcribed."""
+        return [q[0] for q in self.voice_q if self.voice_panel.get(q[0], {}).get('panel') == pid]
+
+    def voice_files(self, vids):
+        """The audio files of these voice notes."""
+        out = []
+        for v in vids or []:
+            v = str(v)
+            if not re.fullmatch(r'[\w-]+', v):
+                continue
+            out += [str(p) for p in sorted((HOME / 'voice').glob(f'{v}.*')) if p.suffix not in ('.json', '.wav')]
+        return out
+
     def _voice_texts(self):
         try:
             with open(HOME / 'inbox.jsonl', 'rb') as fh:
@@ -940,7 +982,9 @@ class Phone:
                 continue
             self.voice_q.popleft()
             self.voice_state.pop(vid, None)
-            self.post({'kind': 'voice_text', 'id': vid, 'text': text, **self.voice_panel.pop(vid, {})})
+            vp = self.voice_panel.pop(vid, {})
+            self.post({'kind': 'voice_text', 'id': vid, 'text': text, **vp})
+            self.note_to_answers(vid, f, text, vp)
             self.cmd('heard', ref=vid, text=text)
             if self.voice_command(text, vid, heard, sid) is None and ffmpeg():
                 try:                                         # a hum tells itself apart: no button (ledger:M163)
@@ -1222,7 +1266,21 @@ class Agent:
         p = {'id': exam_id or 'x' + secrets.token_hex(3), 'kind': 'exam', 'title': title, 'text': question,
              'clips': cl, 'chips': list(chips or []), 'choices': list(choices or []), 'answers_path': answers_path,
              'who': who}
-        return self._panel(p, wait)
+        if answers_path:
+            self.ph.answer_files[p['id']] = str(Path(answers_path).expanduser().resolve())
+            self.ph.save()
+        out = self._panel(p, wait)
+        man = []
+        for c, src in zip(cl, clips):
+            path = str(Path((src if isinstance(src, dict) else {'path': src})['path']).expanduser().resolve())
+            sec = clip_seconds(path)
+            man.append(f"  {c['label']}: {c['url']}  {path}" + (f"  {sec:.1f} s" if sec else ''))
+        where = (f"everything lands in {answers_path}: the answer (kind 'answer'), and every voice note said on the "
+                 f"card (kind 'voice_note' with text, audio_path and field), before or after the answer; an answer "
+                 f"row with voice_notes_pending has more rows coming" if answers_path else
+                 "no answers_path: the answer and the card's voice notes arrive only in the inbox (kind 'exam', and "
+                 "'voice_text' with panel=<id>); give answers_path to get them in one file")
+        return out + '\nclips:\n' + '\n'.join(man) + '\n' + where
 
     def op_offer(self, path, label=None, auto=False, title=None, album=None, artist=None, who=None):
         src = Path(path).expanduser().resolve()
@@ -1737,6 +1795,8 @@ class Handler(BaseHTTPRequestHandler):
                 if pp:                                                    # said on a panel: a reply to whoever sent it
                     extra.update(panel=pp['id'], panel_title=pp.get('title') or '', **({'for': pp['who']}
                                                                                         if pp.get('who') else {}))
+                if g('field') and pp:
+                    extra['field'] = re.sub(r'[^\w .-]', '', g('field'))[:60] or 'card'   # the box it was said into
                 if g('mic'):
                     extra['mic'] = g('mic')[:80]                          # route and processing: 'phone raw ec0 ns0 agc0'
                 try:
@@ -1820,10 +1880,22 @@ class Handler(BaseHTTPRequestHandler):
                     rec['answer'] = None
                 elif p['kind'] == 'exam':
                     rec['answers'] = body.get('answers') or {}
+                    nv = rec['answers'].pop('note_voice', None)
+                    if nv:                                                # the note was said (and maybe edited)
+                        rec['answers']['note_audio'] = ph.voice_files(nv)
+                        rec['answers']['note_source'] = 'voice'
+                    elif rec['answers'].get('note'):
+                        rec['answers']['note_source'] = 'typed'
                 else:
                     rec['answer'] = body.get('answer')
                     if p.get('inputs'):
                         rec['values'] = body.get('values') or {}
+                        vv = {k: ph.voice_files(v) for k, v in (body.get('values_voice') or {}).items() if v}
+                        if vv:
+                            rec['values_audio'] = vv
+                pend = ph.voice_pending(pid)
+                if pend and not rec.get('dismissed'):
+                    rec['voice_notes_pending'] = pend                     # their rows follow when transcribed
                 if p.get('who'):
                     rec['for'] = p['who']                                 # the agent that sent the panel
                 if p.get('answers_path') and not rec.get('dismissed'):
@@ -1831,7 +1903,9 @@ class Handler(BaseHTTPRequestHandler):
                         ap = Path(p['answers_path'])
                         ap.parent.mkdir(parents=True, exist_ok=True)
                         with open(ap, 'a', encoding='utf8') as f:
-                            f.write(json.dumps({'ts': now_iso(), 'exam': pid, 'answers': rec['answers']},
+                            f.write(json.dumps({'ts': now_iso(), 'exam': pid, 'kind': 'answer', 'answers': rec['answers'],
+                                                **({'voice_notes_pending': rec['voice_notes_pending']}
+                                                   if rec.get('voice_notes_pending') else {})},
                                                ensure_ascii=False) + '\n')
                     except OSError as e:
                         rec['answers_path_error'] = str(e)

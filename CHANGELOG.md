@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Phone: an exam's voice notes land in its answers file
+
+- A voice note said on an exam card is written into that exam's `answers_path` (kind 'voice_note': text, audio
+  path, and the box it was said into), even when it is transcribed after the answer was sent. Before, it went only
+  to the inbox and the answer's empty note read as "no comment".
+- Every text box on a card or panel has a mic; the words fill the box, editable, and the answer carries the
+  recording (`note_audio` and `note_source` on an exam, `values_audio` on a panel). An answer sent while a note is
+  still being transcribed says so (`voice_notes_pending`).
+- `phone_exam` replies with each clip's url, path and length, and where the answers and notes will land.
+
 ### Stage: many keys in one call
 
 - New op `stage_keys_set(scene, keys, replace, interp, save)`: a whole key list for any objects in one page
