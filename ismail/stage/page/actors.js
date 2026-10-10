@@ -495,11 +495,18 @@ export function initActors(ed, live) {
     live.emit('actor_rest', { person, start: spec });
     return { person, resting: true, start: spec };
   }
+  const restDone = new Set();                               // people the room's rest pass has finished (posed or not)
   async function restAll() {
-    for (const person of Object.keys(world().actors || {})) await rest(person).catch((e) => console.warn('[actors] rest', person, e));
+    for (const person of Object.keys(world().actors || {})) {
+      await rest(person).catch((e) => console.warn('[actors] rest', person, e));
+      restDone.add(person);
+    }
   }
   // at load and on a scene switch (the bodies of the new scene), and on an agent's word after a start pose changed
-  ed.addEventListener('revealed', () => { for (const r of resting.values()) scene.remove(r.rig.root); resting.clear(); restAll(); });
+  // restP: the room's people are in their poses (a capture waits for it before its first frame)
+  let restP = Promise.resolve();
+  ed.addEventListener('revealed', () => { for (const r of resting.values()) scene.remove(r.rig.root); resting.clear(); restDone.clear(); restP = restAll(); });
+  const notResting = () => Object.keys(world().actors || {}).filter((p) => !restDone.has(p) && !playing.has(p));
   live.handlers.actor_rest = (c) => (c.person ? rest(c.person) : restAll().then(() => ({ resting: [...resting.keys()] })));
   const cur = new THREE.Vector3(), jump = new THREE.Vector3(), WALK_AWAY_M = 6;
   const shiftArr = (x, d) => (x ? [x[0] - d.x, x[1], x[2] - d.z, ...x.slice(3)] : x);
@@ -740,6 +747,10 @@ export function initActors(ed, live) {
     const { rig, s } = st, S = st.start;
     for (const [n, q] of Object.entries(S.locals)) rig.bones[n].quaternion.copy(q);
     rig.bones.pelvis.position.copy(S.pelvisLocal);
+    // pinned hips hold over a start pose too (the user, 2026-10-10: a man pinned to his stool stood up at the bar in
+    // playback): the start pose keeps its shape, its hips sit on the pin
+    const pin = st.pins && st.pins.hips;
+    if (pin) { rig.root.updateMatrixWorld(true); rig.bones.pelvis.position.copy(rig.bones.pelvis.parent.worldToLocal(pin.clone())); }
     rig.root.updateMatrixWorld(true);
     if (!st.ref) st.ref = st.frames ? prep(st, st.frames[0]) : f;   // the user's pose at GO (a take: its first frame)
     const r = st.ref, I = new THREE.Quaternion();
@@ -805,5 +816,6 @@ export function initActors(ed, live) {
   };
   const control = initControl(ed, live, { rigOf, readProfile, setWorldQ, twoBone, pinPoint, anchor: (c) => anchor(c), pinsOf: (p) => pinsOf(p) });
   const pinsOf = (person) => { const st = playing.get(person); return st ? pinnedNames(st) : Object.keys(anchors.get(person) || {}).filter((k) => k !== 'legs' && anchors.get(person)[k]); };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock };
+  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
+    rested: () => restP, notResting };
 }

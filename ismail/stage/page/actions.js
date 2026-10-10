@@ -282,8 +282,13 @@ export function initActions(ed, hands, panels, live, takes) {
           if (ok) { followPanel(it); ed.select(null, 'menu'); break; }
         }
         else if (a === '■ Unfollow' && takes.actors) takes.actors.stop({ person: it.name });
-        else if (a === '▶ Play' && takes.actors) await takes.actors.play({ person: it.name, take: kept.get(it.name) }).catch((e) =>
-          live.emit('voice_error', { where: 'actor play', error: String(e.message || e) }));
+        else if (a === '▶ Play' && takes.actors) await takes.actors.play({ person: it.name, take: kept.get(it.name) }).catch((e) => {
+          const error = String(e.message || e);
+          live.emit('voice_error', { where: 'actor play', error });
+          // said in the headset too: a Play that did nothing looked like a person that would not move (the user, 2026-10-10)
+          panels.show({ panel_id: 'play_failed_' + it.name, title: ed.label(it) + ': nothing to play on', quiet: true, wait: false, seconds: 10,
+            text: /^no actor/.test(error) ? 'There is no body for this person yet, so the take cannot play. Your take is kept.' : error, buttons: ['OK'] });
+        });
         else if (a === '■ Stop' && takes.actors) takes.actors.stop({ person: it.name });
         else if (a === '✕' || a === '✕ Cancel') {               // ✕ undoes whatever was done since this menu opened
           if (moved(it)) {

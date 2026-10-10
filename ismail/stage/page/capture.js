@@ -68,6 +68,12 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     }
     if (failed) throw failed;
     if (busy || ed.staging() || construct.active) throw new Error('the room did not finish coming in');
+    // everyone in their pose before frame 0 (film, 2026-10-10: the first seconds showed statues and arms-out people)
+    if (actors.rested) {
+      await Promise.race([actors.rested(), new Promise((res) => setTimeout(res, (job.rest_s || 60) * 1000))]);
+      const late = actors.notResting ? actors.notResting() : [];
+      if (late.length) errors.push(`not in their pose at frame 0: ${late.join(', ')}`);
+    }
     // film time from here: performance.now stands still between frames, and the takes start at frame 0
     const real = performance.now.bind(performance), base = real();
     let vt = base;
