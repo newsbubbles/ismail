@@ -349,7 +349,7 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
     monkeypatch.setattr(machine, 'MEM_OVER_MIN_GB', 0.0)
     monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
     with machine.slot('gpu', 'blender bvh', mem_gb=0.001, who='film') as job:
-        hog = b'x' * (64 * 2 ** 20)                       # what the job adds; the holder's own memory before it is not counted
+        hog = os.urandom(64 * 2 ** 20)                    # what the job adds (random, so macOS cannot compress it away)
         import time
         t = time.time()
         while not (machine.jobs() and machine.jobs()[0].get('over')) and time.time() - t < 10:

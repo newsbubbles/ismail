@@ -1061,5 +1061,10 @@ def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, 
     m = vt[-1]['media'][0]
     assert (m['src'], m['t'], m['playing']) == ('cut3.mp4', 42.37, True) and 'junk' not in m
     assert vt[-1]['acts'] == [{'what': 'video_seek', 'ms': 1800, 'id': 'cx-1', 'pos': 38.0}]
-    row = json.loads(ans.read_text(encoding='utf8').splitlines()[-1])
-    assert row['id'] == vid and row['media'][0]['t'] == 42.37                    # the answers file has it too
+    for _ in range(100):                     # the answers file is written just after the inbox row
+        rows = [json.loads(x) for x in ans.read_text(encoding='utf8').splitlines()] if ans.exists() else []
+        rows = [r for r in rows if r.get('id') == vid]
+        if rows:
+            break
+        time.sleep(0.1)
+    assert rows and rows[-1]['media'][0]['t'] == 42.37                          # the answers file has it too
