@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Stage: pinned hips hold over a start pose, a failed Play says why, captures wait for everyone's pose
+
+- A person whose hips are pinned to a seat stays on it in playback and in a Follow when they also have a start pose
+  (the start pose kept its own hips before, so a standing start pose stood them up).
+- Play on a person with no body to play on now says so in the headset, and that the take is kept, instead of doing
+  nothing.
+- `stage_capture` waits for every person in the room to be in their pose before frame 0 (up to 60 s), and
+  names anyone who was not in the capture's status.
+
 ### Stage: hands over menus, menus you open never wait, sign-offs on the right thumbs up
 
 - Hands show in front of a menu they reach into, and stay hidden behind one in front of them. The pointer beam, its
