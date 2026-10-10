@@ -196,6 +196,36 @@ def test_priority_from_the_user_puts_a_session_first_in_line_and_heat_still_hold
     assert machine.priority() is None
 
 
+def test_a_slot_that_ends_while_a_reader_holds_its_board_file_still_leaves_the_board(board):
+    """Windows refuses to delete an open file: a slot that ended while another session read its job file stayed on
+    the board, alive, and the next job in line sat out its whole wait (the priority test, 1 run in 5 locally)."""
+    import threading
+    opened, done = threading.Event(), threading.Event()
+
+    def reader(path, hold_s):
+        with open(path, encoding='utf8'):
+            opened.set()
+            time.sleep(hold_s)
+        done.set()
+    with machine.slot('gpu', 'whisper small.en', who='vox') as job:
+        path = board / 'jobs' / (job['id'] + '.json')
+        t = threading.Thread(target=reader, args=(path, 0.3))
+        t.start()
+        assert opened.wait(5)
+    t.join(5)
+    assert done.is_set() and not path.exists() and machine.jobs() == []
+    assert machine.check('gpu', who='tambopata') == ''
+    # a reader that never lets go: the slot still ends, after its patience, and says why the file stayed
+    path = board / 'stuck.json'
+    path.write_text('{}', encoding='utf8')
+    with open(path, encoding='utf8'):
+        t0 = time.time()
+        gone = machine._remove(str(path), patience=0.2)
+        assert time.time() - t0 < 2
+    assert gone == (sys.platform != 'win32')                      # elsewhere an open file can be removed
+    assert machine._remove(str(path)) and not path.exists()
+
+
 def test_an_expired_priority_is_gone_and_the_cli_sets_one(board):
     machine.set_priority('vox', -1, by='the user')
     assert machine.priority() is None
