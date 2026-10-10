@@ -70,7 +70,7 @@ def test_drives_are_checked_against_the_rig():
             rigs.check_drive(bad, parts)
 
 
-def _body(stage, who='bf_sam', names=HUMAN_BONES, parent=HUMAN_PARENT, person='person_bar_lean'):
+def _body(stage, who='body_b', names=HUMAN_BONES, parent=HUMAN_PARENT, person='person_b'):
     d = stage['scenes'] / 'room' / 'actors'
     d.mkdir(exist_ok=True)
     (d / f'{who}.glb').write_bytes(glb(names, parent))
@@ -88,24 +88,24 @@ def test_reading_a_profile_changes_nothing():
 
 def test_the_profile_lives_beside_the_body(stage):
     d = _body(stage)
-    prof = json.loads(OPS['stage_actor_profile'](scene='room', person='person_bar_lean'))
+    prof = json.loads(OPS['stage_actor_profile'](scene='room', person='person_b'))
     assert prof['rig'] == 'human_game_engine' and prof['maps'] == {} and 'leg_r' in prof['effectors']
-    out = OPS['stage_actor_map_save'](scene='room', person='person_bar_lean', name='seated', pins={'hips': 'stool_3'},
+    out = OPS['stage_actor_map_save'](scene='room', person='person_b', name='seated', pins={'hips': 'stool_3'},
                                       drives=[{'part': 'leg_l', 'mode': 'effector', 'joint': 'hand_l', 'touch': True}])
-    assert "saved map 'seated' on bf_sam (plays person_bar_lean)" in out and 'presets now: seated' in out
-    own = json.loads((d / 'bf_sam.json').read_text(encoding='utf-8'))
+    assert "saved map 'seated' on body_b (plays person_b)" in out and 'presets now: seated' in out
+    own = json.loads((d / 'body_b.json').read_text(encoding='utf-8'))
     assert own['maps']['seated']['pins'] == {'hips': 'stool_3'}
-    OPS['stage_actor_map_save'](scene='room', person='person_bar_lean', name='default', drives=[{'part': 'head', 'mode': 'hold'}])
-    assert (d / 'bf_sam.json.prev').is_file()
-    got = _get(stage['port'], 'actor/profile?scene=room&who=bf_sam')[1]
-    assert set(got['maps']) == {'seated', 'default'} and got['file'] == 'bf_sam.json'
+    OPS['stage_actor_map_save'](scene='room', person='person_b', name='default', drives=[{'part': 'head', 'mode': 'hold'}])
+    assert (d / 'body_b.json.prev').is_file()
+    got = _get(stage['port'], 'actor/profile?scene=room&who=body_b')[1]
+    assert set(got['maps']) == {'seated', 'default'} and got['file'] == 'body_b.json'
 
 
 def test_a_derived_scene_finds_the_bodies_in_its_assets(stage):
     _body(stage)
-    (stage['scenes'] / 'attic' / 'world.json').write_text(json.dumps({'assets': 'room', 'actors': {'sam': 'bf_sam'}}), encoding='utf-8')
-    assert json.loads(OPS['stage_actor_profile'](scene='attic', person='sam'))['actor'] == 'bf_sam'
-    assert _get(stage['port'], 'actor/profile?scene=attic&who=bf_sam')[1]['rig'] == 'human_game_engine'
+    (stage['scenes'] / 'attic' / 'world.json').write_text(json.dumps({'assets': 'room', 'actors': {'sam': 'body_b'}}), encoding='utf-8')
+    assert json.loads(OPS['stage_actor_profile'](scene='attic', person='sam'))['actor'] == 'body_b'
+    assert _get(stage['port'], 'actor/profile?scene=attic&who=body_b')[1]['rig'] == 'human_game_engine'
     with pytest.raises(urllib.error.HTTPError):
         _get(stage['port'], 'actor/profile?scene=attic&who=nobody')
 
@@ -129,12 +129,12 @@ def test_a_bad_map_is_not_saved(stage):
 def test_control_ops_reach_the_page(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        OPS['stage_control_set'](scene='room', person='person_bar_lean', part='leg_l', mode='effector', joint='hand_l', touch=True)
+        OPS['stage_control_set'](scene='room', person='person_b', part='leg_l', mode='effector', joint='hand_l', touch=True)
         c = page.seen[-1]
         assert (c['type'], c['part'], c['mode'], c['joint'], c['touch']) == ('control_set', 'leg_l', 'effector', 'hand_l', True)
-        OPS['stage_control_set'](scene='room', person='person_bar_lean', part='arm_r', mode='hold')
+        OPS['stage_control_set'](scene='room', person='person_b', part='arm_r', mode='hold')
         assert 'touch' not in page.seen[-1] and 'joint' not in page.seen[-1]
-        OPS['stage_control_map'](scene='room', person='person_bar_lean', preset='seated', clear=True)
+        OPS['stage_control_map'](scene='room', person='person_b', preset='seated', clear=True)
         assert (page.seen[-1]['type'], page.seen[-1]['preset'], page.seen[-1]['clear']) == ('control_map', 'seated', True)
         for kw, msg in [({'mode': 'fly'}, 'mode is one of'), ({'mode': 'mimic'}, 'joint='), ({'mode': 'pin'}, 'at=')]:
             with pytest.raises(OpError, match=msg):
@@ -147,33 +147,33 @@ def test_control_ops_reach_the_page(stage):
 
 def test_a_start_pose_is_kept_with_the_body(stage):
     d = _body(stage)
-    out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose={'take': '20261005_175000_sam', 'frame': 12})
+    out = OPS['stage_actor_start'](scene='room', person='person_b', pose={'take': '20261005_175000_sam', 'frame': 12})
     assert 'take 20261005_175000_sam frame 12, relative' in out
-    assert json.loads(OPS['stage_actor_profile'](scene='room', person='person_bar_lean'))['start'] == {
+    assert json.loads(OPS['stage_actor_profile'](scene='room', person='person_b'))['start'] == {
         'pose': {'take': '20261005_175000_sam', 'frame': 12}, 'mode': 'relative', 'idle': True}
     assert 'the page shows it at its next load' in out                 # no page open: it applies at the next load
-    out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose='rest', idle=False)
-    assert 'rests in it' not in out and json.loads((d / 'bf_sam.json').read_text(encoding='utf-8'))['start']['idle'] is False
+    out = OPS['stage_actor_start'](scene='room', person='person_b', pose='rest', idle=False)
+    assert 'rests in it' not in out and json.loads((d / 'body_b.json').read_text(encoding='utf-8'))['start']['idle'] is False
     fr = {'head': [0, 0, 1], 'tail': [0, 0, 1.1], 'x': [1, 0, 0]}
-    out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose={'bones': {'pelvis': {'rest': fr, 'pose': fr}}}, mode='snap')
+    out = OPS['stage_actor_start'](scene='room', person='person_b', pose={'bones': {'pelvis': {'rest': fr, 'pose': fr}}}, mode='snap')
     assert 'a Blender pose of 1 bones, snap' in out
-    got = _get(stage['port'], 'actor/profile?scene=room&who=bf_sam')[1]
+    got = _get(stage['port'], 'actor/profile?scene=room&who=body_b')[1]
     assert got['start']['pose']['bones']['pelvis']['pose']['tail'] == [0, 0, 1.1] and got['start']['mode'] == 'snap'
     for kw, msg in [({'mode': 'slow'}, "mode is 'relative'"), ({'pose': 'lean'}, "pose is 'rest'"),
                     ({'pose': {'bones': {'pelvis': {'rest': fr}}}}, 'pose needs head, tail and x'),
                     ({'pose': {'bones': {'head': {'rest': fr, 'pose': fr}}}}, 'at least the pelvis')]:
         with pytest.raises(OpError, match=msg):
-            OPS['stage_actor_start'](scene='room', person='person_bar_lean', **kw)
-    OPS['stage_actor_start'](scene='room', person='person_bar_lean', clear=True)
-    assert 'start' not in json.loads((d / 'bf_sam.json').read_text(encoding='utf-8'))
+            OPS['stage_actor_start'](scene='room', person='person_b', **kw)
+    OPS['stage_actor_start'](scene='room', person='person_b', clear=True)
+    assert 'start' not in json.loads((d / 'body_b.json').read_text(encoding='utf-8'))
     assert 'stage_actor_start' in __import__('ismail.api', fromlist=['MUTATING']).MUTATING
 
 
 def test_the_pose_read_back_reaches_the_page(stage):
     page = FakePage(stage['port'], 'room')
     try:
-        OPS['stage_actor_pose'](scene='room', person='person_bar_lean', t=2.5)
-        assert (page.seen[-1]['type'], page.seen[-1]['person'], page.seen[-1]['t']) == ('actor_pose', 'person_bar_lean', 2.5)
+        OPS['stage_actor_pose'](scene='room', person='person_b', t=2.5)
+        assert (page.seen[-1]['type'], page.seen[-1]['person'], page.seen[-1]['t']) == ('actor_pose', 'person_b', 2.5)
         with pytest.raises(OpError, match='stage_actor_pose'):
             OPS['stage_cmd'](scene='room', type='actor_pose')
     finally:
@@ -184,9 +184,9 @@ def test_a_start_pose_is_shown_now_on_an_open_page(stage):
     _body(stage)
     page = FakePage(stage['port'], 'room')
     try:
-        out = OPS['stage_actor_start'](scene='room', person='person_bar_lean', pose='rest')
+        out = OPS['stage_actor_start'](scene='room', person='person_b', pose='rest')
         assert 'rests in it' in out and 'the page shows it now' in out
-        assert (page.seen[-1]['type'], page.seen[-1]['person']) == ('actor_rest', 'person_bar_lean')
+        assert (page.seen[-1]['type'], page.seen[-1]['person']) == ('actor_rest', 'person_b')
     finally:
         page.stop = True
 
@@ -195,12 +195,12 @@ def test_load_sets_define_unload_and_tell_an_open_page(stage):
     sc = stage['scenes']
     (sc / 'room' / 'manifest.json').write_text(json.dumps({'objects': {
         'person_couple_1_m': {}, 'person_couple_1_f': {}, 'bar_counter': {}}}), encoding='utf-8')
-    OPS['stage_world'](scene='room', world={'actors': {'person_couple_1_m': 'bf_jo', 'cyrus': 'cyrus'}})
+    OPS['stage_world'](scene='room', world={'actors': {'person_couple_1_m': 'body_c', 'player': 'player'}})
     with pytest.raises(OpError, match=r'band_\* match no node and no person'):
         OPS['stage_set_define'](scene='room', name='dancers', items=['person_couple_*', 'band_*'])
     out = OPS['stage_set_define'](scene='room', name='dancers', items=['person_couple_*'], note='six dancers')
     assert 'load set dancers in room: 2 (person_couple_1_f, person_couple_1_m)' in out
-    OPS['stage_set_define'](scene='room', name='band', items=['cyrus'])          # a person with no node yet
+    OPS['stage_set_define'](scene='room', name='band', items=['player'])          # a person with no node yet
     with pytest.raises(OpError, match="no load set 'bar'"):
         OPS['stage_set_load'](scene='room', name='bar', loaded=False)
     out = OPS['stage_set_load'](scene='room', name='dancers', loaded=False)       # no page open: the next load
@@ -235,7 +235,7 @@ def test_music_time_and_takes_on_the_music_reach_the_page(stage):
         assert page.seen[-1]['type'] == 'music_time'
         OPS['stage_music'](scene='room', url='scenes/room/music/song.wav', start=12.5, volume=0)
         assert (page.seen[-1]['type'], page.seen[-1]['from']) == ('music', 12.5)
-        OPS['stage_actor_play'](scene='room', person='person_bar_lean', take='t1', at_music=8.0)
+        OPS['stage_actor_play'](scene='room', person='person_b', take='t1', at_music=8.0)
         assert page.seen[-1]['at_music'] == 8.0
         with pytest.raises(OpError, match='stage_music_time'):
             OPS['stage_cmd'](scene='room', type='music_time')

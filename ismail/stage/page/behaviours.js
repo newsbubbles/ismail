@@ -9,23 +9,23 @@
 //
 // The file (plain JavaScript, no imports; `s` is the object's handle on the stage, below):
 //   export default {
-//     now_light_switch: {
+//     wall_switch: {
 //       sound: 'sounds/switch.wav',                  // under scenes/<scene>/; every press plays it, at the object
 //       volume: 0.8,                                 // of that sound (0 to 1)
-//       state: { club: true },                       // its starting state; saved per scene as it changes
+//       state: { on: false },                        // its starting state; saved per scene as it changes
 //       apply(s) {                                   // state -> room, run at load and after every change of state
-//         const club = s.get('club');
-//         s.light(['cf_house_old', 'cf_house_hall'], { energy: club ? 0 : [300, 900], seconds: 0.4 });
-//         s.light('cf_floor_*', { energy: club ? null : 0 });       // null: back to how the scene was built
+//         const on = s.get('on');
+//         s.light(['ceiling_lamp', 'desk_lamp'], { energy: on ? [300, 60] : 0, seconds: 0.4 });
+//         s.light('accent_*', { energy: on ? 0 : null });            // null: back to how the scene was built
 //       },
-//       press(s) { s.set('club', !s.get('club')); },  // a pinch or trigger on it in VR, or stage_behaviour_run
-//       menu: { 'Club': (s) => s.set('club', true), 'After hours': (s) => s.set('club', false) },
-//       inputs: { power(s, on) { s.set('club', !!on); } },          // what other objects can send it (s.send)
+//       press(s) { s.set('on', !s.get('on')); },      // a quick pinch or trigger on it in VR, or stage_behaviour_run
+//       menu: { 'On': (s) => s.set('on', true), 'Off': (s) => s.set('on', false) },   // a held pinch (or no press)
+//       inputs: { power(s, on) { s.set('on', !!on); } },           // what other objects can send it (s.send)
 //     },
 //   };
 // s: me, get(key?), set(key, value | {..}), state(object, key?), send(object, input, value), light(names, {energy,
 // color, seconds}), show(names, on), move(name, {by, to, turn, seconds}), sound(file, {at, volume}), emit(type, data),
-// do(command, fields), after(seconds, fn), every(seconds, fn). Names take a list or a glob (cf_floor_*). Positions are
+// do(command, fields), after(seconds, fn), every(seconds, fn). Names take a list or a glob (accent_*). Positions are
 // Blender metres, z up; turn is [x, y, z] degrees about the object's own origin.
 //
 // Errors (the user, 2026-10-08, after a touch did nothing: "you should have an event hook on object functionality
@@ -35,9 +35,12 @@ import * as THREE from 'three';
 import { listenerOf } from './stream.js';
 
 const PRESS_GAP_MS = 350;              // one press per object at most this often (a held pinch re-presses)
+// a thing with both a press and a menu: a quick pinch presses, a pinch held this long opens its menu instead (the user,
+// 2026-10-08: pinching the orb ran its press AND opened a menu, and every pinch stacked another one)
+const HOLD_FOR_MENU_MS = 450;
 const ACTIONS = ['press', 'apply'];
 
-export function initBehaviours(ed, live, panels) {
+export function initBehaviours(ed, live, panels, hands = null) {
   let defs = {}, states = {}, report = { file: false, objects: [], errors: [], warnings: [] };
   let timers = [], anims = [], saveTimer = null, gen = 0;
   const lastPress = new Map(), buffers = new Map(), broken = new Map();   // broken: object -> why its code is not running
@@ -150,7 +153,7 @@ export function initBehaviours(ed, live, panels) {
     let q1 = q0.clone();
     if (o.turn) {
       const r = o.turn.map((d) => THREE.MathUtils.degToRad(d));
-      q1 = new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0], r[2], -r[1], 'XYZ')).multiply(q0);   // Blender xyz
+      q1 = new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0], r[2], -r[1], 'YZX')).multiply(q0);   // Blender XYZ (Rz Ry Rx) in three's axes
     }
     const p = new THREE.Vector3(), q = new THREE.Quaternion(), m = new THREE.Matrix4(), s = new THREE.Vector3();
     it.obj.getWorldScale(s);
@@ -351,13 +354,38 @@ export function initBehaviours(ed, live, panels) {
     if (now - (lastPress.get(name) || 0) < PRESS_GAP_MS) { ed.select(null, 'behaviour'); return true; }
     lastPress.set(name, now);
     ed.select(null, 'behaviour');
-    if (d.press) run(name, 'press', undefined, 'person').catch((e) => fail(name, 'press', e));
-    if (d.menu) menu(name, it);
+    const press = () => run(name, 'press', undefined, 'person').catch((e) => fail(name, 'press', e));
+    if (!d.menu) press();
+    else if (!d.press) menu(name, it);
+    else whenHeld(() => menu(name, it), press);
     return true;
+  }
+  // a pinch held past HOLD_FOR_MENU_MS -> held(), let go before -> quick(). Let go is the session's selectend (a
+  // controller's trigger or the system pinch); a hand's own pinch (touch.js) reads as still held while hands.js sees it
+  let holding = null;
+  function whenHeld(held, quick) {
+    const session = ed.renderer.xr.getSession && ed.renderer.xr.getSession();
+    const pinching = () => !!hands && ['left', 'right'].some((sd) => hands.state[sd] && ['pinch', 'ok'].includes(hands.state[sd].g));
+    if (!session && !pinching()) { quick(); return; }           // nothing to hold (a desktop test): a press
+    if (holding) holding.cancel();
+    let ended = false, over = false;
+    const onEnd = () => { ended = true; if (!over) finish(false); };
+    const finish = (long) => {
+      if (over) return;
+      over = true; clearTimeout(timer); if (session) session.removeEventListener('selectend', onEnd);
+      if (holding === h) holding = null;
+      (long ? held : quick)();
+    };
+    // tracked hands: still pinching is the truth (a near pinch may never reach the session); controllers: no selectend yet
+    const tracked = () => !!hands && ['left', 'right'].some((sd) => hands.state[sd] && hands.state[sd].f);
+    const timer = setTimeout(() => finish(!ended && (tracked() ? pinching() : !!session)), HOLD_FOR_MENU_MS);
+    const h = { cancel: () => { over = true; clearTimeout(timer); if (session) session.removeEventListener('selectend', onEnd); } };
+    holding = h;
+    if (session) session.addEventListener('selectend', onEnd);
   }
   async function menu(name, it) {
     const d = defs[name], labels = Object.keys(d.menu);
-    const r = await panels.show({ panel_id: 'behaviour_' + name + '_' + Date.now(), title: d.title || ed.label(it),
+    const r = await panels.show({ panel_id: 'behaviour_' + name, title: d.title || ed.label(it),     // one per thing: re-shown, never stacked
       text: d.text || '', buttons: [...labels, '⚙ Edit', '✕'], near: nearHead(), width: labels.length > 3 ? 0.42 : 0.34, quiet: true });
     const a = r && r.answer;
     if (!a || a === '✕') return;

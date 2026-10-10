@@ -14,6 +14,23 @@
 - The outline of an unloaded set is a helper now (the editor and headset see it, a capture or a camera view does
   not).
 
+### Stage: a quick pinch presses, a held pinch opens the menu
+
+- A thing with both a press and a menu ran its press AND opened its menu on every pinch, and every pinch stacked
+  another menu (the user, 2026-10-08, on a glowing orb). Now a quick pinch presses and a pinch held for 0.45 s opens
+  its menu instead; a thing with only a menu opens it on a pinch. Each thing has one menu: a second pinch replaces it.
+- A behaviour's `move` turn on two or more axes now matches Blender's XYZ order (it composed the axes the wrong way).
+- Behaviour tests are back with a generic switch, and the stage tests use generic names only.
+
+### A finished job leaves the board even while another session reads it
+
+- `machine.slot`: Windows refuses to delete a file another reader has open, and every session reads the job board.
+  A slot that ended at the moment a waiter in line read its job file stayed on the board, alive, for as long as its
+  process lived, and the next job in line sat out its whole wait behind a job that had finished (the priority test
+  failed 1 run in 5 on a Windows laptop: vox's instant job held the GPU slot 60 s). The job file, the waiter's
+  place in line and a cleared priority are now removed with retries until the reader lets go (2 s at most, then a
+  warning). Test: a reader holds the job file open while the slot ends, and the board is empty after.
+
 ### No song content in the tests
 
 - Removed tests/test_stage_behaviours.py: it tested one song scene's light switch, which is the user's VR content

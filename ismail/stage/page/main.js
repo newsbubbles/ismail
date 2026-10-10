@@ -160,7 +160,7 @@ live.onEmit((type, d) => {
 });
 live.handlers.take_keep_last = (c) => keepLast(c.name || null);
 // things that do things: a scene's own small functions, run on a press, a menu item or a wire (behaviours.js)
-window.VR_behaviours = initBehaviours(ed, live, panels);
+window.VR_behaviours = initBehaviours(ed, live, panels, hands);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,

@@ -306,6 +306,32 @@ def jobs():
     return out
 
 
+REMOVE_PATIENCE_S = 2.0    # a board file another reader holds open is removed when it lets go, within this long
+
+
+def _remove(path, patience=None):
+    """Remove a board file, and keep trying while a reader holds it open. Windows refuses to delete a file that is
+    open (Python opens files without delete sharing), and every session reads the board: a slot whose job file was
+    read at the moment it ended stayed on the board, alive, for as long as its process lived (a waiter in line sat
+    out its whole wait behind a job that had finished). -> True when the file is gone."""
+    patience = REMOVE_PATIENCE_S if patience is None else patience
+    t_end = time.time() + patience
+    while True:
+        try:
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if time.time() >= t_end:
+                print(f"[ismail.machine] could not remove {path}: a reader held it open for "
+                      f"{patience:g} s; it stays on the board until this process ends", file=sys.stderr, flush=True)
+                return False
+            time.sleep(0.01)
+        except OSError:
+            return False
+
+
 def priority():
     """-> the priority grant {'who', 'until', 'by', 'why', 'set'} if one is in force, else None."""
     try:
@@ -361,10 +387,7 @@ def priority_match(who=None):
 
 def clear_priority():
     with _board_lock():
-        try:
-            os.remove(os.path.join(board_dir(), 'priority.json'))
-        except OSError:
-            pass
+        _remove(os.path.join(board_dir(), 'priority.json'))
 
 
 def waiters():
@@ -1067,10 +1090,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             time.sleep(WAIT_POLL_S)
     finally:
         if wpath:
-            try:
-                os.remove(wpath)
-            except OSError:
-                pass
+            _remove(wpath)
     g = gpu()
     state = {'gpu_temp': g['temp'], 'gpu_clock': g['clock'], 'gpu_reasons': hex(g['reasons']),
              'gpu_trouble': gpu_trouble(g) or None} if g else {}
@@ -1096,10 +1116,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         _undo(undo)
         used = meter.stop()
         for f in (path, path[:-5] + '.tmp'):
-            try:
-                os.remove(f)
-            except OSError:
-                pass
+            _remove(f)
         _record(job, job['started'] - since, state, used, outcome)
 
 
