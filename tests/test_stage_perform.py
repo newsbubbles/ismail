@@ -48,7 +48,7 @@ def test_words_that_start_in_silence_move_onto_the_voice(tmp_path):
 
 
 def test_a_clip_arrives_in_chunks_and_comes_back_as_words_on_the_follow_clock(stage, monkeypatch, tmp_path):
-    port, perf = stage['port'], '20261004_220000_person_bar_lean'
+    port, perf = stage['port'], '20261004_220000_person_b'
     wav = tmp_path / 'v.wav'
     _voice_wav(wav)
     data = wav.read_bytes()
@@ -58,7 +58,7 @@ def test_a_clip_arrives_in_chunks_and_comes_back_as_words_on_the_follow_clock(st
         seen['bytes'], seen['name'] = len(audio), filename
         return {'text': 'hey you', 'words': [{'word': 'hey', 'start': 0.35, 'end': 1.0}, {'word': 'you', 'start': 1.0, 'end': 1.7}]}
     monkeypatch.setattr(S, 'stt_words', fake_stt)
-    _post(port, f'perf/meta?scene=room&perf={perf}', {'id': perf, 'person': 'person_bar_lean', 'markers': [{'t': 2.0, 'label': 'legs', 'by': 'agent'}]})
+    _post(port, f'perf/meta?scene=room&perf={perf}', {'id': perf, 'person': 'person_b', 'markers': [{'t': 2.0, 'label': 'legs', 'by': 'agent'}]})
     half = len(data) // 2
     _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&seq=0', data[:half], 'audio/wav')
     _raw(port, f'voice/perf?scene=room&perf={perf}&clip=2&seq=1', data[half:], 'audio/wav')
@@ -76,7 +76,7 @@ def test_a_clip_arrives_in_chunks_and_comes_back_as_words_on_the_follow_clock(st
     # on the Follow clock: the clip began at 12.5 s; "hey" starts where the voice does, not in the room tone
     assert ev['words'][0][0] == 'hey' and ev['words'][0][1] == pytest.approx(12.5 + 0.8 - P.MARGIN_S, abs=0.03)
     meta = json.loads((d / 'perf.json').read_text(encoding='utf-8'))
-    assert meta['person'] == 'person_bar_lean' and meta['clips'][0]['n'] == 2 and meta['clips'][0]['voice'] == pytest.approx([0.8, 1.4], abs=0.03)
+    assert meta['person'] == 'person_b' and meta['clips'][0]['n'] == 2 and meta['clips'][0]['voice'] == pytest.approx([0.8, 1.4], abs=0.03)
     out = OPS['stage_performance'](scene='room')
     assert perf in out and 'marker 2.0 s: legs' in out and 'clip 2 at 12.5 s' in out and 'hey@13.' in out
 
@@ -151,10 +151,10 @@ def test_a_batch_sends_page_ops_together_and_keeps_the_order(stage):
     page = BatchPage(stage['port'], 'room')
     try:
         out = OPS['stage_batch'](scene='room', ops=[
-            {'op': 'stage_follow_anchor', 'person': 'person_bar_lean', 'to': 'stool_3'},
+            {'op': 'stage_follow_anchor', 'person': 'person_b', 'to': 'stool_3'},
             {'op': 'stage_perform', 'action': 'mark', 'label': 'legs now'},
-            {'op': 'stage_world', 'world': {'actors': {'person_bar_lean': 'mh_man'}}},      # runs here, between
-            {'op': 'stage_say', 'text': 'feet next', 'sender': 'crossroads film'},
+            {'op': 'stage_world', 'world': {'actors': {'person_b': 'mh_man'}}},      # runs here, between
+            {'op': 'stage_say', 'text': 'feet next', 'sender': 'film agent'},
         ])
         batches = [c for c in page.seen if c['type'] == 'batch']
         assert [[x['type'] for x in b['cmds']] for b in batches] == [['follow_anchor', 'perform'], ['say']]
@@ -171,7 +171,7 @@ def test_a_failed_batch_stops_and_puts_its_files_back(stage):
         before = OPS['stage_world'](scene='room')
         with pytest.raises(OpError) as e:
             OPS['stage_batch'](scene='room', ops=[
-                {'op': 'stage_world', 'world': {'actors': {'person_bar_lean': 'mh_man'}}},
+                {'op': 'stage_world', 'world': {'actors': {'person_b': 'mh_man'}}},
                 {'op': 'stage_say', 'text': 'one'},
                 {'op': 'stage_perform', 'action': 'mark', 'label': 'never'},
             ])
@@ -203,7 +203,7 @@ def test_any_error_in_a_batch_rolls_back(stage, monkeypatch):
         before = OPS['stage_world'](scene='room')
         monkeypatch.setattr(W, 'save_world', half_then_fail)
         with pytest.raises(OpError, match=r"\[0\] stage_world: ERROR KeyError: 'boom'"):
-            OPS['stage_batch'](scene='room', ops=[{'op': 'stage_world', 'world': {'actors': {'person_bar_lean': 'mh_man'}}}])
+            OPS['stage_batch'](scene='room', ops=[{'op': 'stage_world', 'world': {'actors': {'person_b': 'mh_man'}}}])
         monkeypatch.setattr(W, 'save_world', real)
         assert OPS['stage_world'](scene='room') == before
     finally:

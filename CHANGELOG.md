@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Stage: a quick pinch presses, a held pinch opens the menu
+
+- A thing with both a press and a menu ran its press AND opened its menu on every pinch, and every pinch stacked
+  another menu (the user, 2026-10-08, on a glowing orb). Now a quick pinch presses and a pinch held for 0.45 s opens
+  its menu instead; a thing with only a menu opens it on a pinch. Each thing has one menu: a second pinch replaces it.
+- A behaviour's `move` turn on two or more axes now matches Blender's XYZ order (it composed the axes the wrong way).
+- Behaviour tests are back with a generic switch, and the stage tests use generic names only.
+
 ### A finished job leaves the board even while another session reads it
 
 - `machine.slot`: Windows refuses to delete a file another reader has open, and every session reads the job board.
