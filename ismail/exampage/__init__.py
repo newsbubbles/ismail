@@ -6,7 +6,9 @@ blinks. The person answers about the picture showing (M: this one is the real on
 tell), pins comments at a time and frequency (a click, or a dragged box), and the key is served only after an answer.
 
 A round is a folder: manifest.json (what the page shows), key.json (never served before an answer), files/ (the
-pictures and the sound) and answers.jsonl (one line per submit).
+pictures and the sound), sources.json (the real and other sound files and windows of each card; never served; what
+region_measure reads), answers.jsonl (one line per submit) and, once a person names areas on the reveal, areas.jsonl
+(one line per area) and areas_measured.jsonl (region_measure's numbers).
 
   python -m ismail.exampage serve <rounds folder> [--port 8871] [--host 127.0.0.1]
 """
@@ -19,6 +21,7 @@ import sys
 import time
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'words.html')
+VOCAB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vocab.json')
 PORT = 8871
 SAFE = re.compile(r'^[A-Za-z0-9_.-]+$')
 
@@ -37,8 +40,8 @@ def build(out, items, title, intro='', seed=0, f_lo=0.0, f_hi=16000.0, labels=No
     sides = sides[:len(items)]
     rng.shuffle(sides)
     man = {'round': os.path.basename(os.path.abspath(out)), 'axes': list(A.EYE_BOX), 'timed': True, 'title': title,
-           'intro': intro, 'f_hi': f_hi, 'labels': labels or {}, 'items': []}
-    key = {}
+           'intro': intro, 'f_lo': f_lo, 'f_hi': f_hi, 'labels': labels or {}, 'items': []}
+    key, sources = {}, {}
     for q, (it, real_side) in enumerate(zip(items, sides), 1):
         t0, t1 = it['window']
         o0, o1 = it.get('other_window') or (t0, t1)
@@ -56,6 +59,8 @@ def build(out, items, title, intro='', seed=0, f_lo=0.0, f_hi=16000.0, labels=No
         cut = y[int(t0 * sr):int(t1 * sr)]
         wav = os.path.join(files, f'q{q:02d}_word.wav')
         sf.write(wav, cut, sr)
+        sources[str(q)] = {'real': {'file': os.path.abspath(it['real']), 'window': [t0, t1]},
+                           'other': {'file': os.path.abspath(it['other']), 'window': [o0, o1]}}
         man['items'].append({'q': q, 'word': it['word'], 'audio': f'files/q{q:02d}_word.wav', 'window': [t0, t1],
                              'img': pics, 'words': [{'w': w['w'], 'ms': [round(1000 * (w['t0'] - t0)),
                                                                          round(1000 * (w['t1'] - t0))]}
@@ -66,6 +71,8 @@ def build(out, items, title, intro='', seed=0, f_lo=0.0, f_hi=16000.0, labels=No
         json.dump(man, f, indent=1)
     with open(os.path.join(out, 'key.json'), 'w', encoding='utf8') as f:
         json.dump(key, f, indent=1)
+    with open(os.path.join(out, 'sources.json'), 'w', encoding='utf8') as f:      # never served; region_measure reads it
+        json.dump(sources, f, indent=1)
     return man
 
 
@@ -108,6 +115,86 @@ def score(out):
         L.append(f"{v} " + ', '.join(f"{s} {r.count(s)}" for s in ('right', 'WRONG', 'cant', 'none') if r.count(s)))
     L.append(f"saved {a.get('saved_at')}")
     return '\n'.join(L)
+
+
+def machine_vocab_path():
+    return os.environ.get('ISMAIL_EXAM_VOCAB') or os.path.join(os.path.expanduser('~'), '.ismail', 'exam_vocab.json')
+
+
+def _clean_name(name):
+    return re.sub(r'\s+', ' ', re.sub(r'[\x00-\x1f<>"]', ' ', str(name or ''))).strip().lower()[:40]
+
+
+def _names(path):
+    try:
+        with open(path, encoding='utf8') as f:
+            return [n for n in (_clean_name(x) for x in json.load(f).get('names', [])) if n]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def vocab():
+    """The names an area can take: {'names': all (the repo's first, then this machine's), 'repo': [...], 'mine':
+    [...]}. The repo file (vocab.json) is shared; names people add live in a per-machine copy and are only added to."""
+    repo, mine = _names(VOCAB), _names(machine_vocab_path())
+    mine = [n for n in dict.fromkeys(mine) if n not in repo]
+    return {'names': repo + mine, 'repo': repo, 'mine': mine}
+
+
+def add_name(name):
+    """Remember a new name in this machine's copy (never in the repo file). -> (clean name, True if it was new)."""
+    name = _clean_name(name)
+    if not name:
+        raise ValueError('an area needs a name')
+    if name in vocab()['names']:
+        return name, False
+    path = machine_vocab_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf8') as f:
+        json.dump({'names': _names(path) + [name]}, f, indent=1)
+    return name, True
+
+
+def areas(out):
+    """The areas a round's page saved, one dict per line of areas.jsonl."""
+    from .. import regions
+    return regions.read_jsonl(os.path.join(out, 'areas.jsonl'))
+
+
+def save_area(out, body):
+    """Validate and append one named area to <out>/areas.jsonl. body from the page: {q, picture ('1' or '2' as shown),
+    name, note, poly: [[fx, fy]] fractions of the picture from the left and from the top}. The key says whether the
+    picture shown was the real one or ours. -> the saved row. Raises ValueError with what is wrong."""
+    from .. import regions
+    with open(os.path.join(out, 'manifest.json'), encoding='utf8') as f:
+        man = json.load(f)
+    with open(os.path.join(out, 'key.json'), encoding='utf8') as f:
+        key = json.load(f)
+    it = next((i for i in man['items'] if i['q'] == body.get('q')), None)
+    if it is None:
+        raise ValueError(f"no card {body.get('q')!r} in this round")
+    pic = str(body.get('picture'))
+    if pic not in it['img']:
+        raise ValueError('picture must be "1" or "2"')
+    try:
+        frac = [[float(x), float(y)] for x, y in body.get('poly') or []]
+    except (TypeError, ValueError):
+        raise ValueError('poly must be a list of [fx, fy] fractions of the picture')
+    if len(frac) < 3 or any(not (-0.5 <= v <= 1.5) for p in frac for v in p):
+        raise ValueError('poly needs at least 3 points, as fractions of the picture')
+    name, new = add_name(body.get('name'))
+    t0, t1 = it['window']
+    poly = regions.polygon_to_sec_hz(frac, man['axes'], t1 - t0, man.get('f_lo', 0.0), man['f_hi'])
+    if len(poly) < 3:
+        raise ValueError('the outline collapsed to fewer than 3 points')
+    row = {'id': f"{man['round']}.a{len(areas(out)) + 1:03d}", 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'),
+           'round': man['round'], 'q': it['q'], 'word': it.get('word'), 'picture': pic,
+           'shown': 'real' if pic == key[str(it['q'])]['real'] else 'ours', 'name': name, 'new_name': new,
+           'note': str(body.get('note') or '')[:2000], 'window': [t0, t1], 'poly': poly,
+           'f_lo': man.get('f_lo', 0.0), 'f_hi': man['f_hi']}
+    with open(os.path.join(out, 'areas.jsonl'), 'a', encoding='utf8') as f:
+        f.write(json.dumps(row) + '\n')
+    return row
 
 
 def _handler(root):
@@ -174,13 +261,19 @@ def _handler(root):
                 if not answers(d):
                     return self._send(403, b'answer the round first')
                 return self._file(os.path.join(d, 'key.json'))
+            if rest == 'vocab':
+                return self._send(200, json.dumps(vocab()).encode(), 'application/json')
+            if rest == 'areas':                     # the reveal only, like the key
+                if not answers(d):
+                    return self._send(403, b'answer the round first')
+                return self._send(200, json.dumps(areas(d)).encode(), 'application/json')
             m2 = re.match(r'^files/([^/]+)$', rest)
             if m2 and SAFE.match(m2.group(1)) and os.path.isfile(os.path.join(d, 'files', m2.group(1))):
                 return self._file(os.path.join(d, 'files', m2.group(1)))
             return self._send(404, b'not found')
 
         def do_POST(self):
-            m = re.match(r'^/eye/([^/]+)/answer$', self.path.split('?')[0])
+            m = re.match(r'^/eye/([^/]+)/(answer|areas)$', self.path.split('?')[0])
             d = m and self._round(m.group(1))
             if not d:
                 return self._send(404, b'no such round')
@@ -188,6 +281,15 @@ def _handler(root):
                 row = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))).decode('utf8'))
             except ValueError:
                 return self._send(400, b'not JSON')
+            if m.group(2) == 'areas':               # named areas: the reveal only, so only after an answer
+                if not answers(d):
+                    return self._send(403, b'answer the round first')
+                try:
+                    saved = save_area(d, row)
+                except (ValueError, KeyError, OSError, AttributeError) as e:
+                    return self._send(400, str(e).encode())
+                return self._send(200, json.dumps({'ok': True, 'id': saved['id'], 'name': saved['name'],
+                                                   'new_name': saved['new_name']}).encode(), 'application/json')
             row['saved_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
             with open(os.path.join(d, 'answers.jsonl'), 'a', encoding='utf8') as f:
                 f.write(json.dumps(row) + '\n')

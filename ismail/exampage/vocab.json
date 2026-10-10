@@ -1,0 +1,4 @@
+{
+  "what": "The shared names for an area on the reveal of the picture round. A name a person adds goes to their own copy (~/.ismail/exam_vocab.json, or $ISMAIL_EXAM_VOCAB), never to this file.",
+  "names": ["plume", "stroke", "mid texture", "flare", "stripe", "valley", "hill", "smear", "doubled"]
+}

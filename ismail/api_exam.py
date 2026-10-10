@@ -90,3 +90,33 @@ def exam_picture_score(out: str) -> str:
         return X.score(out)
     except (OSError, KeyError, ValueError) as e:
         raise OpError(f"exam_picture_score: {e}")
+
+
+@op()
+def region_measure(out: str, area: str = None) -> str:
+    """Measure inside the areas people named on the reveal of an exam_picture_round (Migration 8, part A). out: a
+    round folder (or a rounds folder: every round under it that holds areas.jsonl); area: one area id (like
+    p1.a003), else every saved area. Each polygon is reduced to its bounding box plus a mask and measured on BOTH
+    pictures' sounds (the real file and ours, at the windows in the round's sources.json): level (mean dB in the
+    mask), mid texture (at the centroid and the median over seeds inside), stroke life, drift and bend (trackers
+    seeded inside, the median), hold, and held20 (z_texture.held at 20 ms). Mean z stays empty until the diff
+    arrives. One line per area is appended to <round>/areas_measured.jsonl; the answer is a table grouped by name
+    (a name gathers its instances over rounds) and the file path."""
+    import os
+    from . import regions as R
+    try:
+        rounds = R.rounds_in(out)
+        if area and len(rounds) > 1:             # an area id starts with its round's folder name
+            rounds = [d for d in rounds if area.startswith(os.path.basename(d) + '.')]
+        if not rounds:
+            raise ValueError(f"no round with saved areas under {out}")
+        rows, files = [], []
+        for d in rounds:
+            R.measure_round(d, area)
+            rows += R.latest_by_id(R.read_jsonl(os.path.join(d, 'areas_measured.jsonl')))
+            files.append(os.path.join(d, 'areas_measured.jsonl'))
+    except (OSError, ValueError) as e:
+        raise OpError(f"region_measure: {e}")
+    if area:
+        rows = [r for r in rows if r.get('id') == area]
+    return R.table(rows) + '\n' + '\n'.join(files)

@@ -64,7 +64,7 @@ packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ism
 "ismail.voices.winds" = ["*.json"]
 "ismail.voices.brass" = ["*.json"]
 "ismail.video" = ["templates/*", "templates/*/*"]
-"ismail.exampage" = ["*.html"]
+"ismail.exampage" = ["*.html", "*.json"]
 "ismail.phone" = ["page/*.js", "page/*.html", "page/*.svg", "page/*.webmanifest", "page/cues/*.mp3", "page/*.png"]
 "ismail.stage" = ["page/*.js", "page/*.html", "page/*.mjs", "page/sounds/*.wav", "page/vendor/three/LICENSE",
                   "page/vendor/three/build/*", "page/vendor/three/examples/jsm/**/*"]
