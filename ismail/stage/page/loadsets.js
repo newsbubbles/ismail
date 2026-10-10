@@ -32,8 +32,8 @@ export function initLoadSets(ed, live, getActors) {
     const g = cv.getContext('2d');
     g.fillStyle = 'rgba(20,28,40,0.55)'; g.beginPath(); g.roundRect(4, 4, 504, 120, 24); g.fill();
     g.strokeStyle = 'rgba(150,200,255,0.8)'; g.lineWidth = 3; g.setLineDash([14, 10]); g.stroke();
-    g.fillStyle = '#dcebff'; g.textAlign = 'center'; g.font = 'bold 48px sans-serif'; g.fillText(text, 256, 62);
-    g.font = '28px sans-serif'; g.fillStyle = '#9fb8d8'; g.fillText(sub, 256, 104);
+    g.fillStyle = '#dcebff'; g.textAlign = 'center'; g.font = 'bold 48px sans-serif'; g.fillText(text, 256, 62, 480);   // squeezed to fit, never cut
+    g.font = '28px sans-serif'; g.fillStyle = '#9fb8d8'; g.fillText(sub, 256, 104, 480);
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
     s.scale.set(1.2, 0.3, 1);

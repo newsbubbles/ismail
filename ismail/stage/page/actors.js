@@ -297,6 +297,7 @@ export function initActors(ed, live) {
           if (b && q && rig.cal[b.name]) setWorldQ(b, q.multiply(rig.cal[b.name]));
         });
       }
+      spreadTwist(rig, sd);
     };
     side('l', 'left'); side('r', 'right');
     // legs: planted feet, a step when the hips leave them; pinned hips: the feet in front of the seat, or on their pins
@@ -511,8 +512,8 @@ export function initActors(ed, live) {
   // stage_actor_start(idle=False) keeps the statue for that person.
   const resting = new Map();                                // person -> { rig, spec }
   // a play or a Follow being set up claims its person until it is playing, so a rest still loading (the one its own
-  // stop() begins, or a scene reveal's) stands down instead of adding a second body (the user, 2026-10-08: "double
-  // Pete" while following and recording, after Pete had a start pose: the rest finished during useStart's await)
+  // stop() begins, or a scene reveal's) stands down instead of adding a second body (the user, 2026-10-08: a person
+  // with a start pose showed twice while following and recording: the rest finished during useStart's await)
   const starting = new Map();                               // person -> plays or Follows being set up
   const claimed = (fn) => async (c) => {
     const person = c && c.person;
@@ -800,6 +801,8 @@ export function initActors(ed, live) {
     } else throw new Error("start pose is 'rest', {take, frame} or {bones: {...}} from Blender");
     rig.root.updateMatrixWorld(true);
     const S = { spec, locals: {}, pelvisLocal: pel.position.clone(), handW: {}, handQ: {}, elbowW: {}, fingerQ: {} };
+    // where the start pose faces (the pelvis's turn from rest, flat): the user's hands are turned onto it at GO
+    S.fwdW = rig.rest.pelvis ? rig.fwd.clone().applyQuaternion(pel.getWorldQuaternion(new THREE.Quaternion()).multiply(rig.rest.pelvis.q.clone().invert())).setY(0).normalize() : null;
     for (const [n, b] of Object.entries(rig.bones)) S.locals[n] = b.quaternion.clone();
     for (const sd of ['l', 'r']) {
       const [, lo, ha] = ARM[sd];
@@ -815,6 +818,38 @@ export function initActors(ed, live) {
     return S;
   }
   const qA = (a) => new THREE.Quaternion(a[3], a[4], a[5], a[6]), vA = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+  // the user's eyes sit above and in front of the head bone; their hands are placed from there
+  const EYE_UP = 0.08, EYE_FWD = 0.09;
+  // shoulders (the user, 2026-10-10: "my shoulders have to kind of adjust for my hands"; arms went through the body):
+  // the clavicle takes a share of the arm's swing away from where the start pose held it, up to a limit
+  const SHOULDER_SHARE = 0.3, SHOULDER_MAX = THREE.MathUtils.degToRad(25);
+  function shoulderFollow(rig, sd, target, rest) {
+    const c = rig.bones[`clavicle_${sd}`], u = rig.bones[`upperarm_${sd}`];
+    if (!c || !u || !rest) return;
+    const sh = u.getWorldPosition(new THREE.Vector3()), a = rest.clone().sub(sh), b = target.clone().sub(sh);
+    if (a.lengthSq() < 1e-6 || b.lengthSq() < 1e-6) return;
+    const q = new THREE.Quaternion().setFromUnitVectors(a.normalize(), b.normalize());
+    const ang = 2 * Math.acos(Math.min(1, Math.abs(q.w)));
+    if (ang < 1e-4) return;
+    const part = new THREE.Quaternion().slerp(q, Math.min(SHOULDER_SHARE * ang, SHOULDER_MAX) / ang);
+    setWorldQ(c, part.multiply(c.getWorldQuaternion(new THREE.Quaternion())));
+  }
+  // forearm twist bones, where a body has them (lowerarm_twist_01/02_[lr]; film can export them): the hand's turn about
+  // the forearm is spread over them (1/3, 2/3) instead of wringing the wrist
+  function spreadTwist(rig, sd) {
+    const t1 = rig.bones[`lowerarm_twist_01_${sd}`], t2 = rig.bones[`lowerarm_twist_02_${sd}`];
+    const lo = rig.bones[`lowerarm_${sd}`], ha = rig.bones[`hand_${sd}`];
+    if (!t1 || !lo || !ha || !rig.rest[lo.name] || !rig.rest[ha.name]) return;
+    const Ql = lo.getWorldQuaternion(new THREE.Quaternion()), Qh = ha.getWorldQuaternion(new THREE.Quaternion());
+    const restLoInv = rig.rest[lo.name].q.clone().invert();
+    const rel = Ql.clone().invert().multiply(Qh).multiply(restLoInv.clone().multiply(rig.rest[ha.name].q).invert());
+    const tw = new THREE.Quaternion(0, rel.y, 0, rel.w).normalize();       // the turn about the forearm's own axis
+    for (const [b, k] of [[t1, 1 / 3], [t2, 2 / 3]]) {
+      if (!b || !rig.rest[b.name]) continue;
+      setWorldQ(b, Ql.clone().multiply(new THREE.Quaternion().slerp(tw, k)).multiply(restLoInv.clone().multiply(rig.rest[b.name].q)));
+    }
+    setWorldQ(ha, Qh);                                             // the hand stays where it was put
+  }
   function poseRelative(st, f) {
     const { rig, s } = st, S = st.start;
     for (const [n, q] of Object.entries(S.locals)) rig.bones[n].quaternion.copy(q);
@@ -829,7 +864,7 @@ export function initActors(ed, live) {
     const D = qA(f.head).multiply(qA(r.head).invert());
     // the whole body walks and turns with the user from the start pose, as a standing body does (poseBase): the user's
     // steps since GO move the hips past HIP_SLACK, a head turn past YAW_SLACK turns the body, the feet step after it.
-    // (The user, 2026-10-08: Pete, who has a start pose, stood with his feet locked and would not walk; this path kept
+    // (The user, 2026-10-08: a person with a start pose stood with feet locked and would not walk; this path kept
     // the start pose's hips and legs whatever the user did.) Pinned hips keep the seat.
     const B = moveStartBody(st, f, r, D);
     const Drel = D.clone().multiply(B.yaw.clone().invert());       // what the body's turn left for the spine and head
@@ -839,18 +874,41 @@ export function initActors(ed, live) {
       if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
       setWorldQ(rig.bones[n], q.multiply(held[n]));
     }
+    // hands and fingers (the user, 2026-10-10, following a drummer posed with sticks: "the starting position of the hands
+    // is not reset to what my hands' position is when we start ... that's why the fingers get all messed up"): at GO the
+    // person's hands and fingers take the user's own, measured from the eyes and turned to the person's facing, so a
+    // seated body reaches where the user reaches; start.hands = 'pose' keeps the start pose's grip and adds the user's
+    // motion to it, as before
+    const byUser = !(S.spec && S.spec.hands === 'pose');
+    if (byUser && !st.armMap) {
+      const fu = new THREE.Vector3(0, 0, -1).applyQuaternion(qA(r.head)).setY(0);
+      const fa = S.fwdW ? S.fwdW.clone() : rig.fwd.clone();
+      st.armMap = { R: new THREE.Quaternion().setFromUnitVectors(fu.lengthSq() > 1e-6 ? fu.normalize() : fa, fa.setY(0).normalize()) };
+    }
+    const M = byUser ? B.yaw.clone().multiply(st.armMap.R) : null;
+    let eye = null;
+    if (byUser) {
+      rig.root.updateMatrixWorld(true);
+      const fwdNow = (S.fwdW ? S.fwdW.clone() : rig.fwd.clone()).applyQuaternion(B.yaw).setY(0).normalize();
+      eye = rig.bones.head.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, EYE_UP, 0)).addScaledVector(fwdNow, EYE_FWD);
+    }
     for (const [sd, h] of [['l', 'left'], ['r', 'right']]) {
       const now = f[h], was = r[h];
       if (!S.handW[sd] || !now || !now.j || !now.j[0] || !was || !was.j || !was.j[0]) continue;   // untracked: the start pose
-      const target = S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
       const [up, lo, ha] = ARM[sd];
+      const target = byUser ? eye.clone().add(vA(now.j[0]).sub(vA(f.head)).applyQuaternion(M).multiplyScalar(s))
+        : S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
+      shoulderFollow(rig, sd, target, S.handW[sd].clone().add(B.off));
       twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(B.off).add(new THREE.Vector3(0, -0.3, 0)));
-      setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
+      if (byUser && rig.cal[ha]) setWorldQ(rig.bones[ha], M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha]));
+      else setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
       for (const [fg, names] of Object.entries(FINGER_JOINTS)) names.forEach((jn, k) => {
         const b = rig.bones[`${fg}_0${k + 1}_${sd}`], i = st.J[jn];
-        if (!b || !S.fingerQ[b.name] || !now.j[i] || !was.j[i]) return;
-        setWorldQ(b, qA(now.j[i]).multiply(qA(was.j[i]).invert()).multiply(S.fingerQ[b.name].clone()));
+        if (!b || !now.j[i]) return;
+        if (byUser && rig.cal[b.name]) setWorldQ(b, M.clone().multiply(qA(now.j[i])).multiply(rig.cal[b.name]));
+        else if (S.fingerQ[b.name] && was.j[i]) setWorldQ(b, qA(now.j[i]).multiply(qA(was.j[i]).invert()).multiply(S.fingerQ[b.name].clone()));
       });
+      spreadTwist(rig, sd);
     }
   }
   // the start pose's body moved by the user's steps and turn (relative mode): hips and facing with slack, legs stepping

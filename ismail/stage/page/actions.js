@@ -50,7 +50,7 @@ export function initActions(ed, hands, panels, live, takes) {
     g.fillStyle = go ? 'rgba(22,163,74,0.9)' : 'rgba(16,18,22,0.85)';
     g.beginPath(); g.arc(128, 128, 120, 0, Math.PI * 2); g.fill();
     g.fillStyle = '#fff'; g.font = `bold ${go ? 92 : 150}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(text, 128, 136);
+    g.fillText(text, 128, 136, 220);                       // squeezed to fit the disc, never cut
     cdTex.needsUpdate = true;
   }
   function cdPlace() {                       // in front of the user, a little below the eyes, where they look
