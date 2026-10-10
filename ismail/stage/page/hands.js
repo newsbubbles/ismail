@@ -97,6 +97,7 @@ export function initHands(ed, xrApi, emit) {
     new THREE.MeshBasicMaterial({ color: 0x7dd3fc, toneMapped: false, transparent: true, opacity: 0.8, depthWrite: false }));
   arc.layers.set(GIZMO); ring.layers.set(GIZMO); tbeam.layers.set(GIZMO);
   arc.visible = ring.visible = tbeam.visible = false; arc.frustumCulled = false; tbeam.frustumCulled = false;
+  for (const o of [arc, ring, tbeam]) { o.material.depthTest = false; o.renderOrder = o === ring ? 998 : 997; }   // on top, like the pointer
   scene.add(arc, ring, tbeam);
   const rc = new THREE.Raycaster();
   rc.layers.enableAll();

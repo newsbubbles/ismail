@@ -145,16 +145,26 @@ export function initXR(ed, desktop) {
     dirtyPanel = true;
   }
 
+  // the hands draw after the panels and test against their depth: in front of a panel they show, behind it they do not
+  function handOverPanels(model) {
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.renderOrder = 996;
+      for (const m of [].concat(o.material)) { m.transparent = true; m.needsUpdate = true; }   // drawn in the later pass
+    });
+  }
+
   // ---- controllers and hands
   const hands = new XRHandModelFactory();
   const ctls = [0, 1].map((i) => {
     const c = xr.getController(i);
     // a beam, not a 1 px line (the user could not see what the hand pointed at): 3 mm thick, 1 m long, scaled in z
     const line = new THREE.Mesh(new THREE.CylinderGeometry(0.0015, 0.0015, 1, 6, 1, true).rotateX(Math.PI / 2).translate(0, 0, -0.5),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true, opacity: 0.55, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true, opacity: 0.55, depthTest: false, depthWrite: false }));
     line.scale.z = 3;
+    line.renderOrder = 997;             // over the room and the panels, like its dot (the user, 2026-10-10: the beam vanished behind the speakers)
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.009, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd23f, toneMapped: false, depthTest: false }));
-    dot.renderOrder = 997;
+    dot.renderOrder = 998;
     line.layers.set(GIZMO); dot.layers.set(GIZMO);
     c.add(line);
     scene.add(dot);
@@ -163,7 +173,9 @@ export function initXR(ed, desktop) {
     body.layers.set(GIZMO);
     grip.add(body);
     const hand = xr.getHand(i);         // note: with hands tracked, three stops updating the grip space (it freezes)
-    hand.add(hands.createHandModel(hand, 'spheres'));
+    const model = hands.createHandModel(hand, 'spheres');
+    hand.add(model);
+    hand.addEventListener('connected', () => handOverPanels(model));   // after the factory's own listener built it
     rig.add(c, grip, hand);
     const s = { c, grip, hand, line, dot, body, src: null, grab: null, pull: null, pending: null, stickActive: false, turned: false, hit: null };
     c.addEventListener('connected', (e) => { s.src = e.data; body.visible = !e.data.hand; });

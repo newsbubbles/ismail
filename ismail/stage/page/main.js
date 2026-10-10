@@ -114,7 +114,7 @@ ed.loadWorld = loadWorld;                          // a scene switch reads the n
 ed.addEventListener('switched', () => fetch(`scenes/${encodeURIComponent(ed.sceneName)}/names.json`, { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : {})).then((n) => { ed.names = n; }).catch(() => { ed.names = {}; }));
 panels.registerPokeable(xr.panelMesh, (uv) => xr.pressUV(uv), (uv) => xr.hoverUV(uv));   // the colour panel takes a fingertip too
-live.handlers.panel = (c) => panels.show(c);
+live.handlers.panel = (c) => panels.show({ ...c, agent: true });   // an agent's: waits while the user talks
 live.handlers.panel_close = (c) => panels.close(c.panel_id, 'closed by Claude');
 // a take during a performance takes its voice from the performance (its clips, linked in the take's meta);
 // otherwise the mic records the whole take
@@ -183,7 +183,7 @@ live.handlers.say = async (c) => {
     // a message, so it rides with the user on its sender's side (the user, 2026-10-04: "it kind of needs to stick to
     // me"), and says who it is from
     panels.show({ panel_id: 'caption_' + Date.now(), title: c.from ? '' : 'Claude', from: c.from, text: String(c.text),
-      seconds: Math.min(120, 25 + words * 0.8), quiet: true, wait: false, anchor: 'body', side: c.side });
+      seconds: Math.min(120, 25 + words * 0.8), quiet: true, wait: false, anchor: 'body', side: c.side, agent: true });
   }
   if (held) return { ...r, spoken: false, held: 'performing: shown, not spoken (aloud=True speaks it into the recording)' };
   return age >= 20000 ? { ...r, spoken: false, stale_s: Math.round(age / 1000) } : r;

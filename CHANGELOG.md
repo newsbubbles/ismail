@@ -11,6 +11,17 @@
 - `stage_capture` waits for every person in the room to be in their pose before frame 0 (up to 60 s), and
   names anyone who was not in the capture's status.
 
+### Stage: hands over menus, menus you open never wait, sign-offs on the right thumbs up
+
+- Hands show in front of a menu they reach into, and stay hidden behind one in front of them. The pointer beam, its
+  dot and the travel arc draw over the room and over menus. Back to front: the room, menus, hands, beams.
+- A menu you open yourself shows at once, even during a voice note; only an agent's panels and speech wait while you
+  talk. Nothing times out or deselects while you talk.
+- A voice note's `during` now lists the menus shown, the buttons pressed, why a panel closed and presses on things,
+  beside selections and touches.
+- An agent's question (`stage_ask`) or panel waiting for an answer no longer holds the other agents' commands. The
+  skill says every sign-off in the headset is a right thumbs up through `stage_ask`.
+
 ### Phone: a voice note says what was playing and what they did
 
 - A note carries `media` (each video and clip on the open panel when it began: file, the second they were at,
