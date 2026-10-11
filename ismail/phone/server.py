@@ -356,10 +356,12 @@ class Phone:
         self.voice_q = collections.deque()
         self.voice_panel = {}                      # voice id -> {panel, for}: a reply said on a panel
         self.voice_state = {}
+        self.voice_tries = {}                      # voice id -> failed tries (each waits twice as long)
         self.rounds = {}                           # panel id -> {for, title, since}: exam rounds the page has open now
         self.showing = None                        # {id, since}: the panel the page shows now (its panel_open/close)
         self._rounds_lock = threading.Lock()
         self._recent_rounds()
+        self._pending_voice()
         self.feeder = None
         threading.Thread(target=self._poll_engine, daemon=True).start()
         threading.Thread(target=self._transcriber, daemon=True).start()
@@ -401,6 +403,34 @@ class Phone:
         self.rounds = {k: v for k, v in self.rounds.items() if k in open_ids}
         if self.showing and self.showing['id'] not in open_ids:
             self.showing = None
+
+    def _pending_voice(self):
+        """After a restart: the voice notes of the last day still without their words go back in line."""
+        try:
+            with open(HOME / 'inbox.jsonl', 'rb') as f:
+                f.seek(max(0, os.path.getsize(f.name) - 2_000_000))
+                lines = f.read().decode('utf8', 'replace').splitlines()[1:]
+        except OSError:
+            return
+        notes, done = {}, set()
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get('kind') == 'voice' and r.get('state') == 'transcribing' and r.get('id'):
+                notes[r['id']] = r
+            elif r.get('kind') == 'voice_text':
+                done.add(r.get('id'))
+        for vid, r in notes.items():
+            f = Path(r.get('file') or '')
+            if vid in done or not f.is_file() or time.time() - (self._ts_epoch(r.get('ts')) or 0) > 86400:
+                continue
+            vp = {k: r[k] for k in ('panel', 'for', 'field', 'media', 'acts') if k in r}
+            if vp:
+                self.voice_panel[vid] = vp
+            self.voice_state[vid] = 'queued (again, after a restart)'
+            self.voice_q.append((vid, f, r.get('heard'), r.get('sid')))
 
     @staticmethod
     def is_round(p):
@@ -1000,14 +1030,23 @@ class Phone:
                 self.voice_state[vid] = 'waiting: ' + why
                 time.sleep(10)
                 continue
+            # 10-11: a 213 s note timed out at 120 s while the speech server, busy, went on with it; each retry
+            # added a copy (about 40 by noon), so none finished and the note behind it waited too. Now each try
+            # waits twice as long as the last, and a note that failed goes to the back of the line
+            tries = self.voice_tries.get(vid, 0)
             try:
-                text = stt(f.read_bytes(), f.name)
+                text = stt(f.read_bytes(), f.name, timeout=min(STT_TIMEOUT_S * 2 ** tries, 3600))
             except Exception as e:
-                self.voice_state[vid] = f'waiting: the speech server does not answer ({type(e).__name__})'
-                time.sleep(20)
+                self.voice_tries[vid] = tries + 1
+                self.voice_state[vid] = (f'waiting: the speech server does not answer ({type(e).__name__}, '
+                                         f'{tries + 1} tries)')
+                if len(self.voice_q) > 1 and self.voice_q[0][0] == vid:
+                    self.voice_q.rotate(-1)
+                time.sleep(STT_RETRY_S)
                 continue
-            self.voice_q.popleft()
+            self.voice_q.remove(next(q for q in self.voice_q if q[0] == vid))
             self.voice_state.pop(vid, None)
+            self.voice_tries.pop(vid, None)
             vp = self.voice_panel.pop(vid, {})
             self.post({'kind': 'voice_text', 'id': vid, 'text': text, **vp})
             self.note_to_answers(vid, f, text, vp)
@@ -1091,13 +1130,17 @@ class Phone:
                 'boot': BOOT, 'build': BUILD}
 
 
-def stt(audio, filename):
+STT_TIMEOUT_S = 120     # the first try; each failed one doubles it, up to an hour
+STT_RETRY_S = 20
+
+
+def stt(audio, filename, timeout=STT_TIMEOUT_S):
     b = '----phone' + str(int(time.time() * 1000))
     body = (f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
             f'Content-Type: application/octet-stream\r\n\r\n').encode() + audio + f'\r\n--{b}--\r\n'.encode()
     req = urllib.request.Request(SPEAK + '/v1/audio/transcriptions', data=body, method='POST',
                                  headers={'Content-Type': f'multipart/form-data; boundary={b}'})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return (json.loads(r.read()).get('text') or '').strip()
 
 
