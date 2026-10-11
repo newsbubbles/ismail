@@ -176,7 +176,7 @@ def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
 
 def test_a_voice_note_is_stamped_and_transcribed(phone, monkeypatch):
     ph, base, _ = phone
-    monkeypatch.setattr(S, 'stt', lambda audio, name: 'more acid please')
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: 'more acid please')
     req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b'\x1a' * 2000,
                                  headers={'Content-Type': 'audio/webm;codecs=opus'})
     vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
@@ -566,7 +566,7 @@ def test_a_hummed_note_reaches_the_inbox_as_a_hum(phone, monkeypatch):
     ph, base, _ = phone
     import io
     import soundfile as sf
-    monkeypatch.setattr(S, 'stt', lambda audio, name: 'Mmm.')
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: 'Mmm.')
     t = np.arange(int(16000 * 0.5)) / 16000
     y = np.concatenate([0.3 * np.sin(2 * np.pi * f * t) for f in (196.0, 220.0, 246.9, 196.0)]).astype(np.float32)
     buf = io.BytesIO()
@@ -602,7 +602,7 @@ def test_the_page_reacts_to_the_sets_own_notes(phone):
 
 def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypatch):
     ph, base, _ = phone
-    monkeypatch.setattr(S, 'stt', lambda audio, name: 'more like the second one but slower')
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: 'more like the second one but slower')
     with pytest.raises(Exception) as e:
         P.phone_panel_show(title='Next?', inputs=[{'id': 'x', 'kind': 'slider'}])
     assert 'choice, check, toggle, text' in str(e.value)
@@ -993,7 +993,7 @@ def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(pho
     import soundfile as sf
     ph, base, _ = phone
     gate = threading.Event()
-    monkeypatch.setattr(S, 'stt', lambda audio, name: (gate.wait(10), 'lisp buzz on the S')[1])
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: (gate.wait(10), 'lisp buzz on the S')[1])
     a, b = tmp_path / 'a.wav', tmp_path / 'b.wav'
     t = np.arange(22050) / 44100
     sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
@@ -1025,9 +1025,70 @@ def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(pho
     assert vt['panel'] == 'r50' and vt['field'] == 'note'                          # the inbox still has it
 
 
+def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_through(phone, monkeypatch):
+    """10-11: a long note timed out at 120 s while the speech server went on with it; every retry added a copy and
+    the short note behind it waited for hours."""
+    ph, base, _ = phone
+    tries = []
+
+    def slow_then_fine(audio, name, timeout=S.STT_TIMEOUT_S):
+        tries.append((audio[:1], timeout))
+        if audio[:1] == b'' and len(tries) == 1:
+            raise TimeoutError('timed out')
+        return 'the long one' if audio[:1] == b'' else 'the short one'
+    monkeypatch.setattr(S, 'STT_RETRY_S', 0.05)
+    monkeypatch.setattr(S, 'stt', slow_then_fine)
+    ids = []
+    for b in (b'', b''):
+        req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b * 2000, headers={'Content-Type': 'audio/webm'})
+        ids.append(json.loads(urllib.request.urlopen(req, timeout=5).read())['id'])
+    for _ in range(100):
+        vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines']
+              if x['kind'] == 'voice_text' and x.get('id') in ids]
+        if len(vt) == 2:
+            break
+        time.sleep(0.1)
+    assert [x['text'] for x in vt] == ['the short one', 'the long one']           # the short one did not wait
+    assert [t for b, t in tries if b == b''] == [S.STT_TIMEOUT_S, 2 * S.STT_TIMEOUT_S]
+
+
+def test_words_written_beside_a_note_are_used_instead_of_the_speech_server(phone, monkeypatch):
+    ph, base, _ = phone
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: (_ for _ in ()).throw(TimeoutError('busy')))
+    monkeypatch.setattr(S, 'STT_RETRY_S', 0.05)
+    req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b'' * 2000, headers={'Content-Type': 'audio/webm'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    (S.HOME / 'voice' / f'{vid}.txt').write_text('transcribed elsewhere', encoding='utf8')
+    for _ in range(100):
+        vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines']
+              if x['kind'] == 'voice_text' and x.get('id') == vid]
+        if vt:
+            break
+        time.sleep(0.1)
+    assert vt and vt[-1]['text'] == 'transcribed elsewhere'
+
+
+def test_after_a_restart_notes_still_without_words_go_back_in_line(tmp_path, monkeypatch):
+    home = tmp_path / 'phone'
+    (home / 'voice').mkdir(parents=True)
+    monkeypatch.setattr(S, 'HOME', home)
+    monkeypatch.setattr(S.Phone, '_transcriber', lambda self: None)
+    monkeypatch.setattr(S.Phone, '_poll_engine', lambda self: None)
+    rows, now = [{'kind': 'boot'}], time.time()
+    for vid, age, extra in (('waiting', 60, {'panel': 'p-1', 'for': 'film'}), ('done', 60, {}), ('old', 2 * 86400, {})):
+        f = home / 'voice' / f'{vid}.webm'
+        f.write_bytes(b'' * 10)
+        rows.append({'kind': 'voice', 'id': vid, 'file': str(f), 'state': 'transcribing', 'ts': S.now_iso(now - age),
+                     **extra})
+    rows.append({'kind': 'voice_text', 'id': 'done', 'text': 'said'})
+    (home / 'inbox.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows), encoding='utf8')
+    ph = S.Phone()
+    assert [q[0] for q in ph.voice_q] == ['waiting'] and ph.voice_panel['waiting'] == {'panel': 'p-1', 'for': 'film'}
+
+
 def test_a_panel_text_box_said_by_voice_carries_its_audio(phone, monkeypatch):
     ph, base, _ = phone
-    monkeypatch.setattr(S, 'stt', lambda audio, name: 'warmer')
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: 'warmer')
     P.phone_panel_show(panel_id='vb-1', title='Which?', sender='dj', inputs=[{'id': 'why', 'kind': 'text'}])
     req = urllib.request.Request(base + '/api/voice?sid=&t=&panel=vb-1&field=why', data=b'\x1a' * 2000,
                                  headers={'Content-Type': 'audio/webm'})
@@ -1042,7 +1103,7 @@ def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, 
     """Nate 10-10: a note said over a panel's video should say where in the video they were when it began, and what
     they did on the page while it recorded."""
     ph, base, _ = phone
-    monkeypatch.setattr(S, 'stt', lambda audio, name: 'this bit, the turn')
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: 'this bit, the turn')
     ans = tmp_path / 'answers.jsonl'
     P.phone_panel_show(panel_id='cx-1', title='The cut', sender='film', text='watch it', inputs=[])
     ph.answer_files['cx-1'] = str(ans)
