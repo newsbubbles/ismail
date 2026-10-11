@@ -10,12 +10,35 @@
 
 Installed from PyPI, `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
 """
+import codecs
 import inspect
 import json
 import os
 import sys
 
 from .api import OPS, OpError
+
+
+def _json_escape(err):
+    """A character the console can't take goes out as a JSON escape (\\u266f), so a JSON answer still parses."""
+    out = []
+    for c in err.object[err.start:err.end]:
+        n = ord(c)
+        units = [n] if n < 0x10000 else [0xd800 + ((n - 0x10000) >> 10), 0xdc00 + ((n - 0x10000) & 0x3ff)]
+        out += [f'\\u{u:04x}' for u in units]
+    return ''.join(out), err.end
+
+
+codecs.register_error('ismail_json_escape', _json_escape)
+
+
+def console_safe(*streams):
+    """On a console that isn't UTF-8 (Windows' cp1252), write plain ASCII with JSON escapes: one sharp sign in an
+    inbox row used to turn a whole answer into a 'charmap' ERROR, and every reader can decode ASCII."""
+    for s in streams:
+        enc = (getattr(s, 'encoding', None) or '').lower().replace('-', '')
+        if enc != 'utf8' and hasattr(s, 'reconfigure'):
+            s.reconfigure(encoding='ascii', errors='ismail_json_escape')
 
 
 def parse_args(args):
@@ -51,6 +74,7 @@ def main(argv):
         from .mcp_server import main as serve
         serve()
         return 0
+    console_safe(sys.stdout, sys.stderr)                 # after mcp: its stdio is the protocol's own
     if argv[0] == 'ops':
         for name, fn in OPS.items():
             print(f"{name:<18} {(fn.__doc__ or '').strip().splitlines()[0]}")
