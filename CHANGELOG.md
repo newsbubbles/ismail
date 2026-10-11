@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### CLI: answers no longer fail on a Windows console
+
+- 10-11: one sharp sign in a phone hum row made every `python -m ismail phone_listen` from before that row print
+  only "ERROR 'charmap' codec can't encode", because a piped Windows console is cp1252; a watcher retried for about
+  an hour and the page never showed it listening. On a console that isn't UTF-8 the CLI now writes plain ASCII,
+  with any other character as a JSON escape (`\u266f`), so a JSON answer still parses and every reader can decode
+  it. A UTF-8 console is left alone, and so is the MCP server's stdio.
+
 ### Phone: a slow speech server no longer buries voice notes
 
 - 10-11: a 213 s note timed out at 120 s while the speech server went on with it, and every retry added another
