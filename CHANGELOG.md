@@ -7,7 +7,8 @@
 - 10-11: a 213 s note timed out at 120 s while the speech server went on with it, and every retry added another
   copy (about 40 in two hours), so neither it nor the short note behind it was transcribed. Now each try waits
   twice as long as the last (up to an hour), a note that failed goes to the back of the line, and after a restart
-  the notes of the last day still without their words go back in line.
+  the notes of the last day still without their words go back in line. A note's words written beside it as
+  `<id>.txt` are used instead of the speech server (a note transcribed elsewhere).
 
 ### Stage: props pinned to a person's bone
 

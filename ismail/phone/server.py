@@ -1034,8 +1034,9 @@ class Phone:
             # added a copy (about 40 by noon), so none finished and the note behind it waited too. Now each try
             # waits twice as long as the last, and a note that failed goes to the back of the line
             tries = self.voice_tries.get(vid, 0)
+            given = f.with_suffix('.txt')               # its words, written beside it by whoever transcribed it elsewhere
             try:
-                text = stt(f.read_bytes(), f.name, timeout=min(STT_TIMEOUT_S * 2 ** tries, 3600))
+                text = given.read_text(encoding='utf8').strip() if given.is_file() else                     stt(f.read_bytes(), f.name, timeout=min(STT_TIMEOUT_S * 2 ** tries, 3600))
             except Exception as e:
                 self.voice_tries[vid] = tries + 1
                 self.voice_state[vid] = (f'waiting: the speech server does not answer ({type(e).__name__}, '

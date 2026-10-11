@@ -64,7 +64,8 @@ Voice notes are transcribed by the speech server on this machine. While the CPU 
 wait in a queue: taps still arrive at once, and the page tells them their note is waiting. When the speech server is slow,
 each try at a note waits twice as long as the last and the note goes to the back of the line, so a long note never
 holds up a short one; `phone_status` lists the notes waiting and why. Notes still waiting when the phone server
-restarts go back in line.
+restarts go back in line. Words written beside a note as `<id>.txt` (in the phone's `voice` folder) are used
+instead of the speech server: the way to hand in a note transcribed elsewhere.
 
 ## Earbuds and the voice, phone in the pocket
 

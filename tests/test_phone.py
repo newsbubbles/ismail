@@ -1052,6 +1052,22 @@ def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_thro
     assert [t for b, t in tries if b == b''] == [S.STT_TIMEOUT_S, 2 * S.STT_TIMEOUT_S]
 
 
+def test_words_written_beside_a_note_are_used_instead_of_the_speech_server(phone, monkeypatch):
+    ph, base, _ = phone
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: (_ for _ in ()).throw(TimeoutError('busy')))
+    monkeypatch.setattr(S, 'STT_RETRY_S', 0.05)
+    req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b'' * 2000, headers={'Content-Type': 'audio/webm'})
+    vid = json.loads(urllib.request.urlopen(req, timeout=5).read())['id']
+    (S.HOME / 'voice' / f'{vid}.txt').write_text('transcribed elsewhere', encoding='utf8')
+    for _ in range(100):
+        vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines']
+              if x['kind'] == 'voice_text' and x.get('id') == vid]
+        if vt:
+            break
+        time.sleep(0.1)
+    assert vt and vt[-1]['text'] == 'transcribed elsewhere'
+
+
 def test_after_a_restart_notes_still_without_words_go_back_in_line(tmp_path, monkeypatch):
     home = tmp_path / 'phone'
     (home / 'voice').mkdir(parents=True)
