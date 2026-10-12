@@ -218,7 +218,9 @@ def engine_call(port, op, timeout=3, **args):
 
 
 def parse_status(text):
-    """The engine's status text -> {bpm, bpb, beat (heard, 0-based), ahead, recording, playing, next}."""
+    """The engine's status text -> {bpm, bpb, beat (heard, 0-based), ahead, recording, playing, sounding, next}.
+    sounding: a track plays a clip or a deck is on air, and the engine has not said SILENT ON AIR (an engine left
+    running with every track stopped is not music)."""
     m = STATUS.search(text or '')
     if not m:
         return None
@@ -232,6 +234,7 @@ def parse_status(text):
             'output': out.group(1) if out else None, 'follow': bool(out and out.group(2)),
             'recording': rec.group(1) if rec else None,
             'playing': [f"{c} ({t})" for t, c in playing[:3]],
+            'sounding': bool(playing or re.search(r'^deck \S+: on air', text, re.M)) and 'SILENT ON AIR' not in text,
             'next': f"{nxt.group(1)} at {nxt.group(2)}" if nxt else None}
 
 
@@ -702,6 +705,10 @@ class Phone:
                         self.onsets = engine_call(port, 'onsets').get('onsets') or []
                     except Exception:
                         pass
+            on = bool(got and got['sounding'])
+            if on != bool(self.engine and self.engine.get('sounding')):
+                self.engine = got
+                self.cmd('engine', sounding=on)           # wakes the page's long poll: its background stills or moves now
             self.engine = got
             if got and got.get('playing') and KEEP_MASTER:  # the music under a note heard from the room speaker too
                 with self.cond:
@@ -1123,7 +1130,7 @@ class Phone:
         tally = collections.Counter(x['what'] for x in self.taps if (x['ts'] or '').startswith(today))
         moods = [x for x in self.taps if x['what'] == 'mood']
         return {'engine': {'playing': bool(e), 'bpm': e['bpm'] if e else None, 'bpb': (e.get('bpb') or 4) if e else None,
-                           'now': now_t, 'next': next_t,
+                           'sounding': bool(e and e.get('sounding')), 'now': now_t, 'next': next_t,
                            'output': e.get('output') if e else None, 'follow': bool(e and e.get('follow')),
                            'now_mark': self.mark(now_t), 'next_mark': self.mark(next_t)},
                 'taps': list(self.taps)[-8:][::-1], 'tally': dict(tally),
@@ -1255,8 +1262,8 @@ class Agent:
                 v['marks'][text] = m
             else:
                 v['marks'].pop(text, None)
-        while len(v['marks']) > 200:
-            v['marks'].pop(next(iter(v['marks'])))
+        for k in list(v['marks'])[:-200]:           # the oldest go first (the builtin next() is the argument here)
+            del v['marks'][k]
         t = ph.now_text()
         if into is not None and t:                  # the piece did not start when its name went up: say where it is
             ph.piece = (t, time.time() - max(0.0, float(into)))

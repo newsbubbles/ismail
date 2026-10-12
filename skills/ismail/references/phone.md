@@ -219,6 +219,8 @@ still, art another agent made, blurred by `blur` and darkened by `dim`) and one 
 pulse on the set's beat, grain, aurora) at an `intensity`. Change it with the mood and on chapter changes, not on
 every bar; it fades over `transition_ms`. The server keeps every vibe readable on a walk (a dark ground, ink 7:1,
 accent 3:1) and refuses one that is not, saying what to change. `phone_vibe(menu=True)` lists the choices.
+The background moves only while music plays: when the set is paused or stopped, or every track is silent, the
+page holds it still in the look's colours (no pulse, no reactions, no drift), so its motion says the set is on.
 
 For more than one effect, give `layers`: up to three, drawn in order, each with its own `speed`, `density`, `size`,
 `angle` (rain's slant), `opacity`, `color`/`color2` and `blend` (normal, add, screen, multiply, overlay), e.g.

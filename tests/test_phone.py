@@ -628,6 +628,38 @@ def test_the_page_reacts_to_the_sets_own_notes(phone):
     assert 'react (a track' in P.phone_vibe(menu=True)
 
 
+def test_the_marks_are_capped_and_phone_now_still_answers(phone):
+    """phone_now's `next` argument hid the builtin next(): past 200 saved marks every call failed ('str' object is
+    not callable), after it had already changed the view."""
+    ph, base, _ = phone
+    ph.view['marks'] = {f'piece {i}': 'new' for i in range(250)}
+    out = P.phone_now(next='', now='piece 300', now_mark='loved')
+    assert "now='piece 300' (loved)" in out
+    assert len(ph.view['marks']) == 200 and 'piece 0' not in ph.view['marks'] and ph.view['marks']['piece 300'] == 'loved'
+
+
+def test_the_background_is_still_while_no_set_plays(phone, monkeypatch):
+    """The person, 10-12: the pulsing should stop when the set is paused or stopped, "more of like an indicator that
+    things are playing". A pause stops the engine (live_stop), so paused and stopped both read as no engine; an
+    engine left running with every track stopped is not playing either."""
+    ph, base, _ = phone
+    assert S.parse_status(STATUS)['sounding'] and get(base, '/api/state?since=0&wait=0')['engine']['sounding']
+    quiet = STATUS.replace('| playing ch3 (pass 1/inf), next', '| silent, next')
+    assert not S.parse_status(quiet)['sounding']
+    assert S.parse_status(quiet + '\ndeck b: on air | fader +0 dB')['sounding']                    # a deck plays
+    assert not S.parse_status(STATUS + '\nSILENT ON AIR for 12 s: nothing has sounded')['sounding']
+    seen = get(base, '/api/state?since=0&wait=0')['cmd']
+    monkeypatch.setattr(S, 'live_engines', lambda: {})                                       # stopped, or paused
+    t = time.time()
+    st = get(base, f'/api/state?since={seen}&wait=10')                                       # wakes the long poll
+    assert time.time() - t < 5 and st['engine'] == dict(st['engine'], playing=False, sounding=False)
+    assert any(c['type'] == 'engine' and c['sounding'] is False for c in st['cmds'])
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "fx.hold(!(e.playing && e.sounding !== false));" in js
+    assert "if (still.matches || rest) return;" in js and "const e = rest ? 0 : Math.exp(-ph * 5)" in js
+    assert "T += dt * 1000;" in js and "hue-rotate(${(drift * T / 60000) % 360}deg)" in js     # drift on the held clock
+
+
 def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypatch):
     ph, base, _ = phone
     monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: 'more like the second one but slower')
