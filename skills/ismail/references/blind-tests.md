@@ -49,7 +49,8 @@ When the person is away from the desk, `phone_exam(title, clips, question, chips
 exam on the phone page: it runs `exam_check` first and refuses one that is not READY, plays each clip on its own
 (the set's stream pauses and comes back after), and writes the answers where you read them. Say what to listen on
 (their earbuds, a speaker) and record it with the answers, as for any device. Keep clips short and the questions
-to two or three: they answer standing, walking, or between other things.
+to two or three: they answer standing, walking, or between other things. Clips of the record go to the phone like
+any other: the phone page reaches only the person, over their private network.
 
 **A floor under every phone round.** A "can't tell" on a phone means nothing until you know what that phone and
 ear can tell apart at all. `phone_exam(..., floor='auto')` adds floor pairs: the real clip against a 64 or 128 kb/s
@@ -128,7 +129,7 @@ fix. A round the person always gets, or never gets, gives no direction: make the
   12 kb/s went unheard in the same rounds, so do not assume them.
 - **Log each round's floor** in the song's notes: the ear gets finer, and the next round can aim one notch smaller.
 
-**Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`), never on a public host when it contains clips of the recording.
+**Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`). Clips of the record are what the test is for: serve it on this computer or to the user's own phone over their private network, and keep a page holding someone else's recording off a public host.
 - **Always host it, always open it where the person already is.** Serve it on 127.0.0.1 and open `http://127.0.0.1:<port>/<round>/` for them in the browser they can see beside the conversation (a browser pane, preview, web view or browser tool, whichever your harness has). Never send the user a file path or a `file://` page: browsers block audio from file pages, and an external browser means switching away (where a copy button may not work).
 - **Submit, don't copy.** A small server serves the round and takes `POST /<round>/answers`, appending them with a timestamp to `exam/<round>/answers.txt`; the user presses Submit and says "done", and you read the file. Keep a copy button as a fallback that also shows the text in a box. Songs are not in the repository, so there is no shared copy: if a song on this machine has one (`songs/tambopata/work/exam_server.py`, `songs/vox/rec/server.py`), copy it into your song's `work/`; otherwise write it (about 40 lines of `http.server`).
 - **Check the page in the pane before handing it over**: count the trials and clips, request one clip, run the answer collector, read the console errors (a JS string broken by a literal newline was caught this way).

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Skill: sampling is allowed, and private use needs no caution
+
+- Nate, 10-12: ismail samples like any DAW. Slicing a reference into the song is fine whenever the user wants it;
+  private work (exact notes, blind tests with the record's clips, exams on the user's own phone) needs no copyright
+  caution and no asking. Rules about what the user may do with music are suggestions, said once; the craft, quality
+  and safety rules are unchanged. "Never place the reference in the render" became a craft default for building an
+  instrument and for the side under test in a blind exam.
+- `project_info` and `render` no longer warn about ref/ files without a SOURCES row. The row stays a habit for
+  credits, and `credits` still lists what it could not credit.
+- From the Spanish guitar handoff: a per-note pass before the first round with a played reference, a check of what
+  a stem holds before tone matching (a second player's bass), testing the note reader on a known line with similar
+  backing, a waveguide string feeding its body force rather than displacement, and the named recording as the target
+  over any sample library.
+
 ### Phone exams: control pairs no longer fail their own pre-flight
 
 - From the Sound Engineer (10-11): an exam of MP3 clips with `floor='auto'` was refused four times before it showed.

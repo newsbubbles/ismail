@@ -228,7 +228,7 @@ songs/<slug>/
   voices/               code voices made for the set; each docstring cites the measurement it came from
   ref/
     SOURCES.md          per source: title, link, who made or played it, licence, what was measured,
-                        who supplied or approved it, date, "analysis only"
+                        who supplied or approved it, date, what was sampled (if anything)
     <name>.wav          the reference
     <name>/             its analysis project (excerpt, stems)
   work/                 measurement scripts and their saved output (groove.txt, timbre.txt): voices and

@@ -11,7 +11,12 @@ A sound is designed toward something you can measure. In this order:
 3. **A free recording of the instrument.** CC0 or permissive: Freesound (filter CC0), VSCO 2 Community Edition, University of Iowa Musical Instrument Samples, the tonejs-instruments set (its strings are VSCO 2 CE, CC0, and a Freesound cello pack by flcellogrl, CC BY 4.0: credit it). A few notes across the range at two dynamics is enough to measure. VSCO 2 CE file names are one octave low (a file named C4 sounds C5), the harp excepted: shift +12 when you import from it, and check one note's pitch first. Log it in the song's `ref/SOURCES.md` before measuring (title, link, recordist or player, licence, what you measure from it) and credit it in the voice's INFO.
 4. **Memory, written down.** With nothing to measure, write a Sound Sheet from what you know of the instrument before coding: how it is excited (pluck, bow, breath, hammer, strike), what resonates (string, body, tube, membrane, room), which partials are strong, how the highs decay against the lows, what the attack sounds like, what noise rides along (bow hair, breath, fingers, fret buzz), how velocity changes the colour, and how two notes in a row differ. Then show it to the user; it is cheaper to correct a sheet than a voice.
 
-Reference audio is for measuring. Never place it in the render.
+Reference audio is the target. When the user named a recording, measure that recording: a free sample set only
+fills in what it cannot show (a guitar voice fitted to a generic sample library missed the record the user pointed
+at; "go directly to the thing that I referenced"). Ask what instrument and setup the player used, too (a 1970s
+flamenco guitar has stronger basses and singing trebles than a classical one). While you build the instrument, keep
+the reference out of the render (a slice proves nothing about the voice); when the user wants the record's own sound
+in the song, sampling it is fine (SKILL.md, Non-negotiables).
 
 ## 2. Pick the route
 
@@ -40,6 +45,10 @@ Each of these was the difference between "a synth imitating X" and X in at least
 - **Sympathetic strings.** Open strings ring along when the played note shares their harmonics (a violin's open G and A kept ringing 3 s after the bow stopped). Listeners picked this as the closest lens on violin and cello.
 - **Unison strings beat, starting in phase.** A piano note is 2-3 strings a hair apart: every strong partial swells and dips 0.3-2.3 times a second by 5-16 dB. Struck together, they start in phase and first cancel 1/(2 x beat rate) seconds later, the dip a listener hears as the note "fading out in the middle". Random starting phases fill that dip in; no beating at all sounds "like a horn".
 - **Where it is excited.** A pluck or bow at 1/n of the string removes every n-th partial (pluck-position comb). A touch at the 1/node point is a natural harmonic: only multiples of the node survive (eharm).
+- **A waveguide string feeds the body its force.** The loop circulates displacement; the bridge and body feel the
+  string's slope (a first difference of the travelling wave). Fed displacement, every note came out 6 dB per octave
+  too dark, and the "body" and "pluck" knobs hid it: a 7-knob fit stalled at 22.5, one first difference brought it
+  to 7.9. A pickup is the exception: it reads displacement or velocity, as an electric voice does.
 - **Noise between the harmonics, calibrated by synthesis.** Bow hair, breath, finger and hammer noise, measured as the level between partials. Estimating it directly reads 10-20 dB low when the noise is uneven within a band (bow noise is); rebuild the note and raise the noise until the energy between the harmonics matches the recording. Missing air is heard as "not crisp, no breathiness". Without it a voice sounds like an organ.
 - **Inharmonicity and stretch.** Stiff strings (piano, low guitar strings) run sharp up the series.
 - **More than one of it.** Two string polarizations, 1-3 detuned strings per piano note, a section of detuned players each with their own vibrato and timing. Static unison detune is the cheap version.
