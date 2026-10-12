@@ -28,14 +28,17 @@ in the song's `HANDOFF.md`: one heading per finding, evidence beside it.
 
 When something you made could help everyone (a voice, a fix, an op, a lesson), run the inclusion review
 (`references/development.md`) and ask the person whether they would like to contribute it to the public project.
-If yes, write it in `HANDOFF.md`, and if no dev session is running, suggest they start one: a new session (a new
-conversation or chat) with the ismail skill, asking it to be the maintainer (the engine), or the stage dev for the
-stage. That session reads every handoff on its routine, asks the person what to build, and sends your session,
+If yes, write it in `HANDOFF.md`. If no dev session is running, offer one by its role: a contributor dev (the
+engine and the skill, on the person's machine), or a stage dev for the stage. Where you can start a session (a new
+conversation, agent or task), start it after their yes with one line saying what to contribute and from which
+folder; where you cannot, give them that line to paste. Never leave them with "a dev needs to do it". That session
+reads every handoff on its routine, asks the person what to build, opens the pull request to the project once they
+say yes, and sends your session,
 conversation or agent a message when something you handed off is in the engine (or tells the person, where
 sessions cannot message each other); then mark it migrated in your `HANDOFF.md`. Never turn into a dev in the same
 conversation. Changing ismail itself is the other kind of work, only when the person asks for it: read
 `references/development.md` first (the roles, the start-up routine, the migration loop), then your role's own
-reference (`maintainer.md` or `stage-dev.md`).
+reference (`contributor-dev.md` or `stage-dev.md`).
 
 ```
 ismail/                  the engine ("the engine" always means ismail/ on main)
@@ -172,8 +175,8 @@ nudges you, follow it.
 - `references/stage.md`: building a scene with a person inside it (a browser or VR stage beside Blender): running the stage (`stage_*` tools), which surface for which decision, eye exams for pictures and what they taught, bodies and contact, contact with a person in a headset, shared-editing rules that never lose their work, agents first. Read before building any scene, look or editor a person works inside.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
 - `references/stage-takes.md`: handing a fast take loop (follow, perform, record, keep) to a helper agent: who owns what, the brief to fill in, the loop, what comes back. Read when the person wants takes and the scene's agent is busy.
-- `references/maintainer.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session the
-  person asked to be the maintainer or the stage dev.
+- `references/contributor-dev.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session
+  that is the contributor dev or the stage dev.
 - `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
   prompts only they can answer, proving it with a sound they hear, and what to do when a step fails.
 - `references/contributing.md`: sending something back for a person who has never used git: in the studio
