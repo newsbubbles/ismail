@@ -433,6 +433,7 @@ python -m ismail.video sync   -s songs/<slug>        # notes -> frames
 python -m ismail.video still  -s songs/<slug> s01_example.py 48
 python -m ismail.video render -s songs/<slug> s01_example.py   # waits for the machine's GPU slot
 python -m ismail.video edit   -s songs/<slug> -- --sheet 33 41 16
+python -m ismail.video overlay in.mp4 out.mp4 --text "made with ismail"   # a line of text on any video (off by default in the edit)
 ```
 
 Shots are Blender scripts built on a small kit (rooms, rigged characters from JSON, lights, fog, cameras), the cut list is Python written in bars, and review is by stills and contact sheets. Per-song work lives in `songs/<slug>/video/`. The skill reference `skills/ismail/references/music-video.md` has the full method.
