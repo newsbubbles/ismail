@@ -363,8 +363,15 @@ class Phone:
         self._recent_rounds()
         self._pending_voice()
         self.feeder = None
+        self.stopped = threading.Event()           # stop(): this Phone's threads end
         threading.Thread(target=self._poll_engine, daemon=True).start()
         threading.Thread(target=self._transcriber, daemon=True).start()
+
+    def stop(self):
+        """End this Phone's threads (the engine poll, the transcriber, the master feed). The server keeps one Phone for
+        its life; a test makes one each, and an old one's transcriber went on retrying a note left in its line through
+        the next test's speech server and into that test's inbox (HOME is module-wide)."""
+        self.stopped.set()
 
     # ---- exam rounds and the panel on screen (the page's panel_open/close, answers, dismissals)
     @staticmethod
@@ -679,7 +686,7 @@ class Phone:
 
     # ---- the engine
     def _poll_engine(self):
-        while True:
+        while not self.stopped.is_set():
             eng = live_engines()
             port = max(eng, key=lambda p: eng[p].get('started', 0), default=None)
             got = None
@@ -701,11 +708,11 @@ class Phone:
                     if self.feeder is None or not self.feeder.is_alive():
                         self.feeder = threading.Thread(target=self._feed, daemon=True)
                         self.feeder.start()
-            time.sleep(1.0)
+            self.stopped.wait(1.0)
 
     def _want_feed(self):
         e = self.engine
-        return bool(self.encoders) or (KEEP_MASTER and bool(e and e.get('playing')))
+        return not self.stopped.is_set() and (bool(self.encoders) or (KEEP_MASTER and bool(e and e.get('playing'))))
 
     def beat_now(self):
         e = self.engine
@@ -1020,15 +1027,15 @@ class Phone:
         return out
 
     def _transcriber(self):
-        while True:
+        while not self.stopped.is_set():
             if not self.voice_q:
-                time.sleep(0.3)
+                self.stopped.wait(0.3)
                 continue
             vid, f, heard, sid = self.voice_q[0]
             why = self._cpu_busy()
             if why:
                 self.voice_state[vid] = 'waiting: ' + why
-                time.sleep(10)
+                self.stopped.wait(10)
                 continue
             # 10-11: a 213 s note timed out at 120 s while the speech server, busy, went on with it; each retry
             # added a copy (about 40 by noon), so none finished and the note behind it waited too. Now each try
@@ -1041,10 +1048,12 @@ class Phone:
                 self.voice_tries[vid] = tries + 1
                 self.voice_state[vid] = (f'waiting: the speech server does not answer ({type(e).__name__}, '
                                          f'{tries + 1} tries)')
-                if len(self.voice_q) > 1 and self.voice_q[0][0] == vid:
-                    self.voice_q.rotate(-1)
-                time.sleep(STT_RETRY_S)
+                self.stopped.wait(STT_RETRY_S)
+                if len(self.voice_q) > 1 and self.voice_q[0][0] == vid:     # after the wait: a note said during it
+                    self.voice_q.rotate(-1)                                  # goes ahead of this one too
                 continue
+            if self.stopped.is_set():                   # stopped while it waited on the speech server
+                return
             self.voice_q.remove(next(q for q in self.voice_q if q[0] == vid))
             self.voice_state.pop(vid, None)
             self.voice_tries.pop(vid, None)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Tests: one phone test's voice notes no longer reach the next
+
+- An old test's phone kept retrying its voice note through the next test's speech server and into its inbox; each
+  test now stops its phones (`Phone.stop()`), and a note said while another waits to retry goes ahead of it.
+
 ### Stage: people's mouths move with a voice (lip sync)
 
 - `stage_face(scene, person, at, audio | take, start, end, words, transcribe)` turns a stretch of a voice recording
