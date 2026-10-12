@@ -90,6 +90,10 @@ A long set (a DJ set, a party, a 30-minute jam) is a loop between you and the au
 are the audience. Later the audience may be a text stream from other devices (motion on the dance floor from a
 camera, facial expression categories); treat it the same way.
 
+- **The phone first, not negotiable.** In the same turn you start any set, start `phone_watch` in the background
+  (`python -m ismail phone_watch "who=<your role>"`). When it wakes you, re-arm it before you act on what it
+  returned, and never put housekeeping (logs, notes, tidying) before the phone. A hand-made watcher lost after a
+  context reset once missed six of the person's notes in 36 minutes. `phone.md`, "Watching the phone", has the rest.
 - **Read the room.** When the audience is into it, lean in: keep the feel and add an element or two, build, take
   it down, drop. When it goes flat or repetitive, move on: a switch-up, a breakdown, a new song.
 - **Think in energy, not song form.** Bring elements in over time (a percussion layer, 808 slides, string stabs,
