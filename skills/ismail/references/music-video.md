@@ -81,7 +81,8 @@ S.go()
 ## Animation (what separates a video from a slideshow of poses)
 
 The first video posed characters by eye and shipped hands inside thighs and a head inside a backpack. The kit now checks
-and fixes that, and makes motion read as motion:
+and fixes that, and makes motion read as motion (what a rig itself allows, wrists without twist bones, a posed body
+that exports in its rest pose, and the clip checks are in `rigged-characters.md`):
 
 - **Clipping is checked on the deformed mesh.** `C.clip(frames)` measures how deep body parts pass into each other (and
   into mounted props) as a fraction of the character's height, minus what already overlaps at rest. Joint contact the
