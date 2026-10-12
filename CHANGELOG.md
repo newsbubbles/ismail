@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Tests: the slow-speech-server phone test no longer races its own second note
+
+- `test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_through` failed on Windows CI (main at
+  61c568e, pr:195 on 10-12): its first note failed before the second note had been posted, so the line had one note
+  and the retry went first. The first try now fails only once the second note is in line, as on the phone.
+
 ### Measuring: a second part in a source is sensed, not assumed away
 
 - New `stem_parts`: per band, how much of its envelope's movement sits at the source's note rate and the rate it

@@ -1091,6 +1091,10 @@ def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_thro
     def slow_then_fine(audio, name, timeout=S.STT_TIMEOUT_S):
         tries.append((audio[:1], timeout))
         if audio[:1] == b'' and len(tries) == 1:
+            for _ in range(100):                     # fail only once the short note is in line behind it: a
+                if len(ph.voice_q) >= 2:             # slow runner could take the second post after the retry
+                    break
+                time.sleep(0.05)
             raise TimeoutError('timed out')
         return 'the long one' if audio[:1] == b'' else 'the short one'
     monkeypatch.setattr(S, 'STT_RETRY_S', 0.05)
