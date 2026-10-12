@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Skill: one line in user-experience.md
+
+- The phone-first exams lesson, reworded; the lesson is unchanged (plan exams that work on a phone and earbuds).
+
 ### Provenance: every mp3 says which ismail made it
 
 - Beside the made-with line and the link, each mp3 ismail writes now carries the version (`pyproject.toml`, 0.3.0),
