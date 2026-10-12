@@ -594,7 +594,145 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
         lines.append(f"{fmt_num(st)} {midi_to_name(p)} {fmt_num(d)} {v}" + (f"   # {c:+.0f}c" if abs(c) > 25 else ''))
     if not merged:
         lines.append("# no confident pitched notes (unpitched/noisy or polyphonic material?)")
+    else:
+        lines += _melody_confidence(seg, ts, merged, grid, base_beat, prob, times, fmin, fmax)
     return merged, '\n'.join(lines)
+
+
+def _melody_confidence(seg, ts, notes, grid, base_beat, prob, times, fmin, fmax):
+    """How far to trust a melody reading: pYIN's voicing probability over the notes, and how many notes had another
+    pitch within 6 dB of the one read (a second part in the source: the reader can follow the backing instead).
+    The other pitch is looked for over the whole range, so a backing outside fmin/fmax still shows."""
+    hop = 256
+    E = _salience(seg, 'C1', hop=hop)
+    base = int(round(librosa.note_to_midi('C1')))
+    fps = ASR / hop
+    pv, rivals, n = [], [], 0
+    for st, p, d, _, _ in notes:
+        ta = grid.offset + (base_beat + st) * grid.spb - ts
+        tb = grid.offset + (base_beat + st + d) * grid.spb - ts
+        sel = (times >= ta + ts) & (times < tb + ts)
+        if sel.any() and not np.all(np.isnan(prob[sel])):
+            pv.append(float(np.nanmean(prob[sel])))
+        fa = int(ta * fps)
+        fb = max(int(tb * fps), fa + 1)
+        i = p - base
+        if fb > E.shape[1] or i < 0 or i >= E.shape[0]:
+            continue
+        v = np.percentile(E[:, fa:fb], 90, axis=1)          # the louder frames: a plucked rival peaks at its attack
+        own = v[max(i - 1, 0):i + 2].max()
+        rem = v.copy()
+        rem[max(i - 1, 0):i + 2] = 0
+        for h in (2, 3, 4, 5, 6):                          # the read note's partials are not a rival
+            j = int(round(i + 12 * np.log2(h)))
+            if j < len(rem):
+                rem[j] = 0
+        k = int(np.argmax(rem))
+        n += 1
+        if rem[k] >= own * 10 ** (-6 / 20):
+            rivals.append(base + k)
+    L = [f"# confidence: voicing {np.mean(pv):.2f} (mean pYIN probability over the notes; under about 0.5 the "
+         f"line is breathy, noisy or not one voice)" if pv else "# confidence: no voiced frames inside the notes"]
+    if n and len(rivals) >= max(2, 0.25 * n):
+        line = float(np.median([nt[1] for nt in notes]))
+        other = float(np.median(rivals))
+        where = 'under' if other < line else 'over'
+        L.append(f"# WARNING {len(rivals)} of {n} notes had another pitch within 6 dB (median "
+                 f"{midi_to_name(int(round(other)))}, {where} the line read at median "
+                 f"{midi_to_name(int(round(line)))}): a second part shares this source, and the reading may follow "
+                 f"it. Restrict fmin/fmax to the lead's register (now {fmin}-{fmax}), and score the reader on a known "
+                 f"line with a similar backing first.")
+    elif pv and np.mean(pv) < 0.4:
+        L.append(f"# WARNING voicing {np.mean(pv):.2f}: the line read is not one clear voice (a louder second part, "
+                 f"noise or chords). Score the reader on a known line with a similar backing before trusting it.")
+    elif n:
+        L.append(f"# {len(rivals)} of {n} notes had another pitch within 6 dB: one line, by this reading")
+    return L
+
+
+# ------------------------------------------------------------------ one part or several
+
+def stem_parts(path, grid, bars=None, max_bars=16):
+    """Does a source (a stem, a 'solo' stretch) hold one part or several? Per band: its level, the rate its
+    envelope moves at most, and the share of its movement at the source's note rate; the strongest low pitch per
+    beat; and how many onsets are strums (three or more pitches at once). A band that is loud but barely moves at
+    the note rate is played by something else: another player, or bleed from another stem."""
+    y = load(path)
+    b0, b1, _ = _range(y, ASR, grid, bars, max_bars)
+    seg, t0, t1 = _span(y, ASR, grid, b0, b1)
+    hop = 256
+    fps = ASR / hop
+    oenv = librosa.onset.onset_strength(y=seg, sr=ASR, hop_length=hop)
+    ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=ASR, hop_length=hop, units='frames')
+    if len(ons) < 4:
+        return {}, f"stem parts bars {b0}-{b1 - 1}: only {len(ons)} onsets; nothing to read (a drone or silence?)"
+    rate = float(fps / np.median(np.diff(ons)))           # notes per second, from the median gap
+    S = np.abs(librosa.stft(seg, n_fft=2048, hop_length=hop)) ** 2
+    freqs = librosa.fft_frequencies(sr=ASR, n_fft=2048)
+    data = {'note_rate': round(rate, 2), 'bands': {}}
+    for name, lo, hi in BANDS:
+        e = np.sqrt(S[(freqs >= lo) & (freqs < hi)].sum(0))
+        nfft = max(len(e), int(fps * 8))
+        P = np.abs(np.fft.rfft((e - e.mean()) * np.hanning(len(e)), n=nfft)) ** 2
+        f = np.fft.rfftfreq(nfft, 1 / fps)
+        band = (f >= 0.5) & (f <= min(30, fps / 2))
+        at = (f >= rate / 1.25) & (f <= rate * 1.25)
+        data['bands'][name] = {'db': round(float(20 * np.log10(e.mean() + 1e-12)), 1),
+                               'share': round(float(P[at].sum() / (P[band].sum() + 1e-20)), 3),
+                               'moves_at': round(float(f[band][np.argmax(P[band])]), 2)}
+    top = max(b['db'] for b in data['bands'].values())
+    live = {k for k, b in data['bands'].items() if b['db'] > top - 24}
+    best = max(data['bands'][k]['share'] for k in live)
+    lines = [f"stem parts bars {b0}-{b1 - 1}: note rate {rate:.1f}/s (median onset gap). Per band: level, share of "
+             f"its envelope's movement at the note rate, the rate it moves at most"]
+    apart = []
+    for name, b in data['bands'].items():
+        own = (b['db'] > top - 15 and b['share'] < 0.35 * best
+               and abs(np.log2(max(b['moves_at'], 0.1) / rate)) > 0.32)
+        if own:
+            apart.append(name)
+        lines.append(f"  {name:<7}{b['db'] - top:6.1f} dB  {100 * b['share']:4.0f}% at the note rate  moves at "
+                     f"{b['moves_at']:4.1f}/s" + ('   <- moves on its own' if own else
+                                                  ('' if name in live else '   (quiet)')))
+    E = _salience(seg, 'C1', hop=hop)
+    base = int(round(librosa.note_to_midi('C1')))
+    lo_top = int(round(librosa.hz_to_midi(250))) - base
+    beats = [] if data['bands']['bass']['db'] > top - 24 else ['  (nothing loud under 250 Hz)']
+    for b in (range(b0, b1) if not beats else []):
+        cells = []
+        for k in range(grid.bpb):
+            fa = int((grid.bar_time(b + k / grid.bpb) - t0) * fps)
+            fb = int((grid.bar_time(b + (k + 1) / grid.bpb) - t0) * fps)
+            if fb <= fa or fa >= E.shape[1]:
+                continue
+            cells.append(midi_to_name(base + int(np.argmax(E[:lo_top, fa:fb].mean(1)))))
+        beats.append(f"  bar {b:>3}: " + ' '.join(cells))
+    strums = 0
+    for o in ons:
+        v = E[:, o:o + max(1, int(0.06 * fps))].mean(1)
+        rem, found = v.copy(), 0
+        for _ in range(8):
+            i = int(np.argmax(rem))
+            if rem[i] < v.max() * 10 ** (-10 / 20):
+                break
+            found += 1
+            for h in (1, 2, 3, 4, 5, 6):
+                j = int(round(i + 12 * np.log2(h)))
+                rem[max(j - 1, 0):j + 2] = 0
+        strums += found >= 3
+    data.update(strums=int(strums), onsets=int(len(ons)), apart=apart)
+    lines.append(f"strums: {strums} of {len(ons)} onsets have three or more pitches at once")
+    lines.append("strongest pitch under 250 Hz per beat:")
+    lines += beats
+    if apart:
+        lines.append(f"WARNING {', '.join(apart)} {'is' if len(apart) == 1 else 'are'} loud but barely "
+                     f"{'moves' if len(apart) == 1 else 'move'} at the note rate: another part plays there (a second "
+                     f"player, or bleed from another stem). Before matching tone to this source, give yours an "
+                     f"under-part at that level, or match only the bands that move with the notes; fit a voice on the "
+                     f"raw render and tone-match after.")
+    else:
+        lines.append("one part, by this reading: every loud band moves with the notes")
+    return data, '\n'.join(lines)
 
 
 def _refine_pitch(y, ta, tb, est_midi):

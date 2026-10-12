@@ -33,8 +33,9 @@ days of rounds comparing its own lines against the record's, which the ear could
 - **Test the note reader first.** Before transcribing a lead from a stem, render a known line with a backing like
   the record's, run the same op, and score it. `analyze_melody` read 85% of a guitar alone exactly, 9% with a
   backing as loud as the lead, and 0% after record-like finishing; on the record it read the accompaniment's
-  register as the lead, and two rounds of lines were built on that. Restrict `fmin`/`fmax` to the lead's register
-  when a second part shares the stem.
+  register as the lead, and two rounds of lines were built on that. `analyze_melody` now ends with its confidence
+  and warns when another pitch sits within 6 dB of the notes it read, or when its voicing is low; on that warning,
+  restrict `fmin`/`fmax` to the lead's register and score the reader on the known line before trusting it.
 - **A played performance needs a per-note pass before the first listening round.** Statistics (note rate, onset
   spread, band balance) matched while the user heard "the rhythms totally wrong" and "not even the right notes".
   Before the first round: (a) find the solo stretches; (b) grid and retune; (c) transcribe a short window per note
@@ -60,8 +61,10 @@ For repeated electronic events: `sound_extract` the event averaged over its loop
 **Check what a stem holds before matching tone to it.** Separation and a "solo" stretch do not guarantee one
 player. A strong per-band EQ match onto a "guitar" stem moved a clip's spectrum onto the record's and wrecked its
 note shape (the 40 ms level fell 4.7 dB): the stem's low band was a second player's bass line and strums. The tell:
-the low band's envelope barely moved at the lead's note rate (6% of its modulation, against 28% in the clip). Read
-each band's envelope modulation at the note rate and the low band's pitch per beat; when they say two parts, give
+the low band's envelope barely moved at the lead's note rate (6% of its modulation, against 28% in the clip).
+`stem_parts(source=, bars=)` reads this: per band, the share of its movement at the note rate and the rate it moves
+at, the strongest pitch under 250 Hz per beat, and the strums, with a WARNING on a loud band that moves on its own
+(a second player, or bleed from another stem). When it says two parts, give
 your clip its own under-part at the right level, then match (the shape score went 8.6 -> 3.2). Fit a voice on the
 raw render and tone-match after, never through a heavy match.
 

@@ -798,8 +798,7 @@ class _Meter:
         t = me.cpu_times()
         self.base = (me.pid, t.user + t.system)       # the holder's CPU before the slot is not the job's
         self.base_w = _write_bytes(me)
-        mi = me.memory_info()
-        self.base_priv = getattr(mi, 'private', mi.rss)   # the holder's memory before the slot is not the job's
+        self.base_priv = _mem_of(me)[1]               # the holder's memory before the slot is not the job's
         self.gpu = _GpuSampler() if gpu_sampler else None
         self.t = threading.Thread(target=self._loop, daemon=True)
         self.t.start()
@@ -816,9 +815,8 @@ class _Meter:
                 key = (p.pid, p.create_time())
                 t = p.cpu_times()
                 self.cpu[key] = t.user + t.system
-                mi = p.memory_info()
-                rss += mi.rss
-                own = getattr(mi, 'private', mi.rss)  # Windows: private bytes, what the commit charge counts
+                res, own = _mem_of(p)
+                rss += res
                 priv += max(0, own - self.base_priv) if p.pid == self.base[0] else own
                 w = _write_bytes(p)
                 if w is not None:
@@ -936,6 +934,13 @@ class _Meter:
         if self.gpu is not None:
             out.update(self.gpu.stop())
         return out
+
+
+def _mem_of(p):
+    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; elsewhere
+    the resident size."""
+    mi = p.memory_info()
+    return mi.rss, getattr(mi, 'private', mi.rss)
 
 
 def _write_bytes(p):

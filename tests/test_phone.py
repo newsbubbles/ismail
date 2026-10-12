@@ -564,6 +564,7 @@ def test_every_voice_note_keeps_the_music_under_it(phone, monkeypatch):
     bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
     assert bj['bpm'] == 120.0 and bj['note_starts_at_s'] == 3.0 and abs(bj['beats'][0][1] - 4.0) < 0.1
     # off the stream (heard from the room speaker): the start is a guess from when the note arrived, searched wide
+    sent = time.time()                         # the master ended at `now`; a slow runner gets here seconds later
     req = urllib.request.Request(base + '/api/voice?sid=&t=&dur=3.0&ago=0.5&mic=phone%20raw%20ec0%20ns0%20agc0',
                                  data=b'' * 2000,
                                  headers={'Content-Type': 'audio/webm'})
@@ -571,7 +572,7 @@ def test_every_voice_note_keeps_the_music_under_it(phone, monkeypatch):
     meta = json.loads((S.HOME / 'voice' / f"{r['id']}_meta.json").read_text(encoding='utf8'))
     bj = json.loads(open(meta['ref_beats'], encoding='utf8').read())
     assert meta['start_is_guess'] and bj['search_s'] == S.REF_GUESS_S and meta['ref_lead_s'] == S.REF_GUESS_S
-    assert abs(meta['ref_s'] - (S.REF_GUESS_S + 3.5)) < 1.0         # the master runs out at "now"
+    assert abs(meta['ref_s'] - (S.REF_GUESS_S + 3.5 - (sent - now))) < 1.0     # the master runs out at "now"
     assert meta['mic'] == 'phone raw ec0 ns0 agc0'                     # which route and processing, per note
 
 
@@ -1091,6 +1092,10 @@ def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_thro
     def slow_then_fine(audio, name, timeout=S.STT_TIMEOUT_S):
         tries.append((audio[:1], timeout))
         if audio[:1] == b'' and len(tries) == 1:
+            for _ in range(100):                     # fail only once the short note is in line behind it: a
+                if len(ph.voice_q) >= 2:             # slow runner could take the second post after the retry
+                    break
+                time.sleep(0.05)
             raise TimeoutError('timed out')
         return 'the long one' if audio[:1] == b'' else 'the short one'
     monkeypatch.setattr(S, 'STT_RETRY_S', 0.05)
