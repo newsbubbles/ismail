@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Live: a track's output, a set's loudness and the engine's priority, in the ops
+
+- `live_track(output='<bus>')` makes a new track play into that bus instead of straight into the master, so the
+  bus's stream carries only the tracks routed to it. The engine took it already; the op did not pass it, so the
+  stream-per-object recipe in live.md failed with "bad arguments". A track's output is set when it is created;
+  asking to move it now says so instead of being ignored (hq:D-131).
+- `live_start(trim_db=, cap_db=)` sets the set's loudness per set: `trim_db=4, cap_db=-12` is about -16 LUFS. The
+  arguments win over `ISMAIL_LIVE_TRIM_DB` and `ISMAIL_LIVE_CAP_DB`, which stay as the fallback. A tool server could
+  not change its own environment between calls, so a set it started stayed quiet. The trim takes -30 to +12 dB and
+  the cap -40 to -8 dBFS; the ceiling still comes only from the environment. djkit's `Set.start` passes them as
+  arguments instead of writing the environment.
+- `live_start` sets the engine's priority in code: above normal by default, with `priority='high'` or `'normal'`
+  to change it. The engine sets it after its render workers start, so they stay normal. Where raising it needs
+  rights the user lacks (outside Windows), the engine stays as it was and the reply says so. live.md had told agents
+  to set it by hand, once as AboveNormal and once as High; both lines are now one line about the option.
+- mastering.md and live.md say how a live set reaches its level: the arguments, then faders.
+
 ### Video: a text overlay
 
 - New `python -m ismail.video overlay <in.mp4> <out.mp4> --text "..."`: a line of text (a credit, a title, a link)
