@@ -696,6 +696,38 @@ def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_pat
         P.phone_exam('bad', [{'label': 'A', 'path': clips[0]['path']}], floor='auto')
 
 
+@pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
+def test_floor_pairs_pass_beside_mp3_clips_and_a_refused_exam_uses_up_nothing(phone, tmp_path):
+    """spanish_guitar 10-11: an exam of MP3 clips with floor pairs failed its own pre-flight four times (WAV
+    floors read as "formats differ by class"), and each refused post spent the first round's full set."""
+    ph, base, _ = phone
+    import soundfile as sf
+    rng = np.random.default_rng(5)
+    t = np.arange(44100) / 44100
+    clips, key = [], {}
+    for i in (1, 2, 3):
+        for ab in 'AB':
+            cls = 'record' if (ab == 'A') == (i % 2 == 1) else 'mine'
+            y = 0.2 * np.sin(2 * np.pi * (200 + 9 * i) * t) + 0.02 * rng.standard_normal(len(t))
+            w = tmp_path / f'w{i}{ab}.wav'
+            sf.write(str(w), y, 44100)
+            f = tmp_path / f'c{i}{ab}.mp3'
+            subprocess.run([S.ffmpeg(), '-y', '-loglevel', 'error', '-i', str(w), '-b:a', '192k', str(f)], check=True)
+            clips.append({'label': f'{i}{ab}', 'path': str(f)})
+            key[f'{i}{ab}'] = cls
+    hist = S.HOME / 'floor_rounds.json'
+    shutil.copyfile(clips[0]['path'], tmp_path / 'take_r45.mp3')             # a file name that gives the source away
+    leaky = [dict(c, path=str(tmp_path / 'take_r45.mp3')) if c['label'] == '1A' else c for c in clips]
+    with pytest.raises(Exception, match='pre-flight failed'):
+        P.phone_exam('leaky', leaky, answers_path=str(tmp_path / 'e0' / 'a.jsonl'), exam_id='fx0', key=key,
+                     secrets=['take_r45'], floor='auto')
+    assert not hist.exists()                                                   # refused: nothing used up
+    out = P.phone_exam('mp3 round', clips, answers_path=str(tmp_path / 'e1' / 'a.jsonl'), exam_id='fx1', key=key,
+                       secrets=['take_r45'], floor='auto')
+    assert out.count('pair ') == 3                                             # the full set, on the round shown
+    assert len(json.loads(hist.read_text(encoding='utf8'))) == 1
+
+
 def test_the_output_switch_acts_on_the_engine_without_an_agent(phone):
     """Nate 10-07: output follows Windows "the way that most applications work", a switch he controls."""
     ph, base, _ = phone

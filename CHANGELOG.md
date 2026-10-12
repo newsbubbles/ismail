@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Phone exams: control pairs no longer fail their own pre-flight
+
+- From the Sound Engineer (10-11): an exam of MP3 clips with `floor='auto'` was refused four times before it showed.
+  The WAV control pairs read as "formats differ by class"; with three classes (the control pairs 'real' beside
+  'record' and 'mine') the order check read 2-clip pairs as triples and saw "every trial starts with 'record'"; and
+  every refused post spent the first round's full control set. Now the pre-flight checks the person's pairs only,
+  `exam_check` reads trials by their labels (1A, 1B, 2A ...) whatever the number of classes, and a floor round
+  counts only once the exam is on the phone.
+
 ### Phone: pictures on panels open full screen
 
 - A tap on a panel's picture opens it full screen, as its videos already do: pinch or double-tap to zoom, a finger
