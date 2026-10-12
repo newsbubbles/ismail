@@ -28,12 +28,12 @@ python -m ismail.video rip     -s songs/<slug> video/assets/<dir>  .dae files or
 python -m ismail.video sync    -s songs/<slug>                    events.json + features.npz (rerun after any song change)
 python -m ismail.video still   -s songs/<slug> s04_foyer.py 120 [-- --top cx,cy,span,z | --dbg nofog | --pct 25]
 python -m ismail.video posesheet -s songs/<slug> s04_foyer.py [f,f]   each character alone, 4 sides, key frames + clipping
-python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ...   (refuses on clipping; -- --allowclip)
+python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ... [--wait 2h]   (refuses on clipping; -- --allowclip)
 python -m ismail.video contact -s songs/<slug> video/renders/shots/s04_foyer_v1.mp4 16
 python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range 33 41]
 ```
 
-`render` holds a machine-wide GPU lock, so queues started from several shells run one at a time instead of thrashing. `still` does not take the lock. Run the module from a directory that is not the repo's parent, or the source folder can shadow the installed package.
+`render` waits for the machine's GPU slot (`ismail.machine`, SKILL.md "The machine is shared") before each shot, so the board's rules hold for it as for any Blender render: one GPU job on the machine, none while the GPU is hot or a drive is nearly full, and none while a live set is on air. It stands in line up to 4 hours by default, long enough to outlast a live set, because a render queue is work the person walks away from (`--wait 12h` longer, `--wait 0` refuses at once). When the slot is refused it says why, names the shots not rendered and exits 75: read the board with `python -m ismail.machine`, then run those shots again. Do not wrap it in `machine run`; it takes the slot itself. `still` and `posesheet` take no slot (seconds of work). Run the module from a directory that is not the repo's parent, or the source folder can shadow the installed package.
 
 ## The loop
 
@@ -81,7 +81,8 @@ S.go()
 ## Animation (what separates a video from a slideshow of poses)
 
 The first video posed characters by eye and shipped hands inside thighs and a head inside a backpack. The kit now checks
-and fixes that, and makes motion read as motion:
+and fixes that, and makes motion read as motion (what a rig itself allows, wrists without twist bones, a posed body
+that exports in its rest pose, and the clip checks are in `rigged-characters.md`):
 
 - **Clipping is checked on the deformed mesh.** `C.clip(frames)` measures how deep body parts pass into each other (and
   into mounted props) as a fraction of the character's height, minus what already overlaps at rest. Joint contact the

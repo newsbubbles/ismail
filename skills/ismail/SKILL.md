@@ -179,6 +179,7 @@ nudges you, follow it.
 - `references/stage.md`: building a scene with a person inside it (a browser or VR stage beside Blender): running the stage (`stage_*` tools), which surface for which decision, eye exams for pictures and what they taught, bodies and contact, contact with a person in a headset, shared-editing rules that never lose their work, agents first. Read before building any scene, look or editor a person works inside.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
 - `references/stage-takes.md`: handing a fast take loop (follow, perform, record, keep) to a helper agent: who owns what, the brief to fill in, the loop, what comes back. Read when the person wants takes and the scene's agent is busy.
+- `references/rigged-characters.md`: rigged human bodies on a VR or browser stage (MakeHuman as the worked example): knowing your rig, exporting rest vs posed, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand tracking, props on bones, following a live person, the clip and view checks, materials that survive export. Read before exporting, posing or following any rigged person.
 - `references/contributor-dev.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session
   that is the contributor dev or the stage dev.
 - `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
@@ -226,9 +227,9 @@ nudges you, follow it.
 - **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
 - **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
-  mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
-  (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
-  it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
+  mimic_measure, the fits, live_parity, `python -m ismail.video render`) take a slot themselves and refuse with the
+  reason; anything else outside ismail (Blender, whisper, demucs, a long script) runs through
+  `python -m ismail.machine run --gpu|--cpu -- <command>` so it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
   counts jobs, not cores, so `--threads` caps the command's numeric threads (BLAS, OpenMP, torch; 2 by default for
   `--cpu`) and pins it to that many cores: ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
   Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged

@@ -21,6 +21,24 @@
   in by the dev, with each conflict explained to the person in their terms.
 - `development.md` names `songs/_migration/LEDGER.md` in the roles table.
 
+### Video: film renders take the machine's GPU slot
+
+- `python -m ismail.video render` now takes the GPU slot on the shared machine board (`ismail.machine`) for each
+  shot, in place of its own temp-file lock. The board's rules now hold for film renders as for any Blender render:
+  one GPU job on the machine, the heat and disk floors, and no render while a live set is on air. Before, the render was invisible to the board and could start Blender during a set.
+- It stands in line for the slot, up to 4 hours by default, to outlast a live set (`--wait 12h`, `--wait 0`
+  refuses at once). A refusal says why, names the shots not rendered and exits 75, like `machine run`. The shot's Blender carries the slot
+  (`$ISMAIL_SLOT`), so heavy work it starts runs in the same slot.
+- music-video.md, SKILL.md and the README say so; the "machine-wide GPU lock" text is gone.
+
+### Skill: rigged characters
+
+- New reference `rigged-characters.md`: rigged human bodies on a VR or browser stage, from one long film build
+  checked in a headset (MakeHuman as the worked example, the lessons marked for any rig): know your rig, rest vs
+  posed export, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand
+  tracking, props on bones, following a live person, the clip and view checks, materials that survive export.
+  Listed in SKILL.md and linked from stage.md and music-video.md.
+
 ### Skill: the contributor dev
 
 - The dev role for the engine is now the **contributor dev**: the dev on the person's own machine
