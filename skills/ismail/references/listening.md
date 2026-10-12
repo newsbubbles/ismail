@@ -11,6 +11,7 @@
 | What pieces does a kit have? | `analyze_kit(source='ref:drums')` | one component per piece: energy share, pitch region, hits per 16th; `(fragment)` = lower k |
 | How much swing? | `analyze_swing(source=)` | 16ths: the 'a' against the 'and', in beats and ms; straight = 0 |
 | Does the dynamic shape work? | `analyze_sections(sections={...})` | rms, peak, loudest and quietest 400 ms per section; WARNING when a build is as loud as its climax |
+| One part or several in this stem? | `stem_parts(source=, bars=)` | per band: share of its movement at the note rate; WARNING on a loud band that moves on its own (another player, or bleed) |
 | Does it pump / gate / groove? | `analyze_envelope(bars, band=)` | digits per 16th; a kick-ducked part shows dips on the beats |
 | Is the low end clean? | `analyze_bars` sub and bass columns, `analyze_spectrum(span=)` | kick and bass should not both peak in the same 1/3-octave band |
 | What is this sound? | `analyze_timbre`, `analyze_spectrum`, `sound_compare` | harmonic slope, brightness and rolloff, envelope times, width |

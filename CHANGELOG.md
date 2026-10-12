@@ -10,6 +10,17 @@
   meter now reads a process's memory through one function (`machine._mem_of`), and the test sets what it reads, so
   it always sees the job 64 MiB past its declared memory and checks the exact numbers on the board.
 
+### Measuring: a second part in a source is sensed, not assumed away
+
+- New `stem_parts`: per band, how much of its envelope's movement sits at the source's note rate and the rate it
+  moves at, the strongest pitch under 250 Hz per beat, and how many onsets are strums. A loud band that moves on
+  its own gets a WARNING: another player, or bleed from another stem. A "guitar" stem that held a second player's
+  bass line had wrecked a tone match (Spanish guitar handoff, 10-12); separation and "solo" stretches are not
+  assumed clean (Nate, 10-12).
+- `analyze_melody` ends with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits
+  within 6 dB of a quarter of the notes or more, or when voicing is low. With a backing about as loud as the lead it
+  reads the backing, as it did on that record; the warning now says so.
+
 ### Skill: sampling is allowed, and private use needs no caution
 
 - Nate, 10-12: ismail samples like any DAW. Slicing a reference into the song is fine whenever the user wants it;
@@ -219,6 +230,7 @@
 - New op `play_file(path)`: opens a sound in the person's own player (Windows, macOS, Linux).
 - skills: step 8, setup's last step ("the end of setup is their first song, not a report"), user-experience.md
   (Nate 10-08, after a Codex dress rehearsal ended on a setup report with the song buried in it).
+
 ### Stage: a Follow that sets itself up from the body
 
 - A Follow on a standing person now walks with you by default; a seated one (hips pinned to a seat) stays on it. A
@@ -383,6 +395,7 @@
 - `phone_panel_show` and `phone_say` take `priority`: 'needs you', 'normal' (the default) or 'low'. Notes and panel
   tabs sort by it (needs you first, then newest), and the corner key fills with the accent colour while an open item
   needs them.
+
 ### A newcomer's next round keeps their tune (ledger:M181, intro dry run 2)
 
 - `sketch(..., base=)` keeps the picked sketch's tune and chords and changes only what the words name: the first
@@ -474,6 +487,7 @@
   concrete moves: tempo, major or minor, busier or sparser, softer or brighter; "a bit" halves the move, "much"
   makes it bigger, and the reply names each ("happier: faster (95 BPM), major, busier, brighter"). Marketing's dry
   run: "a bit happier" changed nothing and two takes came back slower.
+
 ### The picture round: the eye exam page (ledger:M165 step 2, M12)
 
 - `exam_picture_round(out, items, title)`: vox's word-picture page in main. One sound per card, the real picture and
@@ -492,6 +506,7 @@
 - `render` lists HOT on any track whose stem peaks over -0.5 dB, with how far to lower it. Marketing's dry run had
   a melody at -0.0 dB and no word of it (the master was fine, the limiter flattening the tune).
 - The sketch balance never raises the tune past a -1 dB peak; when it needs more, the other parts come down.
+
 ### The person's words are kept, and versions play from the song folder (ledger:M170 G-2b, U-5)
 
 - `guide(first_answer=..., project=)` keeps the vocabulary it decided (`<song>/person.json`, and the latest person
@@ -620,6 +635,7 @@
 - The left-wrist update card lists the changes waiting (up to five, the most important first, then "+N more") and
   grows to fit, instead of naming only one (the user, q44: panels "listing what changed in each update").
   `updates_waiting` carries the titles. The titles come from `stage_note`, one per change landed.
+
 ### Takes on the beat: sync, loop and warp as stage ops
 
 - `stage_take_sync` measures how takes keep time with a song (pulse, own BPM, the rate onto the beat, the first
@@ -629,6 +645,7 @@
   moved onto the beats. Ported from the film session's sync_measure.py, loop_cut.py and beat_warp.py with the
   parameters tuned with the user (ledger:M145); on Nate's takes the port gives the same numbers, windows and
   frames as the scripts. New takes drop the performance link (no borrowed voice), the trim and the label.
+
 ### Takes play smoothly between their samples
 
 - Take playback poses the frame between the two recorded samples around each render frame (positions lerp,
@@ -636,6 +653,7 @@
   (Nate's dance, 20261005_122454) played at 72 fps held the right wrist still on 73% of frames, then jumped
   (95th percentile 46 mm); mixed, 5% still and 21 mm. Samples more than 0.25 s apart (tracking lost) are held.
   Only what posing reads is mixed (head, hands), into a reused buffer: 32 microseconds a person a frame on the desktop.
+
 ### Load sets: unload a group of the room, with a placeholder
 
 - `stage_set_define` names a group of the room (node names or globs, and people), `stage_set_load` unloads it or
@@ -654,6 +672,7 @@
   Setting or clearing a start pose re-poses the resting person on an open page at once (page command `actor_rest`).
   The six dancers had stood with their arms out since they were imported ("a pose to leave everything in").
 - The pose read-back of a take-frame start pose (with nothing playing) no longer fails.
+
 ### The first sketches: mastered, balanced, the first one first, said plainly (ledger:M148, M150, M151 S-1..S-5)
 
 - S-1 (M148): every sketch goes through a master stage for its style (a low cut, glue, mono low end, a limiter at
@@ -986,6 +1005,7 @@
   every box the fingertip is in, smallest first. It works for selecting and for moving. Each pick among several emits
   `pick_cycle {how, item, n, of}`. A person's box covered the cup in their hand and the things near them, so a pinch
   there always gave the person.
+
 ### A performance always has a way out, and agents hear it while it runs
 
 - The user spent seven minutes inside a performance an agent had started ("I'm basically just stuck in a
@@ -1050,6 +1070,7 @@
   pinned "since you left", or a line spoken into the stream when answering), `phone_ask`, `phone_panel_show`,
   `phone_exam` (blind exams with Submit, answers written to the exam's file), `phone_offer` (downloads),
   `phone_buttons` (their own buttons as data), `phone_buzz`, `phone_status`. Reference: `references/phone.md`.
+
 ### voices_list names each voice's function (from the e002 pilots)
 
 - `voices_list` shows `fn=perform` or `fn=voice` on every code voice; it used to say `'fn': 'voice'` for all of
@@ -1420,6 +1441,7 @@
 - A streamed bus or deck that goes quiet sends silence instead of nothing, so every listener stays in step (the
   Crossroads stage had to fill the gaps itself), and `live_stream(project, name=...)` works (the op's `name` clashed
   with the dispatcher's).
+
 ### The stage in the skill
 
 - `references/stage.md`: building a scene with a person inside it, from the Crossroads build: which surface for
@@ -1484,6 +1506,7 @@
   direction, a blind exam to know when you are done, from one note up to the full mix).
 - blind-tests.md: why exams (the person's senses as data, their words into the lexicon) and climbing from the
   smallest unit, since a test pitched too hard gives no direction.
+
 ### Credits name what the piece uses
 
 - `credits` credits only the sources the piece uses: a row is used when a part's model names its file, its folder
@@ -1493,6 +1516,7 @@
   video ids) is left out, and a table under its own heading keeps it.
 - `track_model(on=[...])` takes several sources for one part (a forest bed from two recordings, a voice
   cross-synthesized from bird takes and a player's stem), and a folder of takes (`on='ref/birds/potoo'`).
+
 ### Live: the set says when it runs out
 
 - `live_status` adds `RUNWAY ENDED N bars ago` when a set that has played has had nothing new queued for 8 bars

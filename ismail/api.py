@@ -2075,9 +2075,21 @@ def analyze_chords(project: str, source: str = None, bars: list = None, per_bar:
 @op()
 def analyze_melody(project: str, source: str = 'ref:other', bars: list = None, fmin: str = 'C1', fmax: str = 'C7',
                    quant: float = 0.25, min_conf: float = 0.0) -> str:
-    """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line."""
+    """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line. Ends
+    with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits within 6 dB on a
+    quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax)."""
     P = _load(project)
     return A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)[1]
+
+
+@op()
+def stem_parts(project: str, source: str = 'ref:other', bars: list = None) -> str:
+    """One part or several in a source (max 16 bars)? Per band: level, the share of its envelope's movement at the
+    source's note rate, and the rate it moves at most; the strongest pitch under 250 Hz per beat; and how many
+    onsets are strums. A loud band that barely moves at the note rate is another player or another stem's bleed:
+    read this before matching tone to a stem or trusting a "solo" stretch."""
+    P = _load(project)
+    return A.stem_parts(*P.source(source, bars), bars)[1]
 
 
 @op()
