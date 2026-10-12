@@ -72,6 +72,8 @@ How fast you answer depends on what the person is doing:
   few minutes, a progression rather than a repeat, until they play in again.
 - **Write the story as you go**, one line per take: what they said, what changed. At the end, offer a studio version
   built from the jam, in its own song folder.
+- **Read takes in code, not by hand.** A small runner in the song folder classifies, syncs and reads each take in
+  about a second and asks sample or match on the phone: `references/jam-runner.md` is the recipe.
 
 ## Sounds first
 
