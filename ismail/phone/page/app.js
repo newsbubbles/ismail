@@ -587,10 +587,11 @@ function applyVibe(v) {
     v.css['--accent'], v.css['--ink'], ms, v.hue_drift);
 }
 // the background: up to three effect layers on one canvas, behind the page (ledger:M160); a new look crossfades in
-// over its transition; still while hidden, and for anyone who asked for less motion
+// over its transition; still while hidden, and for anyone who asked for less motion; held still, its colours kept,
+// while no set plays (the person, 10-12: "more of like an indicator that things are playing")
 const fx = (() => {
   const cv = $('fx'), cx = cv.getContext('2d');
-  let layers = [], old = [], fadeAt = 0, fadeMs = 1, drift = 0, raf = 0, last = 0, W = 0, H = 0, dpr = 1;
+  let layers = [], old = [], fadeAt = 0, fadeMs = 1, drift = 0, raf = 0, last = 0, T = 0, rest = false, W = 0, H = 0, dpr = 1;
   let acc = '#ffffff', ink = '#ffffff';
   const still = matchMedia('(prefers-reduced-motion: reduce)');
   const COUNT = { rain: 280, particles: 140, grain: 1, aurora: 3, pulse: 1, none: 0 };
@@ -628,7 +629,7 @@ const fx = (() => {
     } else if (L.effect === 'pulse') {
       const bpm = (state.engine && state.engine.bpm) || 120, b = heardBeat();
       const ph = (((b != null ? b : (t / 1000) * bpm / 60) / Math.max(0.25, L.speed)) % 1 + 1) % 1;
-      const e = Math.exp(-ph * 5), g = cx.createRadialGradient(W / 2, H + 40, 10, W / 2, H + 40, H * (0.55 + 0.25 * e) * L.size);
+      const e = rest ? 0 : Math.exp(-ph * 5), g = cx.createRadialGradient(W / 2, H + 40, 10, W / 2, H + 40, H * (0.55 + 0.25 * e) * L.size);
       g.addColorStop(0, c1); g.addColorStop(1, 'transparent'); cx.globalAlpha = a * (0.25 + 0.75 * e); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
     } else if (L.effect === 'grain') {
       cx.fillStyle = c1; cx.globalAlpha = a * 0.35;
@@ -645,17 +646,16 @@ const fx = (() => {
   function frame(t) {
     raf = 0;
     if (document.visibilityState !== 'visible' || !(layers.length || old.length || hits.length)) return;
-    raf = requestAnimationFrame(frame);
-    if (t - last < 33) return;                                       // about 30 frames a second is plenty
-    const dt = Math.min(0.1, (t - last) / 1000); last = t;
+    if (!rest) { raf = requestAnimationFrame(frame); if (t - last < 33) return; }   // about 30 frames a second is plenty
+    const dt = rest ? 0 : Math.min(0.1, (t - last) / 1000); last = t; T += dt * 1000;   // T: the look's clock, stopped when held
     cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.globalCompositeOperation = 'source-over'; cx.clearRect(0, 0, W, H);
-    const k = Math.min(1, (performance.now() - fadeAt) / fadeMs);
+    const k = rest ? 1 : Math.min(1, (performance.now() - fadeAt) / fadeMs);
     if (k >= 1) old = [];
-    for (const L of old) draw(L, t, dt, 1 - k);
-    for (const L of layers) draw(L, t, dt, k);
-    hitDraw(t);
+    for (const L of old) draw(L, T, dt, 1 - k);
+    for (const L of layers) draw(L, T, dt, k);
+    hitDraw(T);
     cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
-    cv.style.filter = drift ? `hue-rotate(${(drift * t / 60000) % 360}deg)` : '';
+    cv.style.filter = drift ? `hue-rotate(${(drift * T / 60000) % 360}deg)` : '';
   }
   // the notes' reactions (ledger:M160 phase 2): short-lived marks drawn over the layers
   let hits = [];
@@ -683,7 +683,7 @@ const fx = (() => {
     return hits.length;
   }
   function go() { if (!raf && (layers.length || old.length || hits.length) && !still.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame); }
-  window.addEventListener('resize', () => { size(); layers.forEach(seed); });
+  window.addEventListener('resize', () => { size(); layers.forEach(seed); go(); });
   document.addEventListener('visibilitychange', go);
   return {
     set(ls, a, n, ms, hue) {
@@ -694,8 +694,13 @@ const fx = (() => {
       if (still.matches || !(layers.length || old.length)) { if (raf) cancelAnimationFrame(raf); raf = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
       go();
     },
+    hold(on) {                                                       // held: one still frame, no reactions; T stops, so no drift
+      if (on === rest) return; rest = on;
+      if (rest) { hits = []; if (raf) cancelAnimationFrame(raf); raf = 0; }
+      go();
+    },
     hit(x) {
-      if (still.matches) return;
+      if (still.matches || rest) return;
       const life = { flash: 220, glow: 420, burst: 600, sparks: 300, drops: 900, ring: 900 }[x.do] || 400;
       const n = x.do === 'burst' ? 18 : x.do === 'sparks' ? 6 : 0;
       hits.push(Object.assign({ at: performance.now(), life, x: Math.random() * W, y: Math.random() * H * 0.8,
@@ -703,6 +708,7 @@ const fx = (() => {
       hits.splice(0, Math.max(0, hits.length - 60)); go();
     },
     get hits() { return hits.length; },
+    get held() { return rest; },
     get kind() { return layers.map((L) => L.effect).join('+') || 'none'; },
     get layers() { return layers; },
   };
@@ -1071,6 +1077,7 @@ function render() {
   polledAt = Date.now();
   if (clockMode) showInto();
   else { $('heardcap').textContent = 'Heard'; $('bar').innerHTML = m ? `BAR ${m[1]}<span>.${esc(Math.floor(+(m[2] || 1)))}</span>` : 'BAR <span>---</span>'; }
+  fx.hold(!(e.playing && e.sounding !== false));                     // the background moves only while music plays
   movesLocal = null; applyVibe(vibeNow()); showPos();
   SOUNDS = state.sounds || {};
   if (e.now && render.now !== undefined && e.now !== render.now) sound('chapter');   // not on the first look

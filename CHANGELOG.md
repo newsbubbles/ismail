@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phone: the background is still when no set plays, and phone_now works past 200 marks
+
+- The page's background (its effect, the beat pulse, note reactions, hue drift) now holds still, in the look's
+  colours, whenever no music plays: the set paused or stopped (both end the engine), or an engine left running
+  with every track silent. It moves again, where it left off, when the music does (the person, 10-12: "more
+  of like an indicator that things are playing"). The page's state carries `engine.sounding`, and a change
+  wakes the page at once.
+- `phone_now` failed with "'str' object is not callable" once more than 200 marks were saved: its `next`
+  argument hid the builtin `next()` used to trim them, and the view had already changed. Marks are now
+  capped at 200 without it.
+
 ### Tests: one phone test's voice notes no longer reach the next
 
 - An old test's phone kept retrying its voice note through the next test's speech server and into its inbox; each
