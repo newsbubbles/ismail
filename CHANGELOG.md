@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Stage: "heard by" receipts, busy lines, a stuck warning, and an ear that keeps listening
+
+- A session sat ten minutes on a render while four voice notes went unanswered, and the person left the headset
+  (2026-10-11). Now the moment a listener is handed a note, the headset card shows "heard by <who>" for a few
+  seconds; `/live/version` and `stage_presence` carry the newest note's receipt (`receipt`: who took it, answered,
+  stuck).
+- `stage_busy(who, text, minutes)` (POST `/live/busy`) sets a session's one-line status ("rendering the drums, in
+  line, about 5 min"), shown in the headset beside the receipt; `text=""` clears it, and it runs out after `minutes`
+  (default 10, up to 60).
+- A note no agent answered within 2 minutes (a say, ask or panel; the automatic "got it" does not count), taken by
+  sessions with no busy line, gets "<who> has not answered for 2 minutes. It may be stuck." out loud, a
+  `session_stuck` event (also in the inbox) and the `session_stuck` hooks (`STAGE_WHO` names them). A session that
+  only listens is not called stuck when another answered.
+- `python -m ismail.stage.ear --who "<name>"` listens to every scene until stopped: it prints one line per voice note
+  or error, logs the rest to `~/.ismail/ears/<name>/ear.log`, resumes from its mark when started again within 15
+  minutes, and follows a server restart (the inbox now says when its server started). `--once` exits after the
+  first printed line.
+
 ### Skill: a jam runner recipe
 
 - references/jam-runner.md: how to build a small runner in a song's folder that reads each phone take in code in

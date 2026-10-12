@@ -4,6 +4,7 @@
 // The reload leaves VR (a browser cannot re-enter VR without a tap), so the card says so.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
+import { noteText } from './receipts.js';
 
 const THUMB_HOLD_MS = 700;
 
@@ -112,16 +113,19 @@ export function initUpdates(ed, live, hands, voice) {
   vcard.renderOrder = 999; vcard.layers.set(GIZMO); vcard.visible = false; vcard.scale.set(0.2, 0.0586, 1);
   scene.add(vcard);
   let vUntil = 0, listenLine = '', nobody = false, serverNote = '', wasNobody = null;
+  let noteTop = '', noteLine = '', noteWarn = false, noteUntil = 0;    // a receipt, a busy line or a stuck warning
   // a listener that gave no name reads as someone, not as a glitch (the user, 2026-10-04: "unnamed" looked suspicious)
   const listenText = (ls) => (ls.length ? 'listening: ' + ls.map((w) => (w === 'unnamed' ? 'an unnamed agent' : w)).join(', ') : 'nobody is listening');
   function drawV() {
     const g = vcv.getContext('2d');
     g.clearRect(0, 0, 512, 150);
     g.fillStyle = 'rgba(20,24,30,0.85)'; g.beginPath(); g.roundRect(2, 2, 508, 146, 20); g.fill();
-    g.fillStyle = '#fff'; g.font = 'bold 40px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(serverNote || 'stage ' + (st.version || '?'), 256, 46, 480);
-    g.fillStyle = nobody ? '#fbbf24' : '#86efac'; g.font = '30px system-ui, sans-serif';
-    g.fillText(listenLine || 'checking who is listening', 256, 108, 480);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const note = performance.now() < noteUntil;
+    g.fillStyle = note && noteWarn ? '#fbbf24' : note ? '#86efac' : '#fff'; g.font = 'bold 40px system-ui, sans-serif';
+    g.fillText(note ? noteTop : serverNote || 'stage ' + (st.version || '?'), 256, 46, 480);
+    g.fillStyle = note ? '#e5e7eb' : nobody ? '#fbbf24' : '#86efac'; g.font = '30px system-ui, sans-serif';
+    g.fillText(note ? noteLine : listenLine || 'checking who is listening', 256, 108, 480);
     vtex.needsUpdate = true;
   }
   renderer.xr.addEventListener('sessionstart', () => {
@@ -141,6 +145,25 @@ export function initUpdates(ed, live, hands, voice) {
     wasNobody = nobody;
     if (!ch.first && renderer.xr.isPresenting && (flipped || ch.server_changed)) vUntil = performance.now() + 4000;
     if (ch.server_changed) { live.emit('server_changed', { server: live.heard.server }); setTimeout(() => { serverNote = ''; drawV(); }, 6000); }
+  });
+
+  // a note landed with a session ("heard by crossroads film"), a session said what it is busy with, or one looks
+  // stuck: shown on this card for a few seconds (the user, 2026-10-11: four notes went unanswered while a session sat on
+  // a render, and he could not tell landed from lost)
+  live.heard.noteOn.push(({ receipt, busy, first }) => {
+    const t = noteText(receipt, busy);
+    if (!t) return;
+    // shown again only for news: another top line, or a busy line that is new (not one that just ended)
+    const news = t[0] !== noteTop || (t[1] && t[1] !== noteLine);
+    [noteTop, noteLine, noteWarn] = t;
+    if (!news) return;
+    const tag = document.getElementById('vertag');
+    if (tag) tag.title = noteTop + (noteLine ? ' \u00b7 ' + noteLine : '');
+    if (first || !renderer.xr.isPresenting) return;
+    noteUntil = performance.now() + (noteWarn ? 8000 : 4500);
+    vUntil = Math.max(vUntil, noteUntil);
+    drawV();
+    setTimeout(drawV, noteUntil - performance.now() + 50);    // back to the version and who is listening
   });
 
   live.codeV.on.push(async () => {

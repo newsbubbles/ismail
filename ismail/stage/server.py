@@ -564,7 +564,8 @@ class Handler(SimpleHTTPRequestHandler):
             cv = code_version()
             return self._json(200, {'scene': name, 'code': cv, 'code_name': time.strftime('v%m%d.%H%M', time.localtime(cv / 1e9)), **{k: [s.st_mtime_ns, s.st_size] if s else None
                                                       for k, s in zip(('glb', 'manifest'), st)},
-                                    'listening': presence.listening(name), 'server': os.getpid()})
+                                    'listening': presence.listening(name), 'busy': presence.busy_now(),
+                                    'receipt': presence.receipt(), 'server': os.getpid()})
         since = int(q.get('since', ['-1'])[0])
         wait = min(float(q.get('wait', ['0'])[0]), 60.0)
         if wait > 0 and not self.server.longpoll_enter(self.client_address[0]):
@@ -611,7 +612,8 @@ class Handler(SimpleHTTPRequestHandler):
         wait = min(float(q.get('wait', ['0'])[0]), 60.0)
         limit = int(q.get('limit', ['200'])[0])
         if since < 0:                              # where the inbox is now (no listening yet)
-            return self._json(200, {'last': presence.SEQ[0], 'events': presence.inbox_after(presence.SEQ[0] - limit, limit)})
+            return self._json(200, {'last': presence.SEQ[0], 'events': presence.inbox_after(presence.SEQ[0] - limit, limit),
+                                    'started': round(presence.STARTED)})
         if wait > 0 and not self.server.longpoll_enter(self.client_address[0]):
             wait = 0.0
         presence.seen(who, '*', inbox=since)
@@ -624,9 +626,14 @@ class Handler(SimpleHTTPRequestHandler):
             if wait > 0:
                 self.server.longpoll_leave(self.client_address[0])
         presence.seen(who, '*', inbox=last)
-        return self._json(200, {'last': last, 'events': evs})
+        return self._json(200, {'last': last, 'events': evs, 'started': round(presence.STARTED)})   # a new start: count from 0
 
     def _live_post(self, u):
+        if u.path == '/live/busy':                 # a session's busy line (presence.py): {who, text, minutes}; empty text clears
+            b = self._body()
+            if not isinstance(b, dict):
+                raise ValueError('busy takes {who, text, minutes}')
+            return self._json(200, {'ok': True, 'busy': presence.busy(b.get('who'), b.get('text'), b.get('minutes'))})
         name = self._scene(parse_qs(u.query))
         body = self._body()
         if u.path == '/live/state':

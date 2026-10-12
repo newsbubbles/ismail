@@ -35,7 +35,7 @@ Setup:        pins:  <e.g. hips on stool_3>      (stage_follow_anchor, or a save
               where the person stands, what they see first (a card or a pin waiting for them)
 Takes:        how many tries are fine, how long each, what makes one good (in the person's words if they said it)
 Voice:        record (every Follow does), what to cut into clips, what the lines are if any
-You may use:  stage_listen, stage_events, stage_presence, stage_say, stage_panel_show, stage_panel_close,
+You may use:  stage_listen, stage_busy, stage_events, stage_presence, stage_say, stage_panel_show, stage_panel_close,
               stage_actor_follow, stage_actor_play, stage_actor_stop, stage_follow_anchor, stage_control_set,
               stage_control_map, stage_actor_profile, stage_perform, stage_performance, stage_take_start,
               stage_take_stop, stage_take_keep_last, stage_take_view, stage_take_note, stage_actor_map_save,
