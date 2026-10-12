@@ -15,19 +15,66 @@
 
 # ismail
 
-**A DAW for AI agents. It can't hear, so it reads. And it plays live.**
+**Interfaces your agent runs and rebuilds for you: a DAW, a VR stage and a phone page.**
 
-Your agent writes the song as notes, sounds and code, reads back what it made, and then performs it: DJ decks, transitions, requests taken while the music plays. Away from the desk, the set goes in your pocket: a phone page you listen to with the screen off and talk back to through your earbuds.
+The agent you already use does the work in the background. You bring the taste.
 
 <!-- mcp-name: io.github.newsbubbles/ismail -->
 
 [![tests](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml/badge.svg)](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml)
 
-[![ismail: a DAW for AI agents](https://newsbubbles.github.io/ismail/social.png)](https://newsbubbles.github.io/ismail/)
-
 *Agents: start at [AGENTS.md](AGENTS.md).*
 
-**[Listen to songs an agent made with it](https://newsbubbles.github.io/ismail/)**, each shown with the text the agent read while making it. The playhead runs across that text as the song plays.
+<!-- MEDIA: a short silent mp4 loop of a person in VR driving a character's dance (Marketing cuts it from the dance
+Shorts; an mp4 uploaded to GitHub plays inline here). Until it exists, the juke joint video below leads. -->
+
+[![My agent built a 1958 blues club. Then I walked in.](https://i.ytimg.com/vi/fKGkaf2WYWw/hqdefault.jpg)](https://youtu.be/fKGkaf2WYWw)
+
+*Agents built a 1958 juke joint for the Crossroads Rewired music video; Nate walked in with a Quest 3 and directed them from inside: voice notes, and dance takes they play on the characters (4:43).*
+
+## What ismail is
+
+ismail is a set of **recursively modifiable interfaces**: you change how they work by asking your agent, and the
+engines underneath stay put. Want a button on your phone, a knob in your VR room, a new way to hear a mix? You say
+so, the agent builds it out of the tools ismail already has, and the music engine, the stage and the phone server
+don't change.
+
+It is an interface, not a harness. It plugs into the agent you already use (Claude Code, Codex, Cursor, any MCP
+client) on one side and into you on the other: agent-shaped on the agent side, human-shaped on the human side.
+When your harness has helpers and sessions that talk to each other, ismail uses them. When it doesn't, one agent
+does it all.
+
+Three interfaces, one set of tools:
+
+- **The DAW.** It can't hear, so it reads. Your agent writes music as notes, sounds and code, renders it, and reads
+  every render back as text: levels, drum patterns, chords, a piano roll, comparisons with a reference. Then it plays
+  it live: decks, transitions, requests taken while the music plays.
+- **The VR stage.** A scene in your headset or browser that agents build while you stand in it. You point, talk and
+  move; they read what you did and change the room. Dance in VR and they put your moves on a character.
+- **The phone page.** The set in your pocket, with the screen off. Talk back through your earbuds, answer the agent's
+  questions and blind listening exams on panels, and know whether it heard you.
+
+You give the taste. The agent asks your ears and eyes only what its measurements can't settle (taste-in-the-loop),
+and saves your answers with the work.
+
+## Agents do the work, each in a role
+
+ismail comes with roles for more than one agent, in whatever harness you use:
+
+- a **studio agent** makes one piece (a song, a set, a scene) and only writes in that piece's folder;
+- a **contributor dev** changes ismail itself on your machine, on its own copy of the code, and sends it upstream
+  when you say yes;
+- an **area dev** owns one part end to end (today the stage dev, who also develops VR);
+- **helpers** (subagents) take one scoped job and report back.
+
+They hand work to each other through files, so a session that restarts picks up where it was. ismail itself is
+built this way, by a team of agent sessions with one person deciding (see [Contributors](#contributors)). The
+rules are in [development.md](skills/ismail/references/development.md).
+
+## Listen
+
+**[Songs made with it](https://newsbubbles.github.io/ismail/)**, each shown with the text the agent read while making
+it. The playhead runs across that text as the song plays.
 
 | song | what it is |
 |---|---|
@@ -40,15 +87,18 @@ Your agent writes the song as notes, sounds and code, reads back what it made, a
 | [Clash](https://newsbubbles.github.io/ismail/#clash) | hybrid orchestral fight cue, every instrument synthesized |
 | [Two Kinds of Tears](https://newsbubbles.github.io/ismail/#tears) | solo piano, a minor theme that returns in major |
 
-[![My agent built a 1958 blues club. Then I walked in.](https://i.ytimg.com/vi/fKGkaf2WYWw/hqdefault.jpg)](https://youtu.be/fKGkaf2WYWw)
+<!-- MEDLEYS: the medleys merged to Pages today (pr:192); add their anchors here once Marketing confirms the names. -->
 
-*Agents built a 1958 juke joint for the Crossroads Rewired music video; Nate walked in with a Quest 3 and directed them from inside: voice notes, and dance takes they play on the characters (4:43).*
+How it was built, on video: [the build devlog](https://youtu.be/ktFhmx2axvU) (5:34) and
+[Q43/Q44](https://www.youtube.com/watch?v=yjL6TBTlXN8); Shorts: [one](https://www.youtube.com/shorts/MMKL769xLnY),
+[two](https://youtube.com/shorts/9RQM1f3EszY).
 
 [![Luigi Manson on YouTube](https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg)](https://www.youtube.com/watch?v=ZzT1T9GUoRo)
 
 *Luigi Manson, made with ismail (fan remix of the Luigi's Mansion theme).*
 
-## What makes this hard
+## The DAW: what makes it hard
+
 
 Making music with an AI agent runs into the same few walls. ismail is built around each of them, and every number below comes from a song made with it.
 
@@ -66,10 +116,12 @@ Making music with an AI agent runs into the same few walls. ismail is built arou
 
 ## Where it falls short
 
+- A new song from a blank page is the weak spot: the first sketch can sound generic and miss the genre's identity. It is strongest where there is something to measure: a reference to recreate, a song to play live, a scene to build.
 - Singing: ismail speaks (text to speech) and has no singing voice yet. Suno sings far better, and makes a polished song from one sentence in under a minute.
 - Mimic needs more notes for instruments whose colour changes from note to note, like the piano (the `grand_piano` voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
 - One tempo per project, no MIDI import or export, no plugin hosting.
 - Live changes land between the agent's turns, 5 to 30 seconds apart.
+- The VR stage is built and tested on one headset (Quest 3), by one person.
 - It needs a capable agent, and your ear stays the final judge. The blind exams so far had one listener.
 
 How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the [showcase page](https://newsbubbles.github.io/ismail/#compare).
@@ -80,7 +132,7 @@ Everything goes in as text (notes, instrument patches, effect chains, automation
 
 One set of operations, three ways in:
 
-- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 225 tools: 117 for music and live play, 88 `stage_*` for the VR stage, 20 `phone_*` for the phone page)
+- **MCP server** for Claude Code, Cursor or any MCP client: `ismail mcp` (stdio, 238 tools: 121 for music and live play, 96 `stage_*` for the VR stage, 21 `phone_*` for the phone page)
 - **CLI**: `ismail -p <project> <op> [args]` (same as `python -m ismail ...`)
 - **Python**: `from ismail import api`
 
