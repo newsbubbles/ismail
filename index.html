@@ -163,6 +163,8 @@ table.cmp { border-collapse: collapse; width: 100%; min-width: 760px; font-size:
 .two li { margin: 4px 0; }
 .note { color: var(--faint); font-size: 13.5px; margin-top: 14px; }
 @media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
+.direction-h { margin: 36px 0 8px; font-size: 20px; }
+.direction audio { width: 100%; margin-top: 4px; }
 
 footer { padding: 36px 0 60px; color: var(--faint); font-size: 14px; }
 footer p { margin: 6px 0; }
@@ -233,6 +235,23 @@ master: -11.8 LUFS, peak -0.3 dBFS
     <p class="sub">Under each song is the text the agent used to judge it: the arrangement map (one character per bar, 9 = loudest, rows per frequency band, the bass note and the sections it found) and a piano roll of one part. Press play and the playhead runs across the map; click the map to jump to a bar. The songs play through in order, and the one playing opens what the agent saw.</p>
     <p class="sub">Each song says what made it: <b>sprite</b> is the synth engine (oscillators, filters, envelopes, drum synths), <b>mimic</b> plays instruments measured from a few recorded notes, and <b>voices</b> are instruments written as code (the grand piano is built from measured piano partials).</p>
     <div id="tracks"></div>
+    <h3 class="direction-h">One line of direction</h3>
+    <p class="sub">Fr&egrave;re Jacques, twice, on ismail's piano. The agent wrote the first take for a live piano set. Between songs, Nate asked: &ldquo;any of these could get some interesting interpretations right? with some sort of extra emotion?&rdquo; The second take is what came back: the tune in minor and quiet, then a turn to major, louder, with the melody in octaves. Same tune, same piano. His reaction: &ldquo;sounds like it should be on a dramatic movie's soundtrack!&rdquo;</p>
+    <div class="two direction">
+      <div>
+        <h3>The first take: a canon (0:34)</h3>
+        <audio controls preload="none" src="audio/frere_jacques_original.mp3"></audio>
+      </div>
+      <div>
+        <h3>After his ask: minor to major (1:14)</h3>
+        <audio controls preload="none" src="audio/frere_jacques_hope.mp3"></audio>
+      </div>
+    </div>
+    <script>
+      // one take at a time: starting one pauses the other
+      document.querySelectorAll('.direction audio').forEach(a => a.addEventListener('play', () =>
+        document.querySelectorAll('.direction audio').forEach(b => { if (b !== a) b.pause(); })));
+    </script>
   </div>
 </section>
 
