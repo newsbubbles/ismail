@@ -178,6 +178,7 @@ nudges you, follow it.
 - `references/rigged-characters.md`: rigged human bodies on a VR or browser stage (MakeHuman as the worked example): knowing your rig, exporting rest vs posed, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand tracking, props on bones, following a live person, the clip and view checks, materials that survive export. Read before exporting, posing or following any rigged person.
 - `references/contributor-dev.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session
   that is the contributor dev or the stage dev.
+- `references/worktrees.md`: a dev's own copy of the repository (a git worktree), from start to removal, with `python -m ismail.worktrees` (new, claim, sync, done, and the list of every copy with its owner and what it needs).
 - `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
   prompts only they can answer, proving it with a sound they hear, and what to do when a step fails.
 - `references/contributing.md`: sending something back for a person who has never used git: in the studio

@@ -33,8 +33,9 @@ At the start of every session, after every compaction or summary of your context
 
 ## Building
 
-- **Work on a worktree branch**, never in the checkout the live server runs from. When moving code in, import it
-  unchanged in the first commit, so every later change is a diff someone can review. Log each step and its proof
+- **Work on a worktree branch**, never in the checkout the live server runs from
+  (`python -m ismail.worktrees new <topic> --owner "stage dev"`; `worktrees.md` has the rest of the tree). When
+  moving code in, import it unchanged in the first commit, so every later change is a diff someone can review. Log each step and its proof
   in your progress file as you go.
 - **Test without a headset at three levels**: headless tests (a real server in a thread, a fake page that answers
   commands the way the page does); a second server on a spare port with a scratch copy of a scene, never the
