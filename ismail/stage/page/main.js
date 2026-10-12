@@ -290,10 +290,13 @@ function scheduleAutosave() {
   }, AUTOSAVE_IDLE_MS);
 }
 ed.addEventListener('change', scheduleAutosave);
+// the same request as ed.save(), to the scene showing now (not the one the page opened on); keepalive lets it finish
+// after the tab closes (only under 64 KB, the browsers' limit), and it counts as saved only when the server says so
 function flushSave() {
   if (!ed.dirty()) return;
-  const body = new Blob([JSON.stringify(ed.computeEdits())], { type: 'application/json' });
-  if (navigator.sendBeacon(`save?scene=${encodeURIComponent(name)}`, body)) ed.savedJSON = JSON.stringify(ed.computeEdits());
+  const { edits, url, body } = ed.saveRequest();
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: body.length < 60000 })
+    .then((r) => { if (r.ok) ed.savedJSON = JSON.stringify(edits); }).catch(() => {});
 }
 addEventListener('pagehide', flushSave);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave(); });

@@ -175,8 +175,8 @@ def stage_events(scene: str, since: int = 0, types: list = None, limit: int = 10
 @op()
 def stage_listen(who: str, since: int = None, wait: float = 25, port: int = None) -> str:
     """Listen to the person in the headset across every scene: their voice notes (voice_in, then voice_message with
-    the text), whether a note was heard (voice_heard), entering and leaving VR (headset, vr_exit) and scene switches,
-    oldest first. who= your name as the headset shows it ("Claude is listening": e.g. "crossroads film"); while you
+    the text), whether a note was heard (voice_heard), entering and leaving VR (headset, vr_exit), scene switches, and
+    what goes wrong in the room (behaviour_error, page_error) or an object says (object_message), oldest first. who= your name as the headset shows it ("Claude is listening": e.g. "crossroads film"); while you
     call this at least every 40 s you count as listening, and a note you were handed is announced as "handed to
     <who>" if you do not answer it within 6 s (a note nobody was handed gets "nobody is listening" said out loud). since= the `last` from
     the previous call (left out: start now), wait= seconds to wait for something new (up to 60). Answer a note with

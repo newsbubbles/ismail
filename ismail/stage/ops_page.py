@@ -118,8 +118,8 @@ def stage_view_walk(scene: str, on: bool) -> str:
 @op(mutates=True)
 def stage_view_look_through(scene: str, camera: str = None) -> str:
     """Look through a Blender camera on the desktop, or back to the editor view when camera is None (page command:
-    look_through; the page reads `name`). A name that is not a camera silently goes back to the editor view. Errors: no
-    object of that name. Page replies {mode, camera}. Emits: mode."""
+    look_through). Errors: no object of that name, or an object that is not a camera. Page replies {mode, camera}.
+    Emits: mode."""
     return page_cmd(scene, 'look_through', {'camera': camera}, timeout=30)
 
 

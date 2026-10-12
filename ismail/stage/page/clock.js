@@ -105,6 +105,7 @@ export function initClock(ed, live, xrApi, panels) {
       if (ks.length < 2) continue;                              // one key holds nothing: the object stays where it is
       const it = ed.byName.get(name);
       if (!it || (ed.editing && ed.selected === it)) continue;  // never fight the hand that holds it
+      ed.runHome(it);             // saves keep where it was edited to, never the frame the timeline is on (2026-10-12)
       ed.setBlenderWorld(it, sample(ks, st.t, (anim.interp || {})[name]));
     }
     for (const g of growers) {

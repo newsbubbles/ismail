@@ -935,18 +935,22 @@ export class Editor extends THREE.EventDispatcher {
     if (!quiet) this.setStatus(`applied ${n} saved edits from edits.json`);
     return { applied: [...new Set(applied)], missing: [...new Set(missing)] };
   }
-  async save() {
-    if (!this.loaded) throw new Error('the scene is still loading: nothing to save');
+  // one save request for every save (the normal one and the last-moment one when the tab hides): the current scene,
+  // and what was edited at the last save or load and is back to the export now (the server drops it from edits.json)
+  saveRequest() {
     const edits = this.computeEdits();
-    // what was edited at the last save or load and is back to the export now: the server drops it from edits.json
     const before = JSON.parse(this.savedJSON || '{}'), reverted = {};
     for (const k of ['objects', 'lights', 'materials']) {
       const gone = Object.keys(before[k] || {}).filter((n) => !(n in (edits[k] || {})));
       if (gone.length) reverted[k] = gone;
     }
+    return { edits, url: `save?scene=${encodeURIComponent(this.sceneName)}`, body: JSON.stringify({ ...edits, reverted }) };
+  }
+  async save() {
+    if (!this.loaded) throw new Error('the scene is still loading: nothing to save');
+    const { edits, url, body } = this.saveRequest();
     try {
-      const r = await fetch(`save?scene=${encodeURIComponent(this.sceneName)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...edits, reverted }) });
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || r.status);
       const c = j.counts;
