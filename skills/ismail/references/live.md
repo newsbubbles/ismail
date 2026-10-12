@@ -260,6 +260,28 @@ songs/<slug>/
   clip changes.
 - Temp files go to your scratchpad, not `set/`. Measurements are saved as files, not only printed.
 
+### A new piece while the engine runs
+
+A new set or jam starts in its own folder (SKILL.md, "One piece, one folder"), even when an engine already plays
+in another one. An engine belongs to the folder it was started in: the ops and a djkit `Set` find it by that
+folder, and its `live_track` voices and `track:<name>` instruments, `live_record` takes, `live/listen.wav`, controls
+and the phone inbox all come from or go to that folder. No op moves a running engine to another folder, so the
+hand-over is a stop and a start:
+
+1. Make the new folder first: `project_new` there, copy or import what it reuses (voices into its `voices/`, the
+   control module into `set/`) and name each source in its notes.
+2. Finish the current pass or fade it, and tell the person the music stops for a moment. Then
+   `live_stop(project=<old folder>, fade_sec=...)` at a phrase end; it closes any recording.
+3. `live_start(project=<new folder>, bpm=...)`, or `Set('<new folder>').start(bpm)`; its reply names any engine
+   still running elsewhere. Turn `live_record` on again if it was on.
+4. Re-arm the phone watcher on `<new folder>/notes/phone_inbox.jsonl`. The phone page follows the newest engine by
+   itself, so the inbox moves with it, but a watcher on the old file hears nothing. An inbox set with
+   `phone_route(inbox=...)` stays where it points; `phone_route()` sends it back to the playing engine.
+
+Without a restart, a finished song from another folder plays on a deck by its path (`live_load(deck=,
+song=<its folder>)`), and its tracks render with that song's own voices and sound bank. That plays a piece inside a
+set; it does not make a new one: tracks made with `live_track` and every take still land in the engine's folder.
+
 ## Performers and phrase voices
 
 A code voice renders one note at a time, so legato, slides and bends between notes need another shape.
