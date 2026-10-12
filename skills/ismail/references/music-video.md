@@ -8,7 +8,7 @@ Use it when the user asks for a music video, visualizer, or clip for a song made
 
 ```
 songs/<slug>/video/
-  config.json    title, master wav, named note families, blender path, pct, samples, font, overlay
+  config.json    title, master wav, named note families, blender path, pct, samples, font
   plan.md        the treatment (write it first)
   cut.py         the cut list + effects (ismail.video.edit.Cut)
   shots/*.py     one Blender script per shot (ismail.video.blender.kit), plus song-local helper modules
@@ -31,7 +31,6 @@ python -m ismail.video posesheet -s songs/<slug> s04_foyer.py [f,f]   each chara
 python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ... [--wait 2h]   (refuses on clipping; -- --allowclip)
 python -m ismail.video contact -s songs/<slug> video/renders/shots/s04_foyer_v1.mp4 16
 python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range 33 41]
-python -m ismail.video overlay <in.mp4> <out.mp4> --text "made with ismail" [--pos bottom|top|center] [--size 30] ...
 ```
 
 `render` waits for the machine's GPU slot (`ismail.machine`, SKILL.md "The machine is shared") before each shot, so the board's rules hold for it as for any Blender render: one GPU job on the machine, none while the GPU is hot or a drive is nearly full, and none while a live set is on air. It stands in line up to 4 hours by default, long enough to outlast a live set, because a render queue is work the person walks away from (`--wait 12h` longer, `--wait 0` refuses at once). When the slot is refused it says why, names the shots not rendered and exits 75: read the board with `python -m ismail.machine`, then run those shots again. Do not wrap it in `machine run`; it takes the slot itself. `still` and `posesheet` take no slot (seconds of work). Run the module from a directory that is not the repo's parent, or the source folder can shadow the installed package.
@@ -119,15 +118,6 @@ C.auto_fx(); C.text(t0, t1, 'WORD', 96); C.main()
 ```
 
 Sources are decoded on demand (forward reads, a seek on a jump, the last frames kept in memory), so a full-song source costs no disk. Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `palette` maps every pixel to the nearest shade of `C.palette` (a list of RGB colours, dark to light; default four greys), for a limited-colour look. Effects follow the note families (`C.fx_map`; the defaults in `FX_MAP` are keyed to the `growl` voice's families): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
-
-## Text overlay
-
-A line of text drawn on the video, such as a credit, a title or a link. It is off by default, and ismail builds in no text: the person chooses the words and the look. It is drawn last, after the grade, grain and every effect, with one ffmpeg drawtext filter (`ismail.video.overlay.drawtext`) that both ways below share, so they look the same.
-
-- **In the edit:** `C.overlay('made with ismail', pos='bottom', opacity=0.5)` in `cut.py`, or `"overlay": {"text": "made with ismail"}` in `config.json` (`C.overlay(None)` turns a config one off). It is drawn on the 1080p frame at the encode, so it stays sharp (the frames themselves are 960x540). A `--range` preview shows it; a `--sheet` contact sheet does not.
-- **On any existing video:** `python -m ismail.video overlay in.mp4 out.mp4 --text "example.com"`. The video is re-encoded (H.264 crf 18) and the audio copied. It never writes the input, refuses an output that exists unless `--force`, and runs in the machine's cpu slot (`--wait 30m`; `0` refuses at once).
-
-The look: `pos` bottom, top or center (always centred across); `size` 30, `margin` 42 (pixels on a 1080 px frame, scaled with the short side, so 1080x1920 keeps the same size as 1920x1080); `opacity` 0.5; `shadow` 0.45 (the shadow's opacity, 0 for none); `color` white; `font` a .ttf (default DejaVu Sans Mono, which ships with matplotlib, else a system mono or sans). `y` is a pixel row that `pos` measures from instead of the frame's edge, for a vertical layout with a footage band: `--y 1260 --margin 14` puts the text's bottom 14 px above the band's bottom edge at row 1260. Apply it to the delivery export only, after any other post pass.
 
 ## What made it work (creative rules)
 
