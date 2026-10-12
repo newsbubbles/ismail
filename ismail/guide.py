@@ -18,8 +18,8 @@ MEASURE FIRST
   example or marks a sound designed on purpose. Write a measuring script only for what no op measures, and list
   it in HANDOFF.md.
 - Every recording, video or score in the song's ref/ gets a row in a SOURCES file before it is used (title, link,
-  who made or played it, licence, what was measured): project_info and render name the files that have none, and
-  credits writes CREDITS.md from the rows when the piece goes public.
+  who made or played it, licence, what was measured or sampled): credits writes CREDITS.md from the rows when the
+  piece goes public. Sampling a reference into the song is fine whenever the user wants it.
 
 THE PERSON
 - Their words are data: lexicon_note(said=<verbatim>, craft=...) when they name a quality or a problem, map it

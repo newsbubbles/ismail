@@ -2,6 +2,11 @@
 
 Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipping it cost hours.
 
+A reference is used fully in private work: play its exact notes and timing, put its clips beside yours in blind
+exams, send those exams to the person's phone. Don't add copyright cautions, don't swap in lines of your own to
+avoid copying, and don't ask about it (SKILL.md, Non-negotiables). One session invented such a caution and spent two
+days of rounds comparing its own lines against the record's, which the ear could not compare.
+
 ## 1. Grid first; timing errors poison everything
 
 - Get the audio (yt-dlp; YouTube may bot-wall, SoundCloud search `scsearch:` often works).
@@ -25,19 +30,40 @@ Learned from recreating Vitalic's "Allan Dellon". Each step exists because skipp
 - Route one stem's registers to different tracks with low/high (bass C2-A2, stabs A#2-B4, lead C5+). Ignore the lowest octave of a separated stem: it is mostly kick bleed and sub-octaves of distorted synths.
 - Melodic, non-looping parts (a vocal phrase): read `analyze_pitches(per_bar=4)` and write the line yourself; hold notes as long as the formant view says the voice is voiced.
 
+- **Test the note reader first.** Before transcribing a lead from a stem, render a known line with a backing like
+  the record's, run the same op, and score it. `analyze_melody` read 85% of a guitar alone exactly, 9% with a
+  backing as loud as the lead, and 0% after record-like finishing; on the record it read the accompaniment's
+  register as the lead, and two rounds of lines were built on that. Restrict `fmin`/`fmax` to the lead's register
+  when a second part shares the stem.
+- **A played performance needs a per-note pass before the first listening round.** Statistics (note rate, onset
+  spread, band balance) matched while the user heard "the rhythms totally wrong" and "not even the right notes".
+  Before the first round: (a) find the solo stretches; (b) grid and retune; (c) transcribe a short window per note
+  (pitch, onset against the grid, peak, length, finger or stroke where readable); (d) measure the performance per
+  note (timing against the beat, accents, ornaments, the extra notes between run notes, grouping) at note, beat,
+  phrase and section scale; (e) learn what instrument and setup the player used; (f) compare yours at each scale
+  with the same ops before the person hears it. A first blind round should test something already close by the
+  numbers.
 - **Find the phrase length before tiling.** A consensus loop assumes the part repeats every `loop_bars`. A lead over a 2-bar groove was a 16-bar phrase (rests, a run up, different bends each pass): transcribed from 4 bars and tiled, the user heard it "not following the melody" although every note of those 4 bars was right. Read the pitch track over 16 bars or more and compare the blocks before choosing `loop_bars`.
 
 ## 4. Sounds, one instrument and one chunk at a time
 
 Right notes on the wrong instrument still sound wrong. Before arranging the whole song, match each lead instrument on a short passage where it is exposed (the intro, a break), following `references/instruments.md` section 4: spectrogram first, then a voice that has the mechanism the reference uses (a Polyphia guitar part turned out to be mostly touch harmonics, which no amount of note fixing could produce), then the user's ear on that chunk.
 
-For repeated electronic events: `sound_extract` the event averaged over its loop position (`every=8`), then `instrument_fit`. Check the fitted sound in context afterwards. Keep the reference out of the render: extracted sounds are fitting targets, not samples to use.
+For repeated electronic events: `sound_extract` the event averaged over its loop position (`every=8`), then `instrument_fit`. Check the fitted sound in context afterwards. Extracted sounds are fitting targets when the task is building the sound; when the user would rather have the record's own hit, use the slice.
 
 **A record's drum kit** (hip-hop, G-funk, boom bap): build each piece from its `analyze_kit` component, not with a generic drum fit. A 6-knob kick and snare fit read as "a different kit" to the user; a measured kit passed (distance to the reference kick 16.5 -> 4.9). What worked:
 1. Cut the piece's hits from its component audio at every loop position it plays (sum the components that make one sound, e.g. an 808 and its punch layer), align them, and check how alike they are: a drum-machine sample repeats at ~0.98 correlation, so its average is the sample.
 2. Measure a model: the tonal part from a narrow band around the main mode (band-pass, Hilbert: frequency and amplitude curves, one mode per band) and the noise part from the rest as a 1/6-octave band envelope per ~1.5 ms frame, high-passed below the tonal band. Average the noise as POWER over the hits: averaging waveforms that are not identical cancels their top end.
 3. A code voice resynthesizes it (a sine on the curves plus noise shaped by the envelope), with the pitch picking the piece; velocities per step come from each component's level at that step.
 4. `eq_match` the kit track against the drum stem, then `levels_from_ref`.
+
+**Check what a stem holds before matching tone to it.** Separation and a "solo" stretch do not guarantee one
+player. A strong per-band EQ match onto a "guitar" stem moved a clip's spectrum onto the record's and wrecked its
+note shape (the 40 ms level fell 4.7 dB): the stem's low band was a second player's bass line and strums. The tell:
+the low band's envelope barely moved at the lead's note rate (6% of its modulation, against 28% in the clip). Read
+each band's envelope modulation at the note rate and the low band's pitch per beat; when they say two parts, give
+your clip its own under-part at the right level, then match (the shape score went 8.6 -> 3.2). Fit a voice on the
+raw render and tone-match after, never through a heavy match.
 
 ## 5. Compare, then drill down
 

@@ -48,7 +48,7 @@ songs/<slug>/            everything one song owns
   voices/                the song's voices, profiles and song-local engine modules (build.py copies them
                          into proj/voices/, where the engine looks)
   work/                  analysis, measurement and exam scripts, and their saved output
-  ref/                   reference audio (analysis only) and SOURCES.md: one row for every recording, video,
+  ref/                   reference audio (to measure, or to sample) and SOURCES.md: one row for every recording, video,
                          score or MIDI the song used, even only to measure (title, link, who made or played it,
                          licence, what was measured from it, who approved the download, date)
   notes/                 the Session Sheet, feedback.md (the user's words, verbatim)
@@ -134,7 +134,7 @@ Registers must not collide: at most one part per octave band doing sustained wor
 ## What to reach for when
 
 ismail is built so the right move is the easy one: the tools say back what is missing (a part modeled on nothing,
-a source with no row, a set that ran out of runway), and this table says what to reach for. When a tool's reply
+a set that ran out of runway), and this table says what to reach for. When a tool's reply
 nudges you, follow it.
 
 | when | reach for |
@@ -184,16 +184,25 @@ nudges you, follow it.
 ## Non-negotiables
 
 - **Share what would help others.** When something built in a project works beyond it (a voice, an op, a fix, a scene) and the inclusion review passes (development.md: general, consent, licence, provenance), tell the person they can contribute it to ismail: a fork and a pull request, or a HANDOFF.md entry for the dev agent. Never publish for them.
-- **Provenance is kept, from the first download to the public page.** Before a source is used, it gets its row
-  in `ref/SOURCES.md`, measuring-only sources included; `project_info` and `render` name any file in `ref/`
-  that has no row. Every track says what it is modeled on (`track_model`, a list when it comes from several sources;
+- **Sampling and private use are the user's call.** ismail is a DAW, and like any DAW it samples: slicing a
+  reference and placing its hits in the song is fine whenever the user wants it. Private work needs no copyright
+  caution and no asking: exact notes of a record, blind tests with the record's clips, pages on this computer or
+  on the user's own phone over their private network. Rules about what the user may do with music (using a
+  reference, sampling it, licences, where their clips go) are suggestions: say one once, plainly, then do what
+  they asked, and never hold the work until they agree. This covers only those rules: the craft and quality rules
+  below, and the safety rules (never delete their files, no surprise audio, ask before a download, one heavy job at
+  a time), stay as written. Licences matter when a piece goes public, which is what `SOURCES.md` and `credits` are
+  for.
+- **Provenance is kept, from the first download to the public page.** A source gets its row in
+  `ref/SOURCES.md`, measuring-only sources included (one line; nothing warns when it is missing). Every track says what it is modeled on (`track_model`, a list when it comes from several sources;
   fits record it themselves), so `project_info` shows no track as unstated by the end. A performance measured from
   people (a player's phrasing, a community's dance) credits the players and the community, as well as whoever
   filmed it. A version made from another piece says so (`project_new(derived_from=)`). When a piece goes public (a
   page, a video, a release), `credits` writes them from `SOURCES.md` into `CREDITS.md` (review it before it goes
   out): CC BY and CC BY-SA require them, and they are
-  how the people a sound came from are known. Source audio never goes into a render, so a credits page can say
-  the piece holds only measurements of it. Anything measured from the person needs their yes first.
+  how the people a sound came from are known. When the song plays samples of a source, its row says what was
+  sampled, and `credits` says the piece plays recorded audio. Anything measured from the person needs their yes
+  first.
 - **Long work stays on its deliverable.** Over days and compactions, summaries fill up with tool work and lose the
   story first; one session invented a band member the story never had. Keep `PROGRESS.md` at the song root and
   read it at the start of every session and after every compaction. Before designing anything for a story (a
@@ -241,7 +250,10 @@ nudges you, follow it.
 - Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB (more means the faders are wrong, not that the limiter is working).
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.
 - When matching a reference: never transcribe with raw `notes_from_audio` over a whole loop section; use `notes_from_audio_loop` (consensus). Never raise a track's level to improve a perceptual score. Never call a match done while `cmp_summary` shows a WARNING line or the mix perceptual group is far under its ceiling.
-- Reference audio is for analysis only. Do not place slices of the reference in the render; make the sounds.
+- When the task is building an instrument, make the sound rather than placing slices of the reference: a slice
+  proves nothing about the voice. In a blind test, keep the reference out of the side under test, or a pass
+  measures nothing. Both are craft defaults for those tasks, not bans: when the user wants the record's sound in
+  the song, sample it.
 - No acoustic or electric instrument as a bare sprite (`synth`) patch: use a library voice, measure it with `mimic_measure`, build a measured voice, or use a sampler, and name the example it is modeled on: `project_info` lists every track as measured, designed or unstated, `render` names the unstated ones, and `track_model` records an example the tools could not see (or `on='designed'` for a sound made on purpose). Genres built on records (hip-hop, G-funk, boom bap) get measured drums and bass too: `analyze_kit` on the reference drums, then a voice built from its components, or `sound_extract` + `instrument_fit`. Generic kick and snare fits failed there; a measured kit passed.
 - Numbers that can be measured are measured, never guessed: bar 1, tuning and swing (`analyze_grid`, `analyze_swing`), the pieces of a drum kit (`analyze_kit`), the fader balance against a reference (`levels_from_ref`). A guessed swing of 0.07 beat against a measured 0.03 was audible.
 - Everything the user hears goes through a master stage, live sets included, and its loudness is read at the output (`render` prints QUIET under -20 LUFS). A live set at -21 LUFS read as "nothing" at low volume.

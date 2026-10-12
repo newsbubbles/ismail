@@ -1,8 +1,8 @@
 """Where a song's sources came from: every recording, video, score or MIDI in its ref/ folders has a row in a
 SOURCES file, and the credits of a public piece are written from those rows.
 
-The skill asks for a SOURCES.md row before a source is used; this module makes the project say it back on every
-project_info and render (files with no row, rows without a licence or an author), and `credits` writes CREDITS.md
+The skill asks for a SOURCES.md row for each source; project_info counts the files and the rows (and rows without a
+licence or an author) without warning about the rest, and `credits` writes CREDITS.md
 from the rows, the tracks' models and the lineage, the way the first showcase credits page was written by hand.
 
 A file counts as listed when its name, or its name without the extension, appears in any SOURCES file of the song
@@ -164,7 +164,8 @@ def _few(xs, n=4):
 
 
 def summary(root, d=None):
-    """-> (lines for project_info, one line for render or '' when every source has its row)."""
+    """-> (lines for project_info, '' for render). A ref file without a row is not warned about: the row is a
+    habit for credits, and `credits` lists what it could not credit when a piece goes public."""
     s = scan(root, d)
     if not s['files'] and not s['reference']:
         return [], ''
@@ -173,21 +174,10 @@ def summary(root, d=None):
     if n:
         L.append(f"sources: {n} files in ref/, {n - len(un)} with a row in a SOURCES file "
                  f"({len(s['sources'])} SOURCES file{'s' if len(s['sources']) != 1 else ''})")
-    if un:
-        L.append(f"  no SOURCES row: {_few(un)}. Add one per source before using it ({ROW}): credits are "
-                 f"written from these rows")
-    if s['reference'] and not s['reference_listed']:
-        L.append(f"  the reference {os.path.basename(s['reference'])} has no SOURCES row: add one in the song's "
-                 f"ref/SOURCES.md")
     if s['incomplete']:
         L.append(f"  {len(s['incomplete'])} rows without a licence or an author: " +
                  _few([f"{lbl} ({'/'.join(m)})" for _, lbl, m in s['incomplete']], 3))
-    short = ''
-    missing = len(un) + (0 if s['reference_listed'] else 1)
-    if missing:
-        short = (f"  sources: {missing} reference file{'s' if missing != 1 else ''} with no SOURCES row "
-                 f"(project_info lists them; credits are written from those rows)")
-    return L, short
+    return L, ''
 
 
 # ------------------------------------------------------------------ credits

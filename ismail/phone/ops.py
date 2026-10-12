@@ -387,10 +387,20 @@ def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
                     new_key[lab] = key[c['label']]
         if fl:
             rec.append({'pair': i, 'rate': fl[1], 'mp3_side': fl[2]})
-    hist.append({'exam_id': eid, 'at': time.strftime('%Y-%m-%d %H:%M'), 'floors': rec})
+    return new, (new_key if key else None), {'exam_id': eid, 'floors': rec, 'labels': labels, 'from': str(src)}
+
+
+def _floor_remember(record):
+    """The floor round counts once the exam is on the phone: a pre-flight that refused it used up nothing
+    (spanish_guitar 10-11: four refused posts spent the full set on the first round)."""
+    hist_f = S.HOME / 'floor_rounds.json'
+    try:
+        hist = json.loads(hist_f.read_text(encoding='utf8'))
+    except (OSError, ValueError):
+        hist = []
+    hist.append({'exam_id': record['exam_id'], 'at': time.strftime('%Y-%m-%d %H:%M'), 'floors': record['floors']})
     hist_f.parent.mkdir(parents=True, exist_ok=True)
     hist_f.write_text(json.dumps(hist, indent=1), encoding='utf8')
-    return new, (new_key if key else None), {'exam_id': eid, 'floors': rec, 'labels': labels, 'from': str(src)}
 
 
 @op()
@@ -411,28 +421,36 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
     maps the new labels back to yours and says which side of each floor pair is the MP3. floor_from: the real clip
     (default: the first clip keyed real, record or ref). A floor pair told apart more often than chance means the
     phone and the ear separate even an MP3 copy; a floor never told apart means a "can't tell" on a real pair is
-    about the voice, not the device."""
+    about the voice, not the device. The pre-flight checks your pairs only (a floor pair is one clip against itself,
+    in WAV beside clips of any format), and a refused exam uses up no floor round."""
     record = None
     if floor:
         if floor not in ('auto', 'full'):
             raise OpError("floor is 'auto' (the full set the first time, then one rotating pair) or 'full'")
         clips, key, record = _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path)
-        if answers_path:
-            with open(answers_path + '.floor.json', 'w', encoding='utf8') as f:
-                json.dump(record, f, indent=1)
     if check:
         from .. import exam_check as EC
         cl = [c if isinstance(c, dict) else {'path': c} for c in clips or []]
+        floor_labels = {f"{r['pair']}{ab}" for r in (record or {}).get('floors', []) for ab in 'AB'}
+        # a floor pair is one clip against itself (decoded to WAV): it gives no class away, so the format, length
+        # and order checks are about the person's pairs only (spanish_guitar 10-11: WAV floors beside MP3 clips
+        # failed "formats differ by class")
         texts = {'the page text': ' '.join([title, question] + [str(c.get('note', '')) for c in cl]
                                            + [str(c.get('label', '')) for c in cl])}
         ready, lines = EC.run(clips=[{'label': c.get('label') or chr(65 + i), 'path': c.get('path')}
-                                     for i, c in enumerate(cl)], key=key, secrets=secrets,
+                                     for i, c in enumerate(cl) if c.get('label') not in floor_labels],
+                              key={k: v for k, v in key.items() if k not in floor_labels} if key else key,
+                              secrets=secrets,
                               answers_path=answers_path, texts=texts)
         if not ready:
             raise OpError('the exam was not shown, its pre-flight failed:\n' + '\n'.join(lines))
     out = _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
                 choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
     if record:
+        _floor_remember(record)
+        if answers_path:
+            with open(answers_path + '.floor.json', 'w', encoding='utf8') as f:
+                json.dump(record, f, indent=1)
         out += ('\nfloor pairs: ' + ', '.join(f"pair {r['pair']} {r['rate']}" + (f" (the MP3 is {r['mp3_side']})"
                                                   if r['mp3_side'] else '') for r in record['floors'])
                 + '; your pairs are now ' + ', '.join(f'{k}={v}' for k, v in record['labels'].items()))
