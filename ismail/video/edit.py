@@ -16,6 +16,8 @@ A song's video/cut.py:
     python video/cut.py --range 33 41       a preview mp4 of bars 33-40
 
 Frames are processed at 960x540 (shots render there on a slow GPU) and lanczos-scaled to 1920x1080 on encode.
+C.overlay(text, ...) (or "overlay" in config.json) draws a line of text on every output frame, last, at 1080p
+(ismail.video.overlay); off by default.
 """
 import json
 import os
@@ -26,6 +28,7 @@ import time
 import numpy as np
 
 W, H = 960, 540
+OW, OH = 1920, 1080        # the encoded size
 
 # growl family (and named family) -> effect
 FX_MAP = {'wub': 'wub', 'yoi': 'yoi', 'screech': 'screech', 'metal': 'metal', 'zap': 'zap', 'dive': 'dive',
@@ -121,6 +124,10 @@ class Cut:
         self.grade_gamma = 0.85
         self.palette = [(20, 20, 20), (90, 90, 90), (170, 170, 170), (235, 235, 235)]   # RGB, dark to light
         self.palette_gain = 1.25                        # brightens night renders before they are mapped
+        self.overlay_text = None                        # C.overlay(): (text, look), a line on every output frame
+        if self.cfg.get('overlay'):                     # {"text": ..., "pos": ..., ...}
+            ov = dict(self.cfg['overlay'])
+            self.overlay(ov.pop('text', ''), **ov)
 
     # ---- time
     def B(self, bar, beat=0.0):
@@ -179,6 +186,28 @@ class Cut:
 
     def text(self, t0, t1, s, size=96, cx=W / 2, cy=H / 2):
         self.texts.append((t0, t1, s, size, cx, cy))
+
+    def overlay(self, text, **look):
+        """a line of text (a credit, a title, a link) on every output frame, drawn last: after the grade, the grain
+        and the scanlines, at 1080p by ffmpeg drawtext on the encode, so it stays sharp and matches
+        `python -m ismail.video overlay`. look: pos bottom|top|center, size (px at 1080, 30), opacity (0.5),
+        shadow (0.45; 0 for none), font (a .ttf; default DejaVu Sans Mono), margin (px, 42), y (a pixel row pos
+        measures from), color. Off by default; overlay(None) turns off one set in config.json. Contact sheets
+        (--sheet) show the frames without it; a --range preview shows it."""
+        from .overlay import drawtext
+        if text is None:
+            self.overlay_text = None
+            return
+        drawtext(text, OW, OH, **look)                # checks the options and finds the font now, not at the encode
+        self.overlay_text = (text, look)
+
+    def vf(self):
+        """the encode's ffmpeg video filter: the 1080p scale, then the overlay (if any), last."""
+        vf = f'scale={OW}:{OH}:flags=lanczos'
+        if getattr(self, 'overlay_text', None):
+            from .overlay import drawtext
+            vf += ',' + drawtext(self.overlay_text[0], OW, OH, **self.overlay_text[1])
+        return vf
 
     # ---- effects
     def hold(self, key, t0, t1, amp=1.0):
@@ -393,7 +422,7 @@ class Cut:
         cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(self.fps), '-i', '-']
         if audio:
             cmd += ['-ss', f'{t0 / self.fps:.4f}', '-t', f'{(t1 - t0) / self.fps:.4f}', '-i', self.master]
-        cmd += ['-vf', 'scale=1920:1080:flags=lanczos', '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+        cmd += ['-vf', self.vf(), '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
                 '-maxrate', '24M', '-bufsize', '48M', '-pix_fmt', 'yuv420p', '-r', str(self.fps)]   # grain at 1080p made a 1.9 GB file
         if audio:
             cmd += ['-c:a', 'aac', '-b:a', '320k', '-shortest']

@@ -10,6 +10,7 @@
                             refuses on clipping unless -- --allowclip
   contact <video> [n]       contact sheet of n frames of any video -> video/build/look/contact_<name>.png
   edit [-- --sheet a b n | -- --range a b]   runs video/cut.py (sheet = contact sheet of bars a..b-1)
+  overlay <in.mp4> <out.mp4> --text "..."    a line of text on a copy of any video (no --song; `overlay -h` for the look)
 """
 import argparse
 import glob
@@ -160,6 +161,9 @@ def main():
     ap.add_argument('--wait', default=RENDER_WAIT, help="render: how long each shot stands in line for the machine's "
                     "GPU slot (4h by default, 12h; 0 refuses at once)")
     argv = sys.argv[1:]
+    if argv[:1] == ['overlay']:                    # its own options (the look), and no song
+        from .overlay import main as overlay
+        sys.exit(overlay(argv[1:]))
     extra = []
     if '--' in argv:
         i = argv.index('--')

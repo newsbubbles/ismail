@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Video: a text overlay
+
+- New `python -m ismail.video overlay <in.mp4> <out.mp4> --text "..."`: a line of text (a credit, a title, a link)
+  drawn on a copy of any video with ffmpeg drawtext, the audio copied. `--pos bottom|top|center`, `--size 30`,
+  `--margin 42` (pixels on a 1080 px frame, scaled with the video's short side), `--opacity 0.5`, `--shadow 0.45`
+  (0 for none), `--color`, `--font` (default DejaVu Sans Mono from matplotlib, else a system mono or sans), `--y` (a
+  pixel row the position measures from, for a band in a vertical layout). It never writes the input, refuses an
+  output that exists unless `--force`, and runs in the machine's cpu slot (`--wait`).
+- In the edit: `C.overlay(text, ...)` in a cut list, or `"overlay": {"text": ...}` in `video/config.json`, draws
+  the same line on every output frame, last (after the grade and grain), at 1080p on the encode. Off by default;
+  no text is built in. Both ways use one filter builder, `ismail.video.overlay.drawtext`.
+- `music-video.md` has a "Text overlay" part.
+
 ### Dev: dev copies (git worktrees) tracked by a tool
 
 - New `python -m ismail.worktrees`: every dev copy of the repository (a git worktree) on one line, with its branch,
