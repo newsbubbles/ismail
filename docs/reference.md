@@ -12,10 +12,13 @@ pip install "ismail @ git+https://github.com/newsbubbles/ismail"                
 pip install "ismail[perceptual] @ git+https://github.com/newsbubbles/ismail"    # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
 pip install "ismail[separate] @ git+https://github.com/newsbubbles/ismail"      # optional: demucs stem separation for reference tracks
 pip install "ismail[live] @ git+https://github.com/newsbubbles/ismail"          # optional: play live to your speakers (sounddevice)
+pip install "ismail[voice] @ git+https://github.com/newsbubbles/ismail"         # optional: autotune and formant shifts on a voice (pyworld)
+pip install "ismail[video] @ git+https://github.com/newsbubbles/ismail"         # optional: the music-video pipeline (opencv, pycollada, pillow)
 ```
 
 Or run the MCP server without installing anything, with [uv](https://docs.astral.sh/uv/):
-`uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`.
+`uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`. The `--python 3.12` keeps uv on
+a Python the compiled libraries have wheels for; the first start builds them and can take minutes.
 
 To work on ismail itself (or to have the skill and examples on disk), clone it and install in place:
 
@@ -58,7 +61,7 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 1. **Tools.** Open Claude Code in a clone of this repo and the bundled `.mcp.json` registers the server; the tools show up as `mcp__ismail__*`. To use ismail from any folder instead:
 
    ```bash
-   claude mcp add -s user ismail -- uvx --from git+https://github.com/newsbubbles/ismail ismail mcp
+   claude mcp add -s user ismail -- uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp
    # or, after pip install: claude mcp add -s user ismail -- ismail mcp
    ```
 
@@ -77,15 +80,15 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 
 ## Use it with Cursor
 
-1. **Tools.** Opening this folder in Cursor picks up `.cursor/mcp.json`. To use ismail in other projects, add the same entry to `~/.cursor/mcp.json`:
+1. **Tools.** Opening this folder in Cursor picks up `.cursor/mcp.json`, which runs the server from this checkout (`python -m ismail.mcp_server`). To use ismail in other projects, add this entry to `~/.cursor/mcp.json`:
 
    ```json
-   {"mcpServers": {"ismail": {"command": "uvx", "args": ["--from", "git+https://github.com/newsbubbles/ismail", "ismail", "mcp"]}}}
+   {"mcpServers": {"ismail": {"command": "uvx", "args": ["--python", "3.12", "--from", "git+https://github.com/newsbubbles/ismail", "ismail", "mcp"]}}}
    ```
 
 2. **Skill.** `.cursor/rules/ismail.mdc` is an agent-requested rule that points Cursor's agent at `skills/ismail/SKILL.md`. Copy that rule (and the `skills/ismail` folder) into another project to use it there.
 
-Any other MCP client works the same way: run `ismail mcp` (or `uvx --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
+Any other MCP client works the same way: run `ismail mcp` (or `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
 
 ## Quick start (CLI)
 
@@ -106,13 +109,84 @@ python -m ismail -p songs/demo analyze_melody source=track:bass bars=[1,2]
 
 Keep your projects under `songs/` (git-ignored) or anywhere else; a project is just a folder.
 
+## What's built today
+
+Find any tool by what you need or by role with `ops_find`.
+
+- **The DAW.** Songs as code (notes, instrument patches, effect chains, automation in a project file), rendered and
+  read back as text. Named effect stacks (`fx_stack_*`, `stack:<name>`) and an `autotune` effect. A second part
+  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
+  (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
+  (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from.
+- **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
+  track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
+  (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
+  DJ kit for whole cycles of moves (`ismail.live.djkit`).
+- **The VR stage** (`ismail/stage`, the `stage_*` tools): a three.js WebXR page for a desktop browser or a headset,
+  and a small server that carries the live link between the page and the agent. Scenes live in the song's folder.
+  The agent drives the page with ops and reads what the person did and said with `stage_events`. Objects carry
+  their own behaviour; dance takes recorded in the headset play on a character, synced, looped or warped; lip sync
+  (`stage_face`); frame-locked video of a scene (`stage_capture`). The guides: [stage.md](../skills/ismail/references/stage.md),
+  [stage-takes.md](../skills/ismail/references/stage-takes.md), [rigged-characters.md](../skills/ismail/references/rigged-characters.md).
+- **The phone page** (`ismail/phone`, the `phone_*` tools): live listening with the screen off, voice notes sent back
+  with the bar being heard, and panels the agent puts on the page (buttons, inputs, pictures, video), queued rather
+  than popping up. Hum a part (`phone_hum`), pick where the sound goes, pause to stop the set. An agent keeps a
+  standing watch on its inbox with `phone_watch`.
+- **Exams**: blind exams on the phone (`phone_exam`, with floor pairs: the real clip against a 64 or 128 kb/s MP3
+  copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
+  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
+  soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **The first session** for someone new: `guide(new_person=True)`, `sketch` versions 1, 2 and 3 on the showcase
+  voices (`sketch(base=)`, `sketch_keep` for the next round), and feeling words ("happier", "calmer", "darker") that
+  change a sketch by named moves.
+- **Showcase voices**, each measured from recordings or fitted to a record: piano, violin, cello, contrabass,
+  clarinet, bassoon, horn, a 1970 kit, a fitted electric guitar and bass, and sampled Rhodes, drum and guitar sets
+  (see [Voices](#voices-instruments-as-code) and [Sample sources](#sample-sources)). Clarinet, bassoon and horn
+  were measured from VSCO 2 CE (CC0) and checked blind against the real recordings on 2026-10-07 (clarinet not told
+  apart; bassoon and horn told apart but rated good enough; one listener, one pair each). Flute, oboe, trumpet,
+  trombone and tuba were measured too and heard as synthetic, so they stay out until they pass.
+- **Developing it with agents**: roles for studio agents, contributor devs, area devs and helpers
+  ([development.md](../skills/ismail/references/development.md),
+  [contributor-dev.md](../skills/ismail/references/contributor-dev.md)), one worktree per change
+  (`python -m ismail.worktrees`, [worktrees.md](../skills/ismail/references/worktrees.md)), and an intake of what
+  songs need from the engine (`python -m ismail.handoffs`).
+
+## The agent team
+
+ismail is built by a team of AI agent sessions, each with one role, and one person deciding:
+
+- Director: keeps the roster, the board and the decision queue, and carries decisions to the agent they concern.
+- Maintainer: maintains the repo (core, the op table, tests, CI, the skill) and reviews and merges pull requests.
+- VR Dev: owns `ismail/stage`: the page runtime, the server, the stage ops, headset tests.
+- Film: makes a film on the stage and is the stage's main user.
+- Live DJ: plays live sets and tests the `live_*` ops under real-time use.
+- Voice: voice modeling research, checked by blind ear exams.
+- Multiplayer: research on shared worlds for the VR stage.
+- Research: experiments and measurement.
+- Business: go-to-market work.
+- Marketing: launch videos, posts, the site's story and the first-session product shape.
+- Steward: keeps the shared machine healthy (GPU, CPU, memory, disk) and the heavy-job queue moving.
+- Historian: records whose ideas, senses and labor built ismail, and the provenance of what goes public.
+
+## Sample sources
+
+Measured or sampled voices come from these sets. The audio itself stays out of the repo (mimic profiles hold measurements only; sampled sets are fetched on the person's word with `samples_fetch`).
+
+| set | used for | licence |
+|---|---|---|
+| [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE) (Versilian Studios) | the `violin`, `contrabass`, `clarinet`, `bassoon` and `horn` mimic profiles | CC0 1.0 |
+| "real cello notes" by flcellogrl ([Freesound pack 12408](https://freesound.org/people/flcellogrl/packs/12408/)) | the `cello` mimic profile | CC BY 4.0 |
+| [jRhodes3d](https://github.com/sfzinstruments/jlearman.jRhodes3d) by Jeff Learman | the `rhodes` voice | samples CC BY-NC 4.0; the author grants CC0 for music made with them |
+| [Big Rusty Drums](https://github.com/sfzinstruments/karoryfer.big-rusty-drums) by Karoryfer Samples | the `rusty` voice | CC0 1.0 |
+| [Emilyguitar](https://github.com/sfzinstruments/karoryfer.emilyguitar) by D. Smolken, Karoryfer Samples | the `emily` voice | CC0 1.0 |
+
 ## Concepts
 
 - **Project**: a folder with `project.json` (tempo, grid offset, tracks, buses, master, sound bank, reference) plus `sounds/`, `renders/`, `cache/`, `history/` (undo snapshots) and `comparisons/`.
 - **Time**: bars are 1-indexed; note times are beats relative to the bar you write at. `offset_sec` is the time of bar 1, so a project can sit exactly on a reference recording's grid.
 - **Notes**: `'<beat> <pitch> <dur> [vel] [@offset]'`, one per line or `;`-separated; `@-40ms` nudges a sound off its beat so a late attack lands on it (`track_set(offset_ms=)` for a whole part). Drum and step patterns: `pattern_write` with strings like `X...x...X...x...` (X 127, x 100, o 70, - 45, `_` ties).
 - **Instruments**: two synth engines. **sprite** (`"type": "synth"` or `"sprite"`: saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide) is right for synth sounds. **mimic** (`"type": "mimic"`) plays instruments measured from recordings (see below). Plus `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
-- **Effects**: eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, and a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah. Tracks, buses and the master fader can be automated.
+- **Effects**: gain, eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, hall, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, autotune, and a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah. Tracks, buses and the master fader can be automated. A chain can be saved and reused by name (`fx_stack_*`, `stack:<name>`).
 - **Voices**: engineered instruments kept as Python modules, so a project stores a name instead of code (see below).
 - **Sound bank**: sounds made from any instrument and effect chain (`sound_make`), speech (`sound_speak`), imported files, and averaged events cut from a recording (`sound_extract`). Bank sounds work as sampler sources, wavetables, vocoder modulators and audio clips.
 - **Undo and batch**: every edit snapshots the project (`undo`); `batch` applies a list of ops atomically.
@@ -132,17 +206,15 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | winds | `clarinet` | mimic profile measured from VSCO 2 CE (CC0); not told apart from the real note in a blind pair (one listener, 2026-10-07) |
 | winds | `bassoon` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
 | brass | `horn` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
-| bass | `pbass70`, `sub_bass` | `pbass70` is a waveguide bass fitted to a record's bass stem (a preset of the `electric` performer below); `sub_bass` is a sine, the one plain synth a sketch uses |
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
 | fx | `crackle` | designed vinyl surface noise: clicks and hiss |
-| guitar | `electric` | performer: electric guitar or bass as waveguide strings (pick, pickup comb, pickup resonance) playing a whole part, with legato, slides, bends, whammy, vibrato and mutes as lanes. Presets `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `pbass70`; it is the DI signal, so `voice_help` lists the rig each preset was fitted with |
+| guitar | `electric` | performer: electric guitar or bass as waveguide strings (pick, pickup comb, pickup resonance) playing a whole part, with legato, slides, bends, whammy, vibrato and mutes as lanes. Presets `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `strat70_clean` (the clean guitar a sketch reaches for) and `pbass70` (a bass fitted to a record's bass stem); it is the DI signal, so `voice_help` lists the rig each preset was fitted with |
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 | drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
 | guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
-| guitar | `strat70_clean` | the `electric` performer as a clean single-coil guitar (strat, mono): the showcase electric guitar a sketch reaches for |
 
-Use one with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
+Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
 
 Voices are looked up in this order:
 
@@ -150,7 +222,7 @@ Voices are looked up in this order:
 2. Each folder in `$ISMAIL_VOICES` (a path list): your personal library, outside any repo.
 3. `ismail/voices/`: the built-ins.
 
-Each of these may have family subfolders (`strings/`, `keys/`, `percussion/` ...), searched too; mimic profiles (`<name>.mimic.json`) are found the same way.
+Each of these may have family subfolders (`strings/`, `keys/`, `drums/` ...), searched too; mimic profiles (`<name>.mimic.json`) are found the same way.
 
 A voice function may take extra keyword arguments: `bpm` is passed automatically, and the track's `"params"` dict is passed as keywords (`{"type": "code", "voice": "mine", "params": {"brightness": 0.3}}`). A module-level `INFO` dict documents it for `voice_help`; every key is optional: `summary` (one line for `voices_list`), `range`, `velocity` (what velocity does), `functions` (name to description), `params` (name to description), `lanes` (a performer's expression lanes), `rigs` (fx chains it was fitted with, each with its `preset`) and `tail` (recommended tail).
 
@@ -237,8 +309,9 @@ live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, note
   copies, so heavy voices (mimic, code voices, guitar performers) play live. A clip whose first notes cannot
   render in time lands a bar later, and the reply says so.
 - **It listens to itself.** `live_listen` runs the same analysis as a render on the last bars played.
-- **Safety.** Every output passes a trim, a loudness rider, a lookahead limiter and a ceiling; the limits come
-  from the environment (`ISMAIL_LIVE_TRIM_DB`, `ISMAIL_LIVE_CAP_DB`, `ISMAIL_LIVE_CEILING_DB`), never from the agent.
+- **Safety.** Every output passes a trim, a loudness rider, a lookahead limiter and a ceiling; each set's level
+  is set at `live_start(trim_db=, cap_db=)` (else `ISMAIL_LIVE_TRIM_DB` / `ISMAIL_LIVE_CAP_DB`, else quiet defaults),
+  inside fixed ranges, and the ceiling stays at -1 dBFS.
 - **Decks.** `live_load` puts a whole ismail song on a cued deck while another plays; `live_transition` queues
   the mix (blend, bass swap, filter, cut) with a DJ strip per deck (isolator, filter knob, fader, transpose).
 - **Studio and live.** The studio code is the source of truth. Effects run live as block-by-block twins held to
@@ -316,10 +389,15 @@ ismail/
                  block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
-  voices/        the voice library in family folders: keys (grand_piano, additive_piano), strings (violin,
-                 cello, contrabass, clarinet, bassoon, horn mimic profiles), bass (growl), fx (sfx), guitar (electric),
-                 drums (kit70); showcase.json lists the voices a first sketch uses
-  api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py   the operations (CLI and MCP tools)
+  voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
+                 (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
+                 fx (sfx, crackle), guitar (electric, emily), drums (kit70, rusty); showcase.json lists the voices
+                 a first sketch uses, fx_stacks.json the built-in effect stacks
+  api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
+  api_ops.py     ops_find: the op for a need, by purpose or role
+  presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
+  separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup
+  tags.py        ID3 tags on every mp3; lexicon.py a person's own words mapped to ismail's terms
   mcp_server.py, guide.py
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
   phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
@@ -330,6 +408,7 @@ ismail/
   exam_check.py  the pre-flight every exam page runs before the person sees it (leaks, silent or quiet clips)
   provenance.py  what each track's sound is modeled on: measured, designed or not said
   handoffs.py    intake of the songs' HANDOFF files for the migration loop
+  worktrees.py   dev copies (git worktrees) of ismail: who owns each and how far it is from main
 skills/ismail/   the agent skill (SKILL.md + references)
 .mcp.json, .cursor/   MCP and rule config for Claude Code and Cursor
 songs/           your projects (git-ignored)
