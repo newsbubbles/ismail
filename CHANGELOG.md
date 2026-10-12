@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Stage: nine small bugs from the engine review
+
+Each was wrong before this change (10-12):
+
+- **The last-moment save** when the tab hides or closes now goes to the scene showing, not the one the page opened
+  on. It sends the same request as a normal save (with `reverted`) and counts as saved only when the server answers.
+- **A turn reported in an edit** (`delta.rot_xyz_deg` in transform events) read a Blender-space turn in three's XYZ
+  order (Rx Ry Rz); Blender's XYZ is Rz Ry Rx. A turn on one axis was right; a turn on two or more was not.
+- **Foot pins** (`stage_follow_anchor` joint `foot_l`, `foot_r`, `feet`) now hold on a standing person and over a
+  start pose: the pinned foot goes to its pin and stays, and the other foot steps as before. Before, only a seated
+  person read them.
+- **`stage_view_look_through`** now looks through the camera. The op sent `camera` and the page read only `name`,
+  so it always went back to the editor view. An object that is not a camera is now an error.
+- **`stage_listen`** now hears `behaviour_error`, `object_message` and `page_error`; only `stage_events` showed them.
+- **A page answer that carries an `error`** (no mic, already asking, a behaviour function that threw) now fails the
+  op, and fails its step in `stage_batch`. Before, the op said done with the error inside the text.
+- **Saving edits.json** copies the previous file to `history/` and replaces the file in one step, one save at a
+  time. Before, it moved the file away first (a read in between saw no edits) and two saves at once raced on one
+  tmp name.
+- **Timeline playback** no longer leaks into saves: a keyed object keeps the place it was edited to, and the frame
+  the timeline is on is not written into edits.json.
+- **During a scene switch**, events go to the scene they happened in, voice notes to the scene showing when they are
+  sent, and cue and waypoint saves to the scene they were made in.
+
 ### Skill: one piece, one folder
 
 - SKILL.md now says when a new song folder starts: from the first file of a new set, a new jam, a studio track
