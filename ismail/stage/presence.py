@@ -27,7 +27,10 @@ HEARD_WAIT_S = 6             # a note no listener took by then is unheard
 PAGE_FRESH_S = 120           # the headset page posts state about once a minute while it is lifted
 NOBODY = 'Nobody is listening right now. I saved your note.'
 HOOK_EVENTS = ('entered_vr', 'left_vr', 'voice_note', 'voice_unheard')
-INBOX_TYPES = {'voice_in', 'voice_message', 'voice_heard', 'headset', 'vr_exit', 'scene_switched', 'perform_clip'}
+# what stage_listen hears: the person's voice and headset, scene switches, and what an agent must answer for the things
+# it wrote (a behaviour that failed, a message an object sent, a page error; until 2026-10-12 only stage_events showed them)
+INBOX_TYPES = {'voice_in', 'voice_message', 'voice_heard', 'headset', 'vr_exit', 'scene_switched', 'perform_clip',
+               'behaviour_error', 'object_message', 'page_error'}
 ANSWERS = {'ack', 'say', 'ask'}
 
 LOCK = threading.Lock()

@@ -11,8 +11,7 @@ const LOCK_MS = 10000;           // the phone gesture held this long after the n
 
 export function initVoice(ed, hands, live) {
   const { renderer, scene, camera } = ed;
-  let qs = 'scene=' + encodeURIComponent(ed.sceneName);
-  ed.addEventListener('switched', () => { qs = 'scene=' + encodeURIComponent(ed.sceneName); });
+  const qs_ = () => 'scene=' + encodeURIComponent(ed.sceneName);   // read when sent: a switch never leaves it behind
   let ac = null, stream = null, micErr = null;
 
   // ---- sound out: earcons and speech, all through one context
@@ -247,7 +246,7 @@ export function initVoice(ed, hands, live) {
     const snaps = (await Promise.all(during)).filter(Boolean);
     if (blob.size < 2000 || secs < 0.4) { live.emit('voice_note_dropped', { seconds: +secs, why: 'too short' }); return { dropped: true }; }
     try {
-      const r = await fetch(`voice/in?${qs}&kind=message&seconds=${secs}&via=${encodeURIComponent(note.via + (why ? ' / ' + why : ''))}${snap ? '&snap=' + encodeURIComponent(snap) : ''}${snaps.length ? '&snaps=' + encodeURIComponent(snaps.join('|')) : ''}`,
+      const r = await fetch(`voice/in?${qs_()}&kind=message&seconds=${secs}&via=${encodeURIComponent(note.via + (why ? ' / ' + why : ''))}${snap ? '&snap=' + encodeURIComponent(snap) : ''}${snaps.length ? '&snaps=' + encodeURIComponent(snaps.join('|')) : ''}`,
         { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
       if (!r.ok) throw new Error('upload ' + r.status);
       EAR.sent();
@@ -485,7 +484,7 @@ export function initVoice(ed, hands, live) {
     const t = take.rec, id = take.id; take.rec = null;
     t.r.stop();
     const blob = await t.done;
-    fetch(`voice/in?${qs}&kind=take&take=${encodeURIComponent(id)}&seconds=${((performance.now() - t.t0) / 1000).toFixed(2)}`,
+    fetch(`voice/in?${qs_()}&kind=take&take=${encodeURIComponent(id)}&seconds=${((performance.now() - t.t0) / 1000).toFixed(2)}`,
       { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob }).catch(() => EAR.error());
   }
 
@@ -590,7 +589,7 @@ export function initVoice(ed, hands, live) {
     for (let y = 0; y < h; y++) img.data.set(px.subarray((h - 1 - y) * row, (h - y) * row), y * row);
     g.putImageData(img, 0, 0);
     const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
-    const r = await fetch(`snapshot?${qs}&tag=${encodeURIComponent(tag)}`, { method: 'POST', body: blob }).then((x) => x.json());
+    const r = await fetch(`snapshot?${qs_()}&tag=${encodeURIComponent(tag)}`, { method: 'POST', body: blob }).then((x) => x.json());
     if (!quiet) EAR.snap();
     return { path: r.path, eye: clean ? 'between' : 'left', frame: rect, canvas: cv, pose };
   }

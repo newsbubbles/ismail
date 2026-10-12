@@ -20,7 +20,7 @@ export function delta(a, b) {
   const ang = 2 * Math.acos(Math.min(1, dq.w)), s = Math.sqrt(Math.max(0, 1 - dq.w * dq.w));
   d.rot_deg = rn(THREE.MathUtils.radToDeg(ang), 2);
   if (d.rot_deg >= 0.01 && s > 1e-9) d.rot_axis = rv([dq.x / s, dq.y / s, dq.z / s], 3);
-  const e = new THREE.Euler().setFromQuaternion(dq, 'XYZ');
+  const e = new THREE.Euler().setFromQuaternion(dq, 'ZYX');   // Blender's XYZ is Rz Ry Rx, three's 'ZYX' (same axes here)
   d.rot_xyz_deg = rv([e.x, e.y, e.z].map(THREE.MathUtils.radToDeg), 2);
   if (a.scale && b.scale) d.scale_ratio = rv(b.scale.map((v, i) => v / (a.scale[i] || 1)), 4);
   return d;
@@ -55,16 +55,22 @@ export function initLive(ed, desktop, xr) {
   function emit(type, data = {}) {
     for (const w of watchers) { try { w(type, data); } catch (_) { /* a watcher never breaks the event */ } }
     if (CAPTURE) return;                             // a capture page (capture.js) sends nothing to the live link
-    pending.push({ page: pageId, ...data, type });   // the event type always wins
+    // the scene showing when it happened, not when it is sent (a switch in between sent the old room's events to the
+    // new scene, and the first ones of the new room to the old, until 2026-10-12)
+    pending.push({ scene: ed.sceneName, e: { page: pageId, ...data, type } });   // the event type always wins
     if (pending.length > 300) pending.shift();
     flush();
   }
   async function flush() {
     if (sending || retry || !pending.length) return;
     sending = true;
-    const batch = pending.splice(0, pending.length);
+    const scene = pending[0].scene;
+    let n = pending.findIndex((x) => x.scene !== scene);
+    if (n < 0) n = pending.length;
+    const batch = pending.splice(0, n);
     try {
-      const r = await fetch('live/event?' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(batch) });
+      const r = await fetch('live/event?scene=' + encodeURIComponent(scene), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batch.map((x) => x.e)) });
       if (!r.ok) throw new Error(r.status);
       ok();
     } catch (_) {
@@ -290,7 +296,7 @@ export function initLive(ed, desktop, xr) {
     if (inflight) { again = true; return; }
     inflight = true;
     try {
-      const r = await fetch('live/state?' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(gather()) });
+      const r = await fetch('live/state?scene=' + encodeURIComponent(ed.sceneName), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(gather()) });
       if (r.ok) ok();
     } catch (_) { /* server down: the badge goes grey */ }
     inflight = false;
@@ -380,7 +386,8 @@ export function initLive(ed, desktop, xr) {
       return { mode: desktop.mode() };
     },
     look_through: (c) => {
-      const it = c.name ? find(c.name) : null;
+      const n = c.camera || c.name, it = n ? find(n) : null;    // the op sends camera (until 2026-10-12 only name was read)
+      if (it && it.type !== 'CAMERA') throw new Error(`"${it.name}" is not a camera (it is ${it.type})`);
       desktop.lookThrough(it, 'claude');
       return { mode: desktop.mode(), camera: desktop.view.through ? desktop.view.through.name : null };
     },
@@ -403,7 +410,9 @@ export function initLive(ed, desktop, xr) {
       try {
         const h = x && x.type !== 'batch' ? handlers[x.type] : null;
         if (!h) throw new Error(`unknown command "${x && x.type}"`);
-        out.push({ type: x.type, ok: true, result: await h(x), ms: Math.round(performance.now() - t0) });
+        const r = await h(x);
+        if (r && typeof r === 'object' && !Array.isArray(r) && r.error) throw new Error(String(r.error));   // answered {error}: failed
+        out.push({ type: x.type, ok: true, result: r, ms: Math.round(performance.now() - t0) });
       } catch (e) {
         out.push({ type: x && x.type, ok: false, error: e.message || String(e), ms: Math.round(performance.now() - t0) });
         if (c.stop_on_error !== false) break;

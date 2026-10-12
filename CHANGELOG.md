@@ -7,6 +7,52 @@
 - An old test's phone kept retrying its voice note through the next test's speech server and into its inbox; each
   test now stops its phones (`Phone.stop()`), and a note said while another waits to retry goes ahead of it.
 
+### Stage: people's mouths move with a voice (lip sync)
+
+- `stage_face(scene, person, at, audio | take, start, end, words, transcribe)` turns a stretch of a voice recording
+  into a mouth track and plays it on the person at that song second, on whatever body they show (take, Follow, rest
+  pose) and in captures, which move the music clock frame by frame. Words become phonemes with the CMU Pronouncing
+  Dictionary when its data file is on the machine (else from the spelling), phonemes one of nine mouth shapes, and
+  each shape a mix of ARKit face units (`ismail/stage/face.py`); loudness opens the jaw on loud vowels, the mouth
+  rests between words and leads the sound by 40 ms. Tracks are saved in the scene's `faces/` and listed in
+  world.json `faces`. The page (`faces.js`) sets the weights on the body's morph targets by name; a body without
+  mouth shapes is reported once (`face_unsupported`). Bodies need mouth shapes, from mhx's export with
+  `morphs="mouth"`.
+
+### Stage: nine small bugs from the engine review
+
+Each was wrong before this change (10-12):
+
+- **The last-moment save** when the tab hides or closes now goes to the scene showing, not the one the page opened
+  on. It sends the same request as a normal save (with `reverted`) and counts as saved only when the server answers.
+- **A turn reported in an edit** (`delta.rot_xyz_deg` in transform events) read a Blender-space turn in three's XYZ
+  order (Rx Ry Rz); Blender's XYZ is Rz Ry Rx. A turn on one axis was right; a turn on two or more was not.
+- **Foot pins** (`stage_follow_anchor` joint `foot_l`, `foot_r`, `feet`) now hold on a standing person and over a
+  start pose: the pinned foot goes to its pin and stays, and the other foot steps as before. Before, only a seated
+  person read them.
+- **`stage_view_look_through`** now looks through the camera. The op sent `camera` and the page read only `name`,
+  so it always went back to the editor view. An object that is not a camera is now an error.
+- **`stage_listen`** now hears `behaviour_error`, `object_message` and `page_error`; only `stage_events` showed them.
+- **A page answer that carries an `error`** (no mic, already asking, a behaviour function that threw) now fails the
+  op, and fails its step in `stage_batch`. Before, the op said done with the error inside the text.
+- **Saving edits.json** copies the previous file to `history/` and replaces the file in one step, one save at a
+  time. Before, it moved the file away first (a read in between saw no edits) and two saves at once raced on one
+  tmp name.
+- **Timeline playback** no longer leaks into saves: a keyed object keeps the place it was edited to, and the frame
+  the timeline is on is not written into edits.json.
+- **During a scene switch**, events go to the scene they happened in, voice notes to the scene showing when they are
+  sent, and cue and waypoint saves to the scene they were made in.
+
+### Skill: one piece, one folder
+
+- SKILL.md now says when a new song folder starts: from the first file of a new set, a new jam, a studio track
+  made from a jam or a remix. What a piece reuses from an older one is copied or imported by path and named in its
+  notes; a piece never lives inside another piece's folder. The skill only showed what a folder holds, so every
+  new piece went into the folder where the live engine happened to run.
+- live.md, "A new piece while the engine runs": an engine belongs to the folder it started in, so moving to a new
+  set is finish or fade, `live_stop`, `live_start` in the new folder, then the phone watcher on the new inbox. A
+  finished song from another folder can still play on a deck by its path.
+
 ### Phone: one standing watcher for every agent
 
 - New `phone_watch(who)`: the phone watcher every agent runs in the background (`python -m ismail phone_watch
@@ -38,19 +84,6 @@
   rights the user lacks (outside Windows), the engine stays as it was and the reply says so. live.md had told agents
   to set it by hand, once as AboveNormal and once as High; both lines are now one line about the option.
 - mastering.md and live.md say how a live set reaches its level: the arguments, then faders.
-
-### Video: a text overlay
-
-- New `python -m ismail.video overlay <in.mp4> <out.mp4> --text "..."`: a line of text (a credit, a title, a link)
-  drawn on a copy of any video with ffmpeg drawtext, the audio copied. `--pos bottom|top|center`, `--size 30`,
-  `--margin 42` (pixels on a 1080 px frame, scaled with the video's short side), `--opacity 0.5`, `--shadow 0.45`
-  (0 for none), `--color`, `--font` (default DejaVu Sans Mono from matplotlib, else a system mono or sans), `--y` (a
-  pixel row the position measures from, for a band in a vertical layout). It never writes the input, refuses an
-  output that exists unless `--force`, and runs in the machine's cpu slot (`--wait`).
-- In the edit: `C.overlay(text, ...)` in a cut list, or `"overlay": {"text": ...}` in `video/config.json`, draws
-  the same line on every output frame, last (after the grade and grain), at 1080p on the encode. Off by default;
-  no text is built in. Both ways use one filter builder, `ismail.video.overlay.drawtext`.
-- `music-video.md` has a "Text overlay" part.
 
 ### Dev: dev copies (git worktrees) tracked by a tool
 

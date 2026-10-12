@@ -31,7 +31,7 @@ from pathlib import Path
 
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
             'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': [],
-            'props': {}}
+            'props': {}, 'faces': {}}
 
 
 def NAME_OK(name):
@@ -106,6 +106,14 @@ def check_world(w):
                 and isinstance(p.get('rel'), list) and len(p['rel']) == 16
                 and all(isinstance(x, (int, float)) for x in p['rel'])):
             out.append(f'props.{n} must be {{"person": name, "bone": name, "rel": [16 numbers]}}')
+    faces = w.get('faces')
+    if not isinstance(faces, dict):
+        out.append('faces must be an object {person: [{"file", "at"}]}')
+        faces = {}
+    for n, lst in faces.items():
+        if not (isinstance(lst, list) and all(isinstance(e, dict) and isinstance(e.get('file'), str)
+                                              and isinstance(e.get('at'), (int, float)) for e in lst)):
+            out.append(f'faces.{n} must be a list of {{"file": "<name>.json" in faces/, "at": song seconds}}')
     if w.get('derives_from') and b:
         out.append('a derived scene has no build of its own (it is built from derives_from); drop "build"')
     return out

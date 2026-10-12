@@ -322,6 +322,7 @@ export function initActors(ed, live) {
       const ft = st.feet[sd];
       const want = hipAt.clone().add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base));
       want.y = st.floor + rig.rest[`foot_${sd}`].p.y;
+      pinFoot(st, sd, want);
       if (!ft.at) ft.at = want.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
       if (!ft.step && !other.step && ft.at.distanceTo(want) > STEP_AT) ft.step = { from: ft.at.clone(), to: want.clone(), t0: now };
@@ -936,7 +937,8 @@ export function initActors(ed, live) {
     const d = want.distanceTo(b.off), slack = HIP_SLACK * s;
     if (d > slack) b.off.lerp(want, (d - slack) / d);
     lean();
-    const moved = b.off.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3);
+    const moved = b.off.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3)
+      || ['l', 'r'].some((sd) => st.pins && st.pins['foot_' + sd] && st.pins['foot_' + sd].distanceTo(b.feet0[sd].p) > 1e-3);
     if (!moved) return b;
     pel.parent.updateMatrixWorld(true);
     pel.position.copy(pel.parent.worldToLocal(P0.clone().add(b.off)));
@@ -946,6 +948,7 @@ export function initActors(ed, live) {
     for (const sd of ['l', 'r']) {
       const F = b.feet0[sd], ft = st.feet[sd], other = st.feet[sd === 'l' ? 'r' : 'l'];
       const goal = hip.clone().add(F.p.clone().sub(P0).applyQuaternion(b.yaw)); goal.y = F.p.y;
+      pinFoot(st, sd, goal);
       if (!ft.at) ft.at = F.p.clone();
       if (!ft.step && !other.step && ft.at.distanceTo(goal) > STEP_AT) ft.step = { from: ft.at.clone(), to: goal.clone(), t0: now };
       let at = ft.at;
@@ -963,6 +966,15 @@ export function initActors(ed, live) {
     return b;
   }
   const I0 = new THREE.Quaternion();
+  // a standing foot with a pin of its own (stage_follow_anchor joint foot_l / foot_r) goes to the pin and stays there:
+  // it never steps after the hips, the other foot does (until 2026-10-12 only the seated legs read foot pins)
+  function pinFoot(st, sd, goal) {
+    const own = st.pins && st.pins['foot_' + sd];
+    if (!own) return;
+    goal.copy(own);
+    const ft = st.feet[sd];
+    if (!ft.step && (!ft.at || ft.at.distanceTo(own) > 1e-4)) ft.step = { from: (ft.at || own).clone(), to: own.clone(), t0: -Infinity };
+  }
   async function useStart(st, c) {                          // a Follow or a playback: the person's start pose, if any
     await readProfile(st.rig);
     const spec = c.start || (st.rig.profile && st.rig.profile.start);
@@ -1013,5 +1025,5 @@ export function initActors(ed, live) {
   const boneOf = (person, bone) => { const r = shownRig(person); return (r && r.bones[bone]) || null; };
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
   return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
-    rested: () => restP, notResting, boneOf, bonesOf };
+    rested: () => restP, notResting, boneOf, bonesOf, shownRig };
 }

@@ -162,6 +162,11 @@ def reply(ctype, e):
         raise OpError(f'{ctype}: {e.get("error") or "the page refused it"}')
     res = e.get('result')
     txt = json.dumps(res, separators=(', ', ': '), default=str) if res is not None else 'done'
+    # a handler that answers {error: ...} failed (no mic, already asking, a behaviour function that threw): until
+    # 2026-10-12 that came back as done with the error buried in the text
+    if isinstance(res, dict) and res.get('error'):
+        rest = {k: v for k, v in res.items() if k != 'error'}
+        raise OpError(f'{ctype}: {res["error"]}' + (f' ({json.dumps(rest, default=str)[:1500]})' if rest else ''))
     if len(txt) > 2000:
         txt = txt[:2000] + ' ...'
     return f'{ctype} ({e.get("ms", "?")} ms): {txt}'
