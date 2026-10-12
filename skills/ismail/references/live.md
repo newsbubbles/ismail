@@ -274,9 +274,10 @@ hand-over is a stop and a start:
    `live_stop(project=<old folder>, fade_sec=...)` at a phrase end; it closes any recording.
 3. `live_start(project=<new folder>, bpm=...)`, or `Set('<new folder>').start(bpm)`; its reply names any engine
    still running elsewhere. Turn `live_record` on again if it was on.
-4. Re-arm the phone watcher on `<new folder>/notes/phone_inbox.jsonl`. The phone page follows the newest engine by
-   itself, so the inbox moves with it, but a watcher on the old file hears nothing. An inbox set with
-   `phone_route(inbox=...)` stays where it points; `phone_route()` sends it back to the playing engine.
+4. The phone follows the newest engine by itself. `phone_watch` and `phone_listen` read the phone's own inbox, so
+   they keep hearing everything across the restart; only a script reading the old folder's
+   `notes/phone_inbox.jsonl` would go deaf, which is one more reason not to write your own watcher. An inbox set
+   with `phone_route(inbox=...)` stays where it points; `phone_route()` sends it back to the playing engine.
 
 Without a restart, a finished song from another folder plays on a deck by its path (`live_load(deck=,
 song=<its folder>)`), and its tracks render with that song's own voices and sound bank. That plays a piece inside a
