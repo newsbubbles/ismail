@@ -180,7 +180,10 @@ def stage_listen(who: str, since: int = None, wait: float = 25, port: int = None
     call this at least every 40 s you count as listening, and a note you were handed is announced as "handed to
     <who>" if you do not answer it within 6 s (a note nobody was handed gets "nobody is listening" said out loud). since= the `last` from
     the previous call (left out: start now), wait= seconds to wait for something new (up to 60). Answer a note with
-    stage_say or stage_voice_ack on its scene."""
+    stage_say or stage_voice_ack on its scene. The headset shows "heard by <who>" the moment you are handed a note; if
+    no agent answers it (say, ask or panel) within 2 minutes and you set no busy line (stage_busy), it says out loud
+    that you may be stuck (event session_stuck). To keep listening while you work, run `python -m ismail.stage.ear
+    --who "<who>"` in the background and read its lines as they come."""
     rec = link.server_for(port=port)
     if since is None:
         since = link.http(rec, f'live/inbox?{link.q(who=who)}')['last']
@@ -190,6 +193,19 @@ def stage_listen(who: str, since: int = None, wait: float = 25, port: int = None
     for e in got['events']:
         lines.append(f'[{e.get("scene")}] ' + _event_line({k: v for k, v in e.items() if k not in ('seq', 'scene')}))
     return '\n'.join(lines)
+
+
+@op()
+def stage_busy(who: str, text: str = '', minutes: float = None, port: int = None) -> str:
+    """Say what you are busy with, in one line, so the person in the headset knows why an answer is slow
+    ("rendering Dell's drums, in line behind 2 jobs, about 5 min"). who= your name as the headset shows it (the
+    stage_listen who). The headset shows it beside the "heard by" receipts, and while it runs (minutes, default 10, up
+    to 60) a note you have not answered is not called stuck. Set it before anything that can wait on something you do
+    not control (a queue, the GPU, the network); text='' clears it when you are free."""
+    rec = link.server_for(port=port)
+    got = link.http(rec, 'live/busy', {'who': who, 'text': text, 'minutes': minutes})
+    b = got.get('busy')
+    return f'busy: {who}: {b["text"]} (for {round(b["left_s"] / 60)} min)' if b else f'busy: {who}: cleared'
 
 
 @op()
@@ -208,6 +224,13 @@ def stage_presence(port: int = None) -> str:
              f"unread notes: {p['unread']}" + (f" ({rec['scenes']}/_stage/unread.jsonl)" if p['unread'] else '')]
     if lv:
         lines.append(f"last note [{lv.get('scene')}] {lv.get('ts', '')[11:19]} {lv.get('heard') or ''}: {lv.get('text')}")
+    rc = p.get('receipt')
+    if rc:
+        lines.append(f"newest note #{rc['note_id']} [{rc['scene']}]: heard by {', '.join(rc['by']) or 'nobody'}; "
+                     + ('answered' if rc['answered'] else 'not answered yet')
+                     + (f"; looks stuck: {', '.join(rc['stuck'])}" if rc['stuck'] else ''))
+    for w, b in (p.get('busy') or {}).items():
+        lines.append(f"busy: {w}: {b['text']} ({b['age_s']} s ago, {round(b['left_s'] / 60)} min left)")
     lines.append('hooks: ' + (', '.join(f'{k} x{n}' for k, n in p['hooks'].items()) or 'none'))
     return '\n'.join(lines)
 
@@ -909,7 +932,7 @@ def _rest_now(scene, person):
         return '; the page shows it at its next load'
 
 
-NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_scene_export', 'stage_scene_new',
+NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_busy', 'stage_scene_export', 'stage_scene_new',
                 'stage_scene_go'}
 
 
@@ -923,7 +946,7 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
     the batch: the scene folder's top-level .json files that the ops here changed (world.json and the like) go back
     to what they were; takes, performances and voice files are not put back, and what the page already did stays
     (the page cannot roll back; the reply says what ran). Not in a batch: stage_batch, stage_start,
-    stage_stop, stage_listen, stage_scene_export, stage_scene_new, stage_scene_go. Replies one line per op:
+    stage_stop, stage_listen, stage_busy, stage_scene_export, stage_scene_new, stage_scene_go. Replies one line per op:
     [i] op: its answer."""
     import inspect
     from ..api import OPS

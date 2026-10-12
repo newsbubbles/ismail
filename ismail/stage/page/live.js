@@ -511,9 +511,16 @@ export function initLive(ed, desktop, xr) {
   }
   // who is listening (the server's presence: an agent following the live log) and which server process answers; the
   // user spent nine minutes in VR talking to nobody (2026-10-04), so the headset shows it
-  const heard = { listening: null, server: null, on: [] };
+  // and, per voice note, who was handed it ("heard by"), each session's busy line, and who looks stuck (presence.py)
+  const heard = { listening: null, server: null, notes: null, on: [], noteOn: [] };
   function presence(j) {
     if (!Array.isArray(j.listening)) return;
+    const notes = JSON.stringify([j.receipt || null, j.busy || {}]);
+    if (heard.notes !== notes) {
+      const first = heard.notes === null;
+      heard.notes = notes;
+      for (const fn of heard.noteOn) fn({ receipt: j.receipt || null, busy: j.busy || {}, first });
+    }
     const was = heard.listening, wasSrv = heard.server, now = JSON.stringify(j.listening);
     if (now === was && j.server === wasSrv) return;
     heard.listening = now; heard.server = j.server;

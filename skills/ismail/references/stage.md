@@ -56,13 +56,25 @@ something you do.
   it shows "nobody is listening" in amber. `stage_presence()` says whether they are in, where, the last note and
   who is listening. Read every event since the last one you handled, and reconnect on your own: a server restart
   drops every listener.
+- **Keep an ear running while you work.** A loop you run between other calls stops whenever a call blocks: one
+  session sat ten minutes on a render while four notes went unanswered, and the person left the headset.
+  `python -m ismail.stage.ear --who "<your name>"` keeps listening on its own: run it in the background and read its
+  output as it comes (it prints one line per voice note or error and logs the rest); it survives server restarts
+  and resumes where it stopped. `--once` exits after the first printed line, for a harness that only wakes you when
+  a background job ends; then start it again at once.
+- **Answer within a minute, or say you are busy.** The headset shows "heard by <your name>" the moment you are
+  handed a note. Before anything that can wait on something you do not control (a queue, the GPU, the network, a
+  long search), set a busy line: `stage_busy(who=, text="rendering the drums, in line, about 5 min")`; it shows
+  beside the receipts, and `text=""` clears it. A note no agent answered (`stage_say`, `stage_ask`, a panel; the
+  "got it" ack does not count) within 2 minutes, with no busy line from those who took it, gets "<your name> has
+  not answered for 2 minutes. It may be stuck." out loud and a `session_stuck` event.
 - **No silent notes.** A note you were handed but did not answer (`stage_say`, `stage_voice_ack`) within 6 s is
   announced as "Handed to <your name>", so they hear it landed and was not yet answered; a note nobody was handed gets "Nobody is listening right now. I saved your
   note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
 - **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json`,
-  `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...]}`, each a shell command (or an
-  argv list) run with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`, `STAGE_FILE`, `STAGE_EVENT_ID`, `STAGE_URL`,
-  `STAGE_SCENES` in its environment (a toast, a webhook, `claude -p "..."`, `codex exec "..."`); output goes to
+  `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...], "session_stuck": [...]}`,
+  each a shell command (or an argv list) run with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`, `STAGE_FILE`,
+  `STAGE_EVENT_ID`, `STAGE_URL`, `STAGE_SCENES` (and `STAGE_WHO` for session_stuck) in its environment (a toast, a webhook, `claude -p "..."`, `codex exec "..."`); output goes to
   `_stage/hooks.log`. A song's own `_stage/hooks.json` runs only when the home file lists its scenes folder in
   `"trust": [...]`: a scenes folder travels, and must never run commands for whoever opens it.
 
