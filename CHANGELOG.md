@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Skill: the contributor dev
+
+- The dev role for the engine is now the **contributor dev**: the dev on the person's own machine
+  (`references/contributor-dev.md`, which was `maintainer.md`). It opens a pull request to the project once the
+  person says yes to contributing; the project's maintainer reviews and merges. The skill no longer describes
+  one team's setup.
+- A studio agent that finds something worth contributing offers a contributor dev by its role's name, and starts
+  the session itself where its harness can, so nobody is left with "the dev needs to do it".
+- `contributing.md` drops the GitHub sign-up and install steps: the agent handles GitHub and asks the person only for
+  what only they can do. The route without GitHub (a zip) stays.
+- An area dev (the stage dev) sends its finished branch to the contributor dev as a local merge request, or opens
+  its own pull request when none runs. During a live test the stage agent messages the stage dev directly and may
+  start the stage dev session itself (`stage.md`, `stage-dev.md`, `development.md`).
+- Internal record numbers and one team's names are gone from live.md, blind-tests.md and development.md.
+
 ### Skill: one line in user-experience.md
 
 - The phone-first exams lesson, reworded; the lesson is unchanged (plan exams that work on a phone and earbuds).
@@ -14,7 +29,7 @@
   tools (`TXXX:ismail_version`, `ismail_commit`, `ismail_skill`). They are read from the build at the moment of
   writing; a pip install without git or the skill folder writes only what it knows (hq:D-128).
 - `python -m ismail.tags <file.mp3> ...` says which ismail made each file; with no file, which ismail this is.
-- Versions are tagged on main from v0.3.0 on (maintainer.md says when to bump).
+- Versions are tagged on main from v0.3.0 on.
 
 ### Ops: `ops_find`, the tools by purpose and by role
 

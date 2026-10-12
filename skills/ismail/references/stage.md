@@ -202,7 +202,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   environment: change them yourself. The page, gestures, panels, voice, the server: the stage dev.
 - **Findings go to the handoff; during a live test, straight to the stage dev.** A gap in the engine goes in the
   project's HANDOFF.md. While the person is in the stage testing with you, send what they ask of the stage directly
-  as a message to the stage dev's session, conversation or agent, not through a handoff. When the change touches
+  as a message to the stage dev's session, conversation or agent, not through a handoff. If no stage dev is
+  running, start one yourself (a new session, conversation or agent with the ismail skill, asked to be the stage
+  dev, with what the person asked), so the person in the headset never waits on "the dev needs to do it". The
+  stage dev sends its change to the contributor dev as a local merge request (`development.md`, the roles). When
+  the change touches
   the page's code, the stage dev messages you back that an update is ready; tell the person in the room, and they
   take it with the update gesture (a left-hand thumbs up on the updates card).
 - **A message to the person rides with them; a note about a place stays there.** `stage_panel_show(anchor="body")`

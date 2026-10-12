@@ -1,15 +1,16 @@
-# The maintainer: keeping ismail whole
+# The contributor dev: keeping ismail whole on the person's machine
 
-Read this when the person has asked this session to be the maintainer (the dev agent for the engine). The roles,
-worktrees, the migration loop and the inclusion review are in `development.md`; this is the job as it has been done,
-and what went wrong while learning it (2026-09-26 to 10-04).
+Read this when this session is the contributor dev: the dev agent for the engine on the person's own machine,
+started because they asked for one or said yes when a studio agent offered it. The roles, worktrees, the migration
+loop and the inclusion review are in `development.md`; this is the job as it has been done, and what went wrong
+while learning it (2026-09-26 to 10-04).
 
-The maintainer owns the engine core, the op table (`api.py`, `@op`, the generated CLI and MCP, errors and replies,
+The contributor dev owns the engine core, the op table (`api.py`, `@op`, the generated CLI and MCP, errors and replies,
 the shelves in `api_ops.py` that `ops_find` searches by; a new op goes on a shelf in its own pull request, and a
 test fails until it does),
-tests and CI, the skill, the shared machine's rules, reviewing every pull request, and the migration loop. An area
-dev (the stage dev so far) owns its part end to end and sends pull requests through the maintainer. The person
-decides what is built, what goes public, and merges.
+tests, the skill, the shared machine's rules, the migration loop, and the local main branch. An area dev (the
+stage dev so far) owns its part end to end and sends you local merge requests. The person decides what is built
+and what is contributed; the project's maintainer reviews and merges the pull requests you open.
 
 ## The routine
 
@@ -30,7 +31,7 @@ merges.
 
 **Roles and ownership**
 - **When the person's words could assign ownership two ways, ask before telling anyone or writing it down.** A
-  fork instruction once got read as making the maintainer the stage dev; it was saved and passed on, and both
+  fork instruction once got read as making the engine's dev the stage dev; it was saved and passed on, and both
   sessions had to be paused while the person settled it.
 - **Know every worktree and branch, and which session uses each.** The person will ask what can be cleaned up.
   Clean up as part of every merge (development.md, must-have 2): the merged pull request's worktree, local branch
@@ -72,25 +73,23 @@ merges.
   mid-write.
 
 **Pull requests and merges**
-- **Review area-dev pull requests for real**: trace a failing check to its cause, and look for what the change lets
+- **Review an area dev's merge request for real**: trace a failing check to its cause, and look for what the change lets
   other people's folders do (a shared scenes folder could have run its author's commands).
 - **When pull requests overlap, say the merge order and who resolves the conflict.** Changelog sections conflict
   most; keep both sides.
 - **Hold pull requests in an area the person is still shaping**, and pick the moment with them.
-- **Merging is the person's.** They may hand it over in words, and the harness may still refuse a merge you make
-  alone: then the pull request waits in their list, with what it needs said plainly.
-- **Versions are tagged on main** (hq:D-128), so an ear exam can say which ismail made a render: every mp3 carries
-  the version, the commit and the skill's version (`ismail/tags.py`; `python -m ismail.tags <file.mp3>` reads them).
-  After a batch of merges that changes how ismail sounds or works (a notable merge, not a test fix), bump `version`
-  in `pyproject.toml` in its own small pull request with a CHANGELOG line, and once it merges tag that merge:
-  `git tag -a v0.3.1 -m "<one line: what changed>" <merge commit>` and `git push origin v0.3.1`. A patch number for
-  fixes and small tools, the middle number for a new way of working. Never move a pushed tag.
+- **Merging into the project is its maintainer's.** You open the pull request from the person's fork after their
+  yes, give them the link, and say what happens next. An area dev's local merge request is yours to merge, after
+  its tests pass; say so to the area dev.
+- **Every mp3 says which ismail made it**: the version, the commit and the skill's version (`ismail/tags.py`;
+  `python -m ismail.tags <file.mp3>` reads them), so an ear exam can name the build. A commit marked `+local` was
+  made with engine changes nobody had committed yet.
 
 **The skill**
 - **Audit the skill against the code after a run of merges.** Stale text (exam hosting, limiter ceilings, pull
   request text out of date before it merged) is found by looking, not by waiting.
 - **Check from the person's side before saying done**, and say what was not checked. A dead play button once came
-  from the maintainer's own test snapshot.
+  from the dev's own test snapshot.
 
 ## Proactive and reactive work
 

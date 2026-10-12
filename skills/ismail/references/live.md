@@ -391,7 +391,7 @@ bus cannot bake at all (put the effect on the tracks).
 `live_parity(song, bars=[a, b])` checks a song section: it renders the bars in the studio, plays them on a silent
 engine of its own (no `live_start`, nothing late) and compares each track, bus and the mix, from the window's
 second bar (the first is the window's edge: the studio rings in what came before, a deck starts clean). A part
-marked DIFFERS sounds different on a deck than in a render: write it in the song's HANDOFF.md for the maintainer;
+marked DIFFERS sounds different on a deck than in a render: write it in the song's HANDOFF.md for the contributor dev;
 do not change the song to hide it. Known gaps it shows: a mono synth's glide between phrases, a drone that began
 long before the window (it comes in with a fresh attack), a track with no notes in the window (its tail and hiss
 from earlier bars are not played).
@@ -434,10 +434,10 @@ it like any recorded phrase.
 
 ## Other sessions' renders while you play
 
-While your engine is on the board, the governor holds GPU jobs and Blender renders until the set ends (Nate's
-temporary rule after two real dropouts, hq:D-11; `python -m ismail.machine on-air` shows the policy). Audio
+While your engine is on the board, the governor holds GPU jobs and Blender renders until the set ends (a rule
+made after two real dropouts; `python -m ismail.machine on-air` shows the policy). Audio
 renders and other CPU work still run beside you, sharing half the machine's threads (a job that asks for more
-waits; ledger:M132, after a 359-underrun dropout from one slot's render plus the perceptual model on every core).
+waits; after a 359-underrun dropout from one slot's render plus the perceptual model on every core).
 Keep your engine at High priority and watch underruns. Your own checks during a set: run them as
 `python -m ismail.machine run --cpu --threads 2 -- python check.py`; the renders and comparisons inside it use the
 run's slot and its threads.
