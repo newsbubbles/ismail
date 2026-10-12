@@ -43,7 +43,7 @@ You may use:  stage_listen, stage_events, stage_presence, stage_say, stage_panel
               stage_object_set with trial=True only
 You may not:  change the scene for real, save animation, export or rebuild, restart anything, speak in other
               scenes, keep going after the person says stop
-Stop when:    <e.g. one take he keeps, or 30 minutes, or he says done>
+Stop when:    <e.g. one take they keep, or 30 minutes, or they say done>
 Hand back:    see below
 ```
 

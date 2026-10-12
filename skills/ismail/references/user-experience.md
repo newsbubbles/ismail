@@ -35,7 +35,7 @@ answers something the person just did or said, in one sentence they can say no t
 - they mention a VR headset, or want to see the music: the stage.
 - they step away from the computer while something plays: the phone (phone.md, "When to offer it").
 One feature per moment. A no holds for the session. Never list them all at once: a list of features up front is
-what the intro avoids (Nate, 10-07: the intro "needs to be a specific scope", and "an agent can let people know that
+what the intro avoids (the person, 10-07: the intro "needs to be a specific scope", and "an agent can let people know that
 those features exist").
 
 ## Their first answer decides the words
@@ -114,7 +114,7 @@ a view of the stage) has been the fastest route to a good result. The rules that
 - Log every answer verbatim in the song's `notes/feedback.md`, carry a lock into the build as a constant, and note
   any new words in the lexicon.
 - Bring the page to where they are. Away from the desk the phone page is their whole channel (`phone.md`): exams
-  with `phone_exam`, questions with `phone_ask`, answers with `phone_say`. Nate (10-06) loved doing his voice tests
+  with `phone_exam`, questions with `phone_ask`, answers with `phone_say`. One person (10-06) loved doing their voice tests
   on the phone and spends whole days away from the desk: plan exams that work on a phone and
   earbuds.
 
