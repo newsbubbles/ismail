@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Phone: a long voice note no longer freezes the server
+
+- 10-11, 19:18 to 19:21 UTC: a 322 s talk note went through the hum check's pitch tracker, which took 150 s and held
+  the whole phone server (other threads waited up to 129 s), so agents' phone ops were refused for about two
+  minutes. The check now rules a note out by its words first (over one a second) and skips notes over 60 s, so talk
+  never reaches the pitch tracker. A hum is still told apart the same way.
+
 ### CLI: answers no longer fail on a Windows console
 
 - 10-11: one sharp sign in a phone hum row made every `python -m ismail phone_listen` from before that row print

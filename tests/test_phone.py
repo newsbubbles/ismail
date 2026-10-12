@@ -523,6 +523,20 @@ def test_a_hum_tells_itself_apart_from_talk():
     assert hum.words('Mmm la la, play it') == ['play', 'it']
 
 
+def test_talk_and_long_notes_skip_the_pitch_tracker(monkeypatch):
+    """The pitch tracker holds the whole phone server for about half a note's length (10-11: 150 s on a 322 s note,
+    and the server refused connections meanwhile); words and length rule a note out first."""
+    import librosa
+    from ismail.phone import hum
+    monkeypatch.setattr(librosa, 'pyin', lambda *a, **k: pytest.fail('the pitch tracker ran'))
+    talk = np.zeros(hum.SR * 4, dtype=np.float32)
+    c = hum.check(talk, 'so this is for marketing and the paper and the other thing too')
+    assert not c['is_hum'] and 'words a second' in c['why']
+    long_hum = np.zeros(int(hum.SR * (hum.HUM_MAX_S + 5)), dtype=np.float32)
+    c = hum.check(long_hum, 'Mmm.')
+    assert not c['is_hum'] and 'too long' in c['why']
+
+
 def test_every_voice_note_keeps_the_music_under_it(phone, monkeypatch):
     ph, base, _ = phone
     import soundfile as sf
@@ -1042,7 +1056,7 @@ def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_thro
     for b in (b'', b''):
         req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b * 2000, headers={'Content-Type': 'audio/webm'})
         ids.append(json.loads(urllib.request.urlopen(req, timeout=5).read())['id'])
-    for _ in range(100):
+    for _ in range(300):                                                        # 30 s: slow under a full run
         vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines']
               if x['kind'] == 'voice_text' and x.get('id') in ids]
         if len(vt) == 2:

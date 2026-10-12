@@ -108,7 +108,7 @@ sang maps to the beat they heard, with the stream delay and the latency of their
 
 There is no hum button. A note that is mostly pitched, holds its notes and has few words is a hum: it arrives in the
 inbox as kind `hum` (with the pitch it sits around and the ref), right after its transcript. `phone_hum(voice_id)`
-answers for any note, the latest by default, so you can look at one the check let pass. Answer a hum by playing it
+answers for any note, the latest by default, so you can look at one the check let pass. A note with more than one word a second, or longer than a minute, is ruled out before the pitch tracker runs: on a 322 s talk note it held the whole phone server for 150 s, and the server refused connections meanwhile. Answer a hum by playing it
 back on an instrument at the next loop line and asking whether that is what they sang. The thresholds are first
 guesses: measure them on the phone mic first, then on each headset, and keep the latency of each input.
 

@@ -21,6 +21,8 @@ VOICED_MIN = 0.5                  # a hum is mostly pitched...
 STEADY_MIN = 0.5                  # ...holds its pitch (speech glides)...
 WORDS_MAX = 1.0                   # ...and has few words (per second of note)
 STEADY_ST = 0.25                  # semitones per 20 ms that still count as holding a note
+HUM_MAX_S = 60.0                  # longer is talk or a song, not a hum: the pitch tracker holds the whole
+                                  # phone server for about half the note's length (a 322 s note: 150 s, 10-11)
 NONWORDS = {'hm', 'hmm', 'hmmm', 'mm', 'mmm', 'mmmm', 'la', 'da', 'na', 'doo', 'do', 'ba', 'dum', 'dee', 'di',
             'ooh', 'oo', 'ah', 'uh', 'um', 'mhm', 'music'}
 
@@ -46,6 +48,13 @@ def check(y, text='', sr=SR):
     dur = len(y) / sr
     if dur < 0.5:
         return {'is_hum': False, 'dur_s': round(dur, 1), 'why': 'too short to tell (under half a second)'}
+    wps = len(words(text)) / dur                      # words first: talk is ruled out without the pitch tracker
+    if wps > WORDS_MAX:
+        return {'is_hum': False, 'words_per_s': round(wps, 2), 'dur_s': round(dur, 1),
+                'why': f'{wps:.1f} words a second (a hum has under {WORDS_MAX:g})'}
+    if dur > HUM_MAX_S:
+        return {'is_hum': False, 'words_per_s': round(wps, 2), 'dur_s': round(dur, 1),
+                'why': f'too long for a hum ({dur:.0f} s; the check takes notes up to {HUM_MAX_S:g} s)'}
     f0, vflag, _ = librosa.pyin(y, fmin=FMIN, fmax=FMAX, sr=sr, frame_length=1024, hop_length=HOP)
     rms = librosa.feature.rms(y=y, frame_length=1024, hop_length=HOP)[0][:len(f0)]
     db = 20 * np.log10(rms + 1e-9)
@@ -56,7 +65,6 @@ def check(y, text='', sr=SR):
     d = np.abs(np.diff(midi))
     both = voiced[1:] & voiced[:-1]
     steady = float((d[both] < STEADY_ST).sum() / max(1, both.sum()))
-    wps = len(words(text)) / dur
     hz = float(np.nanmedian(f0[voiced])) if voiced.any() else None
     fails = [m for ok, m in ((vfrac >= VOICED_MIN, f'pitched {vfrac:.0%} (a hum is over {VOICED_MIN:.0%})'),
                              (steady >= STEADY_MIN, f'holds its notes {steady:.0%} (over {STEADY_MIN:.0%})'),
