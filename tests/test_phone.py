@@ -835,6 +835,17 @@ def test_the_page_keeps_the_key_lit_after_later_and_sorts_by_priority():
     assert "classList.toggle('urgent'" in js and "'needs you': 0" in js
 
 
+def test_every_panel_picture_opens_full_screen_and_back_closes_it():
+    """Nate 10-12: a picture on a panel opens full screen like a video, zooms and pans, and closes, with no setup per
+    panel. The gestures were checked in a browser; here, that the page wires it up."""
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    html = (S.PAGE / 'index.html').read_text(encoding='utf8')
+    assert "$('panel').addEventListener('click', (e) => { if (e.target.tagName === 'IMG') openViewer(e.target); });" in js
+    assert "addEventListener('popstate', () => closeViewer(true));" in js and "history.pushState({ viewer: 1 }" in js
+    assert '<div id="viewer" hidden><img id="viewimg"' in html and 'id="viewclose"' in html
+    assert '#viewer{position:fixed;inset:0;z-index:10' in html and 'touch-action:none' in html
+
+
 @pytest.fixture
 def eye_round(tmp_path, monkeypatch):
     """A throwaway picture-round page server (ismail.exampage) on a free port, one round 'r1'; the phone server's

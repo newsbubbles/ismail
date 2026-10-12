@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Phone: pictures on panels open full screen
+
+- A tap on a panel's picture opens it full screen, as its videos already do: pinch or double-tap to zoom, a finger
+  to move around it, and the cross, Back or Escape to leave (Nate, 10-12). Every panel picture gets it, with nothing
+  to set up.
+
 ### Phone: a long voice note no longer freezes the server
 
 - 10-11, 19:18 to 19:21 UTC: a 322 s talk note went through the hum check's pitch tracker, which took 150 s and held

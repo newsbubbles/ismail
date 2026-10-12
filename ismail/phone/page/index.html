@@ -174,7 +174,12 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #panel{background:var(--ground);border-top:3px solid var(--accent);width:100%;max-width:520px;margin:0 auto;padding:calc(var(--u)*5) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*5));max-height:90vh;overflow:auto}
 #panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--head);font-stretch:85%}
 #panel p{margin:0 0 calc(var(--u)*4);color:#d9d2c4;white-space:pre-wrap}
-#panel img{max-width:100%;border-radius:var(--r);margin-bottom:calc(var(--u)*3)}
+#panel img{max-width:100%;border-radius:var(--r);margin-bottom:calc(var(--u)*3);cursor:zoom-in}
+/* a panel picture full screen: pinch, drag, double-tap; the cross, Back or Escape leaves */
+#viewer{position:fixed;inset:0;z-index:10;background:#000;overflow:hidden;touch-action:none;display:flex;align-items:center;justify-content:center}
+#viewer[hidden]{display:none}
+#viewimg{width:100vw;height:100vh;object-fit:contain;transform-origin:center;will-change:transform;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;pointer-events:none}
+#viewclose{position:absolute;top:calc(env(safe-area-inset-top) + var(--u)*3);right:calc(var(--u)*3);width:48px;height:48px;min-height:0;padding:0;border-radius:50%;font:400 30px/1 var(--mono);background:rgba(8,7,6,.6);color:#fff;border:1px solid rgba(255,255,255,.4)}
 #panel a.linkbtn{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;min-height:64px;margin:0 0 calc(var(--u)*3);padding:calc(var(--u)*3);text-align:center;text-decoration:none;font:700 18px/1.1 var(--display);font-stretch:75%;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--accent-deep);border:1px solid var(--accent);border-radius:var(--r)}
 #panel video{display:block;width:100%;max-height:60vh;background:#000;border-radius:var(--r);margin-bottom:calc(var(--u)*3)}
 .btns{display:grid;gap:calc(var(--u)*2)}
@@ -248,6 +253,7 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 </div>
 
 <div id="sheet"><div id="panel"></div></div>
+<div id="viewer" hidden><img id="viewimg" alt=""><button id="viewclose" aria-label="Close the picture">&#215;</button></div>
 <div id="toast"></div>
 <audio id="audio" preload="none"></audio>
 <script src="app.js"></script>

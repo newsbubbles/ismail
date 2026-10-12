@@ -260,7 +260,9 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   a remote beside the room speakers), the words go to the page as a clip; `phone_status` shows which. Speak only
   to answer something they said, never unprompted. `buzz=True` vibrates.
 - `phone_ask(text)`: yes or no. `phone_panel_show(title, text, image, buttons)`: anything else (the
-  stage_panel_show shape). Either one with `wait=N` blocks for the answer.
+  stage_panel_show shape). Either one with `wait=N` blocks for the answer. A tap on the panel's image opens it full
+  screen (pinch or double-tap zooms, a finger moves it, the cross or Back closes it), so a detailed picture can be
+  sent as it is; the page's events say `image_open` and `image_close` (with the most it was zoomed).
 - `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
   live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed. That one file holds
   everything about the exam: the answer (kind 'answer'), and every voice note said on the card (kind 'voice_note',

@@ -281,6 +281,7 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
     as kind 'voice' and 'voice_text' with panel=<id> and for=<sender>, so pass sender (your name) to get it back.
     video=<local file>: the person watches it playing inline in the panel, next to the panel's buttons, inputs and
     voice reply (the video pauses when they start to record), so they can watch and then ask questions about it.
+    image=<local file>: a tap opens it full screen, where they can pinch to zoom and move around it.
     Any agent that controls the phone may use it. A phone-sized copy (H.264 + AAC MP4, at most 720 px tall) is made
     first, once per file and kept, inside the machine's cpu slot like any heavy job: video_wait is how long to stand
     in line for the machine ('10m'; '0' refuses at once when it is busy). It needs ffmpeg.

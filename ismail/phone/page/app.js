@@ -839,6 +839,85 @@ function openMessages() {
   else if (newNotes().length || !ps.length) showNotes();
   else showPanel(ps[0]);
 }
+// a picture on a panel opens full screen, the way its videos do (Nate 10-12 08:13): pinch, double-tap or the mouse
+// wheel zooms, a finger or the mouse moves it around, and the cross, Back or Escape leaves. Every image on a panel
+// gets it; a panel sets nothing up.
+const viewer = { s: 1, x: 0, y: 0, most: 1, fs: false, pts: new Map(), pinch: null, tap: 0, moved: false, multi: false };
+function viewerFit() {                                  // the picture's size on screen at zoom 1 (it fills the screen)
+  const im = $('viewimg'), r = Math.min(innerWidth / (im.naturalWidth || 1), innerHeight / (im.naturalHeight || 1));
+  return [(im.naturalWidth || innerWidth) * r, (im.naturalHeight || innerHeight) * r];
+}
+function viewerSet(clamp) {
+  if (clamp) {                                          // the picture's edge never leaves its side of the screen
+    const [w, h] = viewerFit(), mx = Math.max(0, (w * viewer.s - innerWidth) / 2), my = Math.max(0, (h * viewer.s - innerHeight) / 2);
+    viewer.x = Math.min(mx, Math.max(-mx, viewer.x)); viewer.y = Math.min(my, Math.max(-my, viewer.y));
+  }
+  viewer.most = Math.max(viewer.most, viewer.s);
+  $('viewimg').style.transform = `translate(${viewer.x}px,${viewer.y}px) scale(${viewer.s})`;
+}
+function viewerZoom(px, py, s) {                        // zoom to s keeping the point under the finger where it is
+  s = Math.min(8, Math.max(1, s));
+  const k = s / viewer.s, mx = px - innerWidth / 2, my = py - innerHeight / 2;
+  viewer.x = mx - (mx - viewer.x) * k; viewer.y = my - (my - viewer.y) * k; viewer.s = s; viewerSet(true);
+}
+function openViewer(im) {
+  Object.assign(viewer, { s: 1, x: 0, y: 0, most: 1, fs: false, pinch: null, tap: 0 }); viewer.pts.clear();
+  $('viewimg').src = im.currentSrc || im.src; viewerSet(); $('viewer').hidden = false;
+  history.pushState({ viewer: 1 }, '');                 // so Back closes the picture, not the page
+  const vw = $('viewer');
+  if (vw.requestFullscreen) vw.requestFullscreen().then(() => { viewer.fs = true; }).catch(() => {});
+  ev('image_open', { id: shown, src: String(im.getAttribute('src') || '').split('?')[0].split('/').pop().slice(-80) });
+}
+function closeViewer(fromBack) {
+  const vw = $('viewer');
+  if (vw.hidden) return;
+  vw.hidden = true; $('viewimg').removeAttribute('src');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (!fromBack && history.state && history.state.viewer) history.back();
+  ev('image_close', { id: shown, zoom: Math.round(viewer.most * 10) / 10 });
+}
+(() => {
+  const vw = $('viewer'), mid = (a, b) => ({ x: (a.x + b.x) / 2 - innerWidth / 2, y: (a.y + b.y) / 2 - innerHeight / 2 });
+  $('panel').addEventListener('click', (e) => { if (e.target.tagName === 'IMG') openViewer(e.target); });
+  $('viewclose').onclick = () => closeViewer();
+  addEventListener('popstate', () => closeViewer(true));
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && !vw.hidden) closeViewer(); });
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && viewer.fs) { viewer.fs = false; closeViewer(); } });
+  vw.addEventListener('wheel', (e) => { e.preventDefault(); viewerZoom(e.clientX, e.clientY, viewer.s * Math.exp(-e.deltaY / 300)); }, { passive: false });
+  vw.addEventListener('pointerdown', (e) => {
+    if (e.target.id === 'viewclose') return;
+    try { vw.setPointerCapture(e.pointerId); } catch (err) {}      // a finger the browser has already let go of
+    if (!viewer.pts.size) { viewer.moved = false; viewer.multi = false; }
+    viewer.pts.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
+    if (viewer.pts.size === 2) {
+      const [a, b] = [...viewer.pts.values()];
+      viewer.multi = true; viewer.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, m: mid(a, b), s: viewer.s, x: viewer.x, y: viewer.y };
+    }
+  });
+  vw.addEventListener('pointermove', (e) => {
+    const pt = viewer.pts.get(e.pointerId);
+    if (!pt) return;
+    const dx = e.clientX - pt.x, dy = e.clientY - pt.y;
+    pt.x = e.clientX; pt.y = e.clientY;
+    if (Math.hypot(pt.x - pt.x0, pt.y - pt.y0) > 10) viewer.moved = true;
+    if (viewer.pinch && viewer.pts.size >= 2) {
+      const [a, b] = [...viewer.pts.values()], p = viewer.pinch, m = mid(a, b);
+      viewer.s = Math.min(8, Math.max(1, p.s * Math.hypot(a.x - b.x, a.y - b.y) / p.d));
+      const k = viewer.s / p.s;
+      viewer.x = m.x - (p.m.x - p.x) * k; viewer.y = m.y - (p.m.y - p.y) * k; viewerSet();
+    } else if (viewer.pts.size === 1) { viewer.x += dx; viewer.y += dy; viewerSet(true); }
+  });
+  const up = (e) => {
+    if (!viewer.pts.delete(e.pointerId)) return;
+    if (viewer.pts.size < 2) viewer.pinch = null;
+    if (viewer.pts.size) return;
+    viewerSet(true);
+    if (viewer.moved || viewer.multi || e.type === 'pointercancel') return;
+    if (Date.now() - viewer.tap < 300) { viewer.tap = 0; viewerZoom(e.clientX, e.clientY, viewer.s > 1.05 ? 1 : 2.5); }
+    else viewer.tap = Date.now();
+  };
+  vw.addEventListener('pointerup', up); vw.addEventListener('pointercancel', up);
+})();
 // a panel's video says what it is doing: loading, still loading on a slow connection, or could not play, with a
 // link to open it on its own; each reaches the server's events so a stall can be read back (Nate 10-07 15:39: "it is
 // not loading on the phone ... maybe if it's like an error")
