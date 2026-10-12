@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Tests: the over-memory board test no longer depends on the runner's memory
+
+- 10-12: `test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory` failed once on macOS CI with
+  `KeyError: 'over'`. It allocated 64 MiB and waited up to 10 s for the job meter to see it, but on macOS the
+  holder's resident size sometimes never grew past its size at the slot's start, so the job was never flagged. The
+  meter now reads a process's memory through one function (`machine._mem_of`), and the test sets what it reads, so
+  it always sees the job 64 MiB past its declared memory and checks the exact numbers on the board.
+
 ### Phone: pictures on panels open full screen
 
 - A tap on a panel's picture opens it full screen, as its videos already do: pinch or double-tap to zoom, a finger

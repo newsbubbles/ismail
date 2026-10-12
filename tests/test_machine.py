@@ -348,14 +348,18 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
     monkeypatch.setattr(machine, 'METER_S', 0.05)
     monkeypatch.setattr(machine, 'MEM_OVER_MIN_GB', 0.0)
     monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
+    # The holder's memory as the meter reads it, not the runner's: a real 64 MiB allocation sometimes never showed
+    # in the resident size on macOS CI (2026-10-12, run 38222909607), the wait below ran out and 'over' was missing
+    added = [0]
+    held = lambda p: (2 ** 30 + added[0],) * 2
+    monkeypatch.setattr(machine, '_mem_of', lambda p, real=machine._mem_of: held(p) if p.pid == os.getpid() else real(p))
     with machine.slot('gpu', 'blender bvh', mem_gb=0.001, who='film') as job:
-        hog = os.urandom(64 * 2 ** 20)                    # what the job adds (random, so macOS cannot compress it away)
-        import time
+        added[0] = 64 * 2 ** 20                           # what the job adds
         t = time.time()
         while not (machine.jobs() and machine.jobs()[0].get('over')) and time.time() - t < 10:
             time.sleep(0.05)
         on_board = machine.jobs()[0]
-        assert on_board['over'] > 0.001 and on_board['mem_now_gb'] > 0.001
+        assert on_board.get('over') == 0.06 and on_board.get('mem_now_gb') == 0.06, on_board
         assert 'OVER: peaked at' in machine._describe(on_board)
         monkeypatch.setattr(machine, 'memory', lambda: (4.0, 70.0, 2.0))
         why = machine.check('cpu')
