@@ -48,18 +48,30 @@ How fast you answer depends on what the person is doing:
 - **Studio work and exams are turn-based.** They ask, you work, you answer. A long fix inside one turn is fine.
 - **A set runs in real time underneath.** The engine plays on its own and you steer between turns (the loop
   above).
-- **A jam is threaded.** The person plays parts in (a take on the phone's voice page, a recording) and you turn
-  them into loops. They lead; you are the DAW. The main thread answers everything they send within about a
-  minute, before any long work, even if the answer is only "got it, it goes in at the next loop". Any work longer
-  than a couple of minutes (fixing a transcription, sync, sound matching, levels) goes to a helper (a subagent,
-  or a second session when your harness has no helpers) with full context: the song folder, the take, what the
-  person said, and what done looks like. The main thread keeps listening and talking, and says when the
-  helper's result goes in.
+- **A jam is threaded.** The person plays parts in (takes: voice notes, recordings) and you turn them into loops.
+  They lead; you are the DAW. The main thread answers everything they send within about a minute, before any long
+  work, even if the answer is only "got it, it goes in at the next loop". Any work longer than a couple of minutes
+  (fixing a transcription, sync, sound matching, levels) goes to a helper (a subagent, or a second session when
+  your harness has no helpers) with full context: the song folder, the take, what the person said, and what done
+  looks like. The main thread keeps listening and talking, and says when the helper's result goes in.
 
-In a jam the deadline is the loop, not a clock: the time for a change is what is left of the current loop. A
-change that will not land in this loop or the next goes to a helper, and you say which loop it lands in. Keep the
-inbox watch (`phone_watch`) running the whole time: without it you cannot answer within a minute. Notes left
-unanswered while you fix something read as a broken tool.
+### In a jam
+
+- **The deadline is the loop, not a clock.** The time for a change is what is left of the current loop. A change
+  that will not land in this loop or the next goes to a helper, and you say which loop it lands in.
+- **Watch first.** After every wake, re-arm the inbox watch (`phone_watch`) before anything else, then answer, then
+  work. Notes left unanswered read as a broken tool.
+- **Record from the first take.** The best moments come early and unannounced, and what was not recorded is gone.
+- **Their own sound first.** Their real voice, instrument or beatbox, chopped and gated into the loop, usually lands
+  better than a transcription played on a synth. Transcribe when they ask for it or the sound cannot work.
+- **Ask what a take is for.** When a take could be a sample of them or a melody to play on an instrument, ask once,
+  keep the answer, and let them change it by voice.
+- **Pull first, fix later.** When a part made from a take sounds wrong to them, mute it at the next bar, within the
+  minute, and fix it in a helper. Never debug it live while it plays.
+- **A loop is not a resting state.** When they go quiet, the jam becomes a set: keep developing it, a change every
+  few minutes, a progression rather than a repeat, until they play in again.
+- **Write the story as you go**, one line per take: what they said, what changed. At the end, offer a studio version
+  built from the jam, in its own song folder.
 
 ## Sounds first
 

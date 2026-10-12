@@ -7,7 +7,10 @@
 - live.md, "Three paces: studio, set, jam": studio work and exams are turn-based, a set runs in real time
   underneath, and a jam is threaded: the main thread answers everything the person sends within about a minute and
   hands anything longer than a couple of minutes to a helper with full context, saying which loop it lands in.
-  It was only in one agent's notes before (the person, 10-12: "you're the DAW").
+  A new "In a jam" list, from the Live DJ's jam with the person: watch first, record from the first take, their own
+  sound before a transcription, ask once whether a take is a sample or a melody, pull a wrong part at the next bar
+  and fix it in a helper, keep developing when they go quiet, and write the story as you go. It was only in one
+  agent's notes before (the person, 10-12: "you're the DAW").
 
 ### Phone: the background is still when no set plays, and phone_now works past 200 marks
 
