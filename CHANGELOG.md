@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Skill: one piece, one folder
+
+- SKILL.md now says when a new song folder starts: from the first file of a new set, a new jam, a studio track
+  made from a jam or a remix. What a piece reuses from an older one is copied or imported by path and named in its
+  notes; a piece never lives inside another piece's folder. The skill only showed what a folder holds, so every
+  new piece went into the folder where the live engine happened to run.
+- live.md, "A new piece while the engine runs": an engine belongs to the folder it started in, so moving to a new
+  set is finish or fade, `live_stop`, `live_start` in the new folder, then the phone watcher on the new inbox. A
+  finished song from another folder can still play on a deck by its path.
+
 ### Phone: one standing watcher for every agent
 
 - New `phone_watch(who)`: the phone watcher every agent runs in the background (`python -m ismail phone_watch
