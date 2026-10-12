@@ -253,7 +253,7 @@ songs/<slug>/
   work/                 measurement scripts and their saved output (groove.txt, timbre.txt): voices and
                         sections cite these numbers
   notes/feedback.md     bar or time | the user's words verbatim | what changed | the measured result
-  takes/                live_record wavs and sidecars, when recorded
+  live/                 live_record takes (rec_<date>_<time>.wav and its .json), and highlights/ with its INDEX.md
 ```
 
 - **A rebuilt part gets a new track name with the section number** (`gmb2` -> `gmb3`), and each section module
