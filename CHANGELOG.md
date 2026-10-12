@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Measuring: a second part in a source is sensed, not assumed away
+
+- New `stem_parts`: per band, how much of its envelope's movement sits at the source's note rate and the rate it
+  moves at, the strongest pitch under 250 Hz per beat, and how many onsets are strums. A loud band that moves on
+  its own gets a WARNING: another player, or bleed from another stem. A "guitar" stem that held a second player's
+  bass line had wrecked a tone match (Spanish guitar handoff, 10-12); separation and "solo" stretches are not
+  assumed clean (Nate, 10-12).
+- `analyze_melody` ends with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits
+  within 6 dB of a quarter of the notes or more, or when voicing is low. With a backing about as loud as the lead it
+  reads the backing, as it did on that record; the warning now says so.
+
 ### Skill: sampling is allowed, and private use needs no caution
 
 - Nate, 10-12: ismail samples like any DAW. Slicing a reference into the song is fine whenever the user wants it;

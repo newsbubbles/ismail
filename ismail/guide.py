@@ -57,7 +57,8 @@ HEAR (audio -> text), cheapest first
   analyze_bars        per-bar level/bands/onsets/chroma      analyze_envelope  level per 16th (pumping, gates)
   analyze_drums       drum lanes as step strings             analyze_pitches   notes sounding per beat
   analyze_roll        piano roll of a source (same features the comparisons score)
-  analyze_melody      monophonic line -> notes               analyze_formants  vowels of a voice
+  analyze_melody      monophonic line -> notes (+confidence) analyze_formants  vowels of a voice
+  stem_parts          one part or several in a stem (a second player, bleed), before tone matching to it
   analyze_timbre / analyze_spectrum / sound_compare          spectrogram (PNG, last resort)
   analyze_kit         drum kit pieces (NMF) + their patterns analyze_swing     how late swung hats land
   analyze_sections    loudness per section, dynamic range, a build as loud as its climax
