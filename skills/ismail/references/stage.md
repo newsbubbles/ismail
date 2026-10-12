@@ -142,6 +142,9 @@ built the room. Ask it yourself first, while designing and again before they go 
 
 ## Bodies, props and contact
 
+Rigged human bodies (export, wrists, start poses, hands, props on bones, following a person, the clip checks) have
+their own reference: `rigged-characters.md`. Read it before exporting, posing or following anyone.
+
 - **Fix locally from the state the person liked.** When a liked pose has one flaw, restore that pose and change only
   that, the way a body would (roll the shoulder, sink into the seat). Blind searches over many joints drift into
   contortion. Look at a render before the third search.

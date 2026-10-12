@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Skill: rigged characters
+
+- New reference `rigged-characters.md`: rigged human bodies on a VR or browser stage, from one long film build
+  checked in a headset (MakeHuman as the worked example, the lessons marked for any rig): know your rig, rest vs
+  posed export, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand
+  tracking, props on bones, following a live person, the clip and view checks, materials that survive export.
+  Listed in SKILL.md and linked from stage.md and music-video.md.
+
 ### Skill: the contributor dev
 
 - The dev role for the engine is now the **contributor dev**: the dev on the person's own machine
