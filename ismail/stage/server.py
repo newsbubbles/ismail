@@ -196,7 +196,7 @@ CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoi
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release', 'prop_pin',
              'take_keep_last', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
-             'behaviours', 'behaviour_run', 'behaviour_state'}
+             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 

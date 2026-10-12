@@ -260,6 +260,13 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Props in a person's hands.** Place the prop where it belongs on the person (in the hand, on the strap), then
   `stage_prop_pin(scene, object, person, bone='hand_r')`: it rides their body from then on, at rest, in a take and in
   a Follow, and is saved with the scene. `clear=True` unpins it.
+- **A person who sings or speaks (lip sync).** Export their body with mouth shapes kept (mhx `export --morphs mouth`;
+  a step that slims the body for the headset has to keep them too, with every weight at 0; a body without them is
+  left alone and the page says so once, `face_unsupported`), then `stage_face(scene, person, at=<song second>, audio=<vocal stem>, start=, end=, words=[{word, start, end}])`
+  puts that stretch of the voice on their mouth while the song plays (or `take=<id>` for a take's own mic and words;
+  `transcribe=True` asks the speech server for the words). The reply shows the track as a mouth shape letter and a
+  jaw digit per 0.1 s; read it against the words before you film. Without words the jaw only follows loudness, which
+  reads as chewing on a mixed recording: use a vocal stem and words.
 - **Keep the headset light with load sets.** When the work moves to one group (the band), unload the others (the
   dancers): `stage_set_define(scene, 'dancers', items=['person_couple_*'], note='the six dancers')` once, then
   `stage_set_load(scene, 'dancers', loaded=False)`. They are not drawn, compiled or uploaded, their people neither

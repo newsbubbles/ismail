@@ -1013,5 +1013,5 @@ export function initActors(ed, live) {
   const boneOf = (person, bone) => { const r = shownRig(person); return (r && r.bones[bone]) || null; };
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
   return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
-    rested: () => restP, notResting, boneOf, bonesOf };
+    rested: () => restP, notResting, boneOf, bonesOf, shownRig };
 }
