@@ -2,11 +2,14 @@
 
 ## Unreleased
 
-### Tests: the slow-speech-server phone test no longer races its own second note
+### Tests: two phone tests no longer depend on how fast the runner is
 
 - `test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_through` failed on Windows CI (main at
   61c568e, pr:195 on 10-12): its first note failed before the second note had been posted, so the line had one note
   and the retry went first. The first try now fails only once the second note is in line, as on the phone.
+- `test_every_voice_note_keeps_the_music_under_it` failed on Windows CI the same day (pr:195): the guessed reference
+  ends where the master ends, so it is shorter by however long the runner took to reach the second note (1.9 s
+  there). The expected length now takes that time off.
 
 ### Measuring: a second part in a source is sensed, not assumed away
 
