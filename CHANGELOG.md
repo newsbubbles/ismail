@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Provenance: every mp3 says which ismail made it
+
+- Beside the made-with line and the link, each mp3 ismail writes now carries the version (`pyproject.toml`, 0.3.0),
+  the short git commit (with `+local` when the package's code has uncommitted changes) and the skill's version: in
+  the encoder settings frame for people ("ismail 0.3.0 (1a2b3c4, skill 0.1.0) https://...") and one frame each for
+  tools (`TXXX:ismail_version`, `ismail_commit`, `ismail_skill`). They are read from the build at the moment of
+  writing; a pip install without git or the skill folder writes only what it knows (hq:D-128).
+- `python -m ismail.tags <file.mp3> ...` says which ismail made each file; with no file, which ismail this is.
+- Versions are tagged on main from v0.3.0 on (maintainer.md says when to bump).
+
 ### Exam pages: the picture round works on a phone
 
 - A finger on a picture no longer drops a pin or a box (Nate, round s26: he touched a picture to scroll, got marks
