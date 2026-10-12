@@ -133,7 +133,7 @@ def _mono_groups(notes, inst):
 
 
 class Engine:
-    def __init__(self, root, bpm, bpb=4, workers=2, device='default', follow=True):
+    def __init__(self, root, bpm, bpb=4, workers=2, device='default', follow=True, trim_db=None, cap_db=None):
         self.root = os.path.abspath(root)
         self.bpm = float(bpm)
         self.bpb = int(bpb)
@@ -173,7 +173,7 @@ class Engine:
         self.levels = collections.deque(maxlen=600)   # per second: (pos, mix dB, tracks sounding, one of them)
         self._lvl = [0.0, 0]            # the second being summed: energy, samples
         self.runway_out = None          # the mix position the runway ran out (nothing new scheduled) at
-        self.safety = Safety(SR)
+        self.safety = Safety(SR, trim_db, cap_db)        # None: the environment's trim and cap
         self.air = np.zeros((2, int(AIR_S * SR)), dtype=np.float32)
         self.fade = None                # (start gain, samples left, total) when stopping
         self.gain = 1.0
@@ -1216,6 +1216,9 @@ class Engine:
                 loud = [b for b, v in sends.items() if v > 6]
                 if loud:
                     raise LiveError(f"send levels above +6 dB: {loud}")
+            if output is not None and track in self.tracks and self.tracks[track]['output'] != output:
+                raise LiveError(f"track {track!r} plays into {self.tracks[track]['output'] or 'the master'}; a "
+                                f"track's output is set when it is created (remove it and create it again)")
             if deck is not None and track in self.tracks and self.tracks[track]['deck'] != deck:
                 raise LiveError(f"track {track!r} is on deck {self.tracks[track]['deck']!r}; a track stays on the deck "
                                 f"it was created on (remove it and create it again)")
@@ -2392,6 +2395,38 @@ def registry_path(pid=None):
     return d if pid is None else os.path.join(d, f"{pid}.json")
 
 
+PRIORITIES = {'normal': (0x20, 0), 'above_normal': (0x8000, -5), 'high': (0x80, -10)}   # Windows class, nice
+
+
+def set_priority(level, pid=None):
+    """Set a process's scheduling priority (the engine's own by default). Windows: its priority class. Elsewhere:
+    its nice value, which needs rights a user often lacks; then it stays as it was and the reply says so. Returns
+    one line for the log and the live_start reply."""
+    if level not in PRIORITIES:
+        raise ValueError(f"priority {level!r}: one of {', '.join(PRIORITIES)}")
+    cls, nice = PRIORITIES[level]
+    pid = os.getpid() if pid is None else int(pid)
+    if os.name == 'nt':
+        import ctypes
+        k = ctypes.WinDLL('kernel32', use_last_error=True)
+        k.OpenProcess.restype = ctypes.c_void_p
+        k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        k.CloseHandle.argtypes = [ctypes.c_void_p]
+        h = k.OpenProcess(0x0200 | 0x1000, False, pid)     # PROCESS_SET_INFORMATION | QUERY_LIMITED_INFORMATION
+        if not h:
+            return f"priority {level}: not set (could not open process {pid})"
+        try:
+            ok = k.SetPriorityClass(h, cls)
+        finally:
+            k.CloseHandle(h)
+        return f"priority {level}" if ok else f"priority {level}: not set (error {ctypes.get_last_error()})"
+    try:
+        os.setpriority(os.PRIO_PROCESS, pid, nice)
+    except (OSError, AttributeError):
+        return f"priority {level}: not set (this system needs more rights to raise it)"
+    return f"priority {level} (nice {nice})"
+
+
 def warm_effects():
     """Compile/load every effect kernel once before audio starts: a first numba compile mid-set would hold the GIL
     long enough to starve the device."""
@@ -2509,11 +2544,20 @@ def main():
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--port', type=int, default=0)
     ap.add_argument('--no-follow', action='store_true', help="device 'default' stays where it opened")
+    ap.add_argument('--trim-db', type=float, default=None, help="master trim (default: ISMAIL_LIVE_TRIM_DB, or -6)")
+    ap.add_argument('--cap-db', type=float, default=None, help="loudness cap (default: ISMAIL_LIVE_CAP_DB, or -16)")
+    ap.add_argument('--priority', choices=sorted(PRIORITIES), default=None,
+                    help="the engine's own priority, set after the render workers start (they stay normal)")
     a = ap.parse_args()
     import scipy.signal  # noqa: F401  (seconds to import: do it before audio starts, never mid-set)
     from .. import mimic  # noqa: F401  (normalize() imports it for mimic tracks)
     warm_effects()
-    eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device, follow=not a.no_follow)
+    eng = Engine(a.project, a.bpm, a.bpb, a.workers, a.device, follow=not a.no_follow, trim_db=a.trim_db,
+                 cap_db=a.cap_db)
+    # after Engine(): the render workers are already running, so they keep the normal priority they started with
+    prio = set_priority(a.priority) if a.priority else None
+    if prio:
+        print(prio, flush=True)
     httpd = serve(eng, a.port)
     eng.start()
     waited = eng.wait_ready()           # engine.json appears (live_start returns) once the workers can render
@@ -2522,7 +2566,7 @@ def main():
     os.makedirs(d, exist_ok=True)
     info = os.path.join(d, 'engine.json')
     rec = {'port': httpd.server_address[1], 'pid': os.getpid(), 'bpm': a.bpm, 'bpb': a.bpb,
-           'device': a.device, 'started': time.time(), 'project': eng.root}
+           'device': a.device, 'started': time.time(), 'project': eng.root, 'priority': prio}
     with open(info, 'w', encoding='utf8') as f:
         json.dump(rec, f)
     reg = registry_path(os.getpid())

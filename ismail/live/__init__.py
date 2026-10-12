@@ -2,7 +2,8 @@
 
 engine.py   the player process (clock, scheduler, render workers, mixer, device, local HTTP control)
 timeline.py the queue rules in beats (pure; tested without audio)
-safety.py   master trim, level rider, lookahead limiter, hard ceiling (limits come from the environment)
+safety.py   master trim, level rider, lookahead limiter, hard ceiling (trim and cap from live_start or the
+            environment, the ceiling from the environment)
 worker.py   render one note/phrase with the offline instrument code (performer voices, baked studio effects)
 ops.py      the live_* agent ops (registered into ismail.api.OPS)
 fx_blocks.py, dsp_blocks.py

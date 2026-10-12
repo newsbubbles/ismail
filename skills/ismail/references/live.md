@@ -192,8 +192,7 @@ sessions' renders, Blender and video jobs.
   minutes on a lone hat loop after its outro forgot to stop it).
 - **Under load, shrink the rig instead of stopping.** Dropping idle tracks and insert effects (bitcrush,
   compressor, chorus, distortion) while keeping the parts the person named took the mixer from 85% to 47% with
-  the same music. Raising the live engine to AboveNormal priority (render workers stay Normal)
-  helps when other jobs hog the CPU.
+  the same music.
 - **One deck at a time on a busy machine.** A cued deck of a 20-track song costs the mixer as much as one on air,
   and its first section renders in a burst: every breakup in one morning lined up with a deck load. Switch songs
   with a stop and a start (a short gap) until the machine has room.
@@ -338,9 +337,10 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   a floor, not a mixer: its limiter and rider should read 0 dB.
 - **Live output is quiet by default** (trim -6 dB, sustained cap -16 dBFS rms, ceiling -1 dBFS; about -21 to
   -23 LUFS for a balanced mix). That is too quiet for a listener at a normal volume: one user heard "nothing".
-  For a set, start the engine with `ISMAIL_LIVE_TRIM_DB=4` and `ISMAIL_LIVE_CAP_DB=-12` in the environment of
-  the process that calls `live_start` (the engine inherits it): about -16 LUFS. Then keep the limiter near 0 dB
-  with faders.
+  For a set, start the engine with `live_start(..., trim_db=4, cap_db=-12)`: about -16 LUFS. The arguments set
+  this set's level and win over the environment. Left out, the engine reads `ISMAIL_LIVE_TRIM_DB` and
+  `ISMAIL_LIVE_CAP_DB` from the process that calls `live_start`, which a tool server cannot change between calls,
+  so use the arguments. `live_status` prints the trim and cap in use. Then keep the limiter near 0 dB with faders.
 - **Sounds you are unsure of**: try them on a muted or quiet track (`volume_db=-40`, then fade with a ramp on a
   gain fx) rather than straight onto the main part.
 - **Tempo change** = `live_stop`, then `live_start` with the new tempo (a gap). Inside a set, change the feel
@@ -374,8 +374,9 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
 
 - **Streams.** `live_stream(name='bus:lucy')` gives a localhost URL that streams that bus (or `master`, or
   `deck:A`) as raw PCM, int16 stereo at 44.1 kHz, with its own safety limiter. Route the tracks an object should
-  play to their own bus (`live_track(output='lucy')`) so each object plays its own sound at its own place; one master
-  stream would put everything in one spot. The engine listens on localhost only: a page on a headset reaches it
+  play to their own bus (`live_bus('lucy')`, then `live_track(track, instrument=..., output='lucy')` as you create
+  each track; a track's output is set when it is created) so each object plays its own sound at its own place; one
+  master stream would put everything in one spot. The engine listens on localhost only: a page on a headset reaches it
   through the page's own server, which relays the stream (same origin, https). A listener that falls a second behind
   loses its oldest audio and never slows the set. A stream plays sound wherever it is received: tell the user
   before anything starts.
@@ -463,7 +464,8 @@ While your engine is on the board, the governor holds GPU jobs and Blender rende
 made after two real dropouts; `python -m ismail.machine on-air` shows the policy). Audio
 renders and other CPU work still run beside you, sharing half the machine's threads (a job that asks for more
 waits; after a 359-underrun dropout from one slot's render plus the perceptual model on every core).
-Keep your engine at High priority and watch underruns. Your own checks during a set: run them as
+`live_start` sets the engine's priority in code (above normal, render workers normal); its `priority` option
+(`'above_normal'`, `'high'`, `'normal'`) changes it. Watch underruns. Your own checks during a set: run them as
 `python -m ismail.machine run --cpu --threads 2 -- python check.py`; the renders and comparisons inside it use the
 run's slot and its threads.
 
