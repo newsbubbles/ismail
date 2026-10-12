@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Exam pages: the picture round works on a phone
+
+- A finger on a picture no longer drops a pin or a box (Nate, round s26: he touched a picture to scroll, got marks
+  he could not take back). Each card has a Mark button: off, a finger scrolls the page as anywhere else; on, a tap
+  pins and a drag boxes, as before. Mark starts off on a touch screen and on with a mouse.
+- Every mark has a Remove button on its row, which takes the pin or box away (and its comment out of the answers).
+  A removed mark's number is not reused.
+- One card on screen at a time, with Back, Next and "card 2 of 5". An item can carry its own question,
+  `ask`, shown above its pictures (`exam_picture_round(items=[{..., 'ask': 'Where does my voice go thin?'}])`).
+- On a phone, pinning a comment no longer opens the keyboard over the picture; tap the comment box to type.
+
 ### Docs: the roadmap matches what is merged
 
 - `ROADMAP.md` was last changed on 10-02 and still listed the stage as coming into ismail, though it has been in
