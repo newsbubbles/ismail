@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Skill: "the person" in the lessons
+
+- The skill's lessons no longer name one user: each says "the person", as the rest of the skill does (blind-tests.md,
+  mastering.md, phone.md, stage-takes.md, user-experience.md).
+
 ### Skill: shared references and a tidy after the skill review
 
 - Two shared references: `loudness.md` (every output's level, and a table saying which limiter number belongs to

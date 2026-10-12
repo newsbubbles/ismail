@@ -29,7 +29,7 @@ leaves one answer line marked `preflight`: skip it when scoring.
 
 ### The blind crop check: can you tell from the picture?
 
-Before a real-against-made round, look first (Nate's "90 degree rotation": when one sense plateaus, rotate which
+Before a real-against-made round, look first (the person's "90 degree rotation": when one sense plateaus, rotate which
 one measures; a spectrogram is an image an eye reads well). `exam_eye_crops(pairs=[[real, made], ...], out=...)`
 cuts the same window from both clips of each pair (a word plus 60 ms either side, when you pass `windows`) and puts
 them side by side as "1" and "2" in a random order, with the key in a file you do not open. Look at each crop, pick
