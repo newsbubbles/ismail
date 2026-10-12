@@ -58,6 +58,10 @@ class FakeEngine(BaseHTTPRequestHandler):
             pass
 
 
+def _no_speech_server(audio, name, **kw):
+    raise ConnectionRefusedError('no speech server in the tests')
+
+
 @pytest.fixture
 def phone(tmp_path, monkeypatch):
     home, reg, proj = tmp_path / 'phone', tmp_path / 'live', tmp_path / 'song'
@@ -70,6 +74,13 @@ def phone(tmp_path, monkeypatch):
     threading.Thread(target=eng.serve_forever, daemon=True).start()
     (reg / '1.json').write_text(json.dumps({'port': eng.server_address[1], 'started': time.time(),
                                             'project': str(proj)}))
+    monkeypatch.setattr(S, 'stt', _no_speech_server)       # a test that wants words patches its own in
+    made, init = [], S.Phone.__init__
+
+    def init_and_keep(self, *a, **kw):                      # the "restarted server" Phones a test makes too
+        init(self, *a, **kw)
+        made.append(self)
+    monkeypatch.setattr(S.Phone, '__init__', init_and_keep)
     ph = S.Phone()
     monkeypatch.setattr(ph, '_cpu_busy', lambda: '')
     S.Handler.ph, S.Handler.agent = ph, S.Agent(ph)
@@ -82,6 +93,8 @@ def phone(tmp_path, monkeypatch):
             break
         time.sleep(0.1)
     yield ph, f'http://127.0.0.1:{httpd.server_address[1]}', proj
+    for p in made:      # left running, a Phone's transcriber retried a note left in its line inside the next test,
+        p.stop()        # through that test's stt and into its inbox
     httpd.shutdown()
     eng.shutdown()
     for enc in list(ph.encoders.values()):
@@ -1051,7 +1064,7 @@ def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(pho
     import soundfile as sf
     ph, base, _ = phone
     gate = threading.Event()
-    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: (gate.wait(10), 'lisp buzz on the S')[1])
+    monkeypatch.setattr(S, 'stt', lambda audio, name, **kw: (gate.wait(60), 'lisp buzz on the S')[1])
     a, b = tmp_path / 'a.wav', tmp_path / 'b.wav'
     t = np.arange(22050) / 44100
     sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
@@ -1071,16 +1084,19 @@ def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(pho
     assert row['answers']['note_source'] == 'voice' and row['answers']['note_audio'][0].endswith(f'{vid}.webm')
     assert 'note_voice' not in row['answers']
     gate.set()
-    for _ in range(50):
-        rows = [json.loads(x) for x in ans.read_text(encoding='utf8').splitlines()]
-        if len(rows) > 1:
+    deadline = time.time() + 60                                                 # slow under a full run
+    while True:
+        rows = [json.loads(x) for x in ans.read_text(encoding='utf8').split('\n')[:-1]]   # whole lines
+        if len(rows) > 1 or time.time() > deadline:
             break
         time.sleep(0.1)
+    assert len(rows) > 1, (rows, ph.voice_state, list(ph.voice_q))
     note = rows[1]
     assert (note['kind'], note['exam'], note['id'], note['field']) == ('voice_note', 'r50', vid, 'note')
     assert note['text'] == 'lisp buzz on the S' and os.path.exists(note['audio_path'])
-    vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines'] if x['kind'] == 'voice_text'][-1]
-    assert vt['panel'] == 'r50' and vt['field'] == 'note'                          # the inbox still has it
+    lines = json.loads(P.phone_listen('x', since=0, wait=0))['lines']
+    vt = [x for x in lines if x['kind'] == 'voice_text' and x.get('id') == vid]
+    assert len(vt) == 1 and vt[0].get('panel') == 'r50' and vt[0].get('field') == 'note', lines   # the inbox has it
 
 
 def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_through(phone, monkeypatch):
@@ -1090,28 +1106,31 @@ def test_a_note_the_speech_server_is_slow_on_waits_longer_and_lets_the_next_thro
     tries = []
 
     def slow_then_fine(audio, name, timeout=S.STT_TIMEOUT_S):
-        tries.append((audio[:1], timeout))
-        if audio[:1] == b'' and len(tries) == 1:
-            for _ in range(100):                     # fail only once the short note is in line behind it: a
-                if len(ph.voice_q) >= 2:             # slow runner could take the second post after the retry
-                    break
+        long = audio.startswith(b'the long note')
+        tries.append((name, long, timeout))
+        if long and sum(1 for _, lg, _ in tries if lg) == 1:
+            deadline = time.time() + 60              # fail only once the short note is in line behind it
+            while len(ph.voice_q) < 2 and time.time() < deadline:
                 time.sleep(0.05)
             raise TimeoutError('timed out')
-        return 'the long one' if audio[:1] == b'' else 'the short one'
+        return 'the long one' if long else 'the short one'
     monkeypatch.setattr(S, 'STT_RETRY_S', 0.05)
     monkeypatch.setattr(S, 'stt', slow_then_fine)
     ids = []
-    for b in (b'', b''):
-        req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b * 2000, headers={'Content-Type': 'audio/webm'})
+    for b in (b'the long note ', b'the short note'):
+        req = urllib.request.Request(base + '/api/voice?sid=&t=', data=b * 150, headers={'Content-Type': 'audio/webm'})
         ids.append(json.loads(urllib.request.urlopen(req, timeout=5).read())['id'])
-    for _ in range(300):                                                        # 30 s: slow under a full run
-        vt = [x for x in json.loads(P.phone_listen('x', since=0, wait=0))['lines']
-              if x['kind'] == 'voice_text' and x.get('id') in ids]
-        if len(vt) == 2:
+    deadline = time.time() + 60                                                 # slow under a full run
+    while True:
+        lines = json.loads(P.phone_listen('x', since=0, wait=0))['lines']
+        vt = [x for x in lines if x['kind'] == 'voice_text' and x.get('id') in ids]
+        if len(vt) == 2 or time.time() > deadline:
             break
         time.sleep(0.1)
-    assert [x['text'] for x in vt] == ['the short one', 'the long one']           # the short one did not wait
-    assert [t for b, t in tries if b == b''] == [S.STT_TIMEOUT_S, 2 * S.STT_TIMEOUT_S]
+    state = (ids, tries, ph.voice_state, list(ph.voice_q), lines)
+    assert [(x['id'], x['text']) for x in vt] == [(ids[1], 'the short one'), (ids[0], 'the long one')], state
+    assert [t for n, _, t in tries if n.startswith(ids[0])] == [S.STT_TIMEOUT_S, 2 * S.STT_TIMEOUT_S], state
+    assert [n for n, _, _ in tries if n.startswith(ids[1])] and all(n.startswith(tuple(ids)) for n, _, _ in tries), state
 
 
 def test_words_written_beside_a_note_are_used_instead_of_the_speech_server(phone, monkeypatch):

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Tests: one phone test's voice notes no longer reach the next
+
+- An old test's phone kept retrying its voice note through the next test's speech server and into its inbox; each
+  test now stops its phones (`Phone.stop()`), and a note said while another waits to retry goes ahead of it.
+
 ### Phone: one standing watcher for every agent
 
 - New `phone_watch(who)`: the phone watcher every agent runs in the background (`python -m ismail phone_watch
