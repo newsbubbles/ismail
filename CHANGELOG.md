@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Phone: one standing watcher for every agent
+
+- New `phone_watch(who)`: the phone watcher every agent runs in the background (`python -m ismail phone_watch
+  "who=<role>"`). It loops `phone_listen`, returns every line the person sent (a burst gathered with one more short
+  look) and a `next` line saying how to re-arm. Nothing is filtered by owner; only page telemetry (every page
+  action but `panel_close`) and the `voice` transcribing line stay out. Its cursor is kept on disk for each `who`
+  and saved only when it returns lines, so a context reset or a killed watcher resumes where the last return left
+  off, and with no cursor it starts at the end of the inbox instead of replaying it. It returns `alive: true` after
+  `wait_min` (100 minutes) with nothing, waits out a phone server restart, and `round=<card id prefix>` holds a
+  round of someone else's cards. Before this the watcher lived in one song folder; after a context reset a
+  hand-made one kept no cursor and missed six of the person's notes in 36 minutes.
+- skills `phone.md` names `phone_watch` as the standing watcher (re-arm it first after every wake, never write your
+  own); `live.md` adds to the DJ loop: start it in the same turn as any set, and never put housekeeping before the
+  phone.
+
 ### Dev: dev copies (git worktrees) tracked by a tool
 
 - New `python -m ismail.worktrees`: every dev copy of the repository (a git worktree) on one line, with its branch,
