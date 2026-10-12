@@ -60,7 +60,7 @@ when a floor answer differs from the first. Each floor pair costs a slot of the 
 renumbered around them, and the reply and `<answers_path>.floor.json` map the labels back and say which side is the
 MP3. Read the floor first: if they pick the MP3 side as "different" more often than chance, the device and ear
 separate even that, and a real pair they could not tell is a strong pass; if they never can, a "can't tell" says
-little. From the Voice and Paper agents' work (ledger:M173).
+little.
 
 ### Record the devices, every round
 

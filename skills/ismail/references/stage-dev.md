@@ -6,10 +6,13 @@ end to end (the page that runs in a headset or a desktop browser, its server, th
 scene export and the headset diet, comfort, gestures and the action registry, presence). VR is one way into the
 stage; a desktop browser is another.
 
-The maintainer owns the op table (`api.py`, `@op`, the generated CLI and MCP, errors and replies), reviews every
-pull request and keeps CI; the person merges. A change to the op table goes to the maintainer before it goes in a
-pull request. Two devs never build the same part: when a role is unclear, the person settles it before anyone
-builds, never a relayed message.
+The contributor dev owns the op table (`api.py`, `@op`, the generated CLI and MCP, errors and replies) and the
+local main branch. When your branch is ready, send it to the contributor dev as a local merge request (the branch,
+what it changes, its tests passing); it merges it on the machine. With no contributor dev running, open your own
+pull request. A change to the op table goes to the contributor dev before it goes in. Two devs never build the
+same part: when a role is unclear, the person settles it before anyone builds, never a relayed message. The roles
+are in `development.md`. During a live test a stage agent may start your session and message you directly
+(`stage.md`).
 
 These lessons come from the sessions that built the stage inside a film project and then moved it into ismail
 (2026-10-01 to 10-04): what the person said in chat and in about 200 voice notes from the headset.
