@@ -41,6 +41,26 @@ Write a short set as a script, `songs/<slug>/set.py`, like a `build.py`: rerunna
 readable later. A long set with feedback between parts runs from a control module instead (see Running a set). `examples/disco_set.py` (in this skill) is a worked example (intro, groove, breakdown with a filter snap and
 sweep, drop, ending; 17 clips in one batch).
 
+## Three paces: studio, set, jam
+
+How fast you answer depends on what the person is doing:
+
+- **Studio work and exams are turn-based.** They ask, you work, you answer. A long fix inside one turn is fine.
+- **A set runs in real time underneath.** The engine plays on its own and you steer between turns (the loop
+  above).
+- **A jam is threaded.** The person plays parts in (a take on the phone's voice page, a recording) and you turn
+  them into loops. They lead; you are the DAW. The main thread answers everything they send within about a
+  minute, before any long work, even if the answer is only "got it, it goes in at the next loop". Any work longer
+  than a couple of minutes (fixing a transcription, sync, sound matching, levels) goes to a helper (a subagent,
+  or a second session when your harness has no helpers) with full context: the song folder, the take, what the
+  person said, and what done looks like. The main thread keeps listening and talking, and says when the
+  helper's result goes in.
+
+In a jam the deadline is the loop, not a clock: the time for a change is what is left of the current loop. A
+change that will not land in this loop or the next goes to a helper, and you say which loop it lands in. Keep the
+inbox watch (`phone_watch`) running the whole time: without it you cannot answer within a minute. Notes left
+unanswered while you fix something read as a broken tool.
+
 ## Sounds first
 
 A live set is only as good as its sounds, and the rules of the main skill hold here too: no genre parts on bare

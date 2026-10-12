@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Skill: three paces, and a jam is threaded
+
+- live.md, "Three paces: studio, set, jam": studio work and exams are turn-based, a set runs in real time
+  underneath, and a jam is threaded: the main thread answers everything the person sends within about a minute and
+  hands anything longer than a couple of minutes to a helper with full context, saying which loop it lands in.
+  It was only in one agent's notes before (the person, 10-12: "you're the DAW").
+
 ### Phone: the background is still when no set plays, and phone_now works past 200 marks
 
 - The page's background (its effect, the beat pulse, note reactions, hue drift) now holds still, in the look's
