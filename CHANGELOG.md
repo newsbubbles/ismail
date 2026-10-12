@@ -6,10 +6,9 @@
 
 - `python -m ismail.video render` now takes the GPU slot on the shared machine board (`ismail.machine`) for each
   shot, in place of its own temp-file lock. The board's rules now hold for film renders as for any Blender render:
-  one GPU job on the machine, the heat and disk floors, and no render while a live set is on air (hq:D-131, skill
-  review finding B3). Before, the render was invisible to the board and could start Blender during a set.
-- It stands in line for the slot, 30 minutes by default (`--wait 2h`, `--wait 0` refuses at once). A refusal says
-  why, names the shots not rendered and exits 75, like `machine run`. The shot's Blender carries the slot
+  one GPU job on the machine, the heat and disk floors, and no render while a live set is on air. Before, the render was invisible to the board and could start Blender during a set.
+- It stands in line for the slot, up to 4 hours by default, to outlast a live set (`--wait 12h`, `--wait 0`
+  refuses at once). A refusal says why, names the shots not rendered and exits 75, like `machine run`. The shot's Blender carries the slot
   (`$ISMAIL_SLOT`), so heavy work it starts runs in the same slot.
 - music-video.md, SKILL.md and the README say so; the "machine-wide GPU lock" text is gone.
 

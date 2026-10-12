@@ -6,7 +6,7 @@
   still <shot.py> <frame>   one frame -> video/build/look/<shot>_<frame>.png  (extra args after --, e.g. -- --top 0,60,300,20)
   posesheet <shot.py> [f,f] every character alone from four sides at its key frames + the clipping check -> build/look/posesheet_<shot>.png
   render <shot.py>...       full shot renders, one at a time, each in the machine's GPU slot (ismail.machine: it waits
-                            in line, --wait 30m by default, while the GPU is busy or hot or a live set is on air);
+                            in line, --wait 4h by default, while the GPU is busy or hot or a live set is on air);
                             refuses on clipping unless -- --allowclip
   contact <video> [n]       contact sheet of n frames of any video -> video/build/look/contact_<name>.png
   edit [-- --sheet a b n | -- --range a b]   runs video/cut.py (sheet = contact sheet of bars a..b-1)
@@ -25,7 +25,7 @@ from .. import machine
 
 KIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'blender')
 TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
-RENDER_WAIT = '30m'                # a render stands in line this long for the GPU slot, as `machine run --wait` does
+RENDER_WAIT = '4h'                 # a render queue is walk-away work: it outlasts a live set rather than give up
 
 
 def _blender(song, shot, extra, log=None):
@@ -111,8 +111,8 @@ def cmd_rip(song, paths):
 
 def cmd_render(song, shots, extra, wait=RENDER_WAIT):
     """Each shot renders in the machine's GPU slot (ismail.machine), so the board's rules hold for it as for any
-    Blender render: one GPU job machine-wide, the heat and disk floors, and no render while a live set is on air
-    (hq:D-131). It stands in line up to `wait` ('30m'; '0' refuses at once). A refusal stops the queue, says why
+    Blender render: one GPU job machine-wide, the heat and disk floors, and no render while a live set is on air.
+    It stands in line up to `wait` ('4h'; '0' refuses at once). A refusal stops the queue, says why
     and names the shots not rendered. -> 0, or 75 (try again later) when the machine refused."""
     vd = video_dir(song)
     os.makedirs(os.path.join(vd, 'build', 'logs'), exist_ok=True)
@@ -129,7 +129,7 @@ def cmd_render(song, shots, extra, wait=RENDER_WAIT):
             left = [os.path.basename(x) for x in shots[i:]]
             print(f'{name}: not rendered, the machine refused the GPU slot: {e}', file=sys.stderr)
             print(f'not rendered: {" ".join(left)}. Run `python -m ismail.machine` to see the board, then render them '
-                  f'again (--wait 2h stands in line longer; only the user lifts the on-air rule).', file=sys.stderr)
+                  f'again (--wait 12h stands in line longer; only the user lifts the on-air rule).', file=sys.stderr)
             return 75                                            # EX_TEMPFAIL, as `machine run`
         text = open(log, errors='replace').read().splitlines()
         out = next((l.split('RENDERED', 1)[1].strip() for l in text if l.startswith('RENDERED')), None)
@@ -158,7 +158,7 @@ def main():
     ap.add_argument('args', nargs='*')
     ap.add_argument('--song', '-s', default='.', help='song folder (holds proj/ and the master wav)')
     ap.add_argument('--wait', default=RENDER_WAIT, help="render: how long each shot stands in line for the machine's "
-                    "GPU slot (30m, 2h; 0 refuses at once)")
+                    "GPU slot (4h by default, 12h; 0 refuses at once)")
     argv = sys.argv[1:]
     extra = []
     if '--' in argv:
