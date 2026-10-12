@@ -4,7 +4,7 @@ A scene for a video or an interactive world gets made by two kinds of work at on
 renders; the person stands in the scene (a browser, or a headset) and places, judges and acts. This reference is
 what one long build of a 1958 bar and a club, with a VR editor beside Blender, taught about doing that well. Read it
 before building any scene, look or editor a person will work inside, and with `music-video.md` (shots and the cut)
-and `user-experience.md` (their words, senses and consent).
+and `user-experience.md` (their words, kept in the lexicon with `lexicon_note`, their senses and consent).
 
 The stage itself (a browser and WebXR editor with a Blender round trip, hands, voice and panels) is part of ismail:
 `ismail.stage`, driven by the `stage_*` tools (below). Everything after that section holds for any editor where a
@@ -32,6 +32,8 @@ person and an agent change the same scene.
   proves it. Say "not verified yet" otherwise.
 - **Rebuild a room:** `stage_scene_export(scene)` runs `world.json` `build.script` in Blender in a heavy-job slot.
   An open page swaps it in under the construct, never while the person is in VR.
+- **Blender or a script outside the stage tools** runs through `python -m ismail.machine run --gpu -- <command>`, so
+  it takes the machine's GPU slot like the stage's own jobs (SKILL.md, "The machine is shared").
 - **Changes they will notice:** `stage_note(scenes, title, level)` feeds the "updates ready" card in the headset.
 - **Capture a shot on the PC:** `stage_capture(scene, t0, t1, camera=|shot= cameras=|path=|view=, size=, fps=,
   setup=, audio=)` draws the stage frame-locked (frame n is the song at t0 + n / fps, however slow the frame) in a
@@ -142,6 +144,9 @@ built the room. Ask it yourself first, while designing and again before they go 
 
 ## Bodies, props and contact
 
+Rigged human bodies (export, wrists, start poses, hands, props on bones, following a person, the clip checks) have
+their own reference: `rigged-characters.md`. Read it before exporting, posing or following anyone.
+
 - **Fix locally from the state the person liked.** When a liked pose has one flaw, restore that pose and change only
   that, the way a body would (roll the shoulder, sink into the seat). Blind searches over many joints drift into
   contortion. Look at a render before the third search.
@@ -202,7 +207,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   environment: change them yourself. The page, gestures, panels, voice, the server: the stage dev.
 - **Findings go to the handoff; during a live test, straight to the stage dev.** A gap in the engine goes in the
   project's HANDOFF.md. While the person is in the stage testing with you, send what they ask of the stage directly
-  as a message to the stage dev's session, conversation or agent, not through a handoff. When the change touches
+  as a message to the stage dev's session, conversation or agent, not through a handoff. If no stage dev is
+  running, start one yourself (a new session, conversation or agent with the ismail skill, asked to be the stage
+  dev, with what the person asked), so the person in the headset never waits on "the dev needs to do it". The
+  stage dev sends its change to the contributor dev as a local merge request (`development.md`, the roles). When
+  the change touches
   the page's code, the stage dev messages you back that an update is ready; tell the person in the room, and they
   take it with the update gesture (a left-hand thumbs up on the updates card).
 - **A message to the person rides with them; a note about a place stays there.** `stage_panel_show(anchor="body")`

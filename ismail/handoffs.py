@@ -5,6 +5,7 @@ handoff files since the dev agent last looked.
     python -m ismail.handoffs --full          # the same with the new text (changed sections: added lines only)
     python -m ismail.handoffs --mark          # after triage: remember what was seen
     python -m ismail.handoffs --no-prs        # handoffs only (the open pull requests are listed by default)
+    python -m ismail.handoffs --no-worktrees  # without the dev copies section (listed by default)
 
 A handoff file is HANDOFF*.md anywhere under songs/ (a song root, notes/, a video folder; not in caches, backups,
 renders or a generated proj/) or under the extra folders listed in <songs>/_migration/roots.txt (one path per
@@ -15,7 +16,11 @@ whose text was already in the file (a handoff reorganized) is listed only with -
 The open pull requests on the repository are listed after the handoffs (number, title, branch, author, checks,
 whether it merges cleanly), marked new or updated since the last --mark (<songs>/_migration/prs_seen.json), so a
 pull request is never seen only because its author sent word. It uses the GitHub command line (`gh`) when it is
-installed and signed in, and otherwise says it could not look."""
+installed and signed in, and otherwise says it could not look.
+
+Last, the dev copies (git worktrees, `ismail.worktrees`): the next action, the main checkout when it is behind
+origin/main, and only the copies that need something (no owner, merged, idle, behind), so no dev has to remember
+to look. `python -m ismail.worktrees` lists every copy."""
 import argparse
 import difflib
 import glob
@@ -200,6 +205,20 @@ def _report_prs(songs, mark):
         print(f"  [{kind}] {line}")
 
 
+def _report_worktrees():
+    """The dev copies that need something, from ismail.worktrees (no fetch, no gh: the pull requests are above)."""
+    from . import worktrees
+    try:
+        lines = worktrees.intake_lines(HERE)
+    except Exception as e:                           # the intake goes on without it: say so, never fail
+        print(f"\ndev copies (worktrees): could not look ({e}); run python -m ismail.worktrees")
+        return
+    print(f"\n== dev copies (worktrees): {lines[0]}")
+    for ln in lines[1:]:
+        print(ln if ln.startswith('  ') else f"  {ln}")
+    print("  (python -m ismail.worktrees lists every copy; skills/ismail/references/worktrees.md says what to do)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--songs', default=SONGS)
@@ -207,6 +226,7 @@ def main(argv=None):
     ap.add_argument('--all', action='store_true', help='also list sections whose text only moved')
     ap.add_argument('--mark', action='store_true', help='remember everything as seen (after triage)')
     ap.add_argument('--no-prs', action='store_true', help='skip the open pull requests')
+    ap.add_argument('--no-worktrees', action='store_true', help='skip the dev copies (git worktrees)')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(errors='replace')     # handoffs quote symbols a Windows console code page lacks
@@ -228,6 +248,8 @@ def main(argv=None):
         print(f"nothing new in {len(state)} handoff files since the last mark{note}")
         if not a.no_prs:
             _report_prs(a.songs, mark=False)
+        if not a.no_worktrees:
+            _report_worktrees()
         return
     last = None
     for path, title, kind, body, old in rows:
@@ -246,6 +268,8 @@ def main(argv=None):
           f"{os.path.join(a.songs, '_migration', 'LEDGER.md')}, then run with --mark.")
     if not a.no_prs:
         _report_prs(a.songs, mark=False)
+    if not a.no_worktrees:
+        _report_worktrees()
 
 
 if __name__ == '__main__':

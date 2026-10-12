@@ -12,26 +12,14 @@ For acoustic and electric instruments (guitar, strings, piano, brass, voice, cro
 
 A **performer** voice plays a whole part: `perform(notes, total_n, sr, bpm=120, lanes=None, beat0=0.0, **params)` and no `voice()`. Take `beat0` (the song beat at sample 0) and draw each note's randomness (humanize, pick, drift, noise) from a generator keyed on the note's song beat and pitch, as `voices/guitar/electric.py` `_rng` does, never from one generator drawn note after note: a render of any slice of the part (a bar range, the live engine's bar chunks) then plays exactly as the whole part does. Noise that runs under the whole part (a snare's wires) is drawn per block of the song's own timeline (`kit70._wire_noise`).
 
-A voice renders the same in the whole song, in a bar range and live only if it follows five rules (found joining
-windowed renders of a 146-bar song, `songs/tambopata`):
-1. **Seed by song time**, never by where a note sits in the buffer: `beat0` plus the note's start, rounded once
-   (`round((st + beat0 * 60 / bpm) * 1000)`, song milliseconds), not two rounded sample counts added.
-2. **Never index notes by their place in the list**: a window gets only its own notes and a few before. Carry the
-   identity in the note.
-3. **A held note arrives cut**: a note that began before the window comes in at the window's first sample with
-   what is left of it. A song-long bed generates by absolute time (noise per frame seeded by the frame's song
-   number, fades over the song's first seconds), not by the note.
-4. **Length-dependent work changes the sound**: a voice that draws noise for the whole buffer or filters it
-   zero-phase sounds different when it is given a different length. ismail hands code voices each note whole; a
-   performer still gets the window, so keep its draws per note and its filters causal.
-5. **A window's last bar is not the song**: notes after it are absent and it fades out; compare windows at a join,
-   not over their last bar.
-Studio renders of songs using `electric` or `kit70` made before their seeds were keyed (late September 2026) are a
-different take of the same humanization: a blind exam's old clips cannot be rendered again exactly.
+A voice renders the same in the whole song, in a bar range and live only if it follows the five window rules in
+`windows.md`: seed by song time, never index notes by their place in the list, a held note arrives cut, no work
+that depends on the buffer's length, and a window's last bar is not the song. It also says how ismail builds a
+window in the studio, on a deck and live.
 
 ## Gain staging
 
-One synth voice peaks near -9 dBFS and one drum hit near -6 dBFS at full velocity, so faders at 0 dB are a sane start. Chords of 4 notes with unison add up: pads usually sit at -8 to -12 dB. Check `render` output: every track peak under 0 dBFS, master limiter gain reduction under ~6 dB. A limiter pulling 10+ dB means your faders are too hot; turn tracks down, not the limiter.
+One synth voice peaks near -9 dBFS and one drum hit near -6 dBFS at full velocity, so faders at 0 dB are a sane start. Chords of 4 notes with unison add up: pads usually sit at -8 to -12 dB. Check `render` output: every track peak under 0 dBFS, master limiter gain reduction under ~6 dB while mixing (the number for each stage is in `loudness.md`). A limiter pulling 10+ dB means your faders are too hot; turn tracks down, not the limiter.
 
 ## Recipes by role
 
@@ -67,7 +55,8 @@ instrument -> eq (cleanup) -> distortion -> filter -> duck/compressor -> chorus 
 
 A sung take: `autotune` first, on the dry take, then eq, compressor, delay and reverb. It reads the voice's pitch,
 and an echo or a reverb tail in front of it gives it two pitches at once, so the correction wanders. A doubled or
-harmonised voice is a second track with its own `autotune`, not a second one in the same chain.
+harmonised voice is a second track with its own `autotune`, not a second one in the same chain. In a live set the
+take is tuned as a file first, with `sound_autotune` (`live.md`, "Sung takes, tuned").
 
 ## Guitars and other played strings
 

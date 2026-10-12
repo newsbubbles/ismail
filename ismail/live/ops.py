@@ -116,14 +116,33 @@ def _other_engines(project):
 
 @op()
 def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = 'default', workers: int = None,
-               follow_device: bool = True) -> str:
+               follow_device: bool = True, trim_db: float = None, cap_db: float = None,
+               priority: str = 'above_normal') -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
     between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
     it). device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
-    analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always passes a limiter and loudness cap you cannot raise.
-    The reply names any other live engine still running on this machine (two on one device can freeze both).
-    Next: live_track, then live_queue."""
+    analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always
+    passes the safety chain: trim, loudness cap, limiter, ceiling -1 dBFS. trim_db (-30 to +12) and cap_db (sustained
+    RMS dBFS, -40 to -8) set this set's level; left out, they come from ISMAIL_LIVE_TRIM_DB / ISMAIL_LIVE_CAP_DB in
+    the environment, else -6 and -16 (quiet, about -22 LUFS). A set for listeners: trim_db=4, cap_db=-12 (about -16
+    LUFS). priority: the engine process's own priority, 'above_normal' (default), 'high' or 'normal'; its render
+    workers stay normal ('high' can starve them). The reply names any other live engine still running on this
+    machine (two on one device can freeze both). Next: live_track, then live_queue."""
+    from .engine import PRIORITIES
+    from .safety import CAP_RANGE, TRIM_RANGE
+    if priority not in PRIORITIES:
+        raise OpError(f"priority {priority!r}: one of {', '.join(PRIORITIES)} (render workers stay normal)")
+    level = {}
+    for name, v, (lo, hi) in (('trim_db', trim_db, TRIM_RANGE), ('cap_db', cap_db, CAP_RANGE)):
+        if v is None:
+            continue
+        try:
+            level[name] = float(v)
+        except (TypeError, ValueError):
+            level[name] = None
+        if isinstance(v, bool) or level[name] is None or not lo <= level[name] <= hi:
+            raise OpError(f"{name} {v!r}: a number from {lo:g} to {hi:g} dB")
     root = os.path.abspath(project)
     if workers is None:
         workers = min(4, max(2, (os.cpu_count() or 4) - 4))
@@ -155,14 +174,18 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
         # a hidden console, not none: the render workers inherit it instead of each opening a window
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     subprocess.Popen([sys.executable, '-m', 'ismail.live.engine', '--project', root, '--bpm', str(bpm),
-                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers)]
-                     + ([] if follow_device else ['--no-follow']),
+                      '--bpb', str(beats_per_bar), '--device', str(device), '--workers', str(workers),
+                      '--priority', priority]
+                     + ([] if follow_device else ['--no-follow'])
+                     + [x for k, v in level.items() for x in ('--' + k.replace('_', '-'), repr(v))],
                      cwd=pkg_root, env=env, stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                      start_new_session=os.name != 'nt')
     t0 = time.time()
     while time.time() - t0 < 60:
         if os.path.exists(_info_path(project)) and _alive(project):
-            return '\n'.join(others + [f"live engine started ({time.time() - t0:.1f} s)", _call(project, 'status')])
+            prio = (_engine_record(project) or {}).get('priority') or f"priority {priority}: not reported"
+            return '\n'.join(others + [f"live engine started ({time.time() - t0:.1f} s, {prio}, render workers normal)",
+                                        _call(project, 'status')])
         time.sleep(0.3)
     raise OpError(f"the live engine did not come up in 60 s; read {os.path.join(root, 'live', 'engine.log')}")
 
@@ -245,16 +268,20 @@ def _mark_performer(inst, project):
 
 @op()
 def live_track(project: str, track: str, instrument=None, volume_db: float = None, pan: float = None,
-               fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar', deck: str = None) -> str:
+               fx=None, sends: dict = None, remove: bool = False, at: str = 'next_bar', deck: str = None,
+               output: str = None) -> str:
     """Create or change a live track. instrument: a dict (instrument_help), 'preset:<name>' (presets_list),
     {'type': 'code', 'voice': '<name>'} (voices_list) or 'track:<name>' (copy from the folder's project.json).
     fx: the track's whole effect chain, a list of effect dicts (fx_help), 'stack:<name>' for a saved effect stack
     (fx_stack_list; the reply says what it costs on this machine), or 'track:<name>' to copy a project track's
     chain; [] removes all. Sidechain/duck/vocoder sources must be live tracks. sends: {bus: dB} replaces
-    the track's sends (post-fader; live_bus creates buses). A new instrument or chain on a playing track takes
-    over at `at` (live_queue values, or 'now'); a replaced chain's tail rings out. New instruments warm up off the
-    air first (live_status shows WARMING). volume_db <= +6. remove=True silences and deletes the track now.
-    To move one effect param (a sweep, a fade), use live_fx instead of resending the chain. deck='B' puts a new
+    the track's sends (post-fader; live_bus creates buses). output: a bus the new track plays into instead of
+    straight into the master (or its deck); the bus still reaches the master. A stream of that bus
+    (live_stream(name='bus:<b>')) then carries only the tracks routed to it, which a send cannot do (the dry track
+    stays on the master). It is set when the track is created; to move a track, remove it and create it again.
+    A new instrument or chain on a playing track takes over at `at` (live_queue values, or 'now'); a replaced
+    chain's tail rings out. New instruments warm up off the air first (live_status shows WARMING). volume_db <= +6.
+    remove=True silences and deletes the track now. To move one effect param (a sweep, a fade), use live_fx instead of resending the chain. deck='B' puts a new
     track on deck B (created if needed): it then plays through that deck's strip and cue."""
     stack = None
     if isinstance(fx, str) and fx.startswith('stack:'):            # a saved effect stack (ledger:M177)
@@ -275,8 +302,10 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
         instrument = _mark_performer(instrument, project)
+    if output is not None and not (isinstance(output, str) and output):
+        raise OpError(f"output {output!r}: the name of a live bus (live_bus creates one)")
     out = _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
-                at=at, fx=fx, sends=sends, deck=deck)
+                at=at, fx=fx, sends=sends, deck=deck, output=output)
     if fx:
         from .. import api_fxstack as X
         cost = X.chain_costs([stack or fx])

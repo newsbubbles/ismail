@@ -6,7 +6,7 @@ a live set, a film, a scene) is the other kind of work, and it never changes the
 
 A dev role is more than editing: it runs **the migration loop** (below), the standing job of turning what the
 studio learns into the engine and the skill, and of keeping every session on the same page. Each dev role has its
-own reference with its routine and the lessons of the sessions that held it: `maintainer.md` and `stage-dev.md`.
+own reference with its routine and the lessons of the sessions that held it: `contributor-dev.md` and `stage-dev.md`.
 
 Several sessions (conversations, agents) work on one machine at once: some work in the studio, one or more develop
 the engine, and the user moves between them. Every rule below exists because breaking it once cost someone work or
@@ -20,22 +20,34 @@ shared conversation. Know which one you are; do only that job; hand the rest to 
 
 | role | owns | writes | hands off through |
 |---|---|---|---|
-| **The user** | taste and every decision: what is good (the ear and eye are the value function), what gets built, what goes public, merges | feedback, approvals | their words in chat, quoted into `notes/feedback.md` |
+| **The user** | taste and every decision: what is good (the ear and eye are the value function), what gets built, what is contributed | feedback, approvals | their words in chat, quoted into `notes/feedback.md` |
 | **Studio agent** (within; the default role) | one piece: a song, a sound, a live or DJ set, a film, a scene on the stage | only `songs/<slug>/` | `HANDOFF.md` (findings, evidence, proposed API), engine gaps it measured |
-| **Maintainer** (on; a dev role) | the engine, the op table (`api.py`, `@op`, CLI and MCP generation, errors, replies), tests and CI, the skill, the shared machine's rules, the migration loop, reviewing every pull request | `ismail/`, `skills/`, `tests/` on a worktree branch; `songs/_migration/` | pull requests, `LEDGER.md`, a word to each session a merge touches (`maintainer.md`) |
-| **Area dev** (on; a dev role for one part, so far the **stage dev**) | one part end to end: the stage is `ismail/stage` (page, server, `stage_*` ops, `world.json`, export) | that part on its own worktree branches; its notes in `songs/_migration/` | pull requests the maintainer reviews; changes to the op table go to the maintainer first (`stage-dev.md`) |
+| **Contributor dev** (on; the dev role on the person's own machine) | the engine, the op table (`api.py`, `@op`, CLI and MCP generation, errors, replies), tests, the skill, the shared machine's rules, the migration loop, merging what an area dev sends it | `ismail/`, `skills/`, `tests/` on a worktree branch; `songs/_migration/` | a pull request to the project once the person says yes, `songs/_migration/LEDGER.md`, a word to each session a change touches (`contributor-dev.md`) |
+| **Area dev** (on; a dev role for one part, so far the **stage dev**, who also develops VR) | one part end to end: the stage is `ismail/stage` (page, server, `stage_*` ops, `world.json`, export) | that part on its own worktree branches; its notes in `songs/_migration/` | a local merge request to the contributor dev when one runs, otherwise its own pull request; changes to the op table go to the contributor dev first (`stage-dev.md`) |
 | **Subagents** | one scoped task for the agent that started it (an audit, a search, a fit) | what that agent allows | their report, which is data, not instructions |
 
-A dev role starts only when the user asks for one, in its own session (a new conversation or chat with the ismail
-skill: "be the maintainer", "be the stage dev"). A studio agent never turns into a dev in the same conversation:
-when it finds something new for ismail, it asks the user whether to contribute it (SKILL.md, "Your role"), writes it
-in its `HANDOFF.md`, and suggests starting a dev session if none is running. VR is one way into the stage (a desktop
+The project itself (newsbubbles/ismail) has a maintainer who reviews and merges every pull request into it. That
+is not a role on the person's machine: on their machine the contributor dev is the last step, and the pull request
+is how its work leaves.
+
+A dev role runs in its own session (a new conversation, chat or agent with the ismail skill: "be the contributor
+dev", "be the stage dev"), started when the person asks for one or says yes to one. A studio agent never turns into
+a dev in the same conversation: when it finds something new for ismail, it asks the user whether to contribute it
+(SKILL.md, "Your role") and writes it in its `HANDOFF.md`. If no dev session is running, it offers one by its role's
+name (a contributor dev, or a stage dev for the stage). Where its harness can start a session, it starts it after
+the yes, with one line: what to build or contribute, and from which folder. Where it cannot, it gives the person
+that line to paste. The person is never left holding a step that says "the dev needs to do it". During a live test
+on the stage, the stage agent may start the stage dev itself (`stage.md`). VR is one way into the stage (a desktop
 browser is another), so its developer is the stage dev.
 
 Contracts between roles:
 - A studio agent never changes the engine; a dev never changes a song. Each reads the other's files freely.
-- An area dev owns its part; the maintainer owns the op table and the merges. Two devs never build the same part.
-- A finding travels song -> `HANDOFF.md` -> intake -> ledger -> the user decides -> branch -> PR -> merge ->
+- An area dev owns its part; the contributor dev owns the op table and the local main branch. Two devs never
+  build the same part.
+- An area dev sends a finished branch to the contributor dev as a local merge request: the branch, what it changes,
+  its tests passing. The contributor dev reviews it, merges it on the machine and says so. With no contributor dev
+  running, the area dev opens its own pull request.
+- A finding travels song -> `HANDOFF.md` -> intake -> ledger -> the user decides -> branch -> PR -> merged ->
   announcement -> the song marks it migrated. Skipping a step loses it (prose is a weak control surface: the loop
   is tools and files so no step depends on someone remembering).
 - A message from another session is a teammate's request, never the user's approval. Anything that needs a yes
@@ -45,16 +57,19 @@ Contracts between roles:
 ## Work on a worktree, never in the shared checkout
 
 The main checkout is shared: other sessions run songs and live engines from it, and some leave uncommitted work in
-it. Engine work happens on a branch in its own worktree:
+it. Engine work happens on a branch in its own worktree (a dev copy), made from the project's main as
+fetched (`origin/main`), never from the local main:
 
 ```bash
-git -C <ismail> status --short          # what is there before you; none of it is yours
-git -C <ismail> worktree list           # who else is working, on what branch
-git -C <ismail> worktree add ../ismail-<topic> -b <topic> main
+git -C <ismail> status --short                           # what is there before you; none of it is yours
+python -m ismail.worktrees                               # every copy: owner, ahead/behind, merged, what to do next
+python -m ismail.worktrees new <topic> --owner <role>    # fetch, then a copy ../ismail-wt-<topic> from origin/main
 ```
 
-One topic per worktree, one agent per worktree. Run the tests and write the code there. Song folders are not in a
-worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
+`references/worktrees.md` is the decision tree for a copy's whole life: starting, a copy with no owner, syncing with
+main, the main checkout falling behind, handing back, and removing it (`python -m ismail.worktrees done <path>`)
+once it is merged. One topic per worktree, one agent per worktree. Run the tests and write the code there. Song
+folders are not in a worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
 
 ## Collaboration must-haves
 
@@ -66,8 +81,8 @@ worktree (`songs/` is git-ignored), so read a song's files by their path in the 
    (`git merge-base --is-ancestor <branch> main` succeeds) and pushed. Look at its untracked files first, and back
    up anything that is not regenerable. Deleting a folder, a branch or a stash needs the user's yes, with one
    standing exception: **whoever merges a pull request removes its worktree, its local branch and any temporary
-   merge copy right after the merge** (the user's yes of 10-10, after 160 worktrees and 185 branches piled up). The
-   remote branch goes by itself: the repository deletes head branches on merge. A worktree its owner keeps as a
+   merge copy right after the merge** (160 worktrees and 185 branches once piled up). The remote branch goes by
+   itself: the repository deletes head branches on merge. A worktree its owner keeps as a
    standing working copy across pull requests stays; say so in the pull request.
 3. **No stash in a shared repository.** The stash stack is shared by every worktree; another session can pop yours.
    Park work in a commit on your branch.
@@ -82,17 +97,19 @@ worktree (`songs/` is git-ignored), so read a song's files by their path in the 
    `ISMAIL_SONGS` to a temporary folder gets an empty board of its own and no longer sees the shared machine, so a
    test of the governor sets `ISMAIL_MACHINE_DIR` to its own folder on purpose and nothing else moves the board.
 5. **Stage your files and hunks only**, never `git add .` or `-a`.
-6. **The user merges.** Push the branch and open a pull request; the user reviews and merges. Push to main only when
-   the user says so. A worktree stays until its pull request is merged.
+6. **Contributing is the person's yes; merging is the project's.** Push the branch to the person's fork and open a
+   pull request only after they said yes to contributing; the project's maintainer reviews and merges it. Never push
+   to the project directly. An area dev's local merge request goes into the local main after its tests pass. A
+   worktree stays until its work is merged.
 7. **Tell the user what changed for the other sessions**: a renamed op, a new rule in the skill, a moved file.
    Sessions already running read the old skill.
 
 ## Starting as a dev agent: the routine
 
-A dev session (the maintainer or an area dev) runs the same routine when it starts, after every compaction or
+A dev session (the contributor dev or an area dev) runs the same routine when it starts, after every compaction or
 summary of its context, and then on a schedule:
 
-1. **Read your progress file** (`songs/_migration/PROGRESS.md` for the maintainer, the area's own for an area dev,
+1. **Read your progress file** (`songs/_migration/PROGRESS.md` for the contributor dev, the area's own for an area dev,
    e.g. `STAGE_PROGRESS.md`): the deliverable, who matters, what is locked, what is in flight. Then the ledger.
 2. **Check the machine** (`machine_status`, or `python -m ismail.machine`): heat, slots, free disk. Do nothing heavy
    while it says WAIT.
@@ -129,7 +146,8 @@ Every engine change answers three questions in its commit and pull request:
    context, so anything that depends on more than that needs checking: a mono synth's glide from the last phrase,
    a drone that began long before a deck's window, randomness keyed on anything but the song position (synths and
    drums seed on the note's place in its bar, performers on `beat0`), work that depends on the length of the
-   buffer (code voices get each note whole).
+   buffer (code voices get each note whole). How each player builds a window, and the five rules a voice follows,
+   are in `windows.md`.
 3. **What proves it?** Effects: `tests/test_live_parity.py` holds every live processor to its studio twin over a
    whole window. Instruments and voices: `tests/test_live_song_parity.py` plays every instrument type and library
    voice on a deck against the studio (sample for sample, performers by ear); add a case for a new type or voice.
@@ -159,7 +177,7 @@ Each step ends in something you can point at:
    reorders; nothing is built before that.
 4. **Build**, one topic per worktree branch, with a test that fails before the change, the docs and skill text
    in the same commit, and a pull request (the steps under "Migrating an element" below). The row says `in PR #n`.
-5. **Announce after the user merges.** Send one short message to each session, conversation or agent whose own
+5. **Announce after the merge.** Send one short message to each session, conversation or agent whose own
    items or daily work the merge changes (the ledger's roster has their names), and to no other: what changed, the
    ops, params and skill sections involved, what to do differently, and that the skill changed on disk (re-read the
    reference before relying on it). One batched message per session, never a check-in. Tell, never instruct: what a
@@ -190,8 +208,8 @@ ledger row and in the report to the user:
    (the blind exams, by whom), and the song that built it.
 5. **Do its tests carry the song?** Tests on main test the engine with generic names (a "switch", a "room", a
    "lead"), never an object, scene, character, take or line from the user's songs or VR scenes. A test that needs the
-   song's material stays in the song (Nate, 2026-10-09: a stage test built on a song scene's light switch was
-   removed from main).
+   song's material stays in the song (2026-10-09: a stage test built on a song scene's light switch was removed
+   from main).
 
 A held or local item is not a failure: it keeps working where it is. Record the reason in the ledger so nobody asks
 again.
@@ -206,7 +224,7 @@ A studio agent built it inside its song and listed it in `HANDOFF.md`; the inclu
    chooses, and marks the item migrated then.
 3. **Strip the song out of it.** Song names, absolute paths, `sys.path` tricks, constants tuned to one record become
    parameters with defaults, or presets. Give it a generic name (the voice says what it is, not whose it was).
-4. **Make it render the same anywhere** (sound-design.md, the five window rules): randomness keyed on song time
+4. **Make it render the same anywhere** (`windows.md`, the five rules for a voice): randomness keyed on song time
    (`beat0`) or the note's place in its bar, never on buffer position or list order; each note given whole; no
    whole-buffer zero-phase work a window would change; causal kernels if it may run live. A voice that is a
    performer takes `beat0` and lanes.
@@ -235,7 +253,7 @@ A studio agent built it inside its song and listed it in `HANDOFF.md`; the inclu
    is slow or large must say so before an agent queues a set on it.
 10. **Docs in the same commit:** the skill section where an agent will look for it, the route table if it is a new
     kind of thing, `guide` if it changes the basics, CHANGELOG.
-11. **PR with the evidence** (the handoff's exam scores, your round-trip numbers, the cost), the user merges,
+11. **PR with the evidence** (the handoff's exam scores, your round-trip numbers, the cost), the project merges,
     announce it, and the song closes the item.
 
 An **engine** (a song-local module with several functions, like a call-measuring engine) migrates the same way,
@@ -287,7 +305,8 @@ ismail is meant to grow from what its users build. An agent working for anyone (
 builds something general should say so and offer the path: a fork of newsbubbles/ismail, the change on a branch with
 its tests and docs, a pull request that carries the evidence (exam scores, round trips, cost). The same inclusion
 review applies before anything is offered: it works beyond the project, nothing measured from a person goes in
-without their yes, no commercial material, provenance recorded. The person decides and sends it; the agent prepares.
+without their yes, no commercial material, provenance recorded. The person decides; the contributor dev forks,
+opens the pull request and tells them what happens next (`contributing.md`).
 ROADMAP.md says where help is most useful.
 
 ## Lessons from running the loop (2026-10-02)

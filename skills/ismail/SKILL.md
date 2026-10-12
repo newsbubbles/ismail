@@ -28,14 +28,17 @@ in the song's `HANDOFF.md`: one heading per finding, evidence beside it.
 
 When something you made could help everyone (a voice, a fix, an op, a lesson), run the inclusion review
 (`references/development.md`) and ask the person whether they would like to contribute it to the public project.
-If yes, write it in `HANDOFF.md`, and if no dev session is running, suggest they start one: a new session (a new
-conversation or chat) with the ismail skill, asking it to be the maintainer (the engine), or the stage dev for the
-stage. That session reads every handoff on its routine, asks the person what to build, and sends your session,
+If yes, write it in `HANDOFF.md`. If no dev session is running, offer one by its role: a contributor dev (the
+engine and the skill, on the person's machine), or a stage dev for the stage. Where you can start a session (a new
+conversation, agent or task), start it after their yes with one line saying what to contribute and from which
+folder; where you cannot, give them that line to paste. Never leave them with "a dev needs to do it". That session
+reads every handoff on its routine, asks the person what to build, opens the pull request to the project once they
+say yes, and sends your session,
 conversation or agent a message when something you handed off is in the engine (or tells the person, where
 sessions cannot message each other); then mark it migrated in your `HANDOFF.md`. Never turn into a dev in the same
 conversation. Changing ismail itself is the other kind of work, only when the person asks for it: read
 `references/development.md` first (the roles, the start-up routine, the migration loop), then your role's own
-reference (`maintainer.md` or `stage-dev.md`).
+reference (`contributor-dev.md` or `stage-dev.md`).
 
 ```
 ismail/                  the engine ("the engine" always means ismail/ on main)
@@ -140,6 +143,7 @@ nudges you, follow it.
 | when | reach for |
 |---|---|
 | a task starts, and after every compaction | `guide`; the song's `PROGRESS.md` and `HANDOFF.md` |
+| you are not sure which tool fits, or you work in one role (voice, sound, DJ, stage, film) | `ops_find(need='<what you want, in plain words>')`; `ops_find(role=...)` lists the tools your role reaches for first. It reads each tool's own description, so it is never out of date |
 | a new person, or a new song with no reference | `sketch` (two or three contrasting sketches in minutes), then `sketch_keep` the one they pick |
 | a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
@@ -161,7 +165,11 @@ nudges you, follow it.
 - `references/composition.md`: arranging and writing with ismail's notation: rhythm cells as step strings, harmony voicing, motif and answer, feel and phrasing for played parts (phrase placement, band feel, bends to chord tones), 8-bar variation, transitions, energy curves. Read when writing notes.
 - `references/instruments.md`: making acoustic and electric instruments sound real: getting an example first, choosing between library voice, mimic (measured from recordings), hand-written measured voice, sampler and sprite, what makes a measured voice convincing, matching an instrument chunk by chunk, asking the user, genre palettes. Read before choosing sounds for any non-electronic part.
 - `references/mastering.md`: the master pass: loudness targets by genre or reference, the master chain, and checks. Read before calling a song finished.
+- `references/loudness.md`: every output's level, and which limiter number is for which stage (mixing, mastering, a
+  live set, a deck, a stream). Read when a limiter reading and a rule seem to clash.
 - `references/sound-design.md`: recipes per role with parameter ranges, gain staging, when and how to use `instrument_fit`, `track_fit`, `sound_extract`, formant and vocoder voices, guitars and their rigs (register first, harmonic profile, stem bias, fast rig fit). Read when choosing or designing sounds.
+- `references/windows.md`: how ismail builds a window (a bar range, a deck, a live performer) and the five rules a
+  voice follows to sound the same in any of them. Read before writing a voice or a performer.
 - `references/listening.md`: which analysis tool answers which question, how to read the text views (digits, rolls, zoom codes), and the Listening Report checks. Read before the first listen.
 - `references/user-experience.md`: working with the person: the lexicon (their words for what they hear and see, mapped to ismail's terms and kept as their culture and learning curve), exams and feedback pages, objectives and intent provenance across versions, and what never to record. Read at the start of every session with a person.
 - `references/blind-tests.md`: ear tests for the user: the eye exam (lenses that each change one named thing) to find a direction, and the blind exam (real vs mine, hidden) to know when a sound or a performance is done; how to make them fair, how to read the answers, and the song-level checks single notes miss (note clashes, measured microtiming). Read when the numbers plateau or before calling an instrument convincing.
@@ -171,8 +179,11 @@ nudges you, follow it.
 - `references/stage.md`: building a scene with a person inside it (a browser or VR stage beside Blender): running the stage (`stage_*` tools), which surface for which decision, eye exams for pictures and what they taught, bodies and contact, contact with a person in a headset, shared-editing rules that never lose their work, agents first. Read before building any scene, look or editor a person works inside.
 - `references/music-video.md`: music videos with `ismail.video`: the per-song `video/` folder, the CLI, the shot kit (units, floors, posing, mirrors, GPU budget), the cut list and note-driven glitches, contact-sheet review and the creative rules. Read before planning any video.
 - `references/stage-takes.md`: handing a fast take loop (follow, perform, record, keep) to a helper agent: who owns what, the brief to fill in, the loop, what comes back. Read when the person wants takes and the scene's agent is busy.
-- `references/maintainer.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session the
-  person asked to be the maintainer or the stage dev.
+- `references/rigged-characters.md`: rigged human bodies on a VR or browser stage (MakeHuman as the worked example): knowing your rig, exporting rest vs posed, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand tracking, props on bones, following a live person, the clip and view checks, materials that survive export. Read before exporting, posing or following any rigged person.
+- `references/contributor-dev.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session
+  that is the contributor dev or the stage dev.
+- `references/worktrees.md`: a dev's own copy of the repository (a git worktree), from start to removal, with
+  `python -m ismail.worktrees` (new, claim, sync, done, and every copy listed with its owner and what it needs).
 - `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
   prompts only they can answer, proving it with a sound they hear, and what to do when a step fails.
 - `references/contributing.md`: sending something back for a person who has never used git: in the studio
@@ -218,9 +229,9 @@ nudges you, follow it.
 - **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
 - **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
-  mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
-  (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
-  it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
+  mimic_measure, the fits, live_parity, `python -m ismail.video render`) take a slot themselves and refuse with the
+  reason; anything else outside ismail (Blender, whisper, demucs, a long script) runs through
+  `python -m ismail.machine run --gpu|--cpu -- <command>` so it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
   counts jobs, not cores, so `--threads` caps the command's numeric threads (BLAS, OpenMP, torch; 2 by default for
   `--cpu`) and pins it to that many cores: ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
   Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged
@@ -247,7 +258,7 @@ nudges you, follow it.
   Do not sleep-poll a long job: run it in the background and let the harness say when it ends, and never end a turn
   with a heavy job running that the user has not been told about (what runs, how long, how it stops).
 - Never report a render as good without numbers from at least `render` output (LUFS, peak, per-track peaks, SILENT flags) and one analysis view of the changed section.
-- Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB (more means the faders are wrong, not that the limiter is working).
+- Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB while mixing (each stage's number: `references/loudness.md`; more means the faders are wrong, not that the limiter is working).
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.
 - When matching a reference: never transcribe with raw `notes_from_audio` over a whole loop section; use `notes_from_audio_loop` (consensus). Never raise a track's level to improve a perceptual score. Never call a match done while `cmp_summary` shows a WARNING line or the mix perceptual group is far under its ceiling.
 - When the task is building an instrument, make the sound rather than placing slices of the reference: a slice

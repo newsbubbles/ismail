@@ -7,7 +7,8 @@ sub-agent, a background agent, a second session: whatever your harness offers) w
 work. The helper keeps the loop with the person and hands back what it got. The person asked for this so the way
 agent harnesses are built (one agent, many helpers) works for the performance loop too.
 
-Read `stage.md` first (the stage tools, contact with a person in a headset, a Follow is a performance).
+Read `stage.md` first (the stage tools, contact with a person in a headset, a Follow is a performance), and
+`rigged-characters.md` for the bodies the person plays.
 
 ## Who owns what
 
@@ -37,11 +38,12 @@ Voice:        record (every Follow does), what to cut into clips, what the lines
 You may use:  stage_listen, stage_events, stage_presence, stage_say, stage_panel_show, stage_panel_close,
               stage_actor_follow, stage_actor_play, stage_actor_stop, stage_follow_anchor, stage_control_set,
               stage_control_map, stage_actor_profile, stage_perform, stage_performance, stage_take_start,
-              stage_take_stop, stage_take_keep_last, stage_take_view, stage_batch,
+              stage_take_stop, stage_take_keep_last, stage_take_view, stage_take_note, stage_actor_map_save,
+              stage_batch,
               stage_object_set with trial=True only
 You may not:  change the scene for real, save animation, export or rebuild, restart anything, speak in other
               scenes, keep going after the person says stop
-Stop when:    <e.g. one take he keeps, or 30 minutes, or he says done>
+Stop when:    <e.g. one take they keep, or 30 minutes, or they say done>
 Hand back:    see below
 ```
 
@@ -61,7 +63,8 @@ Hand back:    see below
 
 ## Hand back (to the scene's agent)
 
-- The takes kept: their ids, who, how long, and the person's verdict on each in their words.
+- The takes kept: their ids, who, how long, and the person's verdict on each in their words, verbatim, so the
+  scene's agent can keep them in the lexicon (`user-experience.md`, "The lexicon: their words, our terms").
 - The performances: ids, and the clips' words that matter (lines, notes they spoke about the take).
 - What was set up: pins, drives, maps saved and their names.
 - Anything the person asked for that is not the loop's: scene changes, stage problems (a gesture that misfired, a

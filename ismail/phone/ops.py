@@ -168,6 +168,138 @@ def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = Fal
     return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page)
 
 
+# phone_watch: the standing watcher every agent runs. It used to live in one song folder and in the Live DJ's memory;
+# after a context reset the DJ hand-rolled a script that kept no cursor and missed six of the person's notes in 36
+# minutes. Now the cursor lives on disk per agent, so a reset or a killed watcher resumes where the last return left.
+KEEP_PAGE = {'panel_close'}            # the only page action that wakes: 'Later' taps and panel opens woke for nothing
+_RETRY_S = 10                          # the phone server restarting: look again after this
+_ROUND_QUIET_S = 90                    # a held round is over this long after its last line
+_LINE_CHARS = 1500
+
+
+def _cursor_path(who):
+    safe = re.sub(r'[^a-z0-9_-]+', '_', str(who).lower()).strip('_') or 'agent'
+    return S.HOME / 'cursors' / f'{safe}.json'
+
+
+def _cursor_load(who):
+    try:
+        return int(json.loads(_cursor_path(who).read_text(encoding='utf8'))['since'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _cursor_save(who, since):
+    p = _cursor_path(who)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + f'.{os.getpid()}.tmp')
+    tmp.write_text(json.dumps({'who': who, 'since': since, 'saved': time.time()}), encoding='utf8')
+    os.replace(tmp, p)
+
+
+def _wanted(d):
+    """phone.md, 'Watching the phone' step 1: nothing filtered by owner; only page telemetry and the 'voice' line that
+    says a note is being transcribed (its words follow as voice_text) stay out."""
+    k = d.get('kind')
+    if k == 'page':
+        return d.get('what') in KEEP_PAGE
+    return k != 'voice'
+
+
+def _of_round(d, rnd):
+    return bool(rnd) and (str(d.get('id', '')).startswith(rnd) or str(d.get('panel', '')).startswith(rnd))
+
+
+def _clip(d, limit=_LINE_CHARS):
+    """One line at most about `limit` characters as JSON: the longest text is cut, the rest kept whole."""
+    d = dict(d)
+    over = len(json.dumps(d, ensure_ascii=False)) - limit
+    if over > 0:
+        k = max((k for k, v in d.items() if isinstance(v, str)), key=lambda k: len(d[k]), default=None)
+        if k is not None:
+            d[k] = d[k][:max(40, len(d[k]) - over - 60)] + f" ... (cut; inbox line {d.get('n')} has it all)"
+    return d
+
+
+@op()
+def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str = None) -> str:
+    """The standing phone watcher: blocks until the person sends something, returns it, and remembers its place. Run
+    it in the background (`python -m ismail phone_watch "who=<your role>"`), act on what it returns, and re-arm it
+    FIRST after every wake, before any other work. Never write your own watcher.
+    It loops phone_listen(who, page=True) and returns every wanted line (a burst gathered with one more short look),
+    oldest first, as JSON {lines, since, next}: nothing filtered by owner; only page telemetry (every page action but
+    panel_close) and the 'voice' transcribing line (its words follow as voice_text) stay out.
+    The cursor is saved per `who` (~/.ismail/phone/cursors/) only when it returns, so a killed watcher never
+    skips a line and a re-arm resumes where the last return left off. since: start after this inbox line instead.
+    With no saved cursor and no since it starts at the end of the inbox (history is never replayed) and says so.
+    wait_min: after this many minutes with nothing it returns {alive: true} so you re-arm and read phone_status (a
+    background task may be stopped at 2 hours). round=<card id prefix>: you let a round of someone else's cards run:
+    its lines are held (counted, not returned) and the watcher wakes on anything else, or 90 s after the round's last
+    line. A phone server restart is waited out (it looks again every 10 s)."""
+    notes = []
+    if since is None:
+        since = _cursor_load(who)
+    hits, held, err = [], [], None
+    t0 = last = time.time()
+
+    def look(wait):
+        nonlocal since, last
+        res = json.loads(phone_listen(who, since=since, wait=wait, page=True))
+        got = int(res.get('since', since or 0))
+        if since is not None and got < since:              # the inbox is shorter than the cursor: never replay
+            notes.append(f"the saved cursor ({since}) was past the inbox's end ({got}): now from {got}")
+        if since is None:
+            notes.append(f"no saved cursor for {who}: started at the end of the inbox (line {got}); history is not "
+                         f"replayed (pass since=<n> to read from a line)")
+        since = got
+        for d in res.get('lines', []):
+            if round and d.get('kind') in ('page', 'voice'):     # clip plays, a note recording: they are still at it
+                last = time.time()
+            if _of_round(d, round):
+                held.append(d)
+                last = time.time()
+            elif _wanted(d):
+                hits.append(_clip(d))
+
+    def done(**extra):
+        _cursor_save(who, since)
+        arm = f'python -m ismail phone_watch "who={who}"' + (f' round={round}' if extra.pop('_keep_round', False) else '')
+        out = {'who': who, 'since': since, 'lines': hits, **extra}
+        if held:
+            out['held'] = {'round': round, 'lines': len(held), 'answered': sum(d.get('kind') == 'exam' for d in held)}
+        if notes:
+            out['note'] = '; '.join(notes)
+        then = ('act on these lines' if hits else 'read phone_status (is the server up, is anyone listening?)'
+                if extra.get('alive') else 'the round is over: bring the sound back and start a fresh pass')
+        out['next'] = (f"re-arm FIRST, in the background, before anything else: {arm} (the cursor is saved at "
+                       f"{since}); then {then}")
+        return json.dumps(out, ensure_ascii=False)
+
+    while True:
+        try:
+            look(25)
+            err = None
+        except Exception as e:                                   # the phone server restarting: try again
+            err = str(e)[:200]
+            time.sleep(_RETRY_S)
+        if hits:
+            if len(hits) < 40:                                   # a burst (open + answer): one more short look
+                try:
+                    look(5)
+                except Exception:
+                    pass
+            return done(_keep_round=bool(round))
+        if round and held and time.time() - last > _ROUND_QUIET_S:
+            return done(round_over=f"round {round} quiet {_ROUND_QUIET_S} s: "
+                                   f"{sum(d.get('kind') == 'exam' for d in held)} cards answered")
+        if time.time() - t0 >= float(wait_min) * 60:
+            if since is None:                                    # never reached the server: nothing to save
+                return json.dumps({'who': who, 'since': None, 'lines': [], 'alive': True,
+                                   'error': err, 'next': f"the phone server does not answer: phone_status, then "
+                                   f'phone_start if it is down, then python -m ismail phone_watch "who={who}"'})
+            return done(alive=True, **({'error': err} if err else {}))
+
+
 @op()
 def phone_timeline(minutes: float = 15, kinds: list = None, limit: int = 200) -> str:
     """A take of the phone session: everything from the phone in the last `minutes` on one clock, oldest first, one

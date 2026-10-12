@@ -2206,7 +2206,8 @@ def align(project: str, a: str = 'render', b: str = 'ref', bars: list = None, ba
 @op()
 def spectrogram(project: str, source: str = None, bars: list = None, out: str = None, seconds: list = None,
                 f_lo: float = None, f_hi: float = None, words: list = None, ruler: bool = False) -> str:
-    """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path.
+    """Write a mel spectrogram PNG with bar lines (the one non-text view). Returns the PNG path. A picture for the
+    person to look at AND mark is exam_picture_round, not a PNG: they flip between the two and pin what differs.
     For eyes (zoomed on one sound, to compare two by picture): seconds=[t0, t1] inside bars (or the source), the band
     f_lo..f_hi Hz, ruler=True (ms from the window start), words=[{'w', 't0', 't1'}] in s. That picture sits on a fixed
     plot box, so two of the same window line up pixel for pixel, and a .json beside it maps a pixel to (s, Hz).
@@ -2304,7 +2305,8 @@ def _restore(P, backup):
 
 def call(name, /, **kw):
     if name not in OPS:
-        raise OpError(f"unknown op {name!r}; ops: {', '.join(sorted(OPS))}")
+        raise OpError(f"unknown op {name!r}; find one by purpose with ops_find(need='<what you want to do>'). "
+                      f"ops: {', '.join(sorted(OPS))}")
     return OPS[name](**kw)
 
 
@@ -2313,6 +2315,7 @@ from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrumen
 from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
 from . import api_exam  # noqa: E402,F401  (registers exam_check, the exam pre-flight)
 from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list/measure, ledger:M177)
+from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)

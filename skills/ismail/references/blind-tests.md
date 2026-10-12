@@ -29,7 +29,7 @@ leaves one answer line marked `preflight`: skip it when scoring.
 
 ### The blind crop check: can you tell from the picture?
 
-Before a real-against-made round, look first (Nate's "90 degree rotation": when one sense plateaus, rotate which
+Before a real-against-made round, look first (the person's "90 degree rotation": when one sense plateaus, rotate which
 one measures; a spectrogram is an image an eye reads well). `exam_eye_crops(pairs=[[real, made], ...], out=...)`
 cuts the same window from both clips of each pair (a word plus 60 ms either side, when you pass `windows`) and puts
 them side by side as "1" and "2" in a random order, with the key in a file you do not open. Look at each crop, pick
@@ -60,7 +60,7 @@ when a floor answer differs from the first. Each floor pair costs a slot of the 
 renumbered around them, and the reply and `<answers_path>.floor.json` map the labels back and say which side is the
 MP3. Read the floor first: if they pick the MP3 side as "different" more often than chance, the device and ear
 separate even that, and a real pair they could not tell is a strong pass; if they never can, a "can't tell" says
-little. From the Voice and Paper agents' work (ledger:M173).
+little.
 
 ### Record the devices, every round
 
