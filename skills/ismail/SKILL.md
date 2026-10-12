@@ -69,6 +69,12 @@ copies or imports by path and names in its notes; a piece never lives inside ano
 live engine runs there (`references/live.md`, "A new piece while the engine runs"). When the name is not obvious,
 ask the person.
 
+**A piece copied from another song is a whole song.** Its folder gets what any song folder has: everything it takes to
+rebuild it (scripts, project, the code it imports and the files it reads, followed to the end), its provenance
+(`SOURCES.md` rows, including originals kept outside the old folder), its notes, and any renders brought along,
+renamed and retagged for the new piece. Nothing in it reads the old folder, so any agent can pick it up like any
+other song. Rebuild its project and compare it with the source's before rendering.
+
 **Song checkpoints with git**: `git init` inside `songs/<slug>/` (the ismail repository ignores the whole `songs/`
 folder, nested repositories included), never in the ismail checkout. The song's `.gitignore` keeps out audio and
 anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backups/`, live recordings,
