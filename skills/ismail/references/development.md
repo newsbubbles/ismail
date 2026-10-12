@@ -75,6 +75,8 @@ worktree (`songs/` is git-ignored), so read a song's files by their path in the 
    suite passing in CI on the pull request (GitHub runs it on every push, on four platforms; a full local run is one
    more heavy job on the shared machine, so run it only when CI cannot answer), a `CHANGELOG.md` entry under
    Unreleased, and the skill, README and op docstrings updated in the same commit as the behavior they describe.
+   When the change moves a road on `ROADMAP.md` (a row starts or lands, or a new capability has no row), update
+   that row in the same pull request.
    The test suite takes a CPU slot on the machine's board (`tests/conftest.py`), so it waits like any render.
    The board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or `ISMAIL_MACHINE_DIR`): a test that sets
    `ISMAIL_SONGS` to a temporary folder gets an empty board of its own and no longer sees the shared machine, so a
