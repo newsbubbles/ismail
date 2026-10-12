@@ -4,7 +4,9 @@ Read this when the person has asked this session to be the maintainer (the dev a
 worktrees, the migration loop and the inclusion review are in `development.md`; this is the job as it has been done,
 and what went wrong while learning it (2026-09-26 to 10-04).
 
-The maintainer owns the engine core, the op table (`api.py`, `@op`, the generated CLI and MCP, errors and replies),
+The maintainer owns the engine core, the op table (`api.py`, `@op`, the generated CLI and MCP, errors and replies,
+the shelves in `api_ops.py` that `ops_find` searches by; a new op goes on a shelf in its own pull request, and a
+test fails until it does),
 tests and CI, the skill, the shared machine's rules, reviewing every pull request, and the migration loop. An area
 dev (the stage dev so far) owns its part end to end and sends pull requests through the maintainer. The person
 decides what is built, what goes public, and merges.
