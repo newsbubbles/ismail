@@ -146,12 +146,14 @@ class Set:
         with open(self.log_path, 'a', encoding='utf8') as f:
             f.write(time.strftime('%H:%M:%S ') + txt + '\n')
 
-    def start(self, bpm, device='default', trim_db=4, cap_db=-12, min_free_gb=2.0):
-        """live_start at set loudness (trim/cap env, about -16 LUFS), with the pre-flight in the reply: other engines
-        still holding a device, and free disk for a recording."""
-        os.environ.setdefault('ISMAIL_LIVE_TRIM_DB', str(trim_db))
-        os.environ.setdefault('ISMAIL_LIVE_CAP_DB', str(cap_db))
-        r = self.O['live_start'](self.P, bpm=bpm, device=device)
+    def start(self, bpm, device='default', trim_db=None, cap_db=None, min_free_gb=2.0, priority='above_normal'):
+        """live_start at set loudness (trim 4, cap -12, about -16 LUFS, unless given here or set in the environment),
+        with the pre-flight in the reply: other engines still holding a device, and free disk for a recording."""
+        if trim_db is None and 'ISMAIL_LIVE_TRIM_DB' not in os.environ:      # set there: the engine reads it
+            trim_db = 4
+        if cap_db is None and 'ISMAIL_LIVE_CAP_DB' not in os.environ:
+            cap_db = -12
+        r = self.O['live_start'](self.P, bpm=bpm, device=device, trim_db=trim_db, cap_db=cap_db, priority=priority)
         free = shutil.disk_usage(self.P).free / 1e9
         if free < min_free_gb:
             r = f"LOW DISK: {free:.1f} GB free (a recording takes ~1 GB an hour): skip live_record\n" + r

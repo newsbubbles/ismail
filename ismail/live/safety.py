@@ -1,10 +1,11 @@
 """Master safety chain for live output. Block in, block out, state carried between blocks.
 
 trim -> level rider (slow cap on sustained loudness) -> lookahead peak limiter -> hard clip at the ceiling.
-The numbers come from the environment, not from any tool, so an agent cannot turn them up:
+A set's trim and cap come from live_start(trim_db=, cap_db=), inside TRIM_RANGE and CAP_RANGE. Without them, and
+for the ceiling always, the numbers come from the environment of the process that starts the engine:
   ISMAIL_LIVE_TRIM_DB     master trim before everything (default -6)
   ISMAIL_LIVE_CAP_DB      sustained level cap, RMS dBFS over ~3 s (default -16)
-  ISMAIL_LIVE_CEILING_DB  peak ceiling (default -1)
+  ISMAIL_LIVE_CEILING_DB  peak ceiling (default -1); no tool sets it, so an agent cannot raise it
 """
 import os
 
@@ -17,6 +18,8 @@ from ..dsp import SR
 BAD_ABS = 31.6           # +30 dBFS: past this a sample is a fault and is zeroed like a NaN
 MS_CLIP = 4.0            # the rider's level reading never sees more than +12 dBFS a sample
 RIDER_FLOOR_DB = -40.0   # the rider never pulls deeper than this
+TRIM_RANGE = (-30.0, 12.0)   # live_start(trim_db=) takes a value in here
+CAP_RANGE = (-40.0, -8.0)    # live_start(cap_db=) takes a value in here: never louder than a loud club master
 
 
 def _env(name, default):
@@ -50,11 +53,16 @@ def _limit(buf, la, ceil, att, rel, g):
     return out, g
 
 
+def _clamp(v, rng):
+    return min(rng[1], max(rng[0], float(v)))
+
+
 class Safety:
-    def __init__(self, sr=SR):
+    def __init__(self, sr=SR, trim_db=None, cap_db=None):
+        """trim_db / cap_db: the set's own values (live_start); None falls back to the environment."""
         self.sr = sr
-        self.trim_db = _env('ISMAIL_LIVE_TRIM_DB', -6.0)
-        self.cap_db = _env('ISMAIL_LIVE_CAP_DB', -16.0)
+        self.trim_db = _env('ISMAIL_LIVE_TRIM_DB', -6.0) if trim_db is None else _clamp(trim_db, TRIM_RANGE)
+        self.cap_db = _env('ISMAIL_LIVE_CAP_DB', -16.0) if cap_db is None else _clamp(cap_db, CAP_RANGE)
         self.ceiling_db = _env('ISMAIL_LIVE_CEILING_DB', -1.0)
         self.ceil = 10 ** (self.ceiling_db / 20)
         self.la = int(0.003 * sr)
