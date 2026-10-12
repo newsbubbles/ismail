@@ -64,7 +64,10 @@ def exam_picture_round(out: str, items: list, title: str, intro: str = '', seed:
     other_label: what ours is, said after the answer, version}]; real-first and real-second are balanced and seeded.
     labels: the page's words {real, ours, play} (default "This one is the real one", "This one is ours", "Play the
     real sound"). out: the round's folder; its parent is what the page server serves. host=True starts it on
-    127.0.0.1:port unless it runs. Read the answers with exam_picture_score(out)."""
+    127.0.0.1:port unless it runs. Read the answers with exam_picture_score(out).
+    Reach for it whenever the person should see a difference and mark it ("show me the difference", my voice
+    against the render, two takes side by side, where does it go wrong): a static spectrogram PNG they can look at
+    but not mark is the wrong answer to that (Nate, 10-12)."""
     import os
     from . import exampage as X
     try:

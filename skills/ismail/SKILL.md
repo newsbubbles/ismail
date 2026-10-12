@@ -140,6 +140,7 @@ nudges you, follow it.
 | when | reach for |
 |---|---|
 | a task starts, and after every compaction | `guide`; the song's `PROGRESS.md` and `HANDOFF.md` |
+| you are not sure which tool fits, or you work in one role (voice, sound, DJ, stage, film) | `ops_find(need='<what you want, in plain words>')`; `ops_find(role=...)` lists the tools your role reaches for first. It reads each tool's own description, so it is never out of date |
 | a new person, or a new song with no reference | `sketch` (two or three contrasting sketches in minutes), then `sketch_keep` the one they pick |
 | a number that can be measured (grid, swing, kit, key, levels) | the analysis ops, never a guess |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |

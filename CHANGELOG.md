@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Ops: `ops_find`, the tools by purpose and by role
+
+- Agents could not find the tool that fit (Nate, 10-12, via the voice session): after a voice round he asked to see his
+  voice against the renders, got static pictures he could not mark, and the tool for it (`exam_picture_round`) was
+  found only after he described it from memory. `ops_find(need='show me the difference between my voice and the
+  render')` now names it first. It searches every op's own description (a rare word counts more than a common one),
+  so it cannot go stale; `ops_find(role='voice')` lists the shelves a role reaches for first; `ops_find()` lists the
+  shelves (ledger:M210).
+- Every op sits on a shelf (`ismail/api_ops.py`); a test fails when a new op sits on none.
+- A sentence "Reach for it when ..." in an op's description counts as much as its first line, so an op says in the
+  words people ask with when it is the answer. `exam_picture_round` has one, and `spectrogram` points to it.
+- An unknown op name now says to look it up with `ops_find`.
+
 ### Docs: the roadmap matches what is merged
 
 - `ROADMAP.md` was last changed on 10-02 and still listed the stage as coming into ismail, though it has been in
