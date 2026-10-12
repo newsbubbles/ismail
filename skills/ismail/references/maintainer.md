@@ -79,6 +79,12 @@ merges.
 - **Hold pull requests in an area the person is still shaping**, and pick the moment with them.
 - **Merging is the person's.** They may hand it over in words, and the harness may still refuse a merge you make
   alone: then the pull request waits in their list, with what it needs said plainly.
+- **Versions are tagged on main** (hq:D-128), so an ear exam can say which ismail made a render: every mp3 carries
+  the version, the commit and the skill's version (`ismail/tags.py`; `python -m ismail.tags <file.mp3>` reads them).
+  After a batch of merges that changes how ismail sounds or works (a notable merge, not a test fix), bump `version`
+  in `pyproject.toml` in its own small pull request with a CHANGELOG line, and once it merges tag that merge:
+  `git tag -a v0.3.1 -m "<one line: what changed>" <merge commit>` and `git push origin v0.3.1`. A patch number for
+  fixes and small tools, the middle number for a new way of working. Never move a pushed tag.
 
 **The skill**
 - **Audit the skill against the code after a run of merges.** Stale text (exam hosting, limiter ceilings, pull
