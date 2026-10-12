@@ -63,6 +63,12 @@ songs/_<name>/           code shared by several songs (songs/_dubstep)
 songs/_briefs/           briefs for starting a song in a fresh session
 ```
 
+**One piece, one folder.** A new piece gets its own `songs/<slug>/` from its first file: a new set, a new jam, a
+studio track made from a jam, a remix. What it reuses from an older piece (voices, a set's control module, takes) it
+copies or imports by path and names in its notes; a piece never lives inside another piece's folder, even when the
+live engine runs there (`references/live.md`, "A new piece while the engine runs"). When the name is not obvious,
+ask the person.
+
 **Song checkpoints with git**: `git init` inside `songs/<slug>/` (the ismail repository ignores the whole `songs/`
 folder, nested repositories included), never in the ismail checkout. The song's `.gitignore` keeps out audio and
 anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backups/`, live recordings,
