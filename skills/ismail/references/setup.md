@@ -29,7 +29,7 @@ missing everything, setup runs about 3 to 5 checks (section 1), up to 4 winget l
 warm-up, up to 2 plugin lines and 1 or 2 for the songs folder (3); the first session then calls 3 to 5 distinct
 ismail tools (guide, sketch, sketch_keep, lexicon_note, machine_status) and 1 to 3 play commands. That is about 7 to
 23, fewer when they press Always allow. To recount: walk sections 1 to 4 and guide's FIRST SESSION block and add
-them up again; keep README's "Use it with Claude Code" in step. -->
+them up again; keep docs/reference.md's "Use it with Claude Code" in step. -->
 
 ## 1. Look before you install
 
