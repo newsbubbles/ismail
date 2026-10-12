@@ -140,6 +140,25 @@ Learned from a one-hour set steered by one listener; the same reading applies to
 - **Endings are emotional arcs** ("full circle", "crescendo", then peace). Plan the last 15 minutes early as an
   arc, but keep the ending swappable: do not queue it until it is close.
 
+### Highlights on praise
+
+When the person praises what is playing ("I love this", "so hot", a `love` tap from the phone), keep that moment
+as a highlight. The full takes run for hours; the highlights are the record of what the set can do, and the
+showcase.
+
+1. **Close the running take** so its file is complete: `live_record(on=False)`, then `live_record(on=True)` at
+   once. The music keeps playing and a new take file starts. Never cut from the take that is still recording.
+2. **Cut generously** from the take that covers the moment: the whole section around it (from the build to the
+   end of the drop), not the one bar. A phone tap carries `heard`, the bar they heard: cut around that bar, not the
+   engine's now. The take's `.json` gives `first_bar`, `bpm` and `beats_per_bar`, so bar b starts at
+   `(b - first_bar) * beats_per_bar * 60 / bpm` seconds into the file. A short fade at each end.
+3. **Save it as an mp3** in `<project>/live/highlights/<slug>.mp3`: cut to a temporary wav outside the project,
+   encode, remove the temporary file. Never overwrite a highlight.
+4. **Index it** in `live/highlights/INDEX.md`: when, what was playing, their words verbatim, and the section
+   script and engine settings that make it. Keep every section's code in `set/` so a highlight can be rebuilt.
+5. **Space is the person's call.** A take is about 1 GB an hour. Delete a closed take's wav after its highlights
+   are cut only when they asked for that, and keep its `.json`.
+
 ### Your latency is the risk
 
 A section written from scratch took 5 to 10 minutes; a request for a new ending arrived after the queued section
@@ -234,7 +253,7 @@ songs/<slug>/
   work/                 measurement scripts and their saved output (groove.txt, timbre.txt): voices and
                         sections cite these numbers
   notes/feedback.md     bar or time | the user's words verbatim | what changed | the measured result
-  takes/                live_record wavs and sidecars, when recorded
+  live/                 live_record takes (rec_<date>_<time>.wav and its .json), and highlights/ with its INDEX.md
 ```
 
 - **A rebuilt part gets a new track name with the section number** (`gmb2` -> `gmb3`), and each section module
@@ -256,7 +275,8 @@ variation on the song beat (`electric`, `kit70`) plays live as in the studio ren
 vibrato come from the clip's `expr` lanes, `{"bend": [[beat, semitones], ...], "vib": [[beat, cents], ...]}` with
 beats from the clip start; the voice's INFO lists its lanes. A guitar is the `electric` performer with its rig in
 the track's `fx` (`voice_help(name='electric')` lists the fitted rigs): the rig runs live block by block, as in the
-studio.
+studio. A voice you write for a performer follows the five rules in `windows.md`, or its bars live will not match
+the studio.
 
 **Phrase voices** are the older trick for a performer that is not written as one: make **one note = one whole
 phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":
@@ -375,7 +395,7 @@ When the session itself is the show (the viewer sees your turns and hears the se
 
 ## What is and is not live yet
 
-Live: every instrument type including mimic profiles and performer voices, every effect, send buses,
+Live: every instrument type including mimic profiles and performer voices, every effect but `autotune`, send buses,
 sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 
 Effects run two ways. An effect with a live processor (every built-in type but `autotune`, the guitar rig included) runs
@@ -396,9 +416,10 @@ do not change the song to hide it. Known gaps it shows: a mono synth's glide bet
 long before the window (it comes in with a fresh attack), a track with no notes in the window (its tail and hiss
 from earlier bars are not played).
 
-Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
-instrument-param automation on your own live tracks (a deck's song has it; otherwise use fx params, or expr
-lanes on a performer), tempo changes inside a run, placed audio clips and the master effect chain on a deck.
+Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
+`loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
+deck's song has it; otherwise use fx params, or expr lanes on a performer), tempo changes inside a run, and placed
+audio clips on a deck.
 
 ### Sung takes, tuned
 
@@ -413,7 +434,7 @@ slower keeps their own wobble. Then ask what they hear.
 Tune to the set's key and scale whenever you know them: `chromatic` pulls each note to the nearest semitone, so a
 note sung between two lands on whichever is closer, and the take locks less firmly. Three settings cover most asks:
 0 (robotic), 40 (firm, the pop sound), 150 (natural). Autotune has no live processor: tune the file first, then play
-it like any recorded phrase.
+it like any recorded phrase. The studio side (autotune first in the chain, one per voice) is in `sound-design.md`.
 
 ## Numbers worth knowing
 

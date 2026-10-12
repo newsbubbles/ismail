@@ -1,6 +1,6 @@
 # Mastering
 
-Mastering is its own pass, after the mix is right and before anything goes to the user as "the song". A render with only the default safety limiter is a mix, not a master. Most of the difference between "demo" and "record" at this stage is loudness that fits the genre, a balanced spectrum, and glue.
+Mastering is its own pass, after the mix is right and before anything goes to the user as "the song". A render with only the default safety limiter is a mix, not a master. Most of the difference between "demo" and "record" at this stage is loudness that fits the genre, a balanced spectrum, and glue. Which limiter number belongs to which stage (mixing, mastering, a live set, a deck, a stream) is in `loudness.md`.
 
 ## 0. Fix the mix first
 

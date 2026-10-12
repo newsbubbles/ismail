@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Skill: shared references and a tidy after the skill review
+
+- Two shared references: `loudness.md` (every output's level, and a table saying which limiter number belongs to
+  which stage: planning, mixing, mastering, a new project's limiter, the live safety chain, a live set while it
+  plays, the live output defaults) and `windows.md` (how a bar range, a deck and a live performer build a window,
+  and the five rules for a voice, moved from `sound-design.md`). SKILL.md lists both, and the roles point at them.
+- `listening.md` describes the zoom diff (at least three reference takes, level-matched, cells lit only outside the
+  reference's own spread, a control take, spots, a closing check) instead of saying it is coming.
+- `live.md`: a new "Highlights on praise" method (close the take, cut generously around the heard bar, mp3 and an
+  index, delete a take only on the person's word); `phone.md` points to it. Autotune is the one effect with no live
+  processor; a deck already plays its song's master chain, so that line is gone from "not yet".
+- `music-video.md` is generic: articulation codes, cut cadence, the last bar of the final build, the ending and
+  subliminals no longer describe one series. It links the lexicon, live highlights and `loudness.md` for the bed.
+- `stage-takes.md`: the helper may use `stage_take_note` and `stage_actor_map_save`, and links rigged bodies and the
+  lexicon. `stage.md` sends Blender and scripts outside the stage tools through the machine's GPU slot.
+- `contributor-dev.md`: `git blame` dates a claim when auditing the skill, and a branch behind main gets main merged
+  in by the dev, with each conflict explained to the person in their terms.
+- `development.md` names `songs/_migration/LEDGER.md` in the roles table.
+
 ### Video: film renders take the machine's GPU slot
 
 - `python -m ismail.video render` now takes the GPU slot on the shared machine board (`ismail.machine`) for each
