@@ -44,7 +44,7 @@ so act on `heard`, not on the engine's now.
 
 | kind | what it means | what to do |
 |---|---|---|
-| `tap` `love` | they love what they heard | cut a highlight at `heard` (live.md: highlights on praise) |
+| `tap` `love` | they love what they heard | cut a highlight at `heard` (`live.md`, "Highlights on praise") |
 | `tap` `change` | change it up now | the next change-up, now |
 | `tap` `energy_up` / `energy_down` | more energy / calmer | steer the next phrase |
 | `tap` `louder` / `quieter` | the set's level | move the master a few dB |

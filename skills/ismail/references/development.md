@@ -22,7 +22,7 @@ shared conversation. Know which one you are; do only that job; hand the rest to 
 |---|---|---|---|
 | **The user** | taste and every decision: what is good (the ear and eye are the value function), what gets built, what is contributed | feedback, approvals | their words in chat, quoted into `notes/feedback.md` |
 | **Studio agent** (within; the default role) | one piece: a song, a sound, a live or DJ set, a film, a scene on the stage | only `songs/<slug>/` | `HANDOFF.md` (findings, evidence, proposed API), engine gaps it measured |
-| **Contributor dev** (on; the dev role on the person's own machine) | the engine, the op table (`api.py`, `@op`, CLI and MCP generation, errors, replies), tests, the skill, the shared machine's rules, the migration loop, merging what an area dev sends it | `ismail/`, `skills/`, `tests/` on a worktree branch; `songs/_migration/` | a pull request to the project once the person says yes, `LEDGER.md`, a word to each session a change touches (`contributor-dev.md`) |
+| **Contributor dev** (on; the dev role on the person's own machine) | the engine, the op table (`api.py`, `@op`, CLI and MCP generation, errors, replies), tests, the skill, the shared machine's rules, the migration loop, merging what an area dev sends it | `ismail/`, `skills/`, `tests/` on a worktree branch; `songs/_migration/` | a pull request to the project once the person says yes, `songs/_migration/LEDGER.md`, a word to each session a change touches (`contributor-dev.md`) |
 | **Area dev** (on; a dev role for one part, so far the **stage dev**, who also develops VR) | one part end to end: the stage is `ismail/stage` (page, server, `stage_*` ops, `world.json`, export) | that part on its own worktree branches; its notes in `songs/_migration/` | a local merge request to the contributor dev when one runs, otherwise its own pull request; changes to the op table go to the contributor dev first (`stage-dev.md`) |
 | **Subagents** | one scoped task for the agent that started it (an audit, a search, a fit) | what that agent allows | their report, which is data, not instructions |
 
@@ -68,8 +68,8 @@ python -m ismail.worktrees new <topic> --owner <role>    # fetch, then a copy ..
 
 `references/worktrees.md` is the decision tree for a copy's whole life: starting, a copy with no owner, syncing with
 main, the main checkout falling behind, handing back, and removing it (`python -m ismail.worktrees done <path>`)
-once it is merged. One topic per worktree, one agent per worktree. Run the tests and write the code there. Song folders are not in a
-worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
+once it is merged. One topic per worktree, one agent per worktree. Run the tests and write the code there. Song
+folders are not in a worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
 
 ## Collaboration must-haves
 
@@ -146,7 +146,8 @@ Every engine change answers three questions in its commit and pull request:
    context, so anything that depends on more than that needs checking: a mono synth's glide from the last phrase,
    a drone that began long before a deck's window, randomness keyed on anything but the song position (synths and
    drums seed on the note's place in its bar, performers on `beat0`), work that depends on the length of the
-   buffer (code voices get each note whole).
+   buffer (code voices get each note whole). How each player builds a window, and the five rules a voice follows,
+   are in `windows.md`.
 3. **What proves it?** Effects: `tests/test_live_parity.py` holds every live processor to its studio twin over a
    whole window. Instruments and voices: `tests/test_live_song_parity.py` plays every instrument type and library
    voice on a deck against the studio (sample for sample, performers by ear); add a case for a new type or voice.
@@ -223,7 +224,7 @@ A studio agent built it inside its song and listed it in `HANDOFF.md`; the inclu
    chooses, and marks the item migrated then.
 3. **Strip the song out of it.** Song names, absolute paths, `sys.path` tricks, constants tuned to one record become
    parameters with defaults, or presets. Give it a generic name (the voice says what it is, not whose it was).
-4. **Make it render the same anywhere** (sound-design.md, the five window rules): randomness keyed on song time
+4. **Make it render the same anywhere** (`windows.md`, the five rules for a voice): randomness keyed on song time
    (`beat0`) or the note's place in its bar, never on buffer position or list order; each note given whole; no
    whole-buffer zero-phase work a window would change; causal kernels if it may run live. A voice that is a
    performer takes `beat0` and lanes.

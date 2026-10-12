@@ -165,7 +165,11 @@ nudges you, follow it.
 - `references/composition.md`: arranging and writing with ismail's notation: rhythm cells as step strings, harmony voicing, motif and answer, feel and phrasing for played parts (phrase placement, band feel, bends to chord tones), 8-bar variation, transitions, energy curves. Read when writing notes.
 - `references/instruments.md`: making acoustic and electric instruments sound real: getting an example first, choosing between library voice, mimic (measured from recordings), hand-written measured voice, sampler and sprite, what makes a measured voice convincing, matching an instrument chunk by chunk, asking the user, genre palettes. Read before choosing sounds for any non-electronic part.
 - `references/mastering.md`: the master pass: loudness targets by genre or reference, the master chain, and checks. Read before calling a song finished.
+- `references/loudness.md`: every output's level, and which limiter number is for which stage (mixing, mastering, a
+  live set, a deck, a stream). Read when a limiter reading and a rule seem to clash.
 - `references/sound-design.md`: recipes per role with parameter ranges, gain staging, when and how to use `instrument_fit`, `track_fit`, `sound_extract`, formant and vocoder voices, guitars and their rigs (register first, harmonic profile, stem bias, fast rig fit). Read when choosing or designing sounds.
+- `references/windows.md`: how ismail builds a window (a bar range, a deck, a live performer) and the five rules a
+  voice follows to sound the same in any of them. Read before writing a voice or a performer.
 - `references/listening.md`: which analysis tool answers which question, how to read the text views (digits, rolls, zoom codes), and the Listening Report checks. Read before the first listen.
 - `references/user-experience.md`: working with the person: the lexicon (their words for what they hear and see, mapped to ismail's terms and kept as their culture and learning curve), exams and feedback pages, objectives and intent provenance across versions, and what never to record. Read at the start of every session with a person.
 - `references/blind-tests.md`: ear tests for the user: the eye exam (lenses that each change one named thing) to find a direction, and the blind exam (real vs mine, hidden) to know when a sound or a performance is done; how to make them fair, how to read the answers, and the song-level checks single notes miss (note clashes, measured microtiming). Read when the numbers plateau or before calling an instrument convincing.
@@ -178,7 +182,8 @@ nudges you, follow it.
 - `references/rigged-characters.md`: rigged human bodies on a VR or browser stage (MakeHuman as the worked example): knowing your rig, exporting rest vs posed, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand tracking, props on bones, following a live person, the clip and view checks, materials that survive export. Read before exporting, posing or following any rigged person.
 - `references/contributor-dev.md`, `references/stage-dev.md`: the dev roles' routines and lessons, for a session
   that is the contributor dev or the stage dev.
-- `references/worktrees.md`: a dev's own copy of the repository (a git worktree), from start to removal, with `python -m ismail.worktrees` (new, claim, sync, done, and the list of every copy with its owner and what it needs).
+- `references/worktrees.md`: a dev's own copy of the repository (a git worktree), from start to removal, with
+  `python -m ismail.worktrees` (new, claim, sync, done, and every copy listed with its owner and what it needs).
 - `references/setup.md`: setting ismail up on a person's machine yourself: what to check, what to install, the
   prompts only they can answer, proving it with a sound they hear, and what to do when a step fails.
 - `references/contributing.md`: sending something back for a person who has never used git: in the studio
@@ -253,7 +258,7 @@ nudges you, follow it.
   Do not sleep-poll a long job: run it in the background and let the harness say when it ends, and never end a turn
   with a heavy job running that the user has not been told about (what runs, how long, how it stops).
 - Never report a render as good without numbers from at least `render` output (LUFS, peak, per-track peaks, SILENT flags) and one analysis view of the changed section.
-- Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB (more means the faders are wrong, not that the limiter is working).
+- Every track peak below 0 dBFS; master limiter gain reduction under about 6 dB while mixing (each stage's number: `references/loudness.md`; more means the faders are wrong, not that the limiter is working).
 - After writing notes for a part, read them back (`notes_read view='roll'` for a bar or two) before rendering. Most note bugs are visible there.
 - When matching a reference: never transcribe with raw `notes_from_audio` over a whole loop section; use `notes_from_audio_loop` (consensus). Never raise a track's level to improve a perceptual score. Never call a match done while `cmp_summary` shows a WARNING line or the mix perceptual group is far under its ceiling.
 - When the task is building an instrument, make the sound rather than placing slices of the reference: a slice
