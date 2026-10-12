@@ -144,7 +144,7 @@ output device and the file before anything else.
   could do (or that you will take another route).
 - Never ask them to read a log, edit a file, or type a command you could run.
 - A step that failed or confused them is a finding: write it down, with the error and the fix, in the song's
-  `HANDOFF.md` under "Setup". The maintainer reads every handoff, and the next person's setup gets better from
+  `HANDOFF.md` under "Setup". The contributor dev reads every handoff, and the next person's setup gets better from
   it.
 
 ### Optional: the phone page

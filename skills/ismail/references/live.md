@@ -90,6 +90,10 @@ A long set (a DJ set, a party, a 30-minute jam) is a loop between you and the au
 are the audience. Later the audience may be a text stream from other devices (motion on the dance floor from a
 camera, facial expression categories); treat it the same way.
 
+- **The phone first, not negotiable.** In the same turn you start any set, start `phone_watch` in the background
+  (`python -m ismail phone_watch "who=<your role>"`). When it wakes you, re-arm it before you act on what it
+  returned, and never put housekeeping (logs, notes, tidying) before the phone. A hand-made watcher lost after a
+  context reset once missed six of the person's notes in 36 minutes. `phone.md`, "Watching the phone", has the rest.
 - **Read the room.** When the audience is into it, lean in: keep the feel and add an element or two, build, take
   it down, drop. When it goes flat or repetitive, move on: a switch-up, a breakdown, a new song.
 - **Think in energy, not song form.** Bring elements in over time (a percussion layer, 808 slides, string stabs,
@@ -140,6 +144,25 @@ Learned from a one-hour set steered by one listener; the same reading applies to
 - **Endings are emotional arcs** ("full circle", "crescendo", then peace). Plan the last 15 minutes early as an
   arc, but keep the ending swappable: do not queue it until it is close.
 
+### Highlights on praise
+
+When the person praises what is playing ("I love this", "so hot", a `love` tap from the phone), keep that moment
+as a highlight. The full takes run for hours; the highlights are the record of what the set can do, and the
+showcase.
+
+1. **Close the running take** so its file is complete: `live_record(on=False)`, then `live_record(on=True)` at
+   once. The music keeps playing and a new take file starts. Never cut from the take that is still recording.
+2. **Cut generously** from the take that covers the moment: the whole section around it (from the build to the
+   end of the drop), not the one bar. A phone tap carries `heard`, the bar they heard: cut around that bar, not the
+   engine's now. The take's `.json` gives `first_bar`, `bpm` and `beats_per_bar`, so bar b starts at
+   `(b - first_bar) * beats_per_bar * 60 / bpm` seconds into the file. A short fade at each end.
+3. **Save it as an mp3** in `<project>/live/highlights/<slug>.mp3`: cut to a temporary wav outside the project,
+   encode, remove the temporary file. Never overwrite a highlight.
+4. **Index it** in `live/highlights/INDEX.md`: when, what was playing, their words verbatim, and the section
+   script and engine settings that make it. Keep every section's code in `set/` so a highlight can be rebuilt.
+5. **Space is the person's call.** A take is about 1 GB an hour. Delete a closed take's wav after its highlights
+   are cut only when they asked for that, and keep its `.json`.
+
 ### Your latency is the risk
 
 A section written from scratch took 5 to 10 minutes; a request for a new ending arrived after the queued section
@@ -169,8 +192,7 @@ sessions' renders, Blender and video jobs.
   minutes on a lone hat loop after its outro forgot to stop it).
 - **Under load, shrink the rig instead of stopping.** Dropping idle tracks and insert effects (bitcrush,
   compressor, chorus, distortion) while keeping the parts the person named took the mixer from 85% to 47% with
-  the same music. Raising the live engine to AboveNormal priority (render workers stay Normal)
-  helps when other jobs hog the CPU.
+  the same music.
 - **One deck at a time on a busy machine.** A cued deck of a 20-track song costs the mixer as much as one on air,
   and its first section renders in a burst: every breakup in one morning lined up with a deck load. Switch songs
   with a stop and a start (a short gap) until the machine has room.
@@ -234,13 +256,36 @@ songs/<slug>/
   work/                 measurement scripts and their saved output (groove.txt, timbre.txt): voices and
                         sections cite these numbers
   notes/feedback.md     bar or time | the user's words verbatim | what changed | the measured result
-  takes/                live_record wavs and sidecars, when recorded
+  live/                 live_record takes (rec_<date>_<time>.wav and its .json), and highlights/ with its INDEX.md
 ```
 
 - **A rebuilt part gets a new track name with the section number** (`gmb2` -> `gmb3`), and each section module
   lists the old tracks it stops. To reuse a name, `live_fx(track, clear=True)` first: scheduled moves outlive
   clip changes.
 - Temp files go to your scratchpad, not `set/`. Measurements are saved as files, not only printed.
+
+### A new piece while the engine runs
+
+A new set or jam starts in its own folder (SKILL.md, "One piece, one folder"), even when an engine already plays
+in another one. An engine belongs to the folder it was started in: the ops and a djkit `Set` find it by that
+folder, and its `live_track` voices and `track:<name>` instruments, `live_record` takes, `live/listen.wav`, controls
+and the phone inbox all come from or go to that folder. No op moves a running engine to another folder, so the
+hand-over is a stop and a start:
+
+1. Make the new folder first: `project_new` there, copy or import what it reuses (voices into its `voices/`, the
+   control module into `set/`) and name each source in its notes.
+2. Finish the current pass or fade it, and tell the person the music stops for a moment. Then
+   `live_stop(project=<old folder>, fade_sec=...)` at a phrase end; it closes any recording.
+3. `live_start(project=<new folder>, bpm=...)`, or `Set('<new folder>').start(bpm)`; its reply names any engine
+   still running elsewhere. Turn `live_record` on again if it was on.
+4. The phone follows the newest engine by itself. `phone_watch` and `phone_listen` read the phone's own inbox, so
+   they keep hearing everything across the restart; only a script reading the old folder's
+   `notes/phone_inbox.jsonl` would go deaf, which is one more reason not to write your own watcher. An inbox set
+   with `phone_route(inbox=...)` stays where it points; `phone_route()` sends it back to the playing engine.
+
+Without a restart, a finished song from another folder plays on a deck by its path (`live_load(deck=,
+song=<its folder>)`), and its tracks render with that song's own voices and sound bank. That plays a piece inside a
+set; it does not make a new one: tracks made with `live_track` and every take still land in the engine's folder.
 
 ## Performers and phrase voices
 
@@ -256,7 +301,8 @@ variation on the song beat (`electric`, `kit70`) plays live as in the studio ren
 vibrato come from the clip's `expr` lanes, `{"bend": [[beat, semitones], ...], "vib": [[beat, cents], ...]}` with
 beats from the clip start; the voice's INFO lists its lanes. A guitar is the `electric` performer with its rig in
 the track's `fx` (`voice_help(name='electric')` lists the fitted rigs): the rig runs live block by block, as in the
-studio.
+studio. A voice you write for a performer follows the five rules in `windows.md`, or its bars live will not match
+the studio.
 
 **Phrase voices** are the older trick for a performer that is not written as one: make **one note = one whole
 phrase**. The voice takes a `phrases` param, `{"<velocity>": {"notes": [...], "bend":
@@ -314,9 +360,10 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   a floor, not a mixer: its limiter and rider should read 0 dB.
 - **Live output is quiet by default** (trim -6 dB, sustained cap -16 dBFS rms, ceiling -1 dBFS; about -21 to
   -23 LUFS for a balanced mix). That is too quiet for a listener at a normal volume: one user heard "nothing".
-  For a set, start the engine with `ISMAIL_LIVE_TRIM_DB=4` and `ISMAIL_LIVE_CAP_DB=-12` in the environment of
-  the process that calls `live_start` (the engine inherits it): about -16 LUFS. Then keep the limiter near 0 dB
-  with faders.
+  For a set, start the engine with `live_start(..., trim_db=4, cap_db=-12)`: about -16 LUFS. The arguments set
+  this set's level and win over the environment. Left out, the engine reads `ISMAIL_LIVE_TRIM_DB` and
+  `ISMAIL_LIVE_CAP_DB` from the process that calls `live_start`, which a tool server cannot change between calls,
+  so use the arguments. `live_status` prints the trim and cap in use. Then keep the limiter near 0 dB with faders.
 - **Sounds you are unsure of**: try them on a muted or quiet track (`volume_db=-40`, then fade with a ramp on a
   gain fx) rather than straight onto the main part.
 - **Tempo change** = `live_stop`, then `live_start` with the new tempo (a gap). Inside a set, change the feel
@@ -350,8 +397,9 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
 
 - **Streams.** `live_stream(name='bus:lucy')` gives a localhost URL that streams that bus (or `master`, or
   `deck:A`) as raw PCM, int16 stereo at 44.1 kHz, with its own safety limiter. Route the tracks an object should
-  play to their own bus (`live_track(output='lucy')`) so each object plays its own sound at its own place; one master
-  stream would put everything in one spot. The engine listens on localhost only: a page on a headset reaches it
+  play to their own bus (`live_bus('lucy')`, then `live_track(track, instrument=..., output='lucy')` as you create
+  each track; a track's output is set when it is created) so each object plays its own sound at its own place; one
+  master stream would put everything in one spot. The engine listens on localhost only: a page on a headset reaches it
   through the page's own server, which relays the stream (same origin, https). A listener that falls a second behind
   loses its oldest audio and never slows the set. A stream plays sound wherever it is received: tell the user
   before anything starts.
@@ -375,7 +423,7 @@ When the session itself is the show (the viewer sees your turns and hears the se
 
 ## What is and is not live yet
 
-Live: every instrument type including mimic profiles and performer voices, every effect, send buses,
+Live: every instrument type including mimic profiles and performer voices, every effect but `autotune`, send buses,
 sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 
 Effects run two ways. An effect with a live processor (every built-in type but `autotune`, the guitar rig included) runs
@@ -391,14 +439,15 @@ bus cannot bake at all (put the effect on the tracks).
 `live_parity(song, bars=[a, b])` checks a song section: it renders the bars in the studio, plays them on a silent
 engine of its own (no `live_start`, nothing late) and compares each track, bus and the mix, from the window's
 second bar (the first is the window's edge: the studio rings in what came before, a deck starts clean). A part
-marked DIFFERS sounds different on a deck than in a render: write it in the song's HANDOFF.md for the maintainer;
+marked DIFFERS sounds different on a deck than in a render: write it in the song's HANDOFF.md for the contributor dev;
 do not change the song to hide it. Known gaps it shows: a mono synth's glide between phrases, a drone that began
 long before the window (it comes in with a fresh attack), a track with no notes in the window (its tail and hiss
 from earlier bars are not played).
 
-Not yet: master-bus effects (the safety chain is the master), vocoder modulators from sound-bank sounds,
-instrument-param automation on your own live tracks (a deck's song has it; otherwise use fx params, or expr
-lanes on a performer), tempo changes inside a run, placed audio clips and the master effect chain on a deck.
+Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
+`loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
+deck's song has it; otherwise use fx params, or expr lanes on a performer), tempo changes inside a run, and placed
+audio clips on a deck.
 
 ### Sung takes, tuned
 
@@ -413,7 +462,7 @@ slower keeps their own wobble. Then ask what they hear.
 Tune to the set's key and scale whenever you know them: `chromatic` pulls each note to the nearest semitone, so a
 note sung between two lands on whichever is closer, and the take locks less firmly. Three settings cover most asks:
 0 (robotic), 40 (firm, the pop sound), 150 (natural). Autotune has no live processor: tune the file first, then play
-it like any recorded phrase.
+it like any recorded phrase. The studio side (autotune first in the chain, one per voice) is in `sound-design.md`.
 
 ## Numbers worth knowing
 
@@ -434,11 +483,12 @@ it like any recorded phrase.
 
 ## Other sessions' renders while you play
 
-While your engine is on the board, the governor holds GPU jobs and Blender renders until the set ends (Nate's
-temporary rule after two real dropouts, hq:D-11; `python -m ismail.machine on-air` shows the policy). Audio
+While your engine is on the board, the governor holds GPU jobs and Blender renders until the set ends (a rule
+made after two real dropouts; `python -m ismail.machine on-air` shows the policy). Audio
 renders and other CPU work still run beside you, sharing half the machine's threads (a job that asks for more
-waits; ledger:M132, after a 359-underrun dropout from one slot's render plus the perceptual model on every core).
-Keep your engine at High priority and watch underruns. Your own checks during a set: run them as
+waits; after a 359-underrun dropout from one slot's render plus the perceptual model on every core).
+`live_start` sets the engine's priority in code (above normal, render workers normal); its `priority` option
+(`'above_normal'`, `'high'`, `'normal'`) changes it. Watch underruns. Your own checks during a set: run them as
 `python -m ismail.machine run --cpu --threads 2 -- python check.py`; the renders and comparisons inside it use the
 run's slot and its threads.
 

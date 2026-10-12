@@ -45,8 +45,14 @@ frequency, and you frame any part of it at the resolution the question needs. Re
 How: draw the reference and yours on the same window and read them one above the other. Zoom two ways: a few ms
 around an edge (a time-sharp view shows a start early or late) and a whole word or note (a frequency-sharp view shows
 texture up high). For a blind check of your own, `exam_eye_crops` then `exam_eye_score`: if you can pick the real
-one from the picture, the person will most likely hear the difference too. A diff of two zooms (lighting only what
-lies outside the reference's own take-to-take spread) is coming from the Voice agent's work.
+one from the picture, the person will most likely hear the difference too.
+
+To see where two takes differ, diff the zooms against the reference's own spread. Use at least 3 takes of the
+reference line, level-match every clip first, and light a cell only where the test lies outside the reference's
+take-to-take spread in that cell. Run a control too, one of the reference's own takes in the test's place: what
+lights there is the method's noise, not a difference. Then group the lit cells into spots and fix the largest, and
+after the fix check the spot again: it should close. This lives in a song's work folder for now
+(`songs/vox/work/spectrogram_diff.py`: `spectrogram_diff`, `spot_clusters`, `closing_check`), not as an op yet.
 
 What they said, and what the zoom found (the Voice agent's rounds):
 
@@ -97,7 +103,8 @@ Worst:     <the single worst line above> -> next fix
 
 ## Common readings and fixes
 
-- Master limiter GR > 6 dB: pull the loudest tracks down 3-6 dB; re-render.
+- Master limiter GR > 6 dB while mixing: pull the loudest tracks down 3-6 dB; re-render (other stages:
+  `loudness.md`).
 - `analyze_structure` shows a flat map (all 8s and 9s): no energy curve; drop parts in the intro and break, automate a filter.
 - Level digits with holes where the part should sustain: amp sustain too low or notes too short (`notes_transform legato=true`).
 - Bright wash across 3-10 kHz in a synth group: filter envelope amount too high, drive too high, or noise layers; darker is usually closer to finished records than it feels.

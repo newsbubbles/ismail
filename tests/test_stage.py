@@ -516,3 +516,49 @@ def test_follow_anchor_takes_to_from_the_cli_as_a_list_or_a_word(stage):
             assert page.seen[-1]['to'] == want
     finally:
         page.stop = True
+
+
+def test_an_answer_that_carries_an_error_fails_the_op(stage):
+    page = FakePage(stage['port'], 'room', answers={'look_through': {'error': '"lamp" is not a camera (it is LIGHT)'}})
+    try:
+        with pytest.raises(OpError, match='look_through: "lamp" is not a camera'):
+            OPS['stage_view_look_through'](scene='room', camera='lamp')
+        assert page.seen[-1]['camera'] == 'lamp'                      # the page reads camera (it read only name before)
+    finally:
+        page.stop = True
+        page.t.join(5)
+
+
+def test_listen_hears_what_goes_wrong_in_the_room(stage):
+    port = stage['port']
+    last = int(OPS['stage_listen'](who='tester', wait=0).split()[1].rstrip(';'))
+    _post(port, 'live/event?scene=room', [{'type': 'behaviour_error', 'object': 'switch_1', 'phase': 'press', 'error': 'x is not defined'},
+                                          {'type': 'object_message', 'object': 'switch_1', 'text': 'pressed'},
+                                          {'type': 'page_error', 'error': 'boom'}])
+    out = OPS['stage_listen'](who='tester', since=last, wait=2)
+    assert 'behaviour_error' in out and 'x is not defined' in out and 'object_message' in out and 'page_error' in out
+
+
+def test_saving_edits_keeps_the_file_and_a_copy_and_takes_two_saves_at_once(stage):
+    d = stage['scenes'] / 'room'
+    S.save_edits('room', {'objects': {'box': {'location': [1, 0, 0]}}})
+    first = (d / 'edits.json').read_text(encoding='utf-8')
+    S.save_edits('room', {'objects': {'box': {'location': [2, 0, 0]}}})
+    assert json.loads((d / 'edits.json').read_text(encoding='utf-8'))['objects']['box']['location'] == [2, 0, 0]
+    assert [f.read_text(encoding='utf-8') for f in (d / 'history').glob('edits_*.json')] == [first]   # a copy, kept
+    errors = []
+
+    def save(i):
+        try:
+            S.save_edits('room', {'objects': {f'box_{i}': {'location': [i, 0, 0]}}})
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    ts = [threading.Thread(target=save, args=(i,)) for i in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(10)
+    assert not errors
+    objs = json.loads((d / 'edits.json').read_text(encoding='utf-8'))['objects']
+    assert set(objs) == {'box'} | {f'box_{i}' for i in range(8)}             # merged one after another, none lost
+    assert not list(d.glob('*.tmp'))

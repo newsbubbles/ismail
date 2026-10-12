@@ -26,7 +26,7 @@ SAFE = re.compile(r'^[A-Za-z0-9_.-]+$')
 def build(out, items, title, intro='', seed=0, f_lo=0.0, f_hi=16000.0, labels=None):
     """A round in `out` from items [{word, real, other, window: [t0, t1] (s), other_window: [t0, t1] (default the
     same), words: [[t0, t1, text]] (s, in the real file), other_label: what the other picture is (shown after the
-    answer), version, pair}]. The sound card plays is the real file's window. -> the manifest."""
+    answer), version, pair, ask: this card's own question, shown above its pictures}]. The sound card plays is the real file's window. -> the manifest."""
     import numpy as np
     import soundfile as sf
     from .. import analysis as A
@@ -60,6 +60,8 @@ def build(out, items, title, intro='', seed=0, f_lo=0.0, f_hi=16000.0, labels=No
                              'img': pics, 'words': [{'w': w['w'], 'ms': [round(1000 * (w['t0'] - t0)),
                                                                          round(1000 * (w['t1'] - t0))]}
                                                     for w in words]})
+        if it.get('ask'):
+            man['items'][-1]['ask'] = str(it['ask'])
         key[str(q)] = {'real': str(real_side), 'word': it['word'], 'label': it.get('other_label', 'ours'),
                        'version': it.get('version', 'ours'), 'pair': it.get('pair', q)}
     with open(os.path.join(out, 'manifest.json'), 'w', encoding='utf8') as f:

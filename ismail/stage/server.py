@@ -148,7 +148,18 @@ def stale():
     return Path(__file__).stat().st_mtime_ns != SRC_MTIME
 
 
+SAVE_LOCK = threading.Lock()
+
+
 def save_edits(name, edits):
+    # one save at a time, and edits.json is never missing: the previous one is copied to history/ and the new one
+    # replaces it in one step (until 2026-10-12 it was moved away first, so a read in between saw no edits, and two
+    # saves at once raced on one tmp name)
+    with SAVE_LOCK:
+        return _save_edits(name, edits)
+
+
+def _save_edits(name, edits):
     d = SCENES / name
     if not NAME.match(name) or not (d / 'scene.glb').is_file():
         raise ValueError(f'no scene {name!r}')
@@ -184,10 +195,17 @@ def save_edits(name, edits):
         while moved.exists():
             moved = hist / f'edits_{stamp}_{n}.json'
             n += 1
-        shutil.move(str(out), str(moved))
-    tmp = d / 'edits.json.tmp'
+        shutil.copy2(str(out), str(moved))
+    tmp = d / f'edits.json.{threading.get_ident()}.tmp'
     tmp.write_text(json.dumps(edits, indent=1), encoding='utf-8')
-    tmp.replace(out)
+    for i in range(5):             # Windows: a reader holding the file open makes replace fail for a moment
+        try:
+            tmp.replace(out)
+            break
+        except PermissionError:
+            if i == 4:
+                raise
+            time.sleep(0.05)
     return out, moved
 
 

@@ -11,6 +11,7 @@ from ismail import handoffs
 def no_github(monkeypatch):
     """The intake also lists open pull requests through the GitHub command line; tests never reach the network."""
     monkeypatch.setattr(handoffs, '_gh', lambda args, cwd: (None, 'not in tests'))
+    monkeypatch.setattr(handoffs, '_report_worktrees', lambda: None)    # tests/test_worktrees.py covers it
 
 
 def write(p, text):
