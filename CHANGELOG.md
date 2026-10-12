@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Docs: the roadmap matches what is merged
+
+- `ROADMAP.md` was last changed on 10-02 and still listed the stage as coming into ismail, though it has been in
+  `ismail/stage` since 10-04 (Director, 10-12). Every row was checked against what is merged: the stage and what came
+  with it are done, the exam op is building, several planned rows are building, and the phone page, sampled voices,
+  auto-tune, effect stacks and the first session have rows now. The development checklist says to update a road's
+  row in the pull request that moves it.
+
 ### Skill: sampling is allowed, and private use needs no caution
 
 - Nate, 10-12: ismail samples like any DAW. Slicing a reference into the song is fine whenever the user wants it;
