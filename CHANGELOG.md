@@ -19,6 +19,93 @@
   to set it by hand, once as AboveNormal and once as High; both lines are now one line about the option.
 - mastering.md and live.md say how a live set reaches its level: the arguments, then faders.
 
+### Video: a text overlay
+
+- New `python -m ismail.video overlay <in.mp4> <out.mp4> --text "..."`: a line of text (a credit, a title, a link)
+  drawn on a copy of any video with ffmpeg drawtext, the audio copied. `--pos bottom|top|center`, `--size 30`,
+  `--margin 42` (pixels on a 1080 px frame, scaled with the video's short side), `--opacity 0.5`, `--shadow 0.45`
+  (0 for none), `--color`, `--font` (default DejaVu Sans Mono from matplotlib, else a system mono or sans), `--y` (a
+  pixel row the position measures from, for a band in a vertical layout). It never writes the input, refuses an
+  output that exists unless `--force`, and runs in the machine's cpu slot (`--wait`).
+- In the edit: `C.overlay(text, ...)` in a cut list, or `"overlay": {"text": ...}` in `video/config.json`, draws
+  the same line on every output frame, last (after the grade and grain), at 1080p on the encode. Off by default;
+  no text is built in. Both ways use one filter builder, `ismail.video.overlay.drawtext`.
+- `music-video.md` has a "Text overlay" part.
+
+### Dev: dev copies (git worktrees) tracked by a tool
+
+- New `python -m ismail.worktrees`: every dev copy of the repository (a git worktree) on one line, with its branch,
+  owner, commits ahead and behind `origin/main`, merged or not, its last commit's age, its uncommitted and untracked
+  files, and its open pull request (when `gh` is there). Flags: UNASSIGNED, MERGED (remove it), IDLE (unmerged, no
+  commit for 3 days), BEHIND. The first line names the next action, and the next says when the main checkout is
+  behind `origin/main`. `--fetch`, `--json`, `--unassigned`.
+- `new <topic> --owner <name>` fetches and makes the copy from `origin/main`, never from the local main;
+  `claim <path> --owner <name>` records the owner of a copy that exists; `sync <path>` merges `origin/main` in
+  (refuses uncommitted work, never stashes, keeps a conflicted merge in progress and lists its files); `done <path>`
+  removes a copy and its local branch only when its work is in `origin/main` and it holds nothing untracked. Nothing
+  passes `--force` or deletes a file. Owners live in the shared git folder, outside the repository.
+- `python -m ismail.handoffs` (the dev intake) ends with the same summary and the copies that need something
+  (`--no-worktrees` skips it).
+- New reference `worktrees.md`: the decision tree for a copy's whole life, each step naming the command. Linked
+  from SKILL.md, development.md, contributor-dev.md and stage-dev.md.
+
+### Skill: "the person" in the lessons
+
+- The skill's lessons no longer name one user: each says "the person", as the rest of the skill does (blind-tests.md,
+  mastering.md, phone.md, stage-takes.md, user-experience.md).
+
+### Skill: shared references and a tidy after the skill review
+
+- Two shared references: `loudness.md` (every output's level, and a table saying which limiter number belongs to
+  which stage: planning, mixing, mastering, a new project's limiter, the live safety chain, a live set while it
+  plays, the live output defaults) and `windows.md` (how a bar range, a deck and a live performer build a window,
+  and the five rules for a voice, moved from `sound-design.md`). SKILL.md lists both, and the roles point at them.
+- `listening.md` describes the zoom diff (at least three reference takes, level-matched, cells lit only outside the
+  reference's own spread, a control take, spots, a closing check) instead of saying it is coming.
+- `live.md`: a new "Highlights on praise" method (close the take, cut generously around the heard bar, mp3 and an
+  index, delete a take only on the person's word); `phone.md` points to it. Autotune is the one effect with no live
+  processor; a deck already plays its song's master chain, so that line is gone from "not yet".
+- `music-video.md` is generic: articulation codes, cut cadence, the last bar of the final build, the ending and
+  subliminals no longer describe one series. It links the lexicon, live highlights and `loudness.md` for the bed.
+- `stage-takes.md`: the helper may use `stage_take_note` and `stage_actor_map_save`, and links rigged bodies and the
+  lexicon. `stage.md` sends Blender and scripts outside the stage tools through the machine's GPU slot.
+- `contributor-dev.md`: `git blame` dates a claim when auditing the skill, and a branch behind main gets main merged
+  in by the dev, with each conflict explained to the person in their terms.
+- `development.md` names `songs/_migration/LEDGER.md` in the roles table.
+
+### Video: film renders take the machine's GPU slot
+
+- `python -m ismail.video render` now takes the GPU slot on the shared machine board (`ismail.machine`) for each
+  shot, in place of its own temp-file lock. The board's rules now hold for film renders as for any Blender render:
+  one GPU job on the machine, the heat and disk floors, and no render while a live set is on air. Before, the render was invisible to the board and could start Blender during a set.
+- It stands in line for the slot, up to 4 hours by default, to outlast a live set (`--wait 12h`, `--wait 0`
+  refuses at once). A refusal says why, names the shots not rendered and exits 75, like `machine run`. The shot's Blender carries the slot
+  (`$ISMAIL_SLOT`), so heavy work it starts runs in the same slot.
+- music-video.md, SKILL.md and the README say so; the "machine-wide GPU lock" text is gone.
+
+### Skill: rigged characters
+
+- New reference `rigged-characters.md`: rigged human bodies on a VR or browser stage, from one long film build
+  checked in a headset (MakeHuman as the worked example, the lessons marked for any rig): know your rig, rest vs
+  posed export, wrists on a rig without twist bones, start poses as world frames, hands and fingers from hand
+  tracking, props on bones, following a live person, the clip and view checks, materials that survive export.
+  Listed in SKILL.md and linked from stage.md and music-video.md.
+
+### Skill: the contributor dev
+
+- The dev role for the engine is now the **contributor dev**: the dev on the person's own machine
+  (`references/contributor-dev.md`, which was `maintainer.md`). It opens a pull request to the project once the
+  person says yes to contributing; the project's maintainer reviews and merges. The skill no longer describes
+  one team's setup.
+- A studio agent that finds something worth contributing offers a contributor dev by its role's name, and starts
+  the session itself where its harness can, so nobody is left with "the dev needs to do it".
+- `contributing.md` drops the GitHub sign-up and install steps: the agent handles GitHub and asks the person only for
+  what only they can do. The route without GitHub (a zip) stays.
+- An area dev (the stage dev) sends its finished branch to the contributor dev as a local merge request, or opens
+  its own pull request when none runs. During a live test the stage agent messages the stage dev directly and may
+  start the stage dev session itself (`stage.md`, `stage-dev.md`, `development.md`).
+- Internal record numbers and one team's names are gone from live.md, blind-tests.md and development.md.
+
 ### Skill: one line in user-experience.md
 
 - The phone-first exams lesson, reworded; the lesson is unchanged (plan exams that work on a phone and earbuds).
@@ -31,7 +118,7 @@
   tools (`TXXX:ismail_version`, `ismail_commit`, `ismail_skill`). They are read from the build at the moment of
   writing; a pip install without git or the skill folder writes only what it knows (hq:D-128).
 - `python -m ismail.tags <file.mp3> ...` says which ismail made each file; with no file, which ismail this is.
-- Versions are tagged on main from v0.3.0 on (maintainer.md says when to bump).
+- Versions are tagged on main from v0.3.0 on.
 
 ### Ops: `ops_find`, the tools by purpose and by role
 

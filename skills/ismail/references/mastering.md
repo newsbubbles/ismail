@@ -1,6 +1,6 @@
 # Mastering
 
-Mastering is its own pass, after the mix is right and before anything goes to the user as "the song". A render with only the default safety limiter is a mix, not a master. Most of the difference between "demo" and "record" at this stage is loudness that fits the genre, a balanced spectrum, and glue.
+Mastering is its own pass, after the mix is right and before anything goes to the user as "the song". A render with only the default safety limiter is a mix, not a master. Most of the difference between "demo" and "record" at this stage is loudness that fits the genre, a balanced spectrum, and glue. Which limiter number belongs to which stage (mixing, mastering, a live set, a deck, a stream) is in `loudness.md`.
 
 ## 0. Fix the mix first
 
@@ -32,5 +32,5 @@ On `track='master'`, in this order:
   `volume=<dB>`, the smaller of what reaches the target and what keeps the true peak under the ceiling. Never apply
   ffmpeg `loudnorm` as the gain: single-pass is a dynamic AGC, and two-pass with `linear=true` silently falls back to
   it whenever the linear gain would break the true-peak ceiling. It rides the level (+6 to +11 dB inside one bed, the
-  first half second loudest), which Nate heard as "the air and the good sound for a split second, then worse".
+  first half second loudest), which the person heard as "the air and the good sound for a split second, then worse".
 - Then ask the user to listen on two systems if they can (headphones and a phone speaker): "does the low end hold up on the phone? is anything harsh on headphones?"

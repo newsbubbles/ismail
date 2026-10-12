@@ -44,7 +44,7 @@ so act on `heard`, not on the engine's now.
 
 | kind | what it means | what to do |
 |---|---|---|
-| `tap` `love` | they love what they heard | cut a highlight at `heard` (live.md: highlights on praise) |
+| `tap` `love` | they love what they heard | cut a highlight at `heard` (`live.md`, "Highlights on praise") |
 | `tap` `change` | change it up now | the next change-up, now |
 | `tap` `energy_up` / `energy_down` | more energy / calmer | steer the next phrase |
 | `tap` `louder` / `quieter` | the set's level | move the master a few dB |
@@ -79,7 +79,7 @@ in the bud, and a long press opens the phone's assistant). So, while a set plays
   as taps with `via: 'voice'` and the note's `id`. The words also arrive as `voice_text`: act once, not twice.
 - the microphone opens when a note starts and closes when it ends ("Mic: per note", the default): while a mic is
   open, Bluetooth earbuds switch to call mode (mono, narrowband) and the music sounds bad, so a mic held open the
-  whole set ruins it (Nate's Dime 3, 10-06). The switch takes a second or two at each end of a note. "Mic: kept
+  whole set ruins it (the person's earbuds, 10-06). The switch takes a second or two at each end of a note. "Mic: kept
   open" holds it while the set plays, so a press can record with the screen off, in call quality; "Record: phone
   mic" records with the phone's own microphone, so the earbuds may stay in music quality throughout. If the phone
   will not open the mic (the screen off, or blocked), a low tone and a line say so.
@@ -140,8 +140,8 @@ panel, with a link to open it on its own, and the server's events carry `video_o
 
 ## Watching the phone: one loop that sees everything
 
-The person's model, in his words: the watcher "should tell you when shit goes down and give you state info you ask
-for"; the agent makes every call (Nate, 10-07, after a watcher that skipped lines for other agents missed his
+The person's model, in their words: the watcher "should tell you when shit goes down and give you state info you ask
+for"; the agent makes every call (the person, 10-07, after a watcher that skipped lines for other agents missed their
 listening exams and two notes).
 
 1. **One loop.** `phone_listen(who=<your role>, since=<the last since>, wait=25, page=True)`, nothing filtered by
@@ -168,18 +168,19 @@ listening exams and two notes).
 A pause from the person (the Pause key, or "pause the set" said in a note) is acted on by the phone server itself:
 it fades the set out over 4 s and stops the engine, then says so on the page and posts a `control` line
 (`what: 'paused'`) to the inbox. No agent has to be awake for it (10-06: the DJ was mid-task and the set played on
-for 70 s after Nate pressed pause). Starting again is yours, when they say or tap Resume.
+for 70 s after the person pressed pause). Starting again is yours, when they say or tap Resume.
 
 ## Nothing personal on the page
 
 The page may be on someone's screen recording or a shared video: never put where the person lives, their name, or
-other personal details in a caption, a panel or a title (10-06: a story named Nate's town while he recorded).
+other personal details in a caption, a panel or a title (10-06: a story named the person's town while they
+recorded).
 `phone_unsay(match='text')` (or `since='HH:MM'`, or `n=`) takes lines back off the page, its history, its pinned
 line and its notification; it cannot reach a recording already made.
 
 ## The page's sounds: make them, attach them
 
-Every sound the page makes is crafted (Nate, 10-06: "the same thing applies to everything as like a design
+Every sound the page makes is crafted (the person, 10-06: "the same thing applies to everything as like a design
 philosophy"). Make each one with ismail like any sound (short, under 5 s, its peak well under the set: about
 -14 dBFS), render it with `mp3='also'`, and attach it: `phone_sounds(event='message', path=...)`. Events: `message`
 (a `phone_say` caption arrives), `note_start`, `note_end`, `note_sent`, `error` (these replace the built-in tones),

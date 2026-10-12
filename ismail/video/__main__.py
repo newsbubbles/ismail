@@ -5,10 +5,12 @@
   sync                      song project -> video/build/events.json + features.npz (run after every song change)
   still <shot.py> <frame>   one frame -> video/build/look/<shot>_<frame>.png  (extra args after --, e.g. -- --top 0,60,300,20)
   posesheet <shot.py> [f,f] every character alone from four sides at its key frames + the clipping check -> build/look/posesheet_<shot>.png
-  render <shot.py>...       full shot renders, one at a time (a lock serialises every queue on the machine); refuses on
-                            clipping unless -- --allowclip
+  render <shot.py>...       full shot renders, one at a time, each in the machine's GPU slot (ismail.machine: it waits
+                            in line, --wait 4h by default, while the GPU is busy or hot or a live set is on air);
+                            refuses on clipping unless -- --allowclip
   contact <video> [n]       contact sheet of n frames of any video -> video/build/look/contact_<name>.png
   edit [-- --sheet a b n | -- --range a b]   runs video/cut.py (sheet = contact sheet of bars a..b-1)
+  overlay <in.mp4> <out.mp4> --text "..."    a line of text on a copy of any video (no --song; `overlay -h` for the look)
 """
 import argparse
 import glob
@@ -17,57 +19,20 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 
 from . import blender_exe, config, video_dir
+from .. import machine
 
 KIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'blender')
 TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
-LOCK = os.path.join(tempfile.gettempdir(), 'ismail_video_gpu.lock')
-
-
-def _alive(pid):
-    if os.name == 'nt':   # os.kill(pid, 0) TERMINATES the process on Windows
-        import ctypes
-        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-        if not h:
-            return False
-        code = ctypes.c_ulong()
-        ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
-        ctypes.windll.kernel32.CloseHandle(h)
-        return code.value == 259
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
-
-
-class gpu_lock:
-    def __enter__(self):
-        while True:
-            try:
-                os.mkdir(LOCK)
-                open(os.path.join(LOCK, 'pid'), 'w').write(str(os.getpid()))
-                return self
-            except FileExistsError:
-                try:
-                    pid = int(open(os.path.join(LOCK, 'pid')).read())
-                except (OSError, ValueError):
-                    pid = None
-                if pid and not _alive(pid):
-                    shutil.rmtree(LOCK, ignore_errors=True)
-                    continue
-                time.sleep(5)
-
-    def __exit__(self, *a):
-        shutil.rmtree(LOCK, ignore_errors=True)
+RENDER_WAIT = '4h'                 # a render queue is walk-away work: it outlasts a live set rather than give up
 
 
 def _blender(song, shot, extra, log=None):
     vd = video_dir(song)
-    env = dict(os.environ, ISMAIL_VIDEO_KIT=KIT, ISMAIL_VIDEO_DIR=vd)
+    # inside a render's slot the shot carries it ($ISMAIL_SLOT), so anything heavy it starts runs in that slot
+    env = machine.child_env(env=dict(os.environ, ISMAIL_VIDEO_KIT=KIT, ISMAIL_VIDEO_DIR=vd))
     shot = shot if os.path.isabs(shot) else os.path.join(vd, 'shots', os.path.basename(shot))
     cmd = [blender_exe(song), '-b', '-P', shot, '--'] + list(extra)
     if log:
@@ -145,21 +110,35 @@ def cmd_rip(song, paths):
     print(f'{len(files)} models -> {out}  (load with S.room(stem) / S.dae(stem, name); .obj files load directly with S.obj)')
 
 
-def cmd_render(song, shots, extra):
+def cmd_render(song, shots, extra, wait=RENDER_WAIT):
+    """Each shot renders in the machine's GPU slot (ismail.machine), so the board's rules hold for it as for any
+    Blender render: one GPU job machine-wide, the heat and disk floors, and no render while a live set is on air.
+    It stands in line up to `wait` ('4h'; '0' refuses at once). A refusal stops the queue, says why
+    and names the shots not rendered. -> 0, or 75 (try again later) when the machine refused."""
     vd = video_dir(song)
     os.makedirs(os.path.join(vd, 'build', 'logs'), exist_ok=True)
-    for s in shots:
+    wait_s = machine.duration_s(wait) or None          # '0': no line, refused at once if the slot is not free
+    for i, s in enumerate(shots):
         name = os.path.splitext(os.path.basename(s))[0] + ''.join('_' + x.strip('-') for x in extra)
         log = os.path.join(vd, 'build', 'logs', name + '.log')
-        with gpu_lock():
-            t = time.time()
-            code = _blender(song, s, extra, log)
+        try:
+            with machine.slot('gpu', f'video render {os.path.basename(song)} {name}', wait=wait_s, disk_path=vd,
+                              threads=None, cmd=[blender_exe(song), '-b', '-P', s]):
+                t = time.time()
+                code = _blender(song, s, extra, log)
+        except machine.MachineBusy as e:
+            left = [os.path.basename(x) for x in shots[i:]]
+            print(f'{name}: not rendered, the machine refused the GPU slot: {e}', file=sys.stderr)
+            print(f'not rendered: {" ".join(left)}. Run `python -m ismail.machine` to see the board, then render them '
+                  f'again (--wait 12h stands in line longer; only the user lifts the on-air rule).', file=sys.stderr)
+            return 75                                            # EX_TEMPFAIL, as `machine run`
         text = open(log, errors='replace').read().splitlines()
         out = next((l.split('RENDERED', 1)[1].strip() for l in text if l.startswith('RENDERED')), None)
         for l in text:
             if l.startswith(('CLIP', 'NOT RENDERED')):
                 print('  ' + l)
         print(f'{name}: exit {code}, {time.time() - t:.0f}s -> {out or "NO OUTPUT, see " + log}', flush=True)
+    return 0
 
 
 def cmd_contact(song, video, n):
@@ -179,7 +158,12 @@ def main():
     ap.add_argument('command')
     ap.add_argument('args', nargs='*')
     ap.add_argument('--song', '-s', default='.', help='song folder (holds proj/ and the master wav)')
+    ap.add_argument('--wait', default=RENDER_WAIT, help="render: how long each shot stands in line for the machine's "
+                    "GPU slot (4h by default, 12h; 0 refuses at once)")
     argv = sys.argv[1:]
+    if argv[:1] == ['overlay']:                    # its own options (the look), and no song
+        from .overlay import main as overlay
+        sys.exit(overlay(argv[1:]))
     extra = []
     if '--' in argv:
         i = argv.index('--')
@@ -194,12 +178,16 @@ def main():
     elif c == 'sync':
         from .sync import run
         run(song)
-    elif c == 'still':          # no lock: a still is seconds, fine beside a queued render
+    elif c == 'still':          # no slot: a still is seconds, fine beside a queued render
         _blender(song, a.args[0], ['--still', a.args[1]] + extra)
     elif c == 'posesheet':
         cmd_posesheet(song, a.args[0], a.args[1] if len(a.args) > 1 else None, extra)
     elif c == 'render':
-        cmd_render(song, a.args, extra)
+        try:
+            machine.duration_s(a.wait)
+        except ValueError as e:
+            ap.error(f'--wait: {e}')
+        sys.exit(cmd_render(song, a.args, extra, a.wait))
     elif c == 'contact':
         cmd_contact(song, a.args[0], int(a.args[1]) if len(a.args) > 1 else 12)
     elif c == 'edit':
