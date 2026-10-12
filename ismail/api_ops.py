@@ -1,0 +1,168 @@
+"""ops_find: find the op for a need, by purpose, at the moment of need (ledger:M210, Nate 10-12: "the agent who's in
+the right role [should] actually see their tools").
+
+Nothing here is written about an op except which shelf it sits on: the search reads each op's own docstring, so it
+cannot go stale while the docstrings are right. Every op sits on exactly one shelf (CATEGORIES, by name or name
+prefix); tests/test_ops_find.py fails when a new op fits none, so a new op is shelved in the pull request that adds
+it. A role is an ordered list of shelves: the ones it reaches for first come first.
+"""
+import inspect
+import math
+import re
+
+from .api import OPS, OpError, op
+
+# (shelf, what it is for, its op names and name prefixes (ending in _)); the order is the order shown
+CATEGORIES = [
+    ('start', 'start here: the guide, projects, undo, batches, the machine',
+     ('guide', 'project_', 'undo', 'batch', 'credits', 'machine_', 'ops_find')),
+    ('sketch', 'a quick sketch from words, kept or dropped', ('sketch', 'sketch_keep', 'sketch_wait')),
+    ('write', 'tracks, notes, patterns, buses, automation, stem maps',
+     ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
+      'notes_transform', 'pattern_write', 'automation_', 'stem_map_set', 'audio_place')),
+    ('sounds', 'choosing and making sounds: voices, instruments, presets, effects, samples, speech',
+     ('voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
+      'samples_', 'sound_list', 'sound_make', 'sound_import', 'sound_speak', 'sound_autotune')),
+    ('fit', 'matching a sound or a level to a recording, measured',
+     ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
+      'levels_from_ref', 'ref_retune')),
+    ('render', 'rendering and playing', ('render', 'play_file')),
+    ('listen', 'measuring audio as text (and one picture): notes, chords, drums, timbre, formants, structure',
+     ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare')),
+    ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
+    ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_',)),
+    ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes',
+     ('exam_',)),
+    ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
+    ('live', 'playing live: decks, transitions, the live engine', ('live_',)),
+    ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
+    ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
+]
+
+# a role -> its shelves, the ones to reach for first first
+ROLES = {
+    'song': ['start', 'sketch', 'write', 'sounds', 'render', 'listen', 'compare', 'transcribe', 'fit', 'exam',
+             'lexicon'],
+    'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon'],
+    'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render'],
+    'dj': ['live', 'phone', 'listen', 'sounds', 'exam', 'lexicon'],
+    'stage': ['stage', 'phone', 'exam', 'listen'],
+    'film': ['stage', 'render', 'listen', 'exam'],
+    'dev': [c[0] for c in CATEGORIES],
+}
+
+_STOP = set('a an the and or of to in on for with by at from as is are be it its this that my our your their i we '
+            'you he she they me them do does how what which when where who can could should would want need make '
+            'get see show let use using into out up between vs versus just some any all there here whether'.split())
+
+
+def category_of(name):
+    """The shelf an op sits on, or None (the test fails on None). An exact name beats a prefix."""
+    for cat, _, members in CATEGORIES:
+        if name in members:
+            return cat
+    for cat, _, members in CATEGORIES:
+        if any(name.startswith(m) for m in members if m.endswith('_')):
+            return cat
+    return None
+
+
+def _stem(w):
+    """Crude, on purpose: tune/tuning/tuned and mark/marking/marks meet on one stem."""
+    for suf in ('ings', 'ing', 'ies', 'ed', 'es', 's'):
+        if len(w) > len(suf) + 3 and w.endswith(suf):
+            w = w[:-len(suf)]
+            break
+    return w[:-1] if len(w) > 4 and w.endswith('e') else w
+
+
+def _words(text):
+    return [_stem(w) for w in re.findall(r'[a-z0-9]+', text.lower()) if w not in _STOP]
+
+
+def _first_line(name):
+    doc = inspect.getdoc(OPS[name]) or ''
+    s = doc.split('\n\n')[0].replace('\n', ' ')
+    m = re.match(r'(.+?[.!?])(\s|$)', s)
+    return (m.group(1) if m else s)[:200]
+
+
+def _reach(doc):
+    """An op's 'Reach for it when ...' sentence: the asks it answers, in the words people use. Weighted like the first
+    line, so an op author steers the search from the description itself."""
+    m = re.search(r'Reach for it (?:when|whenever|for)\b(.+?)(?:\.\s|\.$|$)', doc.replace('\n', ' '))
+    return m.group(1) if m else ''
+
+
+def _index():
+    """{op: (name words, first-line and reach-for words, all words)} and each word's idf, rebuilt per call (cheap,
+    never stale)."""
+    ix = {}
+    for name in OPS:
+        doc = inspect.getdoc(OPS[name]) or ''
+        nm = set(_words(name.replace('_', ' ')))
+        ix[name] = (nm, set(_words(_first_line(name) + ' ' + _reach(doc))), nm | set(_words(doc)))
+    df = {}
+    for _, _, allw in ix.values():
+        for w in allw:
+            df[w] = df.get(w, 0) + 1
+    avg = sum(len(e[2]) for e in ix.values()) / len(ix)
+    return ix, {w: math.log(1 + len(ix) / d) for w, d in df.items()}, avg
+
+
+def _score(need, entry, idf, avg):
+    """A rare word counts more than a common one, a word in the name or first line more than one further down, and
+    a word further down less in a long description than in a short one (a long one says many things in passing)."""
+    nm, first, allw = entry
+    rest = 1.0 / (0.5 + 0.5 * len(allw) / avg)
+    return sum(idf.get(w, 0) * (3 if w in nm else 2 if w in first else rest if w in allw else 0) for w in set(need))
+
+
+@op()
+def ops_find(need: str = None, role: str = None, category: str = None, n: int = 8) -> str:
+    """Find the op for what you need, by purpose, from each op's own description (so it is never out of date).
+    need: in plain words ("let the person mark the difference between two pictures", "formants of a vowel",
+    "match a level to the reference"): the n best ops with their first line and shelf. role: song, voice, sound,
+    dj, stage, film or dev: the ops that role reaches for first, shelf by shelf (with need: the search, the role's
+    shelves first). category: every op on one shelf. No arguments: the shelves and the roles. Then read an op's full
+    description through your tool list, or call it. Writing an op: a sentence 'Reach for it when ...' in its
+    description, in the words a person or agent would ask with, counts as much as its first line here."""
+    if role is not None and role not in ROLES:
+        raise OpError(f"unknown role {role!r}; roles: {', '.join(ROLES)}. Or search by need without a role")
+    shelves = {c[0]: c for c in CATEGORIES}
+    if category is not None and category not in shelves:
+        raise OpError(f"unknown category {category!r}; categories: {', '.join(shelves)}")
+    by_cat = {}
+    for name in sorted(OPS):
+        by_cat.setdefault(category_of(name), []).append(name)
+    if need:
+        words = _words(need)
+        if not words:
+            raise OpError("need has no words to search by; say what you want to do, e.g. 'compare two takes by ear'")
+        mine = set(ROLES[role]) if role else set()
+        pool = [x for x in (by_cat.get(category, []) if category else OPS) if x != 'ops_find']
+        ix, idf, avg = _index()
+        ranked = sorted(((_score(words, ix[x], idf, avg) * (1.3 if category_of(x) in mine else 1.0), x) for x in pool),
+                        key=lambda t: (-t[0], t[1]))
+        hits = [(s, x) for s, x in ranked if s > 0][:n]
+        if not hits:
+            return (f"nothing matches {need!r}. Try other words, or browse: ops_find(role=...) or "
+                    f"ops_find(category=...); categories: {', '.join(shelves)}")
+        return '\n'.join([f"ops for: {need}"] + [f"  {x}  [{category_of(x)}]  {_first_line(x)}" for _, x in hits])
+    if category:
+        c = shelves[category]
+        return '\n'.join([f"{category}: {c[1]}"] + [f"  {x}  {_first_line(x)}" for x in by_cat.get(category, [])])
+    if role:
+        L = [f"role {role}: the shelves to reach for first come first (ops_find(need=...) searches them all)"]
+        for cat in ROLES[role]:
+            names = by_cat.get(cat, [])
+            L.append(f"{cat} ({len(names)}): {shelves[cat][1]}")
+            if len(names) > 24:          # the stage and live shelves: names only, search for the rest
+                L.append('  ' + ' '.join(names))
+            else:
+                L += [f"  {x}  {_first_line(x)}" for x in names]
+        return '\n'.join(L)
+    L = ['shelves (ops_find(category=...) lists one; ops_find(need="...") searches every description):']
+    L += [f"  {c} ({len(by_cat.get(c, []))}): {d}" for c, d, _ in CATEGORIES]
+    L.append('roles (ops_find(role=...) shows the shelves a role reaches for first): ' + ', '.join(ROLES))
+    return '\n'.join(L)
