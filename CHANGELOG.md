@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Stage: people's mouths move with a voice (lip sync)
+
+- `stage_face(scene, person, at, audio | take, start, end, words, transcribe)` turns a stretch of a voice recording
+  into a mouth track and plays it on the person at that song second, on whatever body they show (take, Follow, rest
+  pose) and in captures, which move the music clock frame by frame. Words become phonemes with the CMU Pronouncing
+  Dictionary when its data file is on the machine (else from the spelling), phonemes one of nine mouth shapes, and
+  each shape a mix of ARKit face units (`ismail/stage/face.py`); loudness opens the jaw on loud vowels, the mouth
+  rests between words and leads the sound by 40 ms. Tracks are saved in the scene's `faces/` and listed in
+  world.json `faces`. The page (`faces.js`) sets the weights on the body's morph targets by name; a body without
+  mouth shapes is reported once (`face_unsupported`). Bodies need mouth shapes, from mhx's export with
+  `morphs="mouth"`.
+
 ### Stage: nine small bugs from the engine review
 
 Each was wrong before this change (10-12):

@@ -777,6 +777,128 @@ def stage_prop_pin(scene: str, object: str, person: str = None, bone: str = 'han
             f'saved in {f}')
 
 
+def _words_of(words):
+    """words= as given: a list of {word, start, end}, a JSON file of one ({"words": [...]} or the list), or None."""
+    if words is None:
+        return None
+    if isinstance(words, str):
+        p = Path(words)
+        if not p.is_file():
+            raise OpError(f'words: no file {p} (give a list of {{word, start, end}} or a JSON file of one)')
+        words = json.loads(p.read_text(encoding='utf-8'))
+        words = words.get('words') if isinstance(words, dict) else words
+    if not isinstance(words, list) or not all(isinstance(w, dict) and {'word', 'start', 'end'} <= set(w) for w in words):
+        raise OpError('words must be a list of {word, start, end} (seconds on the recording\'s clock)')
+    return words
+
+
+@op(mutates=True)
+def stage_face(scene: str, person: str, at: float = None, audio: str = None, take: str = None, start: float = 0.0,
+               end: float = None, words=None, transcribe: bool = False, clear: bool = False, file: str = None,
+               scenes: str = None) -> str:
+    """Put a stretch of a voice recording on a person's mouth at a song time (lip sync): the mouth moves with the
+    words while the song plays, on the take, Follow or rest pose the person shows, and in captures. The voice: audio=
+    a recording (a sung vocal stem is best; wav, or webm/ogg with ffmpeg), or take= a take id (its own mic audio and
+    the words said in it). start/end: the stretch, seconds on the recording's clock; at: the song second where start
+    plays. words: [{word, start, end}] on the recording's clock (or a JSON file of them) shape the mouth per sound
+    (closed lips on M B P, a pucker on OO); transcribe=True asks the speech server for them; with none, the jaw
+    follows loudness only. The track is saved in <scene>/faces/ and listed in world.json faces (person -> [{file,
+    at}]); a new track replaces the person's tracks it overlaps. The person's body needs mouth shapes (mhx export
+    with morphs="mouth"); the page says face_unsupported when it has none. clear=True removes the person's tracks
+    (file= only that one; the files stay). Replies with the track as text: a mouth shape letter and a jaw digit per
+    0.1 s (A closed, B teeth, C open, D wide, E round, F pucker, G lip under teeth, H L-tongue, X rest)."""
+    from . import face, perform
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    faces = {k: list(v) for k, v in (w.get('faces') or {}).items()}
+    mine = faces.get(person, [])
+    if clear:
+        keep = [e for e in mine if file and e['file'] != file]
+        if len(keep) == len(mine):
+            raise OpError(f'{person} has no {"track " + file if file else "mouth tracks"} in {scene} '
+                          f'(tracks: {", ".join(e["file"] for e in mine) or "none"})')
+        faces[person] = keep
+        if not keep:
+            faces.pop(person)
+        w['faces'] = faces
+        worldmod.save_world(d, scene, w)
+        return f'removed {len(mine) - len(keep)} mouth track(s) of {person} in {scene}' + _face_reload(scene, faces)
+    if person not in (w.get('actors') or {}):
+        raise OpError(f'{person!r} is not a person of {scene} (world.json actors: {", ".join(sorted(w.get("actors") or {}))})')
+    if at is None:
+        raise OpError('at: the song second where the stretch starts playing')
+    if bool(audio) == bool(take):
+        raise OpError('give the voice as audio= (a recording) or take= (a take id), one of them')
+    if take:
+        td = d / scene / 'takes' / take
+        v = json.loads((td / 'voice.json').read_text(encoding='utf-8')) if (td / 'voice.json').is_file() else {}
+        src = td / v['file'] if v.get('file') else next(iter(sorted(td.glob('audio.*'))), None)
+        if not src or not src.is_file():
+            raise OpError(f'take {take!r} in {scene} has no audio (takes/{take}/audio.*)')
+        if words is None and not transcribe:
+            words = v.get('words')
+    else:
+        src = Path(audio)
+        if not src.is_file():
+            raise OpError(f'audio: no file {src}')
+    words = _words_of(words)
+    try:
+        x = perform.pcm(src)
+    except Exception as e:                                 # noqa: BLE001  (no ffmpeg, a broken file)
+        raise OpError(f'could not read {src}: {e}')
+    if transcribe:
+        import io
+        import soundfile as sf
+        from .server import stt_words
+        a, b = int(start * perform.SR), int((end if end is not None else len(x) / perform.SR) * perform.SR)
+        buf = io.BytesIO()
+        sf.write(buf, x[a:b], perform.SR, format='WAV')
+        try:
+            got = stt_words(buf.getvalue(), 'stretch.wav')
+        except Exception as e:                             # noqa: BLE001  (no speech server)
+            raise OpError(f'transcribe: the speech server did not answer ({e}); pass words= instead')
+        if got.get('words') is None:
+            raise OpError('transcribe: the speech server gave no word times; pass words= instead')
+        v = perform.voiced(x[a:b])
+        words = [dict(ww, start=ww['start'] + start, end=ww['end'] + start)
+                 for ww in perform.snap_words(got['words'], v)]
+    try:
+        tr = face.track(src, words, start=start, end=end, x=x)
+    except ValueError as e:
+        raise OpError(str(e))
+    name = file or f'{person}_{int(round(at * 1000))}.json'
+    if not name.endswith('.json') or '/' in name or '\\' in name:
+        raise OpError('file: a plain name ending in .json (it goes in the scene\'s faces/ folder)')
+    tr['source'].update(audio=src.name, take=take)
+    fd = d / scene / 'faces'
+    fd.mkdir(exist_ok=True)
+    face.write(tr, fd / name)
+    span = (at, at + tr['seconds'])
+    gone = [e['file'] for e in mine if e['file'] == name or (e['at'] < span[1] and e['at'] + e.get('seconds', 0) > span[0])]
+    faces[person] = sorted([e for e in mine if e['file'] not in gone] +
+                           [{'file': name, 'at': round(at, 3), 'seconds': tr['seconds'], 'from': src.name,
+                             'start': tr['start']}], key=lambda e: e['at'])
+    w['faces'] = faces
+    try:
+        worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+    said = ' '.join(str(x['word']).strip() for x in words or [] if start <= float(x['start']) < start + tr['seconds'])
+    replaced = [g for g in gone if g != name]
+    return (f"{person}'s mouth: {tr['seconds']} s of {src.name} from {tr['start']} s, at song {at} s, "
+            f"{'from ' + str(tr['source']['words']) + ' words (' + tr['source']['phonemes'] + ')' if tr['source']['words'] else 'from loudness only (no words)'}"
+            f"{'; said: ' + said[:200] if said else ''}{'; replaced ' + ', '.join(replaced) if replaced else ''}; "
+            f"saved faces/{name}" + _face_reload(scene, faces) + '\n' + face.readout(tr))
+
+
+def _face_reload(scene, faces):
+    try:
+        link.page_cmd(scene, 'face_reload', {'faces': faces}, timeout=8)
+        return '; the page has it'
+    except Exception:                                      # noqa: BLE001  (no page open)
+        return '; the page takes it at its next load'
+
+
 def _rest_now(scene, person):
     """Re-pose a resting person on the open page (best effort: no page, no harm; it applies at the next load)."""
     try:
