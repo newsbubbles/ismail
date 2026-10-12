@@ -131,8 +131,8 @@ agent at once, word for word, with its inbox number, id and time; whoever's list
 does not hold it. When the owner is unclear, keep it and ask the person. Between agents the same economy holds: news a
 team's lead only needs to know (merged, live, done) goes to a shared feed it reads at its check-ins, and a direct
 message is kept for a decision, a blocker, a conflict, or something the person must hear now, since every message
-wakes the agent it is sent to. Watch with `phone_listen` (every line, in
-order) and `phone_status` (open panels, what the page shows, the exam in progress); never filter by owner in a
+wakes the agent it is sent to. Watch with `phone_watch` (every line, in
+order, over `phone_listen`) and `phone_status` (open panels, what the page shows, the exam in progress); never filter by owner in a
 script, because a line for another agent can still change what you should do. Go quiet between an `exam_round`
 line with state `started` and the one with state `finished` (no sound over someone's listening exam). Panels never pop up
 (they wait on the corner key), so the person's own taps do the pacing. A video that stalls or fails says so in the
@@ -144,10 +144,19 @@ The person's model, in their words: the watcher "should tell you when shit goes 
 for"; the agent makes every call (the person, 10-07, after a watcher that skipped lines for other agents missed their
 listening exams and two notes).
 
-1. **One loop.** `phone_listen(who=<your role>, since=<the last since>, wait=25, page=True)`, nothing filtered by
-   owner. Drop only page telemetry (scroll, stall, note start and end, visible and hidden, clip plays) and the
-   `voice` line that only says a note is being transcribed (its words follow as `voice_text`). For every other line
-   you decide: act on it, pass it to its owner, or leave it. Handle a burst of lines in one turn.
+1. **One loop: `phone_watch`.** Run `python -m ismail phone_watch "who=<your role>"` in the background as your
+   standing watcher. It blocks until the person sends something, then returns the lines and a `next` line. When it
+   wakes you, re-arm it FIRST, before any other work, then act on what it returned. Never write your own watcher:
+   one made by hand after a context reset kept no cursor and missed six of the person's notes in 36 minutes.
+   `phone_watch` keeps its cursor on disk for each `who` and saves it only when it returns lines, so a reset or a
+   killed watcher resumes exactly where the last return left off; with no cursor it starts at the end of the
+   inbox and never replays history. Underneath, it loops `phone_listen(who, since, wait=25, page=True)`, nothing
+   filtered by owner. It drops only page telemetry (every page action except `panel_close`: scroll, stall, note
+   start and end, visible and hidden, clip plays, panel opens) and the `voice` line that only says a note is being
+   transcribed (its words follow as `voice_text`). For every other line you decide: act on it, pass it to its
+   owner, or leave it. Handle a burst of lines in one turn. `round=<card id prefix>` holds the lines of a round of
+   someone else's cards that you chose to let run, and wakes you on anything else or 90 s after the round's last
+   line.
 2. **Passing on.** A note with no `for` that is plainly about another agent's work goes to that agent at once, word
    for word, with its inbox number, id and time. When the owner is unclear, keep it and ask the team's lead (or the
    person, when there is no lead).
@@ -157,8 +166,8 @@ listening exams and two notes).
    `exam_round` finished, or after 90 s with no activity from them (clip plays and notes count as activity). Then
    bring the output back and start a fresh pass.
 4. **Stay alive.** A watcher run in the background may be stopped by its host after a time limit. Give it a shorter
-   life of its own (for example 100 minutes where the limit is 2 hours), and when it ends, read `phone_status` and
-   start it again, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
+   life of its own (`phone_watch` returns `alive: true` after `wait_min`, 100 minutes by default, where the limit
+   is 2 hours), and when it ends, start it again and read `phone_status`, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
    hours ... you can still get the voice notes").
 5. **Their clock.** The machine's clock may not be the person's. Any clock time shown or said to them is in their
    own time zone.
