@@ -34,18 +34,18 @@ Shorts; an mp4 uploaded to GitHub plays inline here). Until it exists, the juke 
 
 ## What ismail is
 
-ismail is a set of **recursively modifiable interfaces**: shared spaces between you and your agents, one side for
-each, that the agents keep rebuilding from your feedback while you use them, within limits you set, where even the
+ismail is a set of **recursively modifiable interfaces**: two-sided spaces, one side for your agents and one for
+you, that the agents keep rebuilding from your feedback while you use them, within limits you set, where even the
 test that decides whether a change helped can be changed. In plain words: you change how the interfaces work by
-asking your agent, the engines underneath stay put, and you decide whether a change actually helped. A button on your phone, an object in your VR room that does something when you press
-it, a new way to read a mix: you ask, the agent builds it from the tools ismail already has, and the music engine,
-the stage and the phone server stay as they are. ismail doesn't try to ship every feature; it lets your agent make
-the one you want.
+asking your agent, the engines underneath stay put, and you decide whether a change actually helped. A button on
+your phone, an object in your VR room that does something when you press it, a new way to read a mix: you ask, the
+agent builds it from the tools ismail already has, and the music engine, the stage and the phone server stay as they
+are. ismail doesn't try to ship every feature; it lets your agent make the one you want.
 
-It is an interface, not a harness: an interface to your harness and an interface to you. It plugs into the agent you already use (Claude Code, Codex, Cursor, any MCP
-client) on one side and into you on the other: agent-shaped on the agent side, human-shaped on the human side.
-When your harness has helpers and sessions that talk to each other, ismail uses them. When it doesn't, one agent
-does it all.
+It is an interface, not a harness: it interfaces to your harness and interfaces to you. It connects to the agent you
+already use (Claude Code, Codex, Cursor, any MCP client) on one side and to you on the other: agent-shaped on the
+agent side, human-shaped on the human side. When your harness has helpers and sessions that talk to each other,
+ismail uses them. When it doesn't, one agent does it all.
 
 Three interfaces your agent reshapes today:
 
@@ -98,7 +98,7 @@ it. The playhead runs across that text as the song plays.
 | song | what it is |
 |---|---|
 | [Live set: Clash, Poppycock, Mycelium](https://newsbubbles.github.io/ismail/#liveset) | recorded live: the agent plays three of its songs in full on decks at 150 BPM (orchestral into dubstep into psytrance), each blended into the next, every song re-rendered from its notes |
-| [Tidewater](https://newsbubbles.github.io/ismail/#tidewater) | strings measured from recordings (mimic), piano, taiko and gong; 22 dB from a pianissimo solo cello to the fortissimo tutti |
+| [Tidewater](https://newsbubbles.github.io/ismail/#tidewater) | strings measured from recordings (mimic), piano, taiko and gong |
 | [Mycelium Protocol](https://newsbubbles.github.io/ismail/#mycelium) | psytrance at 145 BPM, sounds fitted to a reference record's drums and bass |
 | [Poppycock](https://newsbubbles.github.io/ismail/#poppycock) | dubstep, one bass voice whose note velocity picks each hit's articulation |
 | [Fantaisie-Impromptu](https://newsbubbles.github.io/ismail/#fantaisie) | Chopin on a piano synthesized from measured notes, no samples |
@@ -106,11 +106,12 @@ it. The playhead runs across that text as the song plays.
 | [Clash](https://newsbubbles.github.io/ismail/#clash) | hybrid orchestral fight cue, every instrument synthesized |
 | [Two Kinds of Tears](https://newsbubbles.github.io/ismail/#tears) | solo piano, a minor theme that returns in major |
 
-<!-- MEDLEYS: the medleys merged to Pages today (pr:192); add their anchors here once Marketing confirms the names. -->
+One line of direction: [Frère Jacques](https://newsbubbles.github.io/ismail/#tracks) on ismail's piano, the same tune
+before and after one line of feedback: a canon, then minor to major.
 
 How it was built, on video: [the build devlog](https://youtu.be/ktFhmx2axvU) (5:34) and
-[Q43/Q44](https://www.youtube.com/watch?v=yjL6TBTlXN8); Shorts: [one](https://www.youtube.com/shorts/MMKL769xLnY),
-[two](https://youtube.com/shorts/9RQM1f3EszY).
+[Q43/Q44](https://www.youtube.com/watch?v=yjL6TBTlXN8); Shorts: [Saving tokens by doing it myself (for 15 minutes LOL)](https://www.youtube.com/shorts/MMKL769xLnY),
+[In 2026 the door should be tight](https://youtube.com/shorts/9RQM1f3EszY).
 
 [![Luigi Manson on YouTube](https://i.ytimg.com/vi/ZzT1T9GUoRo/hqdefault.jpg)](https://www.youtube.com/watch?v=ZzT1T9GUoRo)
 
@@ -119,28 +120,28 @@ How it was built, on video: [the build devlog](https://youtu.be/ktFhmx2axvU) (5:
 ## The DAW: what makes it hard
 
 
-Making music with an AI agent runs into the same few walls. ismail is built around each of them, and every number below comes from a song made with it.
+Making music with an AI agent runs into the same few walls. ismail is built around each of them, and every ismail number below comes from a song made with it.
 
 **The agent can't hear what it made.** Two thirds of developers name "almost right, but not quite" as their top frustration with AI tools ([Stack Overflow 2025](https://survey.stackoverflow.co/2025/ai)), and with music the output is sound the agent can't check. ismail turns every render into text the agent reads: levels per bar, drum patterns as step strings, chords, a piano roll, vowels, song structure, and comparisons against a reference, scored against that reference's own variation. Each judgment the agent makes comes from a reading it can show you.
 
-**Synthesized instruments sound fake, and the numbers miss it.** In one study the spectrum matched the reference within 1.8 dB and the stem balance within 0.7 dB while the listener heard "30% there". So ismail measures instruments from a few recorded notes. A violin note rebuilt from its neighbours lands closer to the real note than a real neighbouring note repitched (11.2 against 14.6), about three times closer than a hand-set synth patch. Drum kits are built piece by piece from the reference's own drums, and guitars, basses and the piano are fitted to recordings.
+**Synthesized instruments sound fake, and the numbers miss it.** In one study the spectrum matched the reference within 1.8 dB and the stem balance within 0.7 dB while the listener heard "30% there". So ismail measures instruments from a few recorded notes. A violin note rebuilt from its neighbours lands closer to the real note than a real neighbouring note repitched (11.2 against 14.6). Drum kits are built piece by piece from the reference's own drums, and guitars, basses and the piano are fitted to recordings.
 
-**Guesses are audible.** A swing guessed at 0.07 of a beat, against a measured 0.03, could be heard. A guessed gnawa groove was "cool"; the measured one, three strokes at 0, 0.32 and 0.74 of a beat, was "I love it... closer". So tempo, bar 1, tuning, swing, the pieces of a kit and the fader balance all come from measuring the reference.
+**Guesses miss.** A guessed swing of 0.07 of a beat measured at 0.03 on the record. So tempo, bar 1, tuning, swing, the pieces of a kit and the fader balance all come from measuring the reference.
 
-**Your ear is the judge, and its time is short.** The agent measures everything it can and asks you only where its measurements run out, with blind exams: real and made sounds shuffled and hidden, your answers written to a file. On a 1970 guitar record the exam went from 1 of 16 notes undetected to 20 of 22 in four rounds (1/16, 3/28, 14/24, 20/22), and each round's misses named the next fix. In a 21-species bird piece the listener could not pick the recording on any of the 21 calls.
+**Your ear is the judge, and its time is short.** The agent measures everything it can and asks you only where its measurements run out, with blind exams: real and made sounds shuffled and hidden, your answers written to a file. On a 1970 guitar record the exam went from 1 of 16 notes undetected to 20 of 22 in four rounds, with one listener (1/16, 3/28, 14/24, 20/22), and each round's misses named the next fix. In a 21-species bird piece the listener could not pick the recording on any of the 21 calls.
 
 **A finished audio file is a dead end.** A prompt-to-song service hands you a file, and bar 12 of it stays as it is. In ismail a song is notes, instrument patches and code in a project file, with git history and diffs. Change one note and re-render, and nothing else moves. The same song loads on live decks and plays sample for sample like the studio render (`live_parity` checks it), while the agent mixes, jams and takes requests between its turns.
 
-**Who wrote it.** Producers welcome AI for labor and push back on AI taste: in a 2026 survey of 1,100 working creators, 57.9% wanted AI as an assistant and 8.8% supported full automation ([Sonarworks and Sound On Sound](https://www.sonarworks.com/blog/research/future-music-production-human-producer-survey-2026)). ismail trains on nobody's music. The agent writes the notes and the code, reference recordings are measured for numbers and kept out of the render, and you decide what is good. Your feedback is saved with the song.
+**Who wrote it.** Producers welcome AI for labor and push back on AI taste: in a 2026 survey of more than 1,100 working creators, most saw AI as an assistant for routine tasks, with people keeping creative authority ([Sonarworks and Sound On Sound](https://www.sonarworks.com/blog/research/future-music-production-human-producer-survey-2026)). ismail trains on nobody's music. The agent writes the notes and the code, reference recordings are measured for numbers and kept out of the render, and you decide what is good. Your feedback is saved with the song.
 
 ## Where it falls short
 
 - A new song from a blank page is the weak spot: the first sketch can sound generic and miss the genre's identity. It is strongest where there is something to measure: a reference to recreate, a song to play live, a scene to build.
-- Singing: ismail speaks (text to speech) and has no singing voice yet. Suno sings far better, and makes a polished song from one sentence in under a minute.
+- Singing: ismail speaks (text to speech) and has no singing voice yet. Suno sings, and makes a polished song from one sentence.
 - Mimic needs more notes for instruments whose colour changes from note to note, like the piano (the `grand_piano` voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
 - One tempo per project, no MIDI import or export, no plugin hosting.
 - Live changes land between the agent's turns, 5 to 30 seconds apart.
-- The VR stage is built and tested on one headset (Quest 3), by one person.
+- The VR stage is tested on one headset (Quest 3) with one person.
 - It needs a capable agent, and your ear stays the final judge. The blind exams so far had one listener.
 
 How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the [showcase page](https://newsbubbles.github.io/ismail/#compare).
@@ -172,8 +173,9 @@ One set of operations, three ways in:
   clarinet, bassoon, horn, a 1970 kit, a fitted electric guitar and bass, and sampled Rhodes, drum and guitar sets
   (see [Voices](docs/reference.md#voices-instruments-as-code) and [Contributors](#contributors) for sources and licences).
   Clarinet, bassoon and horn are new: measured from VSCO 2 CE (CC0) and checked blind against the real recordings on
-  2026-10-07 (clarinet not told apart, bassoon and horn judged good enough). Flute, oboe, trumpet, trombone and tuba
-  were measured too and heard as synthetic, so they stay out until they pass.
+  2026-10-07 (clarinet not told apart; bassoon and horn told apart but rated good enough; one listener, one pair
+  each). Flute, oboe, trumpet, trombone and tuba were measured too and heard as synthetic, so they stay out until
+  they pass.
 
 ## Where it is going
 
