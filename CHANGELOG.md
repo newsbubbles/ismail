@@ -12,6 +12,14 @@
   and fix it in a helper, keep developing when they go quiet, and write the story as you go. It was only in one
   agent's notes before (the person, 10-12: "you're the DAW").
 
+### Skill: a piece copied from another song is a whole song
+
+- SKILL.md, next to "One piece, one folder": a piece started from another song gets a complete song folder (what
+  it takes to rebuild it, its provenance, its notes, and any renders brought along, renamed for the new piece), and
+  nothing in it reads the old folder, so any agent can pick it up. Check the copy by rebuilding its project and
+  comparing it with the source's before rendering (the person, 10-12: "any other agent could pick it up just like
+  any other song").
+
 ### Phone: the background is still when no set plays, and phone_now works past 200 marks
 
 - The page's background (its effect, the beat pulse, note reactions, hue drift) now holds still, in the look's
