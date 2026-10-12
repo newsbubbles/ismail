@@ -431,7 +431,7 @@ The agent offers the page when a set plays and you step away. The method is in
 python -m ismail.video init   -s songs/<slug>        # scaffold songs/<slug>/video/
 python -m ismail.video sync   -s songs/<slug>        # notes -> frames
 python -m ismail.video still  -s songs/<slug> s01_example.py 48
-python -m ismail.video render -s songs/<slug> s01_example.py
+python -m ismail.video render -s songs/<slug> s01_example.py   # waits for the machine's GPU slot
 python -m ismail.video edit   -s songs/<slug> -- --sheet 33 41 16
 ```
 

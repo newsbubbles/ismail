@@ -219,9 +219,9 @@ nudges you, follow it.
 - **The person's words are data.** When they name a quality, a problem or a fix ("boxy", "too clean"), `lexicon_note` it verbatim before acting, map it once you know what it meant, and say things back their way (`lexicon_find`). Words about the work only, never their emotions. Every piece states its objective in their words (`project_set(objective=)`); a version made from another says so (`project_new(derived_from=)`).
 - **The machine is shared.** Several sessions render, measure and run Blender on one computer with one cooler. Call
   `machine_status` before anything that runs over a minute and wait when it says WAIT. Heavy ops (render, separate,
-  mimic_measure, the fits, live_parity) take a slot themselves and refuse with the reason; anything outside ismail
-  (Blender, whisper, demucs, a long script) runs through `python -m ismail.machine run --gpu|--cpu -- <command>` so
-  it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
+  mimic_measure, the fits, live_parity, `python -m ismail.video render`) take a slot themselves and refuse with the
+  reason; anything else outside ismail (Blender, whisper, demucs, a long script) runs through
+  `python -m ismail.machine run --gpu|--cpu -- <command>` so it takes one too. A script it runs may call ismail's ops (render, measure): they run in the run's slot. A slot
   counts jobs, not cores, so `--threads` caps the command's numeric threads (BLAS, OpenMP, torch; 2 by default for
   `--cpu`) and pins it to that many cores: ask for more only when the machine is quiet. Give `--est` a unit (`--est 10m`, `600s`) so the board tells others when you will be done.
   Declare what it really needs: `--mem` (peak GB) and `--disk` (GB it writes). A job past its `--mem` is flagged
