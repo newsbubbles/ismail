@@ -12,6 +12,21 @@
   set is finish or fade, `live_stop`, `live_start` in the new folder, then the phone watcher on the new inbox. A
   finished song from another folder can still play on a deck by its path.
 
+### Phone: one standing watcher for every agent
+
+- New `phone_watch(who)`: the phone watcher every agent runs in the background (`python -m ismail phone_watch
+  "who=<role>"`). It loops `phone_listen`, returns every line the person sent (a burst gathered with one more short
+  look) and a `next` line saying how to re-arm. Nothing is filtered by owner; only page telemetry (every page
+  action but `panel_close`) and the `voice` transcribing line stay out. Its cursor is kept on disk for each `who`
+  and saved only when it returns lines, so a context reset or a killed watcher resumes where the last return left
+  off, and with no cursor it starts at the end of the inbox instead of replaying it. It returns `alive: true` after
+  `wait_min` (100 minutes) with nothing, waits out a phone server restart, and `round=<card id prefix>` holds a
+  round of someone else's cards. Before this the watcher lived in one song folder; after a context reset a
+  hand-made one kept no cursor and missed six of the person's notes in 36 minutes.
+- skills `phone.md` names `phone_watch` as the standing watcher (re-arm it first after every wake, never write your
+  own); `live.md` adds to the DJ loop: start it in the same turn as any set, and never put housekeeping before the
+  phone.
+
 ### Live: a track's output, a set's loudness and the engine's priority, in the ops
 
 - `live_track(output='<bus>')` makes a new track play into that bus instead of straight into the master, so the
@@ -28,19 +43,6 @@
   rights the user lacks (outside Windows), the engine stays as it was and the reply says so. live.md had told agents
   to set it by hand, once as AboveNormal and once as High; both lines are now one line about the option.
 - mastering.md and live.md say how a live set reaches its level: the arguments, then faders.
-
-### Video: a text overlay
-
-- New `python -m ismail.video overlay <in.mp4> <out.mp4> --text "..."`: a line of text (a credit, a title, a link)
-  drawn on a copy of any video with ffmpeg drawtext, the audio copied. `--pos bottom|top|center`, `--size 30`,
-  `--margin 42` (pixels on a 1080 px frame, scaled with the video's short side), `--opacity 0.5`, `--shadow 0.45`
-  (0 for none), `--color`, `--font` (default DejaVu Sans Mono from matplotlib, else a system mono or sans), `--y` (a
-  pixel row the position measures from, for a band in a vertical layout). It never writes the input, refuses an
-  output that exists unless `--force`, and runs in the machine's cpu slot (`--wait`).
-- In the edit: `C.overlay(text, ...)` in a cut list, or `"overlay": {"text": ...}` in `video/config.json`, draws
-  the same line on every output frame, last (after the grade and grain), at 1080p on the encode. Off by default;
-  no text is built in. Both ways use one filter builder, `ismail.video.overlay.drawtext`.
-- `music-video.md` has a "Text overlay" part.
 
 ### Dev: dev copies (git worktrees) tracked by a tool
 

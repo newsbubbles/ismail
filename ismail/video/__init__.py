@@ -25,8 +25,6 @@ DEFAULTS = {
     "blender": None,           # default: $ISMAIL_BLENDER, then the usual Windows install, then `blender` on PATH
     "pct": 50,                 # shot render size, percent of 1920x1080
     "samples": 16,
-    "overlay": None,           # {"text": "made with ismail", "pos": "bottom", ...}: a line of text on every frame of
-                               # the edit, drawn last (ismail.video.overlay); off by default
 }
 
 
