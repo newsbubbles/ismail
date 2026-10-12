@@ -32,7 +32,7 @@ def song(tmp_path):
     return root, proj
 
 
-def test_project_info_and_render_name_a_source_with_no_row(tmp_path):
+def test_project_info_counts_the_rows_without_warning_about_a_source_with_none(tmp_path):
     root, proj = song(tmp_path)
     s = sources.scan(proj)
     assert sources.song_root(proj) == str(root)
@@ -41,9 +41,9 @@ def test_project_info_and_render_name_a_source_with_no_row(tmp_path):
     assert sorted(s['unlisted']) == ['ref/village/abc.m4a', 'ref/village/abc.wav']
     assert s['incomplete'] == [('ref/birds/SOURCES.md', 'Potoo_XC2.ogg', ['author'])]
     info = OPS['project_info'](proj)
-    assert 'sources: 4 files in ref/, 2 with a row' in info and 'no SOURCES row: ref/village/abc.m4a' in info
+    assert 'sources: 4 files in ref/, 2 with a row' in info and 'no SOURCES row' not in info
     assert '1 rows without a licence or an author: Potoo_XC2.ogg (author)' in info
-    assert '2 reference files with no SOURCES row' in sources.summary(proj)[1]
+    assert sources.summary(proj)[1] == ''
     # a row for the video (by its id, as a SOURCES.txt of video ids does) lists its download and the wav made from it
     (root / 'ref' / 'village' / 'SOURCES.txt').write_text(
         "abc | 4:50 | Paolo Cogliati | SONKARI / a panpipe | https://www.youtube.com/watch?v=abc\n", encoding='utf8')
