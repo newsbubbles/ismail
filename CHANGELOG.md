@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Stage: picking one thing straight from another's open menu opens its menu
+
+- In VR, picking a person or object while another thing's menu was up closed that menu but showed nothing: the
+  old menu's loop ended a moment later, so the new pick found it still busy and was dropped, and picking the same
+  thing again did nothing since it was already selected. The last pick made while a menu closes now opens its
+  menu once the old one has gone, if it is still selected, and picking the selected thing with no menu up shows
+  its menu again (`page/menugate.js`).
+
 ### Skill: a jam runner recipe
 
 - references/jam-runner.md: how to build a small runner in a song's folder that reads each phone take in code in
