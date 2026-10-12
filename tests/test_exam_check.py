@@ -143,6 +143,23 @@ def test_a_band_limited_class_and_lopsided_sides_are_heard(tmp_path):
     assert not ok and "every trial starts with 'real'" in text(lines), text(lines)
 
 
+def test_trials_are_read_by_their_pair_labels_whatever_the_number_of_classes(tmp_path):
+    """A key with three classes over 2-clip pairs (control pairs 'real' beside 'record' and 'mine') was read in
+    triples across the pairs and failed a balanced exam ("every trial starts with 'record'")."""
+    plan = [('record', 'mine'), ('mine', 'record'), ('real', 'real'), ('record', 'mine'), ('mine', 'record'), ('record', 'mine')]
+    clips, key = [], {}
+    for i, sides in enumerate(plan, 1):
+        for ab, cls in zip('AB', sides):
+            clips.append({'label': f'{i}{ab}', 'path': noise(tmp_path / f'c{i}{ab}.wav', None, seed=i * 2 + (ab == 'B'))})
+            key[f'{i}{ab}'] = cls
+    ok, lines = EC.run(clips=clips, key=key, answers_path=str(tmp_path / 'a.jsonl'))
+    assert 'the order follows the key' not in text(lines), text(lines)
+    lop = {c['label']: 'record' if c['label'].endswith('A') else ('mine' if c['label'][0] in '13' else 'mine_v2')
+           for c in clips[:4] + clips[6:]}                                         # the record first in every pair, 3 classes
+    ok, lines = EC.run(clips=clips[:4] + clips[6:], key=lop, answers_path=str(tmp_path / 'a.jsonl'))
+    assert not ok and "every trial starts with 'record'" in text(lines), text(lines)
+
+
 def test_the_blind_crop_check_hides_the_key_and_says_when_the_picture_gives_it_away(tmp_path):
     """ledger:M158 (Voice, vox:r44-r45: 15 of 16 picked from the picture): a gate before a real-vs-made round."""
     from ismail import api_exam as X

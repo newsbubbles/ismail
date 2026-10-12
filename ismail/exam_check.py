@@ -313,6 +313,12 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
                 warns.append("one class is louder on average: " + ', '.join(f"{k} {v:.1f}" for k, v in louds.items()))
             seq = [c['cls'] for c in cl if c['cls']]
             pairs = [seq[i:i + len(classes)] for i in range(0, len(seq) - len(classes) + 1, len(classes))]
+            trial = [re.match(r'^(\d+)[A-Za-z]$', str(c['label'])) for c in cl if c['cls']]
+            if seq and all(trial):                      # clips labelled by trial (1A, 1B, 2A ...): the trials are
+                by_t = {}                               # those, however many classes the key has (spanish_guitar
+                for m, k in zip(trial, seq):            # 10-11: 3 classes over 2-clip pairs read as triples)
+                    by_t.setdefault(m.group(1), []).append(k)
+                pairs = [v for v in by_t.values() if len(v) >= 2]
             if len(pairs) >= 2 and len({p[0] for p in pairs}) == 1:
                 fails.append(f"the order follows the key: every trial starts with {pairs[0][0]!r} (shuffle per trial)")
             elif len(pairs) >= 6:                      # each class first in about its share of the trials (vox:r41)
