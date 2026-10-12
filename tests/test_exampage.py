@@ -23,6 +23,7 @@ def round_dir(tmp_path):
     items = [{'word': f'w{i}', 'real': str(real), 'other': str(ours), 'window': [0.1 * i, 0.1 * i + 0.4],
               'words': [[0.1 * i + 0.05, 0.1 * i + 0.3, f'w{i}']], 'other_label': 'no noise', 'version': 'clean'}
              for i in range(4)]
+    items[0]['ask'] = 'Where does the hiss start?'
     out = tmp_path / 'rounds' / 'p1'
     X.build(str(out), items, 'test round', seed=3)
     return out
@@ -35,6 +36,7 @@ def test_a_round_is_balanced_and_its_files_are_neutral(round_dir):
     for it in man['items']:
         assert all((round_dir / p).exists() for p in list(it['img'].values()) + [it['audio']])
         assert it['words'][0]['ms'] == [50, 300] and 'real' not in json.dumps(it) and 'ours' not in json.dumps(it)
+    assert [it.get('ask') for it in man['items']] == ['Where does the hiss start?', None, None, None]  # its own question
 
 
 def test_the_page_hides_the_key_until_an_answer_and_serves_ranges(round_dir):
