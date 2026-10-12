@@ -8,6 +8,7 @@
 // A selection lets go by itself after idle seconds x metres away > 25 (25 s at arm's length, 8 s from 3 m), so
 // nothing stays selected (and unlocked) while the user walks off. Events: menu {object, action}, deselect_idle.
 import * as THREE from 'three';
+import { menuGate } from './menugate.js';
 
 const IDLE_METRE_SECONDS = 25;
 const FOLLOW_COUNTDOWN_S = 3;          // a Follow from the menu counts down first (the user, 2026-10-05: see below)
@@ -16,7 +17,6 @@ const IDLE_MENU_METRE_SECONDS = 60;   // while its menu is up the user may be re
 export function initActions(ed, hands, panels, live, takes) {
   const { camera } = ed;
   let open = null;                        // { it, id }
-  let busy = false;
   let lastUse = performance.now();
   const touchUse = () => { lastUse = performance.now(); };
 
@@ -267,66 +267,67 @@ export function initActions(ed, hands, panels, live, takes) {
     }
   });
 
-  async function show(it) {
-    if (!ed.renderer.xr.isPresenting || !movable(it) || busy) return;
-    busy = true;
+  function show(it) {
+    if (ed.renderer.xr.isPresenting && movable(it)) gate.show(it);
+  }
+  const gate = menuGate(menuLoop, () => ed.selected);
+  async function menuLoop(it) {
     start = { it, p: it.obj.position.clone(), q: it.obj.quaternion.clone(), s: it.obj.scale.clone() };
-    try {
-      while (ed.selected === it) {
-        const id = 'actions_' + Date.now();
-        open = { it, id };
-        const bs = buttons(it);
-        const r = await panels.show({ panel_id: id, title: ed.label(it) + (ed.unlocked === it ? '  (unlocked)' : ''), buttons: bs,
-          near: besideOf(it), width: bs.length > 4 ? 0.42 : 0.34, quiet: true });
-        open = null;
-        const a = r && r.answer;
-        if (!a) break;                                            // closed (deselected, replaced, timed out)
-        touchUse();
-        live.emit('menu', { object: it.name, action: a });
-        if (a === '📷 My eyes') { fromEyes(it); break; }
-        if (a === '✋ Move') { ed.unlocked = it; ed.setStatus(it.name + ' unlocked: grab to move it'); }
-        else if (a === '✓ Done') { ed.unlocked = null; ed.select(null, 'menu'); break; }
-        else if (a === '⬇ Drop') ed.drop(it, 'menu');
-        else if (a === '📌 Pin' && window.VR_waypoints) { window.VR_waypoints.pinObject(it); ed.setStatus('pinned ' + ed.label(it) + ': say the note'); break; }   // the next voice note is its note
-        else if (a === '◆ Key' && takes.clock) { takes.clock.show(true); takes.clock.key(it.name); }   // clock.js: a key at the playhead
-        else if (a === '● Take') {                              // a person follows the user while the take records
-          if (canAct(it)) { ed.select(null, 'menu'); await countdown(FOLLOW_COUNTDOWN_S, it.name); }
-          if (canAct(it)) await takes.actors.follow({ person: it.name }).catch(() => null);
-          takes.start(it.name);
-          if (canAct(it)) { followPanel(it); ed.select(null, 'menu'); break; }
-        }
-        else if (a === '■ Stop take') {
-          if (takes.actors && takes.actors.playing.get(it.name)?.live) takes.actors.stop({ person: it.name });
-          const r = await takes.stop(); await review(it, r);
-        }
-        else if (a === '◎ Follow' && takes.actors) {
-          ed.select(null, 'menu');                                // the menu goes; the numbers count; GO starts it
-          await countdown(FOLLOW_COUNTDOWN_S, it.name);
-          const ok = await takes.actors.follow({ person: it.name }).then(() => true).catch((e) => {
-            live.emit('voice_error', { where: 'actor follow', error: String(e.message || e) }); return false; });
-          if (ok) { followPanel(it); ed.select(null, 'menu'); break; }
-        }
-        else if (a === '■ Unfollow' && takes.actors) takes.actors.stop({ person: it.name });
-        else if (a === '▶ Play' && takes.actors) await takes.actors.play({ person: it.name, take: kept.get(it.name) }).catch((e) => {
-          const error = String(e.message || e);
-          live.emit('voice_error', { where: 'actor play', error });
-          // said in the headset too: a Play that did nothing looked like a person that would not move (the user, 2026-10-10)
-          panels.show({ panel_id: 'play_failed_' + it.name, title: ed.label(it) + ': nothing to play on', quiet: true, wait: false, seconds: 10,
-            text: /^no actor/.test(error) ? 'There is no body for this person yet, so the take cannot play. Your take is kept.' : error, buttons: ['OK'] });
-        });
-        else if (a === '■ Stop' && takes.actors) takes.actors.stop({ person: it.name });
-        else if (a === '✕' || a === '✕ Cancel') {               // ✕ undoes whatever was done since this menu opened
-          if (moved(it)) {
-            ed.beginEdit('menu cancel');
-            it.obj.position.copy(start.p); it.obj.quaternion.copy(start.q); it.obj.scale.copy(start.s);
-            ed.endEdit();
-            ed.setStatus(ed.label(it) + ': put back');
-          }
-          ed.unlocked = null; ed.select(null, 'menu'); break;
-        }
-        await new Promise((res) => setTimeout(res, 650));         // the panel's own close, then the next state
+    while (ed.selected === it) {
+      const id = 'actions_' + Date.now();
+      open = { it, id };
+      gate.shown(it);
+      const bs = buttons(it);
+      const r = await panels.show({ panel_id: id, title: ed.label(it) + (ed.unlocked === it ? '  (unlocked)' : ''), buttons: bs,
+        near: besideOf(it), width: bs.length > 4 ? 0.42 : 0.34, quiet: true });
+      open = null;
+      const a = r && r.answer;
+      if (!a) break;                                            // closed (deselected, replaced, timed out)
+      touchUse();
+      live.emit('menu', { object: it.name, action: a });
+      if (a === '📷 My eyes') { fromEyes(it); break; }
+      if (a === '✋ Move') { ed.unlocked = it; ed.setStatus(it.name + ' unlocked: grab to move it'); }
+      else if (a === '✓ Done') { ed.unlocked = null; ed.select(null, 'menu'); break; }
+      else if (a === '⬇ Drop') ed.drop(it, 'menu');
+      else if (a === '📌 Pin' && window.VR_waypoints) { window.VR_waypoints.pinObject(it); ed.setStatus('pinned ' + ed.label(it) + ': say the note'); break; }   // the next voice note is its note
+      else if (a === '◆ Key' && takes.clock) { takes.clock.show(true); takes.clock.key(it.name); }   // clock.js: a key at the playhead
+      else if (a === '● Take') {                              // a person follows the user while the take records
+        if (canAct(it)) { ed.select(null, 'menu'); await countdown(FOLLOW_COUNTDOWN_S, it.name); }
+        if (canAct(it)) await takes.actors.follow({ person: it.name }).catch(() => null);
+        takes.start(it.name);
+        if (canAct(it)) { followPanel(it); ed.select(null, 'menu'); break; }
       }
-    } finally { busy = false; }
+      else if (a === '■ Stop take') {
+        if (takes.actors && takes.actors.playing.get(it.name)?.live) takes.actors.stop({ person: it.name });
+        const r = await takes.stop(); await review(it, r);
+      }
+      else if (a === '◎ Follow' && takes.actors) {
+        ed.select(null, 'menu');                                // the menu goes; the numbers count; GO starts it
+        await countdown(FOLLOW_COUNTDOWN_S, it.name);
+        const ok = await takes.actors.follow({ person: it.name }).then(() => true).catch((e) => {
+          live.emit('voice_error', { where: 'actor follow', error: String(e.message || e) }); return false; });
+        if (ok) { followPanel(it); ed.select(null, 'menu'); break; }
+      }
+      else if (a === '■ Unfollow' && takes.actors) takes.actors.stop({ person: it.name });
+      else if (a === '▶ Play' && takes.actors) await takes.actors.play({ person: it.name, take: kept.get(it.name) }).catch((e) => {
+        const error = String(e.message || e);
+        live.emit('voice_error', { where: 'actor play', error });
+        // said in the headset too: a Play that did nothing looked like a person that would not move (the user, 2026-10-10)
+        panels.show({ panel_id: 'play_failed_' + it.name, title: ed.label(it) + ': nothing to play on', quiet: true, wait: false, seconds: 10,
+          text: /^no actor/.test(error) ? 'There is no body for this person yet, so the take cannot play. Your take is kept.' : error, buttons: ['OK'] });
+      });
+      else if (a === '■ Stop' && takes.actors) takes.actors.stop({ person: it.name });
+      else if (a === '✕' || a === '✕ Cancel') {               // ✕ undoes whatever was done since this menu opened
+        if (moved(it)) {
+          ed.beginEdit('menu cancel');
+          it.obj.position.copy(start.p); it.obj.quaternion.copy(start.q); it.obj.scale.copy(start.s);
+          ed.endEdit();
+          ed.setStatus(ed.label(it) + ': put back');
+        }
+        ed.unlocked = null; ed.select(null, 'menu'); break;
+      }
+      await new Promise((res) => setTimeout(res, 650));         // the panel's own close, then the next state
+    }
   }
   // a camera framed by the user's own eyes: the menu closes, 3 s to look at the shot, a shutter, and the camera stands
   // where the eyes are, aimed where they look (one undoable edit; the menu's Cancel puts it back). The user, 2026-10-03:
@@ -361,7 +362,8 @@ export function initActions(ed, hands, panels, live, takes) {
     if (ed.unlocked && ed.unlocked !== ed.selected) ed.unlocked = null;
     if (open && open.it !== ed.selected) panels.close(open.id, 'deselected');
     if (ed.selected && window.VR_behaviours && window.VR_behaviours.onSelect(ed.selected, e.via)) return;   // it does its own thing (behaviours.js)
-    if (ed.selected && ed.selected !== e.prev) show(ed.selected);
+    // a new pick, or the selected thing picked again with no menu up (its menu was lost or closed): show it
+    if (ed.selected && (ed.selected !== e.prev || !open)) show(ed.selected);
   });
   ed.addEventListener('edited', touchUse);
 
