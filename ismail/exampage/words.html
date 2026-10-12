@@ -40,7 +40,13 @@ kbd { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 3px;
 .pic .tag, .pic .pos { position: absolute; font: 600 12px var(--mono); background: rgba(0,0,0,.72); color: #fff;
   padding: 1px 6px; border-radius: 3px; pointer-events: none; white-space: nowrap; }
 .pic .tag { left: 6px; top: 6px; font-size: 15px; } .pic .pos { right: 6px; top: 6px; }
-.stack { max-width: 560px; width: 100%; margin: 0 auto; cursor: crosshair; user-select: none; touch-action: none; }
+/* marking off (the default on a phone): a finger on the picture scrolls the page, as anywhere else; Mark on: a tap
+   pins, a drag boxes (Nate, s26: "I was just using it to scroll ... I can't even delete them") */
+.stack { max-width: 560px; width: 100%; margin: 0 auto; user-select: none; -webkit-user-select: none; touch-action: pan-y pinch-zoom; }
+.stack.marking { cursor: crosshair; touch-action: none; }
+.ask { font-size: 16px; font-weight: 600; }
+.nav { justify-content: space-between; }
+.cmt-x { min-height: 36px; padding: 4px 12px; }
 .stack img { position: absolute; top: 0; left: 0; }
 .stack img:first-child { position: relative; }
 .which { font: 700 18px var(--mono); min-width: 1.2em; text-align: center; }
@@ -82,10 +88,12 @@ select { padding: 8px; border: 1px solid var(--line); border-radius: 5px; backgr
     <div class="eyebrow" id="eyebrow">eye exam</div>
     <h1 id="title">One sound at a time</h1>
     <p class="muted" id="intro"></p>
-    <p class="muted touchhint" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Tap <b>Flip</b> to switch, hold <b>Peek</b> to look at the other one for a moment, or tap <b>Blink</b>. Tap a picture to pin a comment there, or drag to box an area. Then say which picture is the real one.</p>
+    <p class="muted touchhint" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Tap <b>Flip</b> to switch, hold <b>Peek</b> to look at the other one for a moment, or tap <b>Blink</b>. To mark something, tap <b>Mark</b> first: then a tap on the picture pins a comment there and a drag boxes an area. Tap <b>Mark</b> again to scroll. <b>Remove</b> takes a mark away. Then say which picture is the real one, and go on with <b>Next</b>.</p>
     <p class="muted keyhint" style="margin-top:6px">The two pictures sit on top of each other, one showing at a time, so any difference shows up as movement. Keys act on the highlighted card: <kbd>space</kbd> plays the real sound, <kbd>F</kbd> flips, hold <kbd>Shift</kbd> to peek at the other, <kbd>B</kbd> blinks them. Then answer about the picture showing: <kbd>M</kbd> <span id="kreal">this one is the real one</span>, <kbd>S</kbd> <span id="kours">this one is ours</span>, <kbd>0</kbd> can't tell. <kbd>Enter</kbd> next card.</p>
   </div>
   <div id="cards" style="display:grid;gap:16px"></div>
+  <!-- one card on screen at a time, each with its own question (Nate, s26: "each round has its own question") -->
+  <div class="row nav"><button id="back" type="button">Back</button><span class="muted" id="where"></span><button id="next" type="button">Next</button></div>
   <section class="panel">
     <div class="row"><button id="submit" type="button">Submit</button><span class="status" id="st" role="status"></span><a class="backlink" href="/" data-back>Back to the phone</a></div>
   </section>
@@ -100,8 +108,12 @@ let M = null, C = [], active = 0, audio = new Audio(), FHI = 16000, LREAL = "", 
 function setActive(i) {
   const n = Math.max(0, Math.min(C.length - 1, i));
   if (n !== active && C[active]) C[active].stopBlink();
+  const moved = n !== active;
   active = n;
-  C.forEach((c, j) => c.el.classList.toggle("active", j === active));
+  C.forEach((c, j) => { c.el.classList.toggle("active", j === active); c.el.hidden = j !== active; });
+  $("where").textContent = `card ${active + 1} of ${C.length}`;
+  $("back").disabled = active === 0; $("next").disabled = active === C.length - 1;
+  if (moved) C[active].el.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 function pick(c, v) { c.pick = v; }
 function card(it, i) {
@@ -126,6 +138,7 @@ function card(it, i) {
   c.play = play.onclick;
   head.appendChild(play);
   el.appendChild(head);
+  if (it.ask) el.appendChild(mk("p", { className: "ask" }, it.ask));     // this card's own question
   // the blink comparator (his ask after w1 opened: "overlaid over each other ... turn one of them on or off ... take
   // advantage of how the human eye works"): both pictures in one frame, one showing at a time; the eye reads any
   // difference between them as movement. Flip by hand, hold Shift to peek, or let it blink.
@@ -168,10 +181,16 @@ function card(it, i) {
     if (!M.timed) { c.stopBlink(); c.flip(); }
   });
   // w3 on (his ask in w2: "let me also draw an area for each of these comments"): press and drag draws a box,
-  // a plain click still pins a point
+  // a plain click still pins a point. Only while Mark is on: off, a finger on the picture scrolls the page (s26).
+  // A mouse cannot scroll by dragging, so Mark starts on with a mouse and off on a touch screen.
   let drag = null;
+  c.marking = false;
+  c.setMarking = on => {
+    c.marking = on; stack.classList.toggle("marking", on);
+    if (c.markBtn) { c.markBtn.setAttribute("aria-pressed", String(on)); c.markBtn.textContent = on ? "Marking: on" : "Mark"; }
+  };
   stack.addEventListener("pointerdown", ev => {
-    if (!M.timed || ev.button !== 0) return;
+    if (!M.timed || !c.marking || ev.button !== 0) return;
     const p = at(ev); if (!p.ok) return;
     ev.preventDefault(); setActive(i); c.stopBlink();
     drag = { p0: p, p1: p, box: null };
@@ -186,14 +205,15 @@ function card(it, i) {
     Object.assign(drag.box.style, { left: 100 * x0 + "%", width: 100 * (x1 - x0) + "%", top: 100 * (1 - y1) + "%", height: 100 * (y1 - y0) + "%" });
   });
   stack.addEventListener("pointercancel", () => { if (drag) { if (drag.box) drag.box.remove(); drag = null; } });
-  document.addEventListener("pointerup", () => {
+  document.addEventListener("pointerup", ev => {
     if (!drag) return;
     const { p0, p1, box } = drag; drag = null;
     const isBox = !!box;
     const lo = isBox ? (p0.ms <= p1.ms ? p0 : p1) : p0, hi = isBox ? (p0.ms <= p1.ms ? p1 : p0) : p0;
     const k0 = Math.min(p0.ff, p1.ff) / 1000, k1 = Math.max(p0.ff, p1.ff) / 1000;
     const words = isBox ? [...new Set((it.words || []).filter(w => w.ms[1] >= lo.ms && w.ms[0] <= hi.ms).map(w => w.w))].join(" ") || "gap" : p0.word;
-    const cm = { n: c.comments.length + 1, ms: lo.ms, khz: +(isBox ? k0 : p0.ff / 1000).toFixed(1), word: words, picture: c.layer, text: "" };
+    c.nextN = (c.nextN || 0) + 1;                // a removed mark's number is not reused
+    const cm = { n: c.nextN, ms: lo.ms, khz: +(isBox ? k0 : p0.ff / 1000).toFixed(1), word: words, picture: c.layer, text: "" };
     if (isBox) { cm.ms2 = hi.ms; cm.khz2 = +k1.toFixed(1); }
     c.comments.push(cm);
     const dot = mk("span", { className: "dot" }, String(cm.n));
@@ -205,7 +225,14 @@ function card(it, i) {
     const inp = mk("input", { type: "text", placeholder: "what you see here" });
     inp.addEventListener("keydown", e2 => { e2.stopPropagation(); if (e2.key === "Enter") inp.blur(); });
     inp.addEventListener("input", () => { cm.text = inp.value; });
-    r.appendChild(inp); clist.appendChild(r); inp.focus();
+    const x = mk("button", { type: "button", className: "cmt-x", title: `remove mark #${cm.n}` }, "Remove");
+    x.onclick = ev => {
+      ev.stopPropagation();
+      c.comments.splice(c.comments.indexOf(cm), 1);
+      dot.remove(); if (box) box.remove(); r.remove();
+    };
+    r.append(inp, x); clist.appendChild(r);
+    if (ev.pointerType !== "touch") inp.focus();   // on a phone the keyboard would cover the picture; tap the box to type
   });
   const phead = mk("span", { className: "head", hidden: true });
   stack.appendChild(phead);
@@ -228,7 +255,14 @@ function card(it, i) {
   for (const t of ["pointerup", "pointercancel", "pointerleave"]) peek.addEventListener(t, unpeek);
   peek.addEventListener("click", ev => ev.stopPropagation());
   peek.addEventListener("contextmenu", ev => ev.preventDefault());
-  ctl.append(flip, blink, peek, speed, mk("span", { className: "muted" }, M.timed ? "click the picture to pin a comment · F flips · hold Shift to peek" : "click the picture to flip · hold Shift to peek at the other one"));
+  ctl.append(flip, blink, peek, speed);
+  if (M.timed) {
+    c.markBtn = mk("button", { type: "button" }, "Mark");
+    c.markBtn.onclick = ev => { ev.stopPropagation(); setActive(i); c.setMarking(!c.marking); };
+    ctl.appendChild(c.markBtn);
+    c.setMarking(matchMedia("(pointer: fine)").matches && !matchMedia("(pointer: coarse)").matches);
+  }
+  ctl.appendChild(mk("span", { className: "muted keyhint" }, M.timed ? "with Mark on, click the picture to pin a comment or drag to box an area · F flips · hold Shift to peek" : "click the picture to flip · hold Shift to peek at the other one"));
   el.appendChild(ctl);
   el.appendChild(clist);
   const row = mk("div", { className: "row" });
@@ -251,7 +285,7 @@ function card(it, i) {
   row.appendChild(c.choice);
   el.appendChild(row);
   const note = mk("input", { type: "text", placeholder: "what you noticed (optional)" });
-  note.addEventListener("keydown", ev => { ev.stopPropagation(); if (ev.key === "Enter") { setActive(i + 1); C[active].el.scrollIntoView({ block: "center", behavior: "smooth" }); note.blur(); } });
+  note.addEventListener("keydown", ev => { ev.stopPropagation(); if (ev.key === "Enter") { note.blur(); setActive(i + 1); } });
   note.addEventListener("input", () => { c.note = note.value; });
   el.appendChild(note);
   c.res = mk("div", { className: "res", hidden: true });
@@ -270,8 +304,10 @@ document.addEventListener("keydown", e => {
   else if (k === "m") c.choose("mine");
   else if (k === "s") c.choose("synth");
   else if (e.key === "0") c.choose("cant");
-  else if (e.key === "Enter") { setActive(active + 1); C[active].el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  else if (e.key === "Enter") setActive(active + 1);
 });
+$("back").onclick = () => setActive(active - 1);
+$("next").onclick = () => setActive(active + 1);
 document.addEventListener("keyup", e => {           // Shift released: back to the picture you were on
   const c = C[active];
   if (e.key === "Shift" && c && c.peek) { c.show(c.peek); c.peek = null; }

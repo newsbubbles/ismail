@@ -61,7 +61,9 @@ def exam_picture_round(out: str, items: list, title: str, intro: str = '', seed:
     a difference as movement), M / S / 0 answers about the picture showing, and comments pinned at a time and
     frequency (a click, or a dragged box). The key is served only after they answer. items: [{word, real: path,
     other: path, window: [t0, t1] s, other_window (default the same), words: [[t0, t1, text]] in the real file,
-    other_label: what ours is, said after the answer, version}]; real-first and real-second are balanced and seeded.
+    other_label: what ours is, said after the answer, version, ask: this card's own question, shown above its
+    pictures}]. One card shows at a time, with Back and Next; on a phone a finger on a picture scrolls until Mark
+    is on, and each mark has a Remove button; real-first and real-second are balanced and seeded.
     labels: the page's words {real, ours, play} (default "This one is the real one", "This one is ours", "Play the
     real sound"). out: the round's folder; its parent is what the page server serves. host=True starts it on
     127.0.0.1:port unless it runs. Read the answers with exam_picture_score(out)."""
