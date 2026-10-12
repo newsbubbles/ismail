@@ -78,6 +78,9 @@ merges.
 - **When pull requests overlap, say the merge order and who resolves the conflict.** Changelog sections conflict
   most; keep both sides.
 - **Hold pull requests in an area the person is still shaping**, and pick the moment with them.
+- **When the person's branch, or a contribution's branch, is behind main, merge main into it yourself.** Explain
+  each conflict to them in their own terms and at their level: what each side changed, and which you kept. Then
+  remove the worktree you no longer need.
 - **Merging into the project is its maintainer's.** You open the pull request from the person's fork after their
   yes, give them the link, and say what happens next. An area dev's local merge request is yours to merge, after
   its tests pass; say so to the area dev.
@@ -87,7 +90,8 @@ merges.
 
 **The skill**
 - **Audit the skill against the code after a run of merges.** Stale text (exam hosting, limiter ceilings, pull
-  request text out of date before it merged) is found by looking, not by waiting.
+  request text out of date before it merged) is found by looking, not by waiting. `git blame` on a line says how
+  old a claim is and which change it came with: a "not yet" older than the change that built the thing is stale.
 - **Check from the person's side before saying done**, and say what was not checked. A dead play button once came
   from the dev's own test snapshot.
 

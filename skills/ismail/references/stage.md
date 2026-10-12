@@ -4,7 +4,7 @@ A scene for a video or an interactive world gets made by two kinds of work at on
 renders; the person stands in the scene (a browser, or a headset) and places, judges and acts. This reference is
 what one long build of a 1958 bar and a club, with a VR editor beside Blender, taught about doing that well. Read it
 before building any scene, look or editor a person will work inside, and with `music-video.md` (shots and the cut)
-and `user-experience.md` (their words, senses and consent).
+and `user-experience.md` (their words, kept in the lexicon with `lexicon_note`, their senses and consent).
 
 The stage itself (a browser and WebXR editor with a Blender round trip, hands, voice and panels) is part of ismail:
 `ismail.stage`, driven by the `stage_*` tools (below). Everything after that section holds for any editor where a
@@ -32,6 +32,8 @@ person and an agent change the same scene.
   proves it. Say "not verified yet" otherwise.
 - **Rebuild a room:** `stage_scene_export(scene)` runs `world.json` `build.script` in Blender in a heavy-job slot.
   An open page swaps it in under the construct, never while the person is in VR.
+- **Blender or a script outside the stage tools** runs through `python -m ismail.machine run --gpu -- <command>`, so
+  it takes the machine's GPU slot like the stage's own jobs (SKILL.md, "The machine is shared").
 - **Changes they will notice:** `stage_note(scenes, title, level)` feeds the "updates ready" card in the headset.
 - **Capture a shot on the PC:** `stage_capture(scene, t0, t1, camera=|shot= cameras=|path=|view=, size=, fps=,
   setup=, audio=)` draws the stage frame-locked (frame n is the song at t0 + n / fps, however slow the frame) in a
