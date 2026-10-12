@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Dev: dev copies (git worktrees) tracked by a tool
+
+- New `python -m ismail.worktrees`: every dev copy of the repository (a git worktree) on one line, with its branch,
+  owner, commits ahead and behind `origin/main`, merged or not, its last commit's age, its uncommitted and untracked
+  files, and its open pull request (when `gh` is there). Flags: UNASSIGNED, MERGED (remove it), IDLE (unmerged, no
+  commit for 3 days), BEHIND. The first line names the next action, and the next says when the main checkout is
+  behind `origin/main`. `--fetch`, `--json`, `--unassigned`.
+- `new <topic> --owner <name>` fetches and makes the copy from `origin/main`, never from the local main;
+  `claim <path> --owner <name>` records the owner of a copy that exists; `sync <path>` merges `origin/main` in
+  (refuses uncommitted work, never stashes, keeps a conflicted merge in progress and lists its files); `done <path>`
+  removes a copy and its local branch only when its work is in `origin/main` and it holds nothing untracked. Nothing
+  passes `--force` or deletes a file. Owners live in the shared git folder, outside the repository.
+- `python -m ismail.handoffs` (the dev intake) ends with the same summary and the copies that need something
+  (`--no-worktrees` skips it).
+- New reference `worktrees.md`: the decision tree for a copy's whole life, each step naming the command. Linked
+  from SKILL.md, development.md, contributor-dev.md and stage-dev.md.
+
 ### Skill: "the person" in the lessons
 
 - The skill's lessons no longer name one user: each says "the person", as the rest of the skill does (blind-tests.md,

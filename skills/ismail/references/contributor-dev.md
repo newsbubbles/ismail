@@ -35,8 +35,9 @@ merges.
   sessions had to be paused while the person settled it.
 - **Know every worktree and branch, and which session uses each.** The person will ask what can be cleaned up.
   Clean up as part of every merge (development.md, must-have 2): the merged pull request's worktree, local branch
-  and merge copy go at once. Anything unmerged, or someone else's working copy, stays until its owner or the person
-  says otherwise. Check `git worktree list` at each intake: more than a handful is a sign the cleanup slipped.
+  and merge copy go at once (`python -m ismail.worktrees done <path>`). Anything unmerged, or someone else's
+  working copy, stays until its owner or the person says otherwise. The intake shows the copies that need
+  something (`python -m ismail.worktrees` lists them all, with owners); `worktrees.md` says what to do with each. More than a handful is a sign the cleanup slipped.
 - **Keep the roster of session names current, and list the sessions again before sending.** Sessions get renamed;
   a message to an old name fails.
 

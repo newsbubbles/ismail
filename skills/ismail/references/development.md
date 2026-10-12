@@ -57,16 +57,19 @@ Contracts between roles:
 ## Work on a worktree, never in the shared checkout
 
 The main checkout is shared: other sessions run songs and live engines from it, and some leave uncommitted work in
-it. Engine work happens on a branch in its own worktree:
+it. Engine work happens on a branch in its own worktree (a dev copy), made from the project's main as
+fetched (`origin/main`), never from the local main:
 
 ```bash
-git -C <ismail> status --short          # what is there before you; none of it is yours
-git -C <ismail> worktree list           # who else is working, on what branch
-git -C <ismail> worktree add ../ismail-<topic> -b <topic> main
+git -C <ismail> status --short                           # what is there before you; none of it is yours
+python -m ismail.worktrees                               # every copy: owner, ahead/behind, merged, what to do next
+python -m ismail.worktrees new <topic> --owner <role>    # fetch, then a copy ../ismail-wt-<topic> from origin/main
 ```
 
-One topic per worktree, one agent per worktree. Run the tests and write the code there. Song folders are not in a
-worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
+`references/worktrees.md` is the decision tree for a copy's whole life: starting, a copy with no owner, syncing with
+main, the main checkout falling behind, handing back, and removing it (`python -m ismail.worktrees done <path>`)
+once it is merged. One topic per worktree, one agent per worktree. Run the tests and write the code there. Song
+folders are not in a worktree (`songs/` is git-ignored), so read a song's files by their path in the main checkout.
 
 ## Collaboration must-haves
 
