@@ -34,13 +34,15 @@ Shorts; an mp4 uploaded to GitHub plays inline here). Until it exists, the juke 
 
 ## What ismail is
 
-ismail is a set of **recursively modifiable interfaces**: you change how they work by asking your agent, and the
-engines underneath stay put. A button on your phone, an object in your VR room that does something when you press
+ismail is a set of **recursively modifiable interfaces**: shared spaces between you and your agents, one side for
+each, that the agents keep rebuilding from your feedback while you use them, within limits you set, where even the
+test that decides whether a change helped can be changed. In plain words: you change how the interfaces work by
+asking your agent, the engines underneath stay put, and you decide whether a change actually helped. A button on your phone, an object in your VR room that does something when you press
 it, a new way to read a mix: you ask, the agent builds it from the tools ismail already has, and the music engine,
 the stage and the phone server stay as they are. ismail doesn't try to ship every feature; it lets your agent make
 the one you want.
 
-It is an interface, not a harness. It plugs into the agent you already use (Claude Code, Codex, Cursor, any MCP
+It is an interface, not a harness: an interface to your harness and an interface to you. It plugs into the agent you already use (Claude Code, Codex, Cursor, any MCP
 client) on one side and into you on the other: agent-shaped on the agent side, human-shaped on the human side.
 When your harness has helpers and sessions that talk to each other, ismail uses them. When it doesn't, one agent
 does it all.
