@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Skill: a jam runner recipe
+
+- references/jam-runner.md: how to build a small runner in a song's folder that reads each phone take in code in
+  about a second (classify, sync to the engine's beats, read into a part), the sample / match / ask modes on a phone
+  panel, queueing on the loop, and turning the jam into a studio song. No new op: the runner is song code, built per
+  jam from the recipe. live.md's "In a jam" and SKILL.md's reference list point to it.
+
 ### Skill: three paces, and a jam is threaded
 
 - live.md, "Three paces: studio, set, jam": studio work and exams are turn-based, a set runs in real time
