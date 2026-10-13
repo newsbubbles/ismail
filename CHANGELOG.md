@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### README: a short front page
+
+- The README is now short: what ismail is (recursively modifiable interfaces: the DAW, the VR stage and the phone
+  page), songs to listen to, the agent roles, install, where to look, where it falls short, credit and licence.
+- The long reference moved to `docs/reference.md` (what's built today, the agent team, sample sources and every
+  tool area), and `docs/why.md` says why it works this way.
+
 ### Stage: worn parts come off
 
 - `stage_actor_part(scene, person, part, show, move, seconds, reset)` hides a piece of a person's costume (glasses,
