@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Stage: worn parts come off
+
+- `stage_actor_part(scene, person, part, show, move, seconds, reset)` hides a piece of a person's costume (glasses,
+  a mask) or slides it off over a few seconds and then hides it, riding the bone it is worn on so it moves with the
+  head. Kept while the page is open, not saved with the scene; `reset=True` puts it back. Event `actor_part`.
+
 ### Stage: grab by touch
 
 - In VR with hand tracking, resting a hand on a thing (the palm or the finger bases on it, the hand nearly still)

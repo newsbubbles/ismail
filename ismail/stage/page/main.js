@@ -29,6 +29,7 @@ import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initProps } from './props.js';
 import { initGrab } from './grab.js';
+import { initParts } from './parts.js';
 import { initFaces } from './faces.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
@@ -363,6 +364,7 @@ window.VR_props = initProps(ed, live, actors);   // props pinned to a person's b
 const grab = initGrab(ed, live, xr, hands, () => actors, window.VR_props);
 touch.skip = (it, how) => !!grab.heldBy(it) || (how === 'fist' && grab.takeable(it));
 window.VR_grab = grab;
+window.VR_parts = initParts(ed, live, () => actors);   // worn parts: glasses off, a mask down (parts.js)
 window.VR_faces = initFaces(ed, live, actors, () => music.now());   // mouth tracks on the music clock (faces.js); capture swaps music.now
 live.emit('page_boot', { scene: name, in_construct: true });
 for (let n = 1; !ed.loaded; n++) {                 // keep trying: the user can stand and talk in the construct meanwhile

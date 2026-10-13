@@ -284,6 +284,13 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   From GO their hands and fingers are the user's own, placed from the eyes and turned to the person's facing, and the
   shoulders follow the arms. For a grip that must hold (sticks, a guitar neck), `hands='pose'` keeps the start pose's
   hands and adds the user's motion to them.
+- **Worn parts come off.** A piece of costume that is its own mesh in the body's file (glasses, a mask, a hat) can be
+  hidden or slid off: `stage_actor_part(scene, person, part='glasses', show=False)`, then
+  `stage_actor_part(scene, person, part='mask', move=[0, -0.25, 0.05], seconds=1.2, show=False)` slides the mask
+  down and a little forward (metres: to the person's side, up, front) and hides it when it gets there. The piece rides
+  the bone it is worn on while it moves, so it keeps nodding with the head. A wrong name lists the body's meshes.
+  It holds while the page is open (a rest or a take shows it the same way), is not saved with the scene and is not
+  in takes; `reset=True` puts everything back. Event `actor_part` when a slide ends.
 - **Props in a person's hands.** Place the prop where it belongs on the person (in the hand, on the strap), then
   `stage_prop_pin(scene, object, person, bone='hand_r')`: it rides their body from then on, at rest, in a take and in
   a Follow, and is saved with the scene. `clear=True` unpins it.
