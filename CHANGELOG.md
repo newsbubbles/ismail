@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Stage: `ismail.stage.link` imports on its own again
+
+- `python -m ismail.stage.ear --who <name> --once` died with "cannot import name 'page_cmd' from partially
+  initialized module 'ismail.stage.link'": link imported `ismail.api`, which imports the stage ops, which import link.
+  Link now imports api only when it raises an error.
+- `tests/test_stage_imports.py` imports every `ismail.stage` module first, in a fresh interpreter, so a cycle like
+  this fails the tests (it passed before because the test process had already imported api).
+
 ### Stage: "heard by" receipts, busy lines, a stuck warning, and an ear that keeps listening
 
 - A session sat ten minutes on a render while four voice notes went unanswered, and the person left the headset
