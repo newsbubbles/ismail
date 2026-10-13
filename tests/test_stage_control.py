@@ -184,6 +184,23 @@ def test_the_pose_read_back_reaches_the_page(stage):
         page.stop = True
 
 
+def test_a_worn_part_command_reaches_the_page(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        OPS['stage_actor_part'](scene='room', person='person_b', part='mask', move=[0, -0.25, 0.05], seconds=1.2,
+                                show=False)
+        c = page.seen[-1]
+        assert (c['type'], c['person'], c['part'], c['move'], c['seconds'], c['show']) ==             ('actor_part', 'person_b', 'mask', [0, -0.25, 0.05], 1.2, False)
+        OPS['stage_actor_part'](scene='room', person='person_b', reset=True)
+        assert page.seen[-1]['reset'] is True
+        with pytest.raises(OpError, match='part'):
+            OPS['stage_actor_part'](scene='room', person='person_b')
+        with pytest.raises(OpError, match='stage_actor_part'):
+            OPS['stage_cmd'](scene='room', type='actor_part')
+    finally:
+        page.stop = True
+
+
 def test_a_start_pose_is_shown_now_on_an_open_page(stage):
     _body(stage)
     page = FakePage(stage['port'], 'room')
