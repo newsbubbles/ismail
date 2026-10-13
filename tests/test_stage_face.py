@@ -22,6 +22,39 @@ def voice(spans, seconds=2.0):
     return x.astype(np.float32)
 
 
+@pytest.fixture(autouse=True)
+def no_rhubarb(monkeypatch, tmp_path):
+    """The word tests run without Rhubarb, even on a machine that has it."""
+    monkeypatch.setenv('ISMAIL_RHUBARB', str(tmp_path / 'no_rhubarb_here'))
+
+
+FAKE_RHUBARB = '''
+import json, sys
+a = sys.argv[1:]
+out = a[a.index('-o') + 1]
+cues = [{'start': 0.0, 'end': 0.5, 'value': 'X'}, {'start': 0.5, 'end': 0.6, 'value': 'A'},
+        {'start': 0.6, 'end': 0.8, 'value': 'D'}, {'start': 0.8, 'end': 0.9, 'value': 'D'},
+        {'start': 0.9, 'end': 1.1, 'value': 'F'}, {'start': 1.1, 'end': 2.0, 'value': 'X'}]
+json.dump({'mouthCues': cues}, open(out, 'w'))
+'''
+
+
+@pytest.fixture
+def rhubarb(tmp_path, monkeypatch):
+    """A stand-in Rhubarb (a .py run by this Python) answering fixed cues; returns the commands it was run with."""
+    exe = tmp_path / 'rhubarb' / 'rhubarb.py'
+    exe.parent.mkdir()
+    exe.write_text(FAKE_RHUBARB, encoding='utf-8')
+    monkeypatch.setenv('ISMAIL_RHUBARB', str(exe))
+    seen, real = [], face.subprocess.run
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        return real(cmd, **kw)
+    monkeypatch.setattr(face.subprocess, 'run', run)
+    return seen
+
+
 def at(tr, t, unit):
     return tr['frames'][int(round((t - tr['start']) * tr['fps']))][tr['units'].index(unit)]
 
@@ -141,3 +174,57 @@ def test_a_take_gives_its_own_voice_and_words(stage):
     assert '\nshape ....AF' in out                                     # closed lips for the M, then the pucker
     with pytest.raises(OpError, match="take 'nope' in room has no audio"):
         OPS['stage_face'](scene='room', person='singer', at=2.0, take='nope')
+
+
+def test_rhubarb_gives_the_shapes_when_it_is_here(rhubarb):
+    x = voice([(0.5, 1.1)])
+    tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=x)
+    assert tr['source']['engine'] == 'rhubarb'
+    assert [s[:2] for s in tr['shapes']] == [[0.0, 'X'], [0.5, 'A'], [0.6, 'D'], [0.9, 'F'], [1.1, 'X']]
+    assert tr['shapes'][1][3] == 'mama' and tr['shapes'][0][3] == ''
+    assert max(at(tr, t, 'mouthPressLeft') for t in (0.5, 0.53, 0.56)) > 0.2 and at(tr, 1.05, 'mouthPucker') > 0.3
+    cmd = rhubarb[-1]
+    assert cmd[cmd.index('-r') + 1] == 'phonetic' and '-d' not in cmd
+    assert cmd[cmd.index('--extendedShapes') + 1] == 'GHX'
+
+
+def test_the_english_recognizer_is_guided_by_the_words(rhubarb):
+    x = voice([(0.5, 1.1)])
+    tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=x, engine='rhubarb_english')
+    cmd = rhubarb[-1]
+    assert tr['source']['engine'] == 'rhubarb_english' and cmd[cmd.index('-r') + 1] == 'pocketSphinx'
+    assert '-d' in cmd
+
+
+def test_a_stretch_keeps_the_recordings_clock_with_rhubarb(rhubarb):
+    x = voice([(1.5, 2.1)], seconds=3.0)
+    tr = face.track(None, None, start=1.0, end=3.0, x=x)
+    assert tr['start'] == 1.0 and [s[:2] for s in tr['shapes'][:2]] == [[1.0, 'X'], [1.5, 'A']]
+
+
+def test_without_rhubarb_auto_uses_the_words_and_asking_for_it_is_an_error():
+    x = voice([(0.5, 1.1)])
+    tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=x)
+    assert tr['source']['engine'] == 'words' and 'rhubarb_error' not in tr['source']
+    with pytest.raises(ValueError, match='not on this machine'):
+        face.track(None, None, x=x, engine='rhubarb')
+    with pytest.raises(ValueError, match='engine'):
+        face.track(None, None, x=x, engine='lips')
+
+
+def test_a_failing_rhubarb_falls_back_to_the_words_and_says_why(tmp_path, monkeypatch):
+    exe = tmp_path / 'rhubarb.py'
+    exe.write_text('import sys; sys.stderr.write("bad audio"); sys.exit(3)', encoding='utf-8')
+    monkeypatch.setenv('ISMAIL_RHUBARB', str(exe))
+    tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=voice([(0.5, 1.1)]))
+    assert tr['source']['engine'] == 'words' and 'bad audio' in tr['source']['rhubarb_error']
+
+
+def test_a_rhubarb_that_hears_nothing_leaves_it_to_the_words(tmp_path, monkeypatch):
+    exe = tmp_path / 'rhubarb.py'
+    exe.write_text("import json, sys; a = sys.argv; json.dump({'mouthCues': []}, open(a[a.index('-o') + 1], 'w'))",
+                   encoding='utf-8')
+    monkeypatch.setenv('ISMAIL_RHUBARB', str(exe))
+    tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=voice([(0.5, 1.1)]))
+    assert tr['source']['engine'] == 'words' and 'no mouth shapes' in tr['source']['rhubarb_error']
+    assert any(s[1] != 'X' for s in tr['shapes'])
