@@ -68,8 +68,9 @@ def test_one_opening_at_most_two_questions_and_a_calm_wait():
     skill = read('skills', 'ismail', 'SKILL.md')
     assert 'even if they did not offer one' not in skill              # step 0 no longer asks for a recording first
     assert 'welcome, never required' in skill and 'the one opening' in skill
-    for doc in (read('AGENTS.md'), read('README.md'), read('skills', 'ismail', 'references', 'setup.md')):
+    for doc in (read('AGENTS.md'), read('skills', 'ismail', 'references', 'setup.md')):
         assert 'one opening' in doc and 'first_answer' in doc
+    assert 'read [AGENTS.md](AGENTS.md) first' in read('README.md')     # the short README hands agents to AGENTS.md
     assert 'first_answer' in read('skills', 'ismail', 'references', 'user-experience.md')
 
 
