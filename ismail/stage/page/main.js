@@ -28,6 +28,7 @@ import { initWaypoints } from './waypoints.js';
 import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initProps } from './props.js';
+import { initGrab } from './grab.js';
 import { initFaces } from './faces.js';
 import { initPerform } from './perform.js';
 import { loadWorld } from './world.js';
@@ -251,7 +252,7 @@ ed.renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   guard('xr', () => xr.update(dt));
   if (ed.renderer.xr.isPresenting) {
-    guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('voice', () => voice.update());
+    guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('grab', () => grab.update()); guard('voice', () => voice.update());
     guard('body', () => body.update());
     if (!guard('exitVR', () => exitVR.update())) { guard('updates', () => updates.update()); guard('panels', () => panels.update()); }
     guard('gallery', () => gallery.update()); guard('actions', () => actions.update());
@@ -358,6 +359,10 @@ window.VR_waypoints = waypoints;
 window.VR_cues = initCues(ed, live, panels);
 window.VR_anchors = initAnchors(ed, xr, live);   // objects pinned to a hand joint, session only
 window.VR_props = initProps(ed, live, actors);   // props pinned to a person's bone, saved with the scene (props.js)
+// grab by touch: a hand holds a thing it rests on, a release lets it fall (grab.js); the fist grab of touch.js steps aside
+const grab = initGrab(ed, live, xr, hands, () => actors, window.VR_props);
+touch.skip = (it, how) => !!grab.heldBy(it) || (how === 'fist' && grab.takeable(it));
+window.VR_grab = grab;
 window.VR_faces = initFaces(ed, live, actors, () => music.now());   // mouth tracks on the music clock (faces.js); capture swaps music.now
 live.emit('page_boot', { scene: name, in_construct: true });
 for (let n = 1; !ed.loaded; n++) {                 // keep trying: the user can stand and talk in the construct meanwhile

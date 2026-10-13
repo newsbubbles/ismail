@@ -225,6 +225,49 @@ def test_a_prop_is_pinned_to_a_bone_and_saved_with_the_scene(stage):
     assert 'stage_prop_pin' in __import__('ismail.api', fromlist=['MUTATING']).MUTATING
 
 
+def test_grab_by_touch_is_saved_with_the_scene_and_told_to_the_page(stage):
+    sc = stage['scenes']
+    page = FakePage(stage['port'], 'room', answers={'grab_mode': {'takeable': ['bottle', 'sticks']}})
+    try:
+        out = OPS['stage_grab_mode'](scene='room', objects='sticks, bottle*', hold_s=1.2)
+        assert out.startswith('grab by touch on in room: hold 1.2 s to take, open for 1.0 s to let go; objects sticks, bottle*')
+        assert 'a hand can take 2 now: bottle, sticks' in out
+        c = page.seen[-1]
+        assert (c['type'], c['on'], c['hold_s'], c['release_s'], c['objects']) == ('grab_mode', True, 1.2, 1.0, ['sticks', 'bottle*'])
+        OPS['stage_grab_rule'](scene='room', object='bar', fixed=True)
+        assert (page.seen[-1]['type'], page.seen[-1]['grab'], page.seen[-1]['fixed']) == ('grab_rule', True, True)
+        g = W.load_world(sc, 'room')['grab']
+        assert g == {'on': True, 'hold_s': 1.2, 'release_s': 1.0, 'objects': ['sticks', 'bottle*'],
+                     'rules': {'bar': {'grab': True, 'fixed': True}}}
+        out = OPS['stage_grab_mode'](scene='room', on=False, objects='unlocked')
+        assert 'grab by touch off' in out and 'objects unlocked' in out and 'a hand can take' not in out
+        assert W.load_world(sc, 'room')['grab']['rules'] == {'bar': {'grab': True, 'fixed': True}}   # kept
+        out = OPS['stage_grab_rule'](scene='room', object='bar', clear=True)
+        assert out.startswith('dropped the grab rule for bar') and page.seen[-1].get('clear') is True
+        assert W.load_world(sc, 'room')['grab']['rules'] == {}
+        with pytest.raises(OpError, match='bar has no grab rule'):
+            OPS['stage_grab_rule'](scene='room', object='bar', clear=True)
+        with pytest.raises(OpError, match='grab.hold_s must be seconds'):
+            OPS['stage_grab_mode'](scene='room', hold_s=0.05)
+        assert W.load_world(sc, 'room')['grab']['hold_s'] == 1.2                    # refused: nothing written
+        with pytest.raises(OpError, match='stage_grab_mode'):
+            OPS['stage_cmd'](scene='room', type='grab_mode')
+    finally:
+        page.stop = True
+        page.t.join(5)
+    page = FakePage(stage['port'], 'room', refuse=('grab_rule',))
+    try:
+        with pytest.raises(OpError, match='grab_rule: no object chair'):
+            OPS['stage_grab_rule'](scene='room', object='chair')
+    finally:
+        page.stop = True
+    for bad, match in (({'on': 1}, 'grab.on'), ({'release_s': 30}, 'grab.release_s'), ({'objects': 'all'}, 'grab.objects'),
+                       ({'rules': {'x': {'grab': 'yes'}}}, 'grab.rules.x'), ({'hands': 2}, "unknown key 'hands'"), (3, 'grab must be')):
+        assert any(match in p for p in W.check_world({**W.DEFAULTS, 'grab': bad})), bad
+    assert not W.check_world({**W.DEFAULTS, 'grab': {'on': True, 'objects': 'unlocked', 'rules': {'bar': {'fixed': True}}}})
+    assert {'stage_grab_mode', 'stage_grab_rule'} <= __import__('ismail.api', fromlist=['MUTATING']).MUTATING
+
+
 def test_load_sets_define_unload_and_tell_an_open_page(stage):
     sc = stage['scenes']
     (sc / 'room' / 'manifest.json').write_text(json.dumps({'objects': {

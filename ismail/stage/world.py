@@ -31,7 +31,8 @@ from pathlib import Path
 
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
             'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': [],
-            'props': {}, 'faces': {}}
+            'props': {}, 'faces': {}, 'grab': None}
+GRAB_KEYS = {'on', 'hold_s', 'release_s', 'objects', 'rules'}
 
 
 def NAME_OK(name):
@@ -114,8 +115,35 @@ def check_world(w):
         if not (isinstance(lst, list) and all(isinstance(e, dict) and isinstance(e.get('file'), str)
                                               and isinstance(e.get('at'), (int, float)) for e in lst)):
             out.append(f'faces.{n} must be a list of {{"file": "<name>.json" in faces/, "at": song seconds}}')
+    out += check_grab(w.get('grab'))
     if w.get('derives_from') and b:
         out.append('a derived scene has no build of its own (it is built from derives_from); drop "build"')
+    return out
+
+
+def check_grab(g):
+    """Problems with world.json grab (grab by touch, page/grab.js): {on, hold_s, release_s, objects, rules}."""
+    if g is None:
+        return []
+    if not isinstance(g, dict):
+        return ['grab must be an object {"on", "hold_s", "release_s", "objects", "rules"}']
+    out = [f'grab has an unknown key {k!r} (keys: {", ".join(sorted(GRAB_KEYS))})' for k in g if k not in GRAB_KEYS]
+    if 'on' in g and not isinstance(g['on'], bool):
+        out.append('grab.on must be true or false')
+    for k, lo, hi in (('hold_s', 0.2, 10), ('release_s', 0.1, 10)):
+        v = g.get(k)
+        if k in g and not (isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi):
+            out.append(f'grab.{k} must be seconds from {lo} to {hi}')
+    o = g.get('objects', 'unlocked')
+    if not (o == 'unlocked' or (isinstance(o, list) and all(isinstance(x, str) and x for x in o))):
+        out.append('grab.objects must be "unlocked" (every small thing not locked) or a list of names (globs: drum_stick_*)')
+    rules = g.get('rules', {})
+    if not isinstance(rules, dict):
+        out.append('grab.rules must be an object {object: {"grab": bool, "fixed": bool}}')
+        rules = {}
+    for n, r in rules.items():
+        if not (isinstance(r, dict) and set(r) <= {'grab', 'fixed'} and all(isinstance(v, bool) for v in r.values())):
+            out.append(f'grab.rules.{n} must be {{"grab": true|false, "fixed": true|false}}')
     return out
 
 

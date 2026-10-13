@@ -7,6 +7,7 @@
 //   live: prop_pin {object, person, bone} -> {object, person, bone, rel}   (measured from where it stands now)
 //         prop_pin {object, clear: true}   -> {object, unpinned}
 //   events: prop_pinned, prop_unpinned
+// grab.js holds things the same way for a session (hold, letGo): never saved, and a let-go thing stays where it is.
 import * as THREE from 'three';
 import { world } from './world.js';
 
@@ -42,6 +43,28 @@ export function initProps(ed, live, actors) {
     delete p.it.obj.userData.propHome;
     pins.delete(name);
     return true;
+  }
+
+  // a hand holding a thing for this session (grab.js): rel measured now unless given; never saved, no home
+  function hold(name, person, bone, rel) {
+    const it = ed.byName.get(name), b = actors.boneOf(person, bone);
+    if (!it || (!b && !rel)) return null;
+    let r;
+    if (rel) r = new THREE.Matrix4().fromArray(rel);
+    else {
+      it.obj.updateWorldMatrix(true, false);
+      b.updateWorldMatrix(true, false);
+      r = new THREE.Matrix4().copy(b.matrixWorld).invert().multiply(it.obj.matrixWorld);
+    }
+    const p = { it, person, bone, rel: r, on: false, held: true };
+    pins.set(name, p);
+    return p;
+  }
+  // stop riding the bone, and stay where it is now (a drop, a take from a person's hand)
+  function letGo(name) {
+    const p = pins.get(name);
+    if (p) pins.delete(name);
+    return p || null;
   }
 
   // the scene's pins, at every staging (load, hot reload, scene switch)
@@ -93,5 +116,5 @@ export function initProps(ed, live, actors) {
     return { object: c.object, ...spec };
   };
 
-  return { pins, unpin, reload: fromWorld };
+  return { pins, unpin, hold, letGo, reload: fromWorld };
 }

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Stage: grab by touch
+
+- In VR with hand tracking, resting a hand on a thing (the palm or the finger bases on it, the hand nearly still)
+  for 1.5 s takes it; a ring at the palm fills while it counts. Opening the hand past half its grip for 1 s lets go
+  (the ring empties; closing again keeps it), and the thing falls onto whatever is under it with the hand's speed, so
+  a toss flies. Fingertips alone are still the pinch for menus, and the fist grab steps aside for things grab takes.
+- Inside a person, their hand holds what you take, and the grab and the drop go into the take and play back with it.
+- `stage_grab_mode(scene, on, objects, hold_s, release_s)` and `stage_grab_rule(scene, object, grab, fixed)`, saved in
+  world.json `grab`; a fixed thing (a bar) keeps the hand where it took hold. Events `grab_counting`, `grabbed`,
+  `grab_releasing`, `grab_released`, `grab_landed`. Grabbed things are never saved to the edits file.
+
 ### Stage: stepping into a person
 
 - A third way to Follow: at GO the view moves inside the person, eyes at their eyes and facing their way, so their

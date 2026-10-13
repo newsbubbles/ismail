@@ -800,6 +800,94 @@ def stage_prop_pin(scene: str, object: str, person: str = None, bone: str = 'han
             f'saved in {f}')
 
 
+def _grab_save(scene, scenes, change):
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    w = worldmod.load_world(d, scene)
+    g = {'on': False, 'hold_s': 1.5, 'release_s': 1.0, 'objects': 'unlocked', 'rules': {}, **(w.get('grab') or {})}
+    change(g)
+    probs = worldmod.check_grab(g)
+    if probs:
+        raise OpError('; '.join(probs))
+    w['grab'] = g
+    try:
+        f = worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+    return g, f
+
+
+def _grab_page(scene, typ, fields):
+    try:
+        e = link.send(scene, typ, fields, timeout=20)
+    except Exception:                                      # noqa: BLE001  (no page open)
+        return None, 'the page takes it at its next load'
+    if e.get('ok') is False or e.get('error'):
+        raise OpError(f'{typ}: {e.get("error") or "the page refused it"}')
+    return e.get('result') or {}, None
+
+
+@op(mutates=True)
+def stage_grab_mode(scene: str, on: bool = True, hold_s: float = None, release_s: float = None, objects=None,
+                    scenes: str = None) -> str:
+    """Grab by touch: in VR a hand takes a thing by resting on it (the palm or the finger bases touching it, the hand
+    nearly still) for hold_s seconds (a ring fills), holds it, and lets go when the hand opens past half its grip for
+    release_s seconds (a ring empties; closing again keeps it). A let-go thing falls under gravity onto what is under
+    it, with the hand's speed (a toss flies). Inside a person (stage_embody) the person's hand holds it, and the grab
+    and the drop go into the take. Fingertips alone stay the pinch for menus. objects: "unlocked" (every small thing
+    the scene does not lock) or a list of names, globs allowed (["drum_stick_*", "bottle"]). Grabbed things are never
+    saved: the edits file keeps them where they stood. on=False lets go of everything held. Saved in world.json grab;
+    stage_grab_rule sets one object (a fixed bar, a big thing allowed, a thing never taken). Emits: grab_counting,
+    grabbed, grab_releasing, grab_released, grab_landed."""
+    if isinstance(objects, str) and objects != 'unlocked':
+        objects = [x.strip() for x in objects.split(',') if x.strip()]
+
+    def change(g):
+        g['on'] = bool(on)
+        if hold_s is not None:
+            g['hold_s'] = float(hold_s)
+        if release_s is not None:
+            g['release_s'] = float(release_s)
+        if objects is not None:
+            g['objects'] = objects
+    g, f = _grab_save(scene, scenes, change)
+    r, later = _grab_page(scene, 'grab_mode', {k: g[k] for k in ('on', 'hold_s', 'release_s', 'objects')})
+    objs = g['objects'] if g['objects'] == 'unlocked' else ', '.join(g['objects'])
+    head = (f'grab by touch {"on" if g["on"] else "off"} in {scene}: hold {g["hold_s"]} s to take, open for '
+            f'{g["release_s"]} s to let go; objects {objs}; saved in {f}')
+    if later:
+        return f'{head}; {later}'
+    can, let_go = r.get('takeable') or [], r.get('let_go')
+    if g['on']:
+        head += f'; a hand can take {len(can)} now' + (': ' + ', '.join(can[:20]) + (' ...' if len(can) > 20 else '') if can else '')
+    return head + (f'; let go of {", ".join(let_go)}' if let_go else '')
+
+
+@op(mutates=True)
+def stage_grab_rule(scene: str, object: str, grab: bool = True, fixed: bool = False, clear: bool = False,
+                    scenes: str = None) -> str:
+    """One object's grab-by-touch rule (stage_grab_mode). grab=True lets a hand take it even when it is big or locked;
+    grab=False never (and a hand holding it lets go). fixed=True: a hand holds on to it but it does not move (a bar, a
+    rail, a door frame); the hand model stays where it took hold, and pulling the hand 6 cm away lets go. clear=True
+    drops the rule. Saved in world.json grab.rules."""
+    def change(g):
+        rules = dict(g.get('rules') or {})
+        if clear:
+            if object not in rules:
+                raise OpError(f'{object} has no grab rule in {scene} (rules: {", ".join(rules) or "none"})')
+            rules.pop(object)
+        else:
+            rules[object] = {'grab': bool(grab), 'fixed': bool(fixed)}
+        g['rules'] = rules
+    g, f = _grab_save(scene, scenes, change)
+    if clear:
+        _, later = _grab_page(scene, 'grab_rule', {'object': object, 'clear': True})
+        return f'dropped the grab rule for {object} in {scene}; saved in {f}' + (f'; {later}' if later else '')
+    _, later = _grab_page(scene, 'grab_rule', {'object': object, 'grab': bool(grab), 'fixed': bool(fixed)})
+    what = 'never taken' if not grab else 'held on to, fixed' if fixed else 'taken by a hand'
+    return (f'{object} in {scene}: {what}; saved in {f}' + (f'; {later}' if later else '')
+            + ('' if g['on'] else '; grab by touch is off in this scene (stage_grab_mode turns it on)'))
+
+
 def _words_of(words):
     """words= as given: a list of {word, start, end}, a JSON file of one ({"words": [...]} or the list), or None."""
     if words is None:

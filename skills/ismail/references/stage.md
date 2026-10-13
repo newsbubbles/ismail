@@ -287,6 +287,17 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Props in a person's hands.** Place the prop where it belongs on the person (in the hand, on the strap), then
   `stage_prop_pin(scene, object, person, bone='hand_r')`: it rides their body from then on, at rest, in a take and in
   a Follow, and is saved with the scene. `clear=True` unpins it.
+- **Grab by touch (in VR, hand tracking).** `stage_grab_mode(scene, on=True, objects="unlocked", hold_s=1.5,
+  release_s=1.0)`: a hand takes a thing by resting on it, the palm or the finger bases touching it and the hand nearly
+  still, for `hold_s` (a ring fills); it holds it until the hand opens past half its grip for `release_s` (a ring
+  empties; closing again keeps it). Let go, it falls onto what is under it with the hand's speed, so a toss flies.
+  Fingertips alone stay the pinch for menus. Inside a person (`stage_embody`) the person's hand holds it, and the grab
+  and the drop go into the take and play back with it. `objects` can be a list of names or globs (`["drum_stick_*"]`).
+  `stage_grab_rule(scene, object, grab=True, fixed=False)` sets one thing: `fixed=True` for a bar or a rail the hand
+  holds on to without moving it (pulling 6 cm off lets go), `grab=False` for one never taken. Grabbed things are never
+  saved; the edits file keeps them where they stood. Events `grab_counting`, `grabbed`, `grab_releasing`,
+  `grab_released`, `grab_landed`. Phase 1 limits: a box around each mesh (fine for sticks, bottles and bars), and a
+  thing in flight only meets what is under it, not walls beside it.
 - **A person who sings or speaks (lip sync).** Export their body with mouth shapes kept (mhx `export --morphs mouth`;
   a step that slims the body for the headset has to keep them too, with every weight at 0; a body without them is
   left alone and the page says so once, `face_unsupported`), then `stage_face(scene, person, at=<song second>, audio=<vocal stem>, start=, end=, words=[{word, start, end}])`

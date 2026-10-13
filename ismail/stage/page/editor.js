@@ -885,9 +885,9 @@ export class Editor extends THREE.EventDispatcher {
   computeEdits() {
     const out = { objects: {}, lights: {}, materials: {} };
     for (const it of this.items) {
-      // pinned to a hand (anchor.js) or a person's bone (props.js), or moved on trial by an agent (live.js set
-      // trial): saved as it was before
-      const home = it.obj.userData.anchorHome || it.obj.userData.propHome || it.obj.userData.trialHome || it.obj.userData.behaviourHome;
+      // pinned to a hand (anchor.js) or a person's bone (props.js), moved on trial by an agent (live.js set
+      // trial), or grabbed by a hand (grab.js): saved as it was before
+      const u = it.obj.userData, home = u.anchorHome || u.propHome || u.trialHome || u.behaviourHome || u.grabHome;
       if (home ? home.changed : this.changed(it)) {
         const t = home ? home.t : this.blenderTransform(it);
         out.objects[it.name] = { location: r7(t.location), quaternion: r7(t.quaternion) };
