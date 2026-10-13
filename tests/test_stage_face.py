@@ -218,3 +218,13 @@ def test_a_failing_rhubarb_falls_back_to_the_words_and_says_why(tmp_path, monkey
     monkeypatch.setenv('ISMAIL_RHUBARB', str(exe))
     tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=voice([(0.5, 1.1)]))
     assert tr['source']['engine'] == 'words' and 'bad audio' in tr['source']['rhubarb_error']
+
+
+def test_a_rhubarb_that_hears_nothing_leaves_it_to_the_words(tmp_path, monkeypatch):
+    exe = tmp_path / 'rhubarb.py'
+    exe.write_text("import json, sys; a = sys.argv; json.dump({'mouthCues': []}, open(a[a.index('-o') + 1], 'w'))",
+                   encoding='utf-8')
+    monkeypatch.setenv('ISMAIL_RHUBARB', str(exe))
+    tr = face.track(None, [{'word': 'mama', 'start': 0.5, 'end': 1.1}], x=voice([(0.5, 1.1)]))
+    assert tr['source']['engine'] == 'words' and 'no mouth shapes' in tr['source']['rhubarb_error']
+    assert any(s[1] != 'X' for s in tr['shapes'])

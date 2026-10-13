@@ -268,7 +268,10 @@ def track(audio, words=None, start=0.0, end=None, fps=30, lead=LEAD_S, x=None, e
     if engine.startswith('rhubarb') or (engine == 'auto' and rhubarb_path()):
         try:
             shapes = rhubarb_shapes(x, start, end, ws, english=engine == 'rhubarb_english')
-            used = 'rhubarb_english' if engine == 'rhubarb_english' else 'rhubarb'
+            if shapes:
+                used = 'rhubarb_english' if engine == 'rhubarb_english' else 'rhubarb'
+            else:
+                why = 'Rhubarb heard no mouth shapes'     # the words (or loudness) make the track instead
         except (ValueError, OSError, subprocess.TimeoutExpired) as e:
             if engine != 'auto':
                 raise ValueError(str(e)) from None
