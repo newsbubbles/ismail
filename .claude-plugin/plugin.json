@@ -2,7 +2,7 @@
   "name": "ismail",
   "displayName": "ismail",
   "version": "0.3.0",
-  "description": "A DAW for AI agents: write music as notes, sounds and code, read the audio back as text, and play it live, in a VR stage too. 203 MCP tools plus the composing skill.",
+  "description": "A DAW for AI agents: write music as notes, sounds and code, read the audio back as text, and play it live, in a VR stage too. Its MCP tools (find one by need with ops_find) and the composing skill.",
   "author": {"name": "Nate Codes", "url": "https://github.com/newsbubbles"},
   "homepage": "https://newsbubbles.github.io/ismail/",
   "repository": "https://github.com/newsbubbles/ismail",

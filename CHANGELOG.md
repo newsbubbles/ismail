@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### README: a short front page
+
+- The README is now short: what ismail is (recursively modifiable interfaces: the DAW, the VR stage and the phone
+  page), songs to listen to, the agent roles, install, where to look, where it falls short, credit and licence.
+- The long reference moved to `docs/reference.md` (what's built today, the agent team, sample sources and every
+  tool area), and `docs/why.md` says why it works this way.
+
 ### Render: faders in the readout, an empty artist tag, wait in minutes
 - render's per-track readout says it is post-fader and prints each track's and bus's fader (and "(automated)" when
   the fader moves). A track routed to a bus is read before the bus's fader. When the master limiter is working, the
