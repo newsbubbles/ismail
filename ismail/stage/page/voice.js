@@ -443,6 +443,16 @@ export function initVoice(ed, hands, live) {
   tags.left.scale.set(0.09, 0.0225, 1); tags.right.scale.set(0.09, 0.0225, 1); badge.scale.set(0.32, 0.036, 1);    // wide canvas: 'REC locked: phone to send' was clipped
   const tmp = new THREE.Vector3(), fwd = new THREE.Vector3();
   function hud() {
+    if (ed.cleanView) {                    // inside a person (embody.js): nothing over the view but a stop being held
+      tags.left.visible = tags.right.visible = qcard.visible = false;
+      const pf = self.perfHud && self.perfHud();
+      badge.visible = !!(pf && pf.startsWith('■'));
+      if (!badge.visible) return;
+      camera.getWorldPosition(tmp); camera.getWorldDirection(fwd);
+      badge.position.copy(tmp).addScaledVector(fwd, 0.6).y += 0.3;
+      draw(badge, pf, 'rgba(60,60,60,0.85)');
+      return;
+    }
     for (const side of ['left', 'right']) {
       const h = hands.state[side], sp = tags[side];
       sp.visible = !!(h && h.f);

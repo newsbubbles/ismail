@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Stage: stepping into a person
+
+- A third way to Follow: at GO the view moves inside the person, eyes at their eyes and facing their way, so their
+  body is exactly where yours is and their hands are yours. Their head, your hand models and every panel, beam and
+  label are hidden from the inside, so a headset recording is clean. Both thumbs down held (or "stop the
+  performance", or an agent) stops it; you are put back where you stood and the take plays on them for keep or redo.
+- The person menu has "Step in" (with a take); agents use `stage_embody(person, when=next|now|off, eyes=person|floor,
+  after=return|stay)`. Events `embody_armed`, `embody_start`, `embody_stop`, `embody_skipped`.
+
 ### Stage: lip sync hears the voice with Rhubarb Lip Sync
 
 - When Rhubarb Lip Sync is on the machine (`~/.ismail/tools/rhubarb/`, or `ISMAIL_RHUBARB`), `stage_face` and
