@@ -383,8 +383,10 @@ def _ranges(xs):
 @op(mutates=True)
 def project_set(project: str, bpm: float = None, length_bars: int = None, offset_sec: float = None,
                 reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None,
-                objective: str = None, objective_by: str = 'user') -> str:
+                objective: str = None, objective_by: str = 'user', artist: str = None) -> str:
     """Change project settings. Changing bpm keeps notes on the same beats (the song gets faster/slower).
+    artist: the artist tag render writes into its mp3s (default 'ismail'); '' writes no artist tag, for a copy
+    whose artist is added later, by hand.
     reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference.
     objective: what the piece is for, in the words of whoever set it (objective_by, default 'user'): a sleep set's
     might be "stay asleep", a cover's "sound like the 1970 record". Earlier objectives are kept as history;
@@ -392,7 +394,7 @@ def project_set(project: str, bpm: float = None, length_bars: int = None, offset
     P = _load(project)
     ch = []
     for k, v in (('bpm', bpm), ('length_bars', length_bars), ('offset_sec', offset_sec), ('tail_sec', tail_sec),
-                 ('name', name)):
+                 ('name', name), ('artist', artist)):
         if v is not None:
             P.d[k] = v
             ch.append(f"{k}={v}")
@@ -570,7 +572,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     sits 4-6 LU over the rest) and mastered for its style. Versions are numbered across rounds (a next round's
     first is version 4 after three), so every number names one sketch. A next round (base=) keeps the person's
     tune and chords and changes only what their words name; its reply names the version to play as "before".
-    wait: when the machine is busy, stand in line this long ('2m' default, '0' refuses at once)."""
+    wait: when the machine is busy, stand in line this long ('2m' default, '0' refuses at once). A bare number is
+    minutes: wait='10' is ten minutes; for seconds write wait='600s'."""
     import sys
     from . import sketch as SK
     from . import voices as V
@@ -1898,7 +1901,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     analysis as 'track:<name>'. Analysis of a windowed render and its stems still uses song bar numbers (bars outside
     the window raise). mp3='also' writes renders/<out or latest>.mp3 next to the wav, mp3='only' writes the named
     render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg on PATH or $ISMAIL_FFMPEG.
-    wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once).
+    wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once). A bare number is
+    minutes: wait='10' is ten minutes; for seconds write wait='600s'.
     Returns levels, clipping and timing."""
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
@@ -1966,13 +1970,15 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     if R.full and lufs < -20:
         L.append(f"  QUIET: {lufs:.1f} LUFS is under every genre target (classical and ambient sit at -18 to -16): raise "
                  f"the master (limiter gain_db) or the faders; at low playback volume this reads as nothing")
-    L.append("  per track (after its fx and fader, scaled by the master chain's gain, so tracks sum to the mix;"
-             " buses listed as bus:<name>):")
+    L.append("  per track, post-fader (after its fx and its fader, then scaled by the master chain's gain; buses listed"
+             " as bus:<name>; a track routed to a bus is read before the bus's fader, and is in the bus's line too):")
     for k, v in st.items():
         pk = 20 * np.log10(np.max(np.abs(v)) + 1e-12)
         rms = 10 * np.log10(np.mean(v ** 2) + 1e-12)
         s = R.stats.get(k, {})
-        L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB" + (f"  ({'cached' if s.get('cached') else 'rendered in ' + str(s['sec']) + 's'})" if s else '')
+        src = P.d.get('buses', {}).get(k[4:], {}) if k.startswith('bus:') else P.d['tracks'].get(k, {})
+        fader = f"  fader {src.get('volume_db', 0.0):+.1f}" + (' (automated)' if (src.get('automation') or {}).get('volume_db') else '')
+        L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB{fader}" + (f"  ({'cached' if s.get('cached') else 'rendered in ' + str(s['sec']) + 's'})" if s else '')
                  + ('  SILENT - check notes/instrument/mute' if pk < -90 else '')
                  + (f"  HOT: this part alone reaches full scale; lower it {pk + 3:.1f} dB (track_set volume_db) so "
                     f"it peaks near -3 and the limiter is not flattening it" if pk > HOT_DB and k != 'master'
@@ -1988,6 +1994,10 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         L.append("  master: no limiter (fx_add target='master' fx={'type': 'limiter', 'ceiling_db': -0.3} catches peaks)")
     elif not any(t == 'master' and gr < -0.5 for (t, _), gr in R.gain_reduction.items()):
         L.append("  master limiter: idle (gain reduction under 0.5 dB)")
+    else:
+        L.append("  master limiter is working, so the peaks above carry its reduction: lowering one fader also eases the"
+                 " limiter, and that part's peak drops by less than the fader moved. A part over 0 dB here would reach"
+                 " the limiter on its own; it is not a clip")
     short = provenance.summary(P.d, P.root, tracks)[1]
     if short:
         L.append(short)
