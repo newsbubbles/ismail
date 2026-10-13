@@ -11,6 +11,16 @@
 - The person menu has "Step in" (with a take); agents use `stage_embody(person, when=next|now|off, eyes=person|floor,
   after=return|stay)`. Events `embody_armed`, `embody_start`, `embody_stop`, `embody_skipped`.
 
+### Stage: lip sync hears the voice with Rhubarb Lip Sync
+
+- When Rhubarb Lip Sync is on the machine (`~/.ismail/tools/rhubarb/`, or `ISMAIL_RHUBARB`), `stage_face` and
+  `face.track` take the mouth shapes from it: it listens to the voice itself, so the mouth follows the sounds and
+  the pauses instead of splitting each word's time evenly. Its phonetic recognizer is the default (any language,
+  singing too, 8 s of speech in about 2 s); `engine='rhubarb_english'` uses its English recognizer guided by the
+  words (8 s in about 17 s); `engine='words'` keeps the word method. Rhubarb gives the same nine mouth shapes, so
+  tracks and the page are unchanged.
+- Without it, or when it fails, the words are used as before, and the reply says why Rhubarb did not run.
+
 ### README: a "please credit" section
 
 - The licence stays MIT. The README now asks, as a request and not a licence term, that published work say "Made

@@ -818,14 +818,16 @@ def _words_of(words):
 @op(mutates=True)
 def stage_face(scene: str, person: str, at: float = None, audio: str = None, take: str = None, start: float = 0.0,
                end: float = None, words=None, transcribe: bool = False, clear: bool = False, file: str = None,
-               scenes: str = None) -> str:
+               engine: str = 'auto', scenes: str = None) -> str:
     """Put a stretch of a voice recording on a person's mouth at a song time (lip sync): the mouth moves with the
     words while the song plays, on the take, Follow or rest pose the person shows, and in captures. The voice: audio=
     a recording (a sung vocal stem is best; wav, or webm/ogg with ffmpeg), or take= a take id (its own mic audio and
     the words said in it). start/end: the stretch, seconds on the recording's clock; at: the song second where start
     plays. words: [{word, start, end}] on the recording's clock (or a JSON file of them) shape the mouth per sound
     (closed lips on M B P, a pucker on OO); transcribe=True asks the speech server for them; with none, the jaw
-    follows loudness only. The track is saved in <scene>/faces/ and listed in world.json faces (person -> [{file,
+    follows loudness only. engine: 'auto' uses Rhubarb Lip Sync when it is on this machine (it hears the mouth
+    shapes in the voice itself, any language, singing too), else the words; 'rhubarb_english' its slower English
+    recognizer guided by the words; 'words' the words only. The track is saved in <scene>/faces/ and listed in world.json faces (person -> [{file,
     at}]); a new track replaces the person's tracks it overlaps. The person's body needs mouth shapes (mhx export
     with morphs="mouth"); the page says face_unsupported when it has none. clear=True removes the person's tracks
     (file= only that one; the files stay). Replies with the track as text: a mouth shape letter and a jaw digit per
@@ -886,7 +888,7 @@ def stage_face(scene: str, person: str, at: float = None, audio: str = None, tak
         words = [dict(ww, start=ww['start'] + start, end=ww['end'] + start)
                  for ww in perform.snap_words(got['words'], v)]
     try:
-        tr = face.track(src, words, start=start, end=end, x=x)
+        tr = face.track(src, words, start=start, end=end, x=x, engine=engine)
     except ValueError as e:
         raise OpError(str(e))
     name = file or f'{person}_{int(round(at * 1000))}.json'
@@ -909,9 +911,16 @@ def stage_face(scene: str, person: str, at: float = None, audio: str = None, tak
     said = ' '.join(str(x['word']).strip() for x in words or [] if start <= float(x['start']) < start + tr['seconds'])
     replaced = [g for g in gone if g != name]
     return (f"{person}'s mouth: {tr['seconds']} s of {src.name} from {tr['start']} s, at song {at} s, "
-            f"{'from ' + str(tr['source']['words']) + ' words (' + tr['source']['phonemes'] + ')' if tr['source']['words'] else 'from loudness only (no words)'}"
+            f"{_face_from(tr['source'])}"
             f"{'; said: ' + said[:200] if said else ''}{'; replaced ' + ', '.join(replaced) if replaced else ''}; "
             f"saved faces/{name}" + _face_reload(scene, faces) + '\n' + face.readout(tr))
+
+
+def _face_from(src):
+    eng, n = src.get('engine'), src.get('words')
+    out = {'rhubarb': 'shapes heard by Rhubarb', 'rhubarb_english': 'shapes heard by Rhubarb (English, guided by '
+           f'{n} words)', 'words': f"from {n} words ({src.get('phonemes')})"}.get(eng, 'from loudness only (no words)')
+    return out + (f" (Rhubarb did not run: {src['rhubarb_error']})" if src.get('rhubarb_error') else '')
 
 
 def _face_reload(scene, faces):

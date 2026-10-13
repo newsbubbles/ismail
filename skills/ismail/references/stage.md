@@ -294,6 +294,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   `transcribe=True` asks the speech server for the words). The reply shows the track as a mouth shape letter and a
   jaw digit per 0.1 s; read it against the words before you film. Without words the jaw only follows loudness, which
   reads as chewing on a mixed recording: use a vocal stem and words.
+  With Rhubarb Lip Sync on the machine (free, MIT, about 87 MB for Windows: unpacked in `~/.ismail/tools/rhubarb/`
+  or named by `ISMAIL_RHUBARB`; download it only on the person's yes), `stage_face` hears the mouth shapes in the
+  voice itself: the timing follows the sounds and pauses, in any language and in singing, at about 4 times faster
+  than real time. `engine='rhubarb_english'` uses its English recognizer guided by the words (slower than real
+  time), `engine='words'` the words only. The reply says which one made the track, and why Rhubarb did not run.
 - **Keep the headset light with load sets.** When the work moves to one group (the band), unload the others (the
   dancers): `stage_set_define(scene, 'dancers', items=['person_couple_*'], note='the six dancers')` once, then
   `stage_set_load(scene, 'dancers', loaded=False)`. They are not drawn, compiled or uploaded, their people neither
