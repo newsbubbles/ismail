@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### README: a "please credit" section
+
+- The licence stays MIT. The README now asks, as a request and not a licence term, that published work say "Made
+  with ismail" with a link, points to the `credits` op and to GitHub's "Cite this repository" (CITATION.cff).
+
 ### Stage: `ismail.stage.link` imports on its own again
 
 - `python -m ismail.stage.ear --who <name> --once` died with "cannot import name 'page_cmd' from partially

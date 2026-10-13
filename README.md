@@ -525,6 +525,16 @@ songs/           your projects (git-ignored)
 
 Open an issue with the song (a link is fine) and the prompt you gave your agent. The best ones go on the [showcase page](https://newsbubbles.github.io/ismail/).
 
+## Please credit
+
+ismail is MIT-licensed: use it for anything, commercial work included. We only ask, as a request and not a licence
+term, that when you publish something made with ismail, you say so.
+
+- Music, videos, posts: "Made with ismail" and a link to https://github.com/newsbubbles/ismail. The `credits` op
+  writes CREDITS.md with that line and the recordings the agent measured; keep it with the piece.
+- Papers and reports: use "Cite this repository" on GitHub (from `CITATION.cff`).
+- If your agent measured someone else's recording to model a sound, credit them too; CREDITS.md lists them.
+
 ## License
 
 MIT, see `LICENSE`.
