@@ -236,7 +236,7 @@ export function initHands(ed, xrApi, emit) {
     shadow.frames = [];
     if (fr.length < REC_HZ) return null;                        // under a second: nothing worth keeping
     const t0 = fr[0].t;                                         // the buffer may have dropped its oldest part
-    lastFollow = { person: shadow.person, frames: t0 ? fr.map((f) => ({ ...f, t: r4(f.t - t0) })) : fr,
+    lastFollow = { person: shadow.person, frames: t0 ? fr.map((f) => ({ ...f, t: r4(f.t - t0), ...(f.ev ? { ev: f.ev.map((e) => ({ ...e, t: r4(e.t - t0) })) } : {}) })) : fr,
       started: new Date(shadow.started.getTime() + t0 * 1000), seconds: r4(fr[fr.length - 1].t - t0),
       perf: shadow.perf ? { performance: shadow.perf.id, perf_shift: r4(t0), perf_scene: shadow.perf.scene } : null };
     emit('follow_buffered', { person: lastFollow.person, frames: fr.length, seconds: lastFollow.seconds });
@@ -298,8 +298,16 @@ export function initHands(ed, xrApi, emit) {
     if (body) fr.body = body;
     return fr;
   }
+  // grab.js: a grab or a drop inside a person goes into the take being made (a take or a Follow's shadow), on the next
+  // frame, with its own time (a drop is marked when the hand began to open, up to a second or two back)
+  let marks = [];
+  function mark(ev) { if (rec.on || shadow.on) marks.push(ev); }
+  function withMarks(fr, t0) {
+    if (marks.length) { fr.ev = marks.map(({ at, ...e }) => ({ ...e, t: r4((at - t0) / 1000) })); marks = []; }
+    return fr;
+  }
   function sample(now) {
-    const fr = makeFrame(now, rec.t0);
+    const fr = withMarks(makeFrame(now, rec.t0), rec.t0);
     rec.buf.push(fr);
     rec.frames++;
     if (rec.buf.length >= REC_HZ) flushTake();
@@ -393,7 +401,7 @@ export function initHands(ed, xrApi, emit) {
     if (shadow.on && rec.on) { shadow.on = false; shadow.frames = []; }   // a real take started: it has the frames
     else if (shadow.on && now - shadow.last >= 1000 / REC_HZ - 1) {
       shadow.last = now;
-      shadow.frames.push(makeFrame(now, shadow.t0));
+      shadow.frames.push(withMarks(makeFrame(now, shadow.t0), shadow.t0));
       if (shadow.frames.length > SHADOW_MAX_S * REC_HZ) shadow.frames.shift();
     }
   }
@@ -402,7 +410,7 @@ export function initHands(ed, xrApi, emit) {
   // actors.js follow: the frame a take would record right now (a person moves with the user, live)
   const frameNow = () => makeFrame(performance.now(), 0);
   const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false,
-    shadowStart, shadowStop, keepLast, discardLast, lastFollowInfo, lastFollowData: () => lastFollow, performing: false,
+    shadowStart, shadowStop, mark, keepLast, discardLast, lastFollowInfo, lastFollowData: () => lastFollow, performing: false,
     addUIGuard: (fn) => uiGuards.push(fn) };
   return api;
 }

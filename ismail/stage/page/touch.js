@@ -204,7 +204,7 @@ export function initTouch(ed, xrApi, hands, emit) {
         } else if (rose && !hands.state[side].resting && !hands.performing) {   // perform.js: no grabs while performing
           let pt = null, all = [];
           for (const q of rose === 'pinch' ? [p.pinchPt, p.palm] : [p.palm, p.pinchPt]) {
-            all = nearAll(q);
+            all = nearAll(q).filter((x) => !(api.skip && api.skip(x.item, rose)));   // grab.js takes these by holding
             if (all.length) { pt = q; break; }
           }
           const free = all.filter((x) => !x.locked);
@@ -255,5 +255,7 @@ export function initTouch(ed, xrApi, hands, emit) {
   }
   ed.renderer.xr.addEventListener('sessionend', () => { for (const side of ['left', 'right']) { release(side); display(side, null); } });
 
-  return { update, held, nearFor };
+  // grab.js sets skip(item, how): true for a thing it holds, and (a fist) for one it takes by holding (a pinch stays)
+  const api = { update, held, nearFor, skip: null };
+  return api;
 }
