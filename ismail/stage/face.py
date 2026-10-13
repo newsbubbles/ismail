@@ -11,6 +11,10 @@ short time and the vowels share the rest, so a held sung note is a held vowel. L
 loud vowels, and the mouth rests where nothing is said. With no words (no transcript) the track follows loudness
 alone, rounding the lips when the voice is dark. The mouth leads the sound by LEAD_S, as real mouths do.
 
+When Rhubarb Lip Sync is on this machine (rhubarb_path), it gives the shapes instead: it listens to the voice itself
+(the words, when there are any, guide its recognizer), so the timing follows the sounds, not a split of each word's
+span. Its output is the same nine Preston Blair shapes, so the rest of the track is made the same way.
+
 face.json: {fps, start, seconds, units: [names], frames: [[weight per unit] per frame] (0..1, 2 decimals),
             shapes: [[t, shape, phoneme, word]], source}
 start and every t are seconds on the recording's clock; frame i shows the mouth at start + i / fps.
@@ -18,6 +22,9 @@ start and every t are seconds on the recording's clock; frame i shows the mouth 
 import json
 import os
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +70,8 @@ LETTERS = [('oo', 'UW'), ('ee', 'IY'), ('ea', 'IY'), ('ou', 'AW'), ('ow', 'OW'),
            ('c', 'K'), ('d', 'D'), ('f', 'F'), ('g', 'G'), ('h', 'HH'), ('j', 'JH'), ('k', 'K'), ('l', 'L'),
            ('m', 'M'), ('n', 'N'), ('p', 'P'), ('r', 'R'), ('s', 'S'), ('t', 'T'), ('v', 'V'), ('w', 'W'),
            ('x', 'K S'), ('z', 'Z')]
+
+ENGINES = ('auto', 'rhubarb', 'rhubarb_english', 'words')
 
 _DICT = None
 
@@ -168,9 +177,80 @@ def _smooth(m, fps):
     return out
 
 
-def track(audio, words=None, start=0.0, end=None, fps=30, lead=LEAD_S, x=None):
+def rhubarb_path():
+    """The Rhubarb Lip Sync program when it is on this machine: $ISMAIL_RHUBARB (the program or its folder), else
+    ~/.ismail/tools/rhubarb/ with the release unpacked in it at any depth; None when it is not here."""
+    env = os.environ.get('ISMAIL_RHUBARB')
+    root = Path(env) if env else Path.home() / '.ismail' / 'tools' / 'rhubarb'
+    if root.is_file():
+        return root
+    if root.is_dir():
+        for name in ('rhubarb.exe', 'rhubarb'):
+            hit = sorted(q for q in root.rglob(name) if q.is_file())
+            if hit:
+                return hit[0]
+    return None
+
+
+def rhubarb_shapes(x, start, end, words=None, exe=None, english=False, timeout=600):
+    """[[t, shape, '', word]] from Rhubarb Lip Sync for x (16 kHz mono) between start and end, t on x's clock; the
+    shapes keep the word they fall in. Its phonetic recognizer by default: any language, singing too, about 4 times
+    faster than real time. english=True uses its English speech recognizer, guided by the words as dialog text
+    (about 2 times slower than real time, 2026-10-13 on this laptop)."""
+    import soundfile as sf
+    exe = exe or rhubarb_path()
+    if not exe or not Path(exe).is_file():
+        raise ValueError('Rhubarb Lip Sync is not on this machine (set ISMAIL_RHUBARB, or unpack it in '
+                         '~/.ismail/tools/rhubarb/)')
+    exe, sr = Path(exe), perform.SR
+    ws = sorted((w for w in words or [] if float(w['end']) > start and float(w['start']) < end),
+                key=lambda w: float(w['start']))
+    with tempfile.TemporaryDirectory(prefix='ismail_rhubarb_') as td:
+        wav, out, dialog = Path(td) / 'voice.wav', Path(td) / 'cues.json', Path(td) / 'dialog.txt'
+        sf.write(wav, x[int(start * sr):int(end * sr)], sr, subtype='PCM_16')
+        cmd = [sys.executable, str(exe)] if exe.suffix == '.py' else [str(exe)]   # a .py stands in for it in tests
+        cmd += ['-f', 'json', '--extendedShapes', 'GHX', '-r', 'pocketSphinx' if english else 'phonetic', '-o', str(out)]
+        if ws and english:
+            dialog.write_text(' '.join(str(w['word']).strip() for w in ws), encoding='utf-8')
+            cmd += ['-d', str(dialog)]
+        r = subprocess.run(cmd + [str(wav)], capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0 or not out.is_file():
+            raise ValueError(f'Rhubarb Lip Sync failed ({r.returncode}): {(r.stderr or r.stdout).strip()[-300:]}')
+        cues = json.loads(out.read_text(encoding='utf-8')).get('mouthCues') or []
+    shapes = []
+    for c in cues:
+        t, shp = start + float(c['start']), str(c['value'])
+        if shp not in SHAPES or (shapes and shapes[-1][1] == shp):
+            continue
+        word = next((str(w['word']).strip() for w in ws if float(w['start']) <= t < float(w['end'])), '')
+        shapes.append([round(t, 3), shp, '', '' if shp == 'X' else word])
+    return shapes
+
+
+def _word_shapes_of(ws):
+    """[[t, shape, phoneme, word]] for words [{word, start, end}], with rests in the pauses."""
+    segs = []
+    for w in sorted(ws, key=lambda w: float(w['start'])):
+        for s in word_shapes(str(w['word']), float(w['start']), float(w['end'])):
+            segs.append(s + (str(w['word']).strip(),))
+    shapes, prev_end = [], None
+    for (t0, t1, shp, ph, word) in segs:
+        if prev_end is not None and t0 - prev_end > GAP_REST_S:
+            shapes.append([round(prev_end, 3), 'X', '', ''])
+        shapes.append([round(t0, 3), shp, ph, word])
+        prev_end = t1
+    if prev_end is not None:
+        shapes.append([round(prev_end, 3), 'X', '', ''])
+    return shapes
+
+
+def track(audio, words=None, start=0.0, end=None, fps=30, lead=LEAD_S, x=None, engine='auto'):
     """The mouth track for audio (a path, or x: 16 kHz mono samples) between start and end (seconds on its clock),
-    from words [{word, start, end}] on the same clock (snapped words from a take are best), or loudness alone."""
+    from words [{word, start, end}] on the same clock (snapped words from a take are best), or loudness alone.
+    engine: 'auto' (Rhubarb when it is here, else the words), 'rhubarb' (an error when it is not here),
+    'rhubarb_english' (its slower English recognizer, guided by the words) or 'words'."""
+    if engine not in ENGINES:
+        raise ValueError(f"engine: one of {', '.join(ENGINES)}, not {engine!r}")
     if x is None:
         x = perform.pcm(audio)
     sr = perform.SR
@@ -183,21 +263,19 @@ def track(audio, words=None, start=0.0, end=None, fps=30, lead=LEAD_S, x=None):
     loud, dark = np.resize(loud[i0:i0 + n], n), np.resize(dark[i0:i0 + n], n)
     idx = {u: j for j, u in enumerate(UNITS)}
     m = np.zeros((n, len(UNITS)))
-    shapes = []
     ws = [w for w in (words or []) if float(w['end']) > start and float(w['start']) < end and str(w.get('word', '')).strip()]
-    if ws:
-        segs = []
-        for w in sorted(ws, key=lambda w: float(w['start'])):
-            for s in word_shapes(str(w['word']), float(w['start']), float(w['end'])):
-                segs.append(s + (str(w['word']).strip(),))
-        prev_end = None
-        for (t0, t1, shp, ph, word) in segs:
-            if prev_end is not None and t0 - prev_end > GAP_REST_S:
-                shapes.append([round(prev_end, 3), 'X', '', ''])
-            shapes.append([round(t0, 3), shp, ph, word])
-            prev_end = t1
-        if prev_end is not None:
-            shapes.append([round(prev_end, 3), 'X', '', ''])
+    shapes, used, why = [], 'words' if ws else 'loudness', None
+    if engine.startswith('rhubarb') or (engine == 'auto' and rhubarb_path()):
+        try:
+            shapes = rhubarb_shapes(x, start, end, ws, english=engine == 'rhubarb_english')
+            used = 'rhubarb_english' if engine == 'rhubarb_english' else 'rhubarb'
+        except (ValueError, OSError, subprocess.TimeoutExpired) as e:
+            if engine != 'auto':
+                raise ValueError(str(e)) from None
+            why = str(e)                              # auto: say why, and fall back to the words
+    if not used.startswith('rhubarb') and ws:
+        shapes = _word_shapes_of(ws)
+    if shapes:
         times = np.array([s[0] for s in shapes])
         for i in range(n):
             t = start + i / fps + lead
@@ -220,7 +298,8 @@ def track(audio, words=None, start=0.0, end=None, fps=30, lead=LEAD_S, x=None):
     return {'fps': fps, 'start': round(start, 3), 'seconds': round(n / fps, 3), 'units': UNITS,
             'frames': np.round(m, 2).tolist(), 'shapes': [s for s in shapes if start <= s[0] < end],
             'source': {'audio': str(audio) if audio is not None else None, 'words': len(ws),
-                       'phonemes': 'dict' if pronouncing() else 'spelling', 'lead_s': lead}}
+                       'phonemes': 'dict' if pronouncing() else 'spelling', 'lead_s': lead, 'engine': used,
+                       **({'rhubarb_error': why} if why else {})}}
 
 
 def write(tr, path):
