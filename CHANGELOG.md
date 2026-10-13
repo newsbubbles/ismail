@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Render: faders in the readout, an empty artist tag, wait in minutes
+- render's per-track readout says it is post-fader and prints each track's and bus's fader (and "(automated)" when
+  the fader moves). A track routed to a bus is read before the bus's fader. When the master limiter is working, the
+  readout says so: lowering one fader also eases the limiter, so that part's peak drops by less than the fader moved,
+  and a part over 0 dB there is not a clip.
+- `project_set(artist=...)` sets the artist tag render writes into its mp3s. `artist=''` writes none (and removes one
+  already there), for a copy whose artist is added by hand later. Unset, it stays "ismail".
+- render's and sketch's help say a bare `wait` number is minutes: `wait='10'` is ten minutes, `wait='600s'` is
+  seconds.
+
 ### Stage: worn parts come off
 
 - `stage_actor_part(scene, person, part, show, move, seconds, reset)` hides a piece of a person's costume (glasses,

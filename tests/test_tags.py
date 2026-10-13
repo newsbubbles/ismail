@@ -47,3 +47,13 @@ def test_retagging_replaces_the_stamp_and_an_old_mp3_reads_none(tmp_path, monkey
     old = tmp_path / 'old.mp3'
     old.write_bytes(b'\xff\xfb\x90\x00' + bytes(400))
     assert tags.read_tags(str(old)) == {}
+
+
+def test_an_empty_artist_writes_no_artist_tag_and_none_means_ismail(tmp_path):
+    p = _mp3(tmp_path)
+    assert tags.tag_mp3(p)['artist'] == 'ismail' and tags.read_tags(p)['artist'] == 'ismail'
+    tags.tag_mp3(p, artist='')                    # a copy whose artist is added by hand later: none, and the old one gone
+    from mutagen.id3 import ID3
+    assert ID3(p).getall('TPE1') == [] and not tags.read_tags(p).get('artist')
+    tags.tag_mp3(p, artist='Someone')
+    assert tags.read_tags(p)['artist'] == 'Someone'
