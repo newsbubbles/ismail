@@ -2326,6 +2326,7 @@ from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, sec
 from . import api_exam  # noqa: E402,F401  (registers exam_check, the exam pre-flight)
 from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list/measure, ledger:M177)
 from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
+from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
