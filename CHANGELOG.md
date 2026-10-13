@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Live: played keys
+
+- `midi_sources()` lists the MIDI inputs (keyboards, pads, loopMIDI ports). Windows reads them through winmm with
+  no extra library; elsewhere mido with python-rtmidi when installed.
+- `live_midi(project, source, track= or instrument=, volume_db, transpose, channel, remove)` plays an input through
+  the running set: the notes render once on the workers, then a key sounds one output buffer after the press
+  (velocity, note-off, sustain pedal, all-notes-off). Swapping the sound keeps the old one until the new is ready. A
+  running engine says when an input is plugged in or out and reopens a patched one when it comes back.
+- Every key is logged with the bar heard (`live/midi/<input>.jsonl`); `live_played(project, source, bars)` reads it
+  back as notes lines, the format tracks take.
+- Known gaps: keys skip the track's live effects and the safety limiter (a soft clip guards them), and are not in
+  `live_record` recordings or streams yet.
+
 ### Listening together
 
 - New `listen_*` ops record what plays on this computer while the person listens and talks about it:

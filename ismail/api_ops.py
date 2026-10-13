@@ -36,7 +36,7 @@ CATEGORIES = [
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
     ('together', 'listening together: record what plays (a mic only with their yes), mark moments and their messages, '
                  'read back skips, stretches and what was said on one clock', ('listen_',)),
-    ('live', 'playing live: decks, transitions, the live engine', ('live_',)),
+    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]
