@@ -15,6 +15,18 @@
 - Known gaps: keys skip the track's live effects and the safety limiter (a soft clip guards them), and are not in
   `live_record` recordings or streams yet.
 
+### Listening together
+
+- New `listen_*` ops record what plays on this computer while the person listens and talks about it:
+  `listen_start` (speakers or another output, and a mic only with `mic_ok=True` after their yes; the reply names
+  every live input, and the phone page pins the mic state), `listen_peek`, `listen_mark`, `listen_note` (a typed
+  message, placed over the time spent typing it), `listen_stop`, `listen_read` and `listen_list`.
+- The reading puts everything on one clock: skips, changes and pauses in the music, each stretch's loudness (LUFS,
+  LRA, true peak), beat grid and overview, and what was said, placed at the moment of the music heard (the mic's
+  lag and drift are measured). Recording and reading run in the background.
+- Windows only for now: `pip install ismail[listen]` adds pyaudiowpatch. Built from the Live DJ's session recorder.
+  See `skills/ismail/references/listen-together.md`.
+
 ### README: a short front page
 
 - The README is now short: what ismail is (recursively modifiable interfaces: the DAW, the VR stage and the phone

@@ -38,6 +38,7 @@ separate = ["demucs>=4.0"]
 video = ["opencv-python>=4.8", "pycollada>=0.8", "pillow>=10.0"]
 live = ["sounddevice>=0.4"]
 voice = ["pyworld>=0.3.4"]
+listen = ["pyaudiowpatch>=0.2; sys_platform == 'win32'"]
 dev = ["pytest>=8.0"]
 
 [project.urls]
