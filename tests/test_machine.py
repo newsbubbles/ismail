@@ -620,23 +620,29 @@ def test_a_job_far_past_its_memory_on_low_commit_is_paused_never_killed_and_resu
     monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
     code = "import time; b = b'x' * (300 * 2 ** 20)\nfor i in range(400): print(i, flush=True); time.sleep(0.05)"
     with machine.slot('cpu', 'questcut ffmpeg', mem_gb=0.01, who='steward') as job:
-        p = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True)
-        t = time.time()
-        while not (machine.jobs() and machine.jobs()[0].get('suspended')) and time.time() - t < 20:
-            time.sleep(0.05)
-        on_board = machine.jobs()[0]
-        assert on_board['suspended']['pids'] == [p.pid] and psutil.Process(p.pid).is_running()
-        assert 'SUSPENDED: OVER' in machine._describe(on_board) and 'resume' in machine._describe(on_board)
-        assert 'none is paused' not in machine.resume('nothing-like-it') and 'no paused job' in machine.resume('zzz')
-        out = machine.resume('questcut')
-        assert out.startswith("resumed 'questcut ffmpeg' (1 processes)") and 'memory is still low' in out
-        t = time.time()
-        while machine.jobs()[0].get('suspended') and time.time() - t < 10:
-            time.sleep(0.05)
-        time.sleep(0.5)
-        assert not machine.jobs()[0].get('suspended') and machine.jobs()[0].get('resumed')   # not paused again
-        p.kill()
-        p.wait()
+        p = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.DEVNULL)
+        try:
+            t = time.time()
+            while not (machine.jobs() and machine.jobs()[0].get('suspended')) and time.time() - t < 20:
+                time.sleep(0.05)
+            on_board = machine.jobs()[0]
+            assert on_board['suspended']['pids'] == [p.pid] and psutil.Process(p.pid).is_running()
+            assert 'SUSPENDED: OVER' in machine._describe(on_board) and 'resume' in machine._describe(on_board)
+            assert 'none is paused' not in machine.resume('nothing-like-it') and 'no paused job' in machine.resume('zzz')
+            out = machine.resume('questcut')
+            assert out.startswith("resumed 'questcut ffmpeg' (1 processes)") and 'memory is still low' in out
+            t = time.time()
+            while machine.jobs()[0].get('suspended') and time.time() - t < 10:
+                time.sleep(0.05)
+            time.sleep(0.5)
+            assert not machine.jobs()[0].get('suspended') and machine.jobs()[0].get('resumed')   # not paused again
+        finally:                                        # a failed assert must not leave a paused 300 MB process
+            try:
+                psutil.Process(p.pid).resume()
+            except psutil.Error:
+                pass
+            p.kill()
+            p.wait()
     assert machine.history()[-1]['suspended'] is True
 
 
