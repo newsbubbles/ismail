@@ -77,7 +77,7 @@ def build_line(b=None):
 
 def tag_mp3(path, title=None, artist=None, album=None, date=None, comment=None):
     """Write the tags into `path` (an mp3), keeping any other tags it has. title: what it is (default: the file
-    name); artist: who made it (default 'ismail'); album: the song or set it belongs to; date: YYYY-MM-DD (default
+    name); artist: who made it (default 'ismail'; '' writes no artist tag and removes one already there); album: the song or set it belongs to; date: YYYY-MM-DD (default
     today); comment: added after the made-with line. -> the tags written, as a dict."""
     from mutagen.id3 import COMM, ID3, ID3NoHeaderError, TALB, TDRC, TENC, TIT2, TPE1, TSSE, TXXX, WOAS, WXXX
     try:
@@ -85,10 +85,13 @@ def tag_mp3(path, title=None, artist=None, album=None, date=None, comment=None):
     except ID3NoHeaderError:
         tags = ID3()
     title = title or os.path.splitext(os.path.basename(path))[0].replace('_', ' ')
-    vals = {'title': title, 'artist': artist or 'ismail', 'album': album, 'date': date or datetime.date.today().isoformat(),
+    vals = {'title': title, 'artist': 'ismail' if artist is None else artist, 'album': album, 'date': date or datetime.date.today().isoformat(),
             'comment': MADE_WITH + (f'. {comment}' if comment else '')}
     tags.setall('TIT2', [TIT2(encoding=3, text=vals['title'])])
-    tags.setall('TPE1', [TPE1(encoding=3, text=vals['artist'])])
+    if vals['artist']:
+        tags.setall('TPE1', [TPE1(encoding=3, text=vals['artist'])])
+    else:
+        tags.delall('TPE1')
     if album:
         tags.setall('TALB', [TALB(encoding=3, text=album)])
     tags.setall('TDRC', [TDRC(encoding=3, text=vals['date'])])
