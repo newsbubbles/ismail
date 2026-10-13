@@ -562,3 +562,24 @@ def test_saving_edits_keeps_the_file_and_a_copy_and_takes_two_saves_at_once(stag
     objs = json.loads((d / 'edits.json').read_text(encoding='utf-8'))['objects']
     assert set(objs) == {'box'} | {f'box_{i}' for i in range(8)}             # merged one after another, none lost
     assert not list(d.glob('*.tmp'))
+
+
+def test_stepping_into_a_person_goes_to_the_page(stage):
+    page = FakePage(stage['port'], 'room')
+    try:
+        OPS['stage_embody'](scene='room', person='person_a')
+        c = page.seen[-1]
+        assert (c['type'], c['person'], c['when'], c['eyes'], c['after']) == ('embody', 'person_a', 'next', 'person', 'return')
+        OPS['stage_embody'](scene='room', person='person_a', when='now', eyes='floor', after='stay', countdown=0)
+        c = page.seen[-1]
+        assert (c['when'], c['eyes'], c['after'], c['countdown']) == ('now', 'floor', 'stay', 0)
+        OPS['stage_embody'](scene='room', when='off')
+        assert page.seen[-1]['when'] == 'off'
+        for bad, match in (({'when': 'later'}, 'when is'), ({'eyes': 'mine'}, 'eyes is'), ({'after': 'go'}, 'after is'),
+                           ({}, 'person= is needed')):
+            with pytest.raises(OpError, match=match):
+                OPS['stage_embody'](scene='room', **({'person': 'p'} if bad else {}), **bad)
+        with pytest.raises(OpError, match='stage_embody'):
+            OPS['stage_cmd'](scene='room', type='embody')
+    finally:
+        page.stop = True

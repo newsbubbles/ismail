@@ -385,6 +385,34 @@ def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = N
 
 
 @op(mutates=True)
+def stage_embody(scene: str, person: str = None, when: str = 'next', eyes: str = 'person', after: str = 'return',
+                 countdown: int = 3) -> str:
+    """Step the person in VR into a person (page command: embody): at GO their view moves inside, their eyes at the
+    person's eyes and facing the way the person faces, so the body is exactly where theirs is and they see the
+    person's hands as their own. The person's head, their own hand models and every panel, beam and label are hidden
+    from the inside (a clean view, for filming); the Follow is a performance as usual, and both thumbs down held,
+    saying "stop the performance" or stage_perform(action="stop") ends it. Then they are put back where they stood
+    and a take made inside plays on the person for keep or redo. when: next (the next Follow or Take on that person,
+    from the menu or stage_actor_follow, steps in; nothing moves yet) | now (count down `countdown` seconds and step
+    in, a Follow without a take) | off (disarm, and step out if inside). eyes: person (their eye height) | floor (the
+    user's own height on the person's floor). after: return | stay (left where the person stands). The person menu
+    has the same as "Step in" (with a take). Needs the headset on: outside VR the Follow starts as a plain one
+    (embody_skipped). Page replies {armed, person, eyes, after} for next, the Follow's reply plus {inside: true} for
+    now. Errors: no person, no body for that person. Emits: embody_armed, embody_start {person, eyes, after},
+    embody_stop {person, why, take, after}, embody_skipped {person, why}."""
+    if when not in ('next', 'now', 'off'):
+        raise OpError("when is next, now or off")
+    if eyes not in ('person', 'floor'):
+        raise OpError("eyes is person or floor")
+    if after not in ('return', 'stay'):
+        raise OpError("after is return or stay")
+    if when != 'off' and not person:
+        raise OpError('person= is needed (the person to step into)')
+    return page_cmd(scene, 'embody', {'person': person, 'when': when, 'eyes': eyes, 'after': after, 'countdown': countdown},
+                    timeout=30 + (countdown or 0))
+
+
+@op(mutates=True)
 def stage_anchor_set(scene: str, object: str, hand: str = 'left', joint: str = 'thumb-metacarpal', at: str = 'keep') -> str:
     """Pin an object to a joint of a tracked hand for this session (page command: anchor). hand: left | right; joint:
     a WebXR hand joint name; at: keep (holds the pose it has now, relative to the joint) | joint (its origin onto the
@@ -728,4 +756,4 @@ def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
     return page_cmd(scene, 'actor_pose', {'person': person, 't': t}, timeout=30)
 
 
-TYPED = {'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

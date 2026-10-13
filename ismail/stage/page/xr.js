@@ -23,7 +23,8 @@ export function initXR(ed, desktop) {
   // layer (the beam, the travel arc and ring, boxes and names on targets, the panel, the update card) never reached the
   // headset; the user could not see what they pointed at. Put the layer back after three sets the eye cameras.
   const updateCamera = xr.updateCamera.bind(xr);
-  xr.updateCamera = (cam) => { updateCamera(cam); for (const c of xr.getCamera().cameras) c.layers.enable(GIZMO); };
+  // Inside a person (embody.js) the view is clean: the layer stays off (Marketing: no HUD or menus in the recorded view)
+  xr.updateCamera = (cam) => { updateCamera(cam); for (const c of xr.getCamera().cameras) c.layers[ed.cleanView ? 'disable' : 'enable'](GIZMO); };
   // body-tracking: Quest Browser's WebXR body (83 joints, legs from Meta's generated legs) when the user has turned on
   // chrome://flags "WebXR Experiments"; without the flag it is simply not granted and nothing changes
   const btn = VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking', 'body-tracking'] });
@@ -480,10 +481,10 @@ export function initXR(ed, desktop) {
       localStorage.setItem(spotKey(), JSON.stringify({ x: rig.position.x, y: rig.position.y, z: rig.position.z, yaw: e.y }));
     } catch (_) { /* storage blocked: start as before */ }
   }
-  setInterval(() => { if (xr.isPresenting) spotSave(); }, 2000);
+  setInterval(() => { if (xr.isPresenting && !ed.embodied) spotSave(); }, 2000);   // inside a person is not a spot
   ed.addEventListener('switching', () => { if (xr.isPresenting) spotSave(); });   // the old scene keeps its spot
   xr.addEventListener('sessionend', () => {
-    spotSave();
+    if (!ed.embodied) spotSave();
     rig.position.set(0, 0, 0);
     rig.quaternion.identity();
     panel.visible = false;

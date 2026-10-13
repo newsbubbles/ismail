@@ -15,6 +15,7 @@ import { initBody } from './body.js';
 import { initActions } from './actions.js';
 import { initTakes4D } from './takes4d.js';
 import { initActors } from './actors.js';
+import { initEmbody } from './embody.js';
 import { initGallery } from './gallery.js';
 import { initConstruct } from './construct.js';
 import { initMusic } from './music.js';
@@ -110,6 +111,20 @@ ed.preRender.push(() => { if (actors.playing.size) wake(); });   // a playing ac
 live.handlers.actor_play = (c) => actors.play(c);
 live.handlers.actor_stop = (c) => actors.stop(c);
 window.VR_actors = actors;
+// stepping into a person (embody.js): a Follow armed for it, or asked with embody, moves the view into them at GO,
+// before the Follow reads the user's body, so the person's body starts exactly where the user's is
+const embody = initEmbody(ed, live, xr, () => actors, hands);
+window.VR_embody = embody;
+const followPlain = actors.follow;
+actors.follow = async (c) => {
+  const h = embody.claim(c);
+  if (!h || !(await embody.enter(c.person, h))) return followPlain({ ...c, embody: undefined });
+  try {
+    const r = await followPlain({ ...c, embody: h, mode: 'walk' });
+    embody.entered(c.person);
+    return { ...r, inside: true, eyes: h.eyes, after: h.after };
+  } catch (e) { embody.exit('failed'); throw e; }
+};
 // scenes from inside: go to another scene, or take a re-export of this one, under the construct (scenes.js)
 window.VR_scenes = initScenes(ed, live, xr, construct, { get actors() { return actors; }, get view() { return takes4d; } });
 ed.loadWorld = loadWorld;                          // a scene switch reads the new world before staging (editor.js)
@@ -166,7 +181,7 @@ window.VR_behaviours = initBehaviours(ed, live, panels, hands);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,
-  get actors() { return actors; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
+  get actors() { return actors; }, get embody() { return embody; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
 live.handlers.take_stop = () => stopTake();
 const sayText = live.handlers.say;                 // in VR there is no caption to read: speak it (or with --voice)
 // a line queued while the page was away is old news by the time it connects: caption it, do not speak it (the user

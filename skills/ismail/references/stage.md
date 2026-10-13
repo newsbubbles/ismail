@@ -254,6 +254,12 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   it runs: listen during it, and when they ask to stop, `stage_perform(action="stop")` (it ends the Follow and a take
   with it). They can also stop it themselves: both thumbs down held, saying "stop the performance", or Stop on the
   Follow panel. A take borrowed onto another body plays silent unless `stage_actor_play(voice=True)`.
+- **Stepping into a person** puts the person's eyes where the person's are: `stage_embody(person, when="next")` makes
+  the next Follow or Take on them start inside (their menu's "Step in" does it with a take), `when="now"` counts down
+  and steps in. Inside, the view is clean (no panels, beams, labels or their own hand models, so a headset recording
+  can be filmed), and they stop it like any performance (both thumbs down held). They are put back where they stood
+  and the take plays on the person for keep or redo. Tell them how to stop before they step in: there is no panel
+  inside. `eyes="floor"` keeps their own height instead of the person's.
 - **Give the person the control they need, and change it as you go.** Ask how they want to drive a part
   ("his feet with your hands?"), then `stage_control_set` it: `effector` for an arm or a leg (relative: their hand's
   motion becomes his foot's), `touch=True` so they start when ready, `pin` to keep a hand on the bar, `hold` to keep

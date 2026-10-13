@@ -95,6 +95,7 @@ export function initActions(ed, hands, panels, live, takes) {
     const following = playing && takes.actors.playing.get(it.name).live;
     if (kept.has(it.name) && !following) b.push(playing ? '■ Stop' : '▶ Play');
     if (canAct(it) && !rec) b.push(following ? '■ Unfollow' : '◎ Follow');   // they move with you, live
+    if (canAct(it) && !rec && !following) b.push('👤 Step in');               // you inside them while a take records
     b.push(rec ? '■ Stop take' : '● Take', '◆ Key', '📌 Pin', '⬇ Drop', moved(it) ? '✕ Cancel' : '✕');
     return b;
   }
@@ -260,11 +261,19 @@ export function initActions(ed, hands, panels, live, takes) {
     if (type !== 'actor_stop' || !d || !d.live) return;
     const id = followPanels.get(d.person);
     if (id) panels.close(id, 'follow ended');
-    if (!takes.recording()) setTimeout(() => offerKeep(d.person), 0);   // after hands.js has buffered it (main.js order)
+    const inside = takes.embody && takes.embody.isInside(d.person);   // stepping out offers it instead (below)
+    if (!takes.recording() && !inside) setTimeout(() => offerKeep(d.person), 0);   // after hands.js has buffered it (main.js order)
     if (d.why === 'walked_away' && takes.recording()) {
       const it = ed.byName.get(d.person);
       setTimeout(async () => { const t = await takes.stop(); if (it) await review(it, t); }, 0);
     }
+  });
+
+  // stepped back out of a person (embody.js): their take plays on them for keep or redo, or the Follow is offered
+  live.onEmit((type, d) => {
+    if (type !== 'embody_stop' || !d || d.why === 'failed' || (d.why === 'walked_away' && d.take)) return;   // walked away: reviewed above
+    const it = ed.byName.get(d.person);
+    if (it) setTimeout(() => (d.take ? review(it, { take: d.take }) : offerKeep(d.person)), 0);
   });
 
   function show(it) {
@@ -296,6 +305,16 @@ export function initActions(ed, hands, panels, live, takes) {
         if (canAct(it)) await takes.actors.follow({ person: it.name }).catch(() => null);
         takes.start(it.name);
         if (canAct(it)) { followPanel(it); ed.select(null, 'menu'); break; }
+      }
+      else if (a === '👤 Step in' && takes.actors) {
+        // the user inside the person (embody.js) while a take records: the count, then their eyes are yours; both
+        // thumbs down steps out, and the take plays on them for keep or redo (Marketing's shot, 2026-10-13)
+        ed.select(null, 'menu');
+        await countdown(FOLLOW_COUNTDOWN_S, it.name);
+        const r = await takes.actors.follow({ person: it.name, embody: true }).catch((e) => {
+          live.emit('voice_error', { where: 'step in', error: String(e.message || e) }); return null; });
+        if (r) { takes.start(it.name); followPanel(it); }
+        break;
       }
       else if (a === '■ Stop take') {
         if (takes.actors && takes.actors.playing.get(it.name)?.live) takes.actors.stop({ person: it.name });

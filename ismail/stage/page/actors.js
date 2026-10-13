@@ -418,7 +418,8 @@ export function initActors(ed, live) {
     const rig = [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
     const f0 = source(), floor = world().floor || 0;
     const userH = Math.max(0.5, f0.head[1] - floor), actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
-    const s = THREE.MathUtils.clamp(actorH / userH, 0.6, 1.4);
+    // stepping into them (embody.js): the user's view is already at their eyes, so the body is the user's, unscaled
+    const s = c.embody ? 1 : THREE.MathUtils.clamp(actorH / userH, 0.6, 1.4);
     const it = ed.byName.get(person);
     const w = it ? it.obj.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(f0.head[0], floor, f0.head[2]);
     const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd);
@@ -430,7 +431,8 @@ export function initActors(ed, live) {
     const facing = facingOf(ed, person, toW, new THREE.Vector3(f0.head[0], 0, f0.head[2]));
     const turn = turnFor(new THREE.Quaternion(f0.head[3], f0.head[4], f0.head[5], f0.head[6]), facing);
     const st = { person, rig, live: true, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])), s, floor: ground,
-      anchor: new THREE.Vector3(f0.head[0], floor, f0.head[2]), to: toW, turn, mode: c.mode || 'place', drift: new THREE.Vector3(),
+      anchor: new THREE.Vector3(f0.head[0], c.embody ? ground : floor, f0.head[2]), to: toW, turn, mode: c.mode || 'place', drift: new THREE.Vector3(),
+      embodied: !!c.embody,
       mirror: !!c.mirror, mirrorN: facing ? new THREE.Vector3(facing.z, 0, -facing.x) : null,
       last: new THREE.Vector3(f0.head[0], f0.head[1], f0.head[2]),
       alignInv: align.clone().invert(), feet: { l: {}, r: {} }, t0: performance.now(), it };
@@ -439,6 +441,7 @@ export function initActors(ed, live) {
     // the setup from the body, not a button (the user, 2026-10-08: a standing man came up with his feet locked and would
     // not walk): seated (hips on a seat) stays put, a standing person walks with the user
     if (!c.mode) st.mode = st.pins && st.pins.hips ? 'place' : 'walk';
+    if (st.embodied) st.mode = 'walk';                   // inside them, the body stays where the user is: no drift
     await useStart(st, c);
     playing.set(person, st);
     lastMirror.set(person, st.mirror);
@@ -592,14 +595,15 @@ export function initActors(ed, live) {
     const st = playing.get(person);
     if (!st || !st.live) return {};
     const seated = !!(st.pins && st.pins.hips);
-    const says = seated ? 'Seated: the hips stay on the seat; your head leans the body, your hands move the arms.'
+    const says = st.embodied ? 'Inside them: their body is yours. Both thumbs down, held, stops and steps you back out.' : seated ? 'Seated: the hips stay on the seat; your head leans the body, your hands move the arms.'
       : st.mode === 'walk' ? 'Standing: walks as you walk. Leaning or turning your head bends the body, the feet stay.'
         : 'On the spot: dances where they stand while you move around.';
-    return { body: seated ? 'seated' : 'standing', mode: st.mode, says };
+    return { body: seated ? 'seated' : 'standing', mode: st.mode, says, ...(st.embodied ? { inside: true } : {}) };
   }
   function setMode(person, mode) {
     const st = playing.get(person);
     if (!st || !st.live) return null;
+    if (st.embodied) return { person, mode: st.mode, ...setupOf(person) };   // inside them: always with the user
     if (mode === 'walk' && st.mode === 'place') { st.anchor.add(st.drift); st.drift.set(0, 0, 0); }   // no jump when he starts walking
     st.mode = mode;
     return { person, mode, ...setupOf(person) };
@@ -1023,7 +1027,23 @@ export function initActors(ed, live) {
   // a bone of the body a person shows now (playing, following or resting), for props pinned to it (props.js)
   const shownRig = (person) => { const st = playing.get(person) || resting.get(person); return st ? st.rig : null; };
   const boneOf = (person, bone) => { const r = shownRig(person); return (r && r.bones[bone]) || null; };
+  // where a person's eyes are and which way they face, for stepping into them (embody.js): a body resting in a start
+  // pose, its head; anyone else, above their spot at their height, where a Follow puts the head at GO
+  async function eyesOf(person, user) {
+    const it = ed.byName.get(person);
+    if (!it) throw new Error('no such person: ' + person);
+    const rig = await rigOf(person), ground = groundOf(it);
+    const w = it.obj.getWorldPosition(new THREE.Vector3()), toW = new THREE.Vector3(w.x, ground, w.z);
+    const facing = facingOf(ed, person, toW, user ? new THREE.Vector3(user.x, 0, user.z) : null);
+    const r = resting.get(person), hb = r && r.rig.bones.head;
+    let eye;
+    if (hb) {
+      eye = hb.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, EYE_UP, 0));
+      if (facing) eye.addScaledVector(facing, EYE_FWD);
+    } else eye = toW.clone().add(new THREE.Vector3(0, rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08, 0));
+    return { eye, facing, ground };
+  }
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
   return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
-    rested: () => restP, notResting, boneOf, bonesOf, shownRig };
+    rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf };
 }
