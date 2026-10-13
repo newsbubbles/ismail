@@ -446,6 +446,29 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   ready to become `automation_set` lanes in a studio project: a take's knob moves land in the score, on the song's
   clock, and replay the same way in a render and a video.
 
+## Played keys: the person plays a part
+
+When the person wants to play a part themselves (a bassline in a jam, a lead over the set) instead of you writing
+it, patch their keyboard into the engine. Your job is the patching and the sound; the playing is theirs and goes
+straight to the speakers.
+
+- `midi_sources()` lists the MIDI inputs (keyboards, pads, virtual ports). A running engine also says when one is
+  plugged in or out, and a patched one plays again when it comes back.
+- `live_midi(source='keys', track='bass')` plays the input with a live track's sound (its baked effects included),
+  or `instrument='preset:pluck'` (anything live_track takes). Call it again with another track or instrument to
+  swap; the old sound plays until the new notes are ready. The notes render once on the workers (C2 to C7, a kit's
+  pads, or one hit for a drum), then a key sounds one output buffer after the press. Velocity, note-offs, the
+  sustain pedal, `transpose` and `channel` are followed. Tell the person before their keys first sound.
+- Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
+  above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
+- **What they played is text.** Every key is logged with the bar heard. `live_played()` reads it back as notes
+  lines (`bar | +beat | pitch | d= | v=`, the format tracks take). Read it to answer what they played, quote a
+  phrase back in their words, or turn a phrase into a part: edit the lines (fix a note, quantize, move it to bar 1)
+  and give them to `live_track` so the set plays it from then on.
+- **No MIDI keyboard?** Optional, only for someone who wants to play and has no instrument: on Windows, loopMIDI
+  makes a virtual port (name it, e.g. "ismail keys"), and any on-screen keyboard page that sends Web MIDI to that
+  port plays through `live_midi` like a real one. Someone with a keyboard needs none of this.
+
 ## Playing for a screen recording
 
 When the session itself is the show (the viewer sees your turns and hears the set):

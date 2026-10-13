@@ -579,3 +579,58 @@ def live_controls(project: str, control: str = None, last: int = 20) -> str:
     """The control moves of this set as automation: for each control, its target and [bar, value] points in this
     engine's bars (the last `last` of them), ready to become automation_set points in a studio project."""
     return _call(project, 'controls', control=control, last=last)
+
+
+def _check_instrument(project, instrument):
+    """An instrument as live_track takes it, checked here (voice modules are imported in this process, never in
+    the engine)."""
+    from .. import api
+    P = api.Project(project) if os.path.exists(os.path.join(os.path.abspath(project), 'project.json')) else None
+    if isinstance(instrument, str) and instrument.startswith('track:') and P is None:
+        raise OpError(f"instrument {instrument!r} copies a project track, but {project} has no project.json; "
+                      f"pass a dict or 'preset:<name>'")
+    instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
+    return _mark_performer(instrument, project)
+
+
+@op()
+def midi_sources() -> str:
+    """The MIDI inputs this computer has now (keyboards, pads, loopMIDI ports), by name. A running live engine also
+    notices one plugged in and says so; live_midi plays one through the set."""
+    from .. import midi
+    names = midi.sources()
+    if not names:
+        return ("no MIDI inputs. A keyboard plugged in over USB shows up here; on Windows, loopMIDI makes a "
+                "virtual one (a port named for it, e.g. 'ismail keys').")
+    return "MIDI inputs:\n" + '\n'.join(f"  {n}" for n in names)
+
+
+@op()
+def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
+              transpose: int = None, channel: int = None, remove: bool = False) -> str:
+    """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
+    same speakers. source: the input's name or a unique part of it (midi_sources); with no source, says what is
+    plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
+    included) or instrument=... (as live_track takes it: 'preset:<name>', a dict, a code voice). Call again with
+    another track or instrument to swap: the old sound plays until the new notes land. The notes render once on
+    the render workers (C2 to C7, or a kit's pads; a few seconds to a minute); a key then sounds one output buffer
+    after the press (live_status says how long). Played keys skip the track's effects and the safety limiter (a
+    soft clip guards them). volume_db: the keys' level, at most +6 (default: the track's fader, or -6 dB for an
+    instrument). transpose: semitones; channel: 1 to 16 (0 = every channel, the
+    default). Every key is logged with the bar heard to <project>/live/midi/<source>.jsonl (live_played reads it
+    back as notes). remove=True unpatches.
+    Tell the person before their keys first sound."""
+    if instrument is not None:
+        instrument = _check_instrument(project, instrument)
+    return _call(project, 'midi', source=source, track=track, instrument=instrument, volume_db=volume_db,
+                 transpose=transpose, channel=channel, remove=remove)
+
+
+@op()
+def live_played(project: str, source: str = None, bars: int = 8) -> str:
+    """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
+    bars, the same notes format tracks take (note-offs held while the sustain pedal was down). The last `bars` bars
+    that had keys, per input (source: one input). Read it to answer what they played, to quote a phrase back, or to
+    turn a phrase into a track: edit the lines (fix a note, quantize, move it to bar 1) and give them to live_track
+    or a studio track."""
+    return _call(project, 'played', source=source, bars=bars)

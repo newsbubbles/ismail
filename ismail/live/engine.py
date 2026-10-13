@@ -35,6 +35,7 @@ from . import graph as G
 from . import worker
 from .safety import BAD_ABS, Safety
 from . import outputs as O
+from .midi_play import MidiPlay
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 
 BLOCK = 1024
@@ -201,6 +202,7 @@ class Engine:
         self._fifo_n = 0
         self._fifo_lock = threading.Lock()
         self._head = 0
+        self.midi = MidiPlay(self)      # played keys: MIDI inputs patched to instruments (live_midi)
         if self.n_workers > 0:
             import multiprocessing as mp
             ctx = mp.get_context('spawn')
@@ -254,6 +256,29 @@ class Engine:
                                                                    tr['root'] or self.root)))
         self._feed()
 
+    def _submit_midi(self, key, notes_s, inst, root):
+        """One note of a played-keys instrument (live_midi): rendered once, kept by the MIDI patch, never placed.
+        Needed a little after the clips due in the next 2 s, so a set that plays keeps its notes."""
+        self._jid += 1
+        jid = self._jid
+        self.jobs[jid] = {'key': key, 'track': None, 'warm': False, 'wi': None, 'gen': None, 'midi': True,
+                          'audio_s': notes_s[0][2] + inst.get('_tail', 1.0), 'est_s': 0.0}
+        if self.n_workers == 0:
+            t0 = time.time()
+            if root not in self._banks:
+                self._banks[root] = worker.SoundBank(root)
+            instruments.set_resolvers(self._banks[root].sound, self._banks[root].table)
+            try:
+                y = worker.render_event(inst, notes_s, 0.0, self.bpm, root)
+                err = worker.check(y)
+            except Exception as e:
+                y, err = None, f"{type(e).__name__}: {e}"
+            self._result(jid, None if err else y, time.time() - t0, err)
+            return
+        self.seq += 1
+        heapq.heappush(self._backlog, (self.pos + 2 * SR, self.seq, jid, (jid, inst, notes_s, 0.0, self.bpm, root)))
+        self._feed()
+
     def _feed(self):
         """Hand the workers the earliest-needed renders, a few at a time. A render whose notes no queued clip wants
         any more (cancelled, replaced, ended) is dropped here, so old clips cannot clog the workers."""
@@ -262,7 +287,7 @@ class Engine:
             job = self.jobs.get(jid)
             if job is None:
                 continue
-            if not job['warm'] and not any(k[0] in self.tl.clips for k in self.rwait.get(job['key'], [])):
+            if not job['warm'] and not job.get('midi') and not any(k[0] in self.tl.clips for k in self.rwait.get(job['key'], [])):
                 self.jobs.pop(jid, None)
                 self.renders.pop(job['key'], None)
                 self.rwait.pop(job['key'], None)
@@ -305,6 +330,9 @@ class Engine:
             if job.get('sent'):
                 self._inflight -= 1
                 self._feed()
+            if job.get('midi'):
+                self.midi.rendered(key, y, err)
+                return
             tr = self.tracks.get(track)
             if tr is None or job['gen'] != tr['gen']:      # rendered with an instrument the track no longer has
                 if not warm:
@@ -799,6 +827,13 @@ class Engine:
                     self._fifo.popleft()
                     self._head = 0
             self._fifo_n -= got
+        keys = self.midi.mix(out)
+        if keys is not None:            # live_listen hears the keys where the device played them
+            i = (self.played - self.safety.la - G.LAT_BUDGET) % self.air.shape[1]
+            j = min(i + frames, self.air.shape[1])
+            self.air[:, i:j] += keys[:j - i].T
+            if j - i < frames:
+                self.air[:, :frames - (j - i)] += keys[j - i:].T
         if got < frames and self.pos > 0 and self.fade is None:
             self.stats['underruns'] += 1
             self.last_underrun = fmt_bar(self.beat(self.played), self.bpb)
@@ -836,7 +871,7 @@ class Engine:
             self._on_board.enter_context(machine.slot('live', f"live engine {os.path.basename(self.root)}", threads=None))
         except Exception:                      # the board is advice for others; the set plays regardless
             pass
-        threads = [self._schedule_loop, self._mix_loop]
+        threads = [self._schedule_loop, self._mix_loop, self.midi.loop]
         if self.n_workers:
             threads.append(self._collect)
         for fn in threads:
@@ -952,6 +987,7 @@ class Engine:
 
     def shutdown(self):
         self.running = False
+        self.midi.close()
         if getattr(self, '_on_board', None) is not None:
             self._on_board.close()
         if getattr(self, 'stream', None) is not None:
@@ -2169,6 +2205,19 @@ class Engine:
             out.append({'t': s.track, 'b': round(self.beat(s.start), 3), 'l': round(20 * math.log10(pk + 1e-9), 1)})
         return {'beat': round(now, 3), 'bpm': self.bpm, 'bpb': self.bpb, 'onsets': out}
 
+    def cmd_midi(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
+                 remove=False):
+        try:
+            return self.midi.cmd(source, track, instrument, volume_db, transpose, channel, remove)
+        except (ValueError, OSError, RuntimeError) as e:
+            raise LiveError(str(e))
+
+    def cmd_played(self, source=None, bars=8):
+        try:
+            return self.midi.played(source, bars)
+        except (ValueError, OSError) as e:
+            raise LiveError(str(e))
+
     def cmd_status(self, deck=None):
         if deck is not None and deck not in self.decks:
             raise LiveError(f"no deck {deck!r}; decks: {list(self.decks) or 'none'}")
@@ -2182,6 +2231,8 @@ class Engine:
             sn = self.hub.names()
             if sn:
                 lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
+            if self.midi.patches:
+                lines += [self.midi.line(p) for p in self.midi.patches.values()]
             if self.controls.maps:
                 lines.append("controls: " + '; '.join(f"{c} -> {O.describe(m)}" for c, m in self.controls.maps.items()))
             stall = self._stalled()
@@ -2457,7 +2508,8 @@ def serve(engine, port=0, idle_min=None):
            'cancel': engine.cmd_cancel, 'view': engine.cmd_view, 'listen': engine.cmd_listen_dump,
            'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
-           'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets}
+           'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
+           'midi': engine.cmd_midi, 'played': engine.cmd_played}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
