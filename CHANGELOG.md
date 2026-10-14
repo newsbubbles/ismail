@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Stage: named ops for every live edit
+
+- `stage_asset_install(scene, file, kind, name=, scenes=)`: puts a room (`scene.glb`), a piece list
+  (`manifest.json`), an actor body (`actors/<name>.glb`, in the scene the bodies come from) or a tree
+  (`trees/tree_<k>`) into a live scene. The file it replaces is kept in the scene's `history/`; an open page reloads
+  the room or the trees, and a replaced body shows at the next page load. It refuses a missing file, a wrong type, an
+  unknown kind and an unknown scene with the next step.
+- `stage_world(scene, update={...})` changes only the keys given (a key set to null goes back to its default);
+  `world=` still replaces the whole file, and giving both is an error.
+- `stage_restart(port=, scenes=, now=False, who=)` restarts a stage server with the arguments it was started with
+  (servers now record them), waits for `/health` and replies with the port and scenes. While a page is in VR it
+  refuses, says so in the headset, and names the way on: wait for `vr_exit`, or `stage_ask` and `now=True` on a yes.
+- `skills/ismail/hooks/named_ops_guard.py`: an optional Claude Code hook that refuses `python -c` with ismail code,
+  copies into a scenes folder, killing the stage or a live engine by process, and hand edits of `world.json`,
+  `scene.glb` or `manifest.json`, naming the op to use instead (`skills/ismail/hooks/README.md`).
+- `references/stage.md` has the table of blocked forms and their ops.
+
 ### Live: keys on the screen
 
 - `live_keys_page(project, phone=False, sender=None)`: optional, for someone with no MIDI instrument who wants to

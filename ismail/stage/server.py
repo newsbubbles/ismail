@@ -1108,11 +1108,13 @@ class Server(ThreadingHTTPServer):
         self.pool.shutdown(wait=False, cancel_futures=True)
 
 
-def register(port, scheme, host):
+def register(port, scheme, host, start=None):
+    """Record this server in the registry. start: the arguments it was started with (host, footage, esbuild, tls),
+    so stage_restart can start it again the same way."""
     d = registry_dir()
     d.mkdir(parents=True, exist_ok=True)
     rec = {'pid': os.getpid(), 'port': port, 'host': host, 'scheme': scheme, 'scenes': str(SCENES), 'state': str(STATE),
-           'started': time.time(), 'url': f'{scheme}://127.0.0.1:{port}/'}
+           'started': time.time(), 'url': f'{scheme}://127.0.0.1:{port}/', 'start': start or {}}
     (d / f'{port}.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
     return d / f'{port}.json'
 
@@ -1142,7 +1144,8 @@ def main(argv=None):
         ctx.load_cert_chain(a.cert, a.key)
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = 'https'
-    reg = register(port, scheme, host)
+    reg = register(port, scheme, host, start={'host': a.host, 'footage': a.footage, 'esbuild': os.environ.get('ESBUILD'),
+                                             'tls': bool(a.tls)})
     presence.URL[0] = f'{scheme}://127.0.0.1:{port}'
     print(f'ismail stage on {scheme}://{host}:{port}/  scenes {SCENES}: {scene_names()}', flush=True)
     try:
