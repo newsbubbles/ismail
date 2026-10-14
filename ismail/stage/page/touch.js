@@ -173,11 +173,11 @@ export function initTouch(ed, xrApi, hands, emit) {
   // (editor.js drop). The right thumbs-down stays the panels' and questions' "no".
   const drop = { since: 0, done: false };
   function dropUpdate(now) {
-    const L = hands.state.left;
-    const on = !hands.performing && !!(L && L.f && L.g === 'thumbs_down' && ed.selected && ed.canMove(ed.selected) && !held.left && !held.right);
+    const G = hands.gestures;                            // gestures.js: the drop row (left thumbs down by default)
+    const on = !hands.performing && !!(G.on('drop') && ed.selected && ed.canMove(ed.selected) && !held.left && !held.right);
     if (!on) { drop.since = 0; drop.done = false; return; }
     if (!drop.since) drop.since = now;
-    if (!drop.done && now - drop.since > 500) {
+    if (!drop.done && now - drop.since > G.hold('drop', 500)) {
       drop.done = true;
       const name = ed.selected.name, top = ed.drop(ed.selected, 'xr-drop');
       emit('drop', { object: name, onto: top === null ? null : +top.toFixed(3) });

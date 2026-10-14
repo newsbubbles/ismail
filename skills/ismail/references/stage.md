@@ -228,6 +228,13 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Measure a gesture from a take before binding it.** A pinch that the system already uses collides with yours
   (one pinch once had six jobs and opened a palette while the person's hands were busy);
   gestures are personal, so calibrate them per person, and keep their recordings local without consent.
+- **The gesture map is data, read it before you name a gesture.** `stage_gestures(scene)` lists what each hand shape
+  means in VR now (the intent, shape, hand, hold, where it is read, and whose row it is). `stage_gesture_set(scene,
+  intent, shape=, hand=, hold_ms=, off=)` rebinds one in the person's own map (it follows them into every scene), or
+  with `owner="scene"` in this scene's rows (world.json `gestures`; the person's rows win). The page takes it at
+  once. A rebind that would share a shape with another row where both are read is refused, naming that row.
+  Leaving VR, the performance stop and the voice note are locked (never rebound or off, so nobody is trapped);
+  travel, the snapshot frame, select and hold are fixed to how the shape moves. `stage_gesture_reset` goes back.
 - **Keep tooling in service of the work.** An editor feature is worth building when the scene waits on it; when the
   scene is waiting for layout, build the scene.
 - **The scene's content is yours; how the stage works is the stage dev's.** Models, lights, the street, music, the
@@ -247,9 +254,10 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   wait while they talk, and for 3 s after a note, because they often send the next one at once. Menus they open
   themselves never wait, and nothing times out while they talk. A voice note's `during` lists what they did while it
   recorded (selections, menus shown and pressed, presses on things), so "this one" can be read without the event log.
-- **A sign-off in the headset is a right thumbs up.** Before anything that hitches or changes the room around them (a
-  reload, a re-export, a scene switch), ask with `stage_ask`: right thumbs up is yes, down is no. Never wait for them
-  to say a word for it, and never use the left hand, which takes updates. An open ask holds no other command.
+- **A sign-off in the headset is a right thumbs up** (the map's `answer_yes`; `stage_gestures` says if the person
+  moved it). Before anything that hitches or changes the room around them (a reload, a re-export, a scene switch),
+  ask with `stage_ask`: right thumbs up is yes, down is no. Never wait for them to say a word for it, and never use
+  the left hand, which takes updates. An open ask holds no other command.
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
   `stage_take_keep_last`. Leave everyone else unpinned: a Follow sets itself up from the body (seated stays on the

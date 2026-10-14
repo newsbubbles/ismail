@@ -15,6 +15,20 @@
   The top line says whether it is connected and what it plays. Each message carries a sequence number, so a
   late one never undoes a newer key.
 
+### Stage: the gesture map
+
+- What each hand shape means in VR is now data, not code in six page files: `stage_gestures(scene)` lists it (intent,
+  shape, hand, hold, where it is read, whose row), `stage_gesture_set(scene, intent, shape=, hand=, hold_ms=, off=,
+  owner="person" | "scene")` rebinds one, `stage_gesture_reset` goes back. The page reads `/gestures?scene=` and
+  takes a change at once (page command `gestures_reload`). Nothing changes in feel: the defaults are the gestures
+  and holds the page had.
+- Who wins: locked and fixed rows, then the person's own map (`~/.ismail/stage/person/gestures.json`, every scene),
+  then the scene's rows (world.json `gestures`, checked like the rest of world.json), then the engine.
+- Locked: leaving VR (both thumbs up), the performance stop (both thumbs down), the voice note (phone). Fixed to how
+  the shape moves: travel, the snapshot frame, select, hold. Rebindable: the update reload, the yes and no answers,
+  drop. A rebind that would share a shape with another row where both are read is refused, naming that row and
+  its owner. The update card and the answer prompt sit over the hand the map names and say its gesture.
+
 ### Stage: edits apply in place, no reload
 
 - `stage_material_set(scene, color, material= | object=)` sets a material's base colour on the open page now, as an

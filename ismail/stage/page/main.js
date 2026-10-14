@@ -6,6 +6,7 @@ import { initDesktop } from './desktop.js';
 import { initXR } from './xr.js';
 import { initLive } from './live.js';
 import { initHands } from './hands.js';
+import { initGestures } from './gestures.js';
 import { initVoice } from './voice.js';
 import { initTouch } from './touch.js';
 import { initUpdates } from './updates.js';
@@ -62,6 +63,9 @@ const desktop = initDesktop(ed);
 const xr = initXR(ed, desktop);
 const live = initLive(ed, desktop, xr);
 const hands = initHands(ed, xr, live.emit);
+hands.gestures = initGestures(hands, () => ed.sceneName);   // the gesture map (gestures.js): what each hand shape means
+ed.addEventListener('switched', () => hands.gestures.reload().catch(() => {}));   // a scene's own rows come with it
+live.handlers.gestures_reload = () => hands.gestures.reload();
 const voice = initVoice(ed, hands, live);
 const touch = initTouch(ed, xr, hands, live.emit);
 setPickEmit(live.emit);   // pickcycle.js: pick_cycle events when a pinch again takes the next thing under it

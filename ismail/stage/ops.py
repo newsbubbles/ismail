@@ -918,6 +918,90 @@ def _words_of(words):
     return words
 
 
+def _gesture_dir(scene, scenes):
+    return _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+
+
+def _gestures_now(scene):
+    """Tell an open page the gesture map changed (best effort: with no page open it applies at the next load)."""
+    try:
+        r = link.page_cmd(scene, 'gestures_reload', {}, timeout=20)
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return 'the page takes it at its next load'
+    return '' if r == link.QUEUED else 'the page has it now'
+
+
+def _gesture_lines(scenes, scene):
+    from . import gestures as gm
+    rows, coll = gm.resolve(gm.layers(scenes, scene))
+    out = []
+    for intent, r in rows.items():
+        tag = ', '.join(x for x in (r['owner'], r.get('lock'), 'off' if r.get('off') else None) if x)
+        out.append(f'{intent}: {gm.describe(r)} ({gm.WHERE[r["where"]]}) means {r["means"]} [{tag}]')
+    return out + [f'COLLISION {c}' for c in coll]
+
+
+@op()
+def stage_gestures(scene: str, scenes: str = None) -> str:
+    """The gesture map in force in VR for this scene: each intent (what a gesture means), the hand shape and hand that
+    do it, how long it is held, where it is read, and who owns the row (engine, person, scene; locked and fixed rows
+    are the engine's), then any collisions. Shapes: pinch, ok, pinch_middle, thumbs_up, thumbs_down, fist, open, gun,
+    point, phone, peace, rock. Rebind with stage_gesture_set; stage_gesture_reset goes back to the defaults."""
+    return '\n'.join(_gesture_lines(_gesture_dir(scene, scenes), scene))
+
+
+@op(mutates=True)
+def stage_gesture_set(scene: str, intent: str, shape: str = None, hand: str = None, hold_ms: float = None,
+                      off: bool = None, owner: str = 'person', scenes: str = None) -> str:
+    """Bind a gesture to an intent in the VR gesture map (stage_gestures lists them): shape (a hand shape), hand
+    (left, right, either, both at once), hold_ms (held this long before it acts), off=True switches the intent off.
+    owner="person" (default) is the person's own map and follows them into every scene; owner="scene" is this scene's
+    rows (world.json gestures), which the person's rows win over. A rebind that would make two intents share a shape
+    where both are read is refused, naming the row it collides with. Locked rows (vr_exit, stop, voice_note) never
+    change; fixed rows (travel, frame_shot, select, hold) are wired to how the shape moves. The page takes it live."""
+    from . import gestures as gm
+    d = _gesture_dir(scene, scenes)
+    lay = gm.layers(d, scene)
+    try:
+        rows = gm.check_binding(lay, owner, intent, shape=shape, hand=hand, hold_ms=hold_ms, off=off)
+    except ValueError as e:
+        raise OpError(str(e))
+    f = _gesture_save(d, scene, owner, rows)
+    r, _ = gm.resolve({**lay, owner: rows})
+    return f'{intent}: {gm.describe(r[intent])}{" (off)" if r[intent].get("off") else ""}, {owner} row, saved in {f}; ' + _gestures_now(scene)
+
+
+def _gesture_save(d, scene, owner, rows):
+    from . import gestures as gm
+    if owner == 'person':
+        return gm.save_person(rows)
+    w = worldmod.load_world(d, scene)
+    w['gestures'] = rows
+    try:
+        return worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+
+
+@op(mutates=True)
+def stage_gesture_reset(scene: str, intent: str = None, owner: str = 'person', scenes: str = None) -> str:
+    """Back to the engine's gesture for one intent, or for every intent with no intent given, in the person's own map
+    (owner="person") or this scene's rows (owner="scene"). The page takes it live."""
+    from . import gestures as gm
+    if owner not in gm.LAYERS:
+        raise OpError(f'owner is one of {", ".join(gm.LAYERS)}')
+    d = _gesture_dir(scene, scenes)
+    rows = dict(gm.layers(d, scene)[owner])
+    if intent is not None and intent not in rows:
+        raise OpError(f'the {owner} rows do not set {intent}' + (f' (they set {", ".join(rows)})' if rows else ' (they set nothing)'))
+    gone = [intent] if intent else list(rows)
+    for k in gone:
+        rows.pop(k)
+    f = _gesture_save(d, scene, owner, rows)
+    return f'{owner} rows: reset {", ".join(gone) or "nothing (none were set)"}; saved in {f}; ' + _gestures_now(scene)
+
+
+
 @op(mutates=True)
 def stage_face(scene: str, person: str, at: float = None, audio: str = None, take: str = None, start: float = 0.0,
                end: float = None, words=None, transcribe: bool = False, clear: bool = False, file: str = None,
