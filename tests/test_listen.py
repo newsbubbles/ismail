@@ -2,6 +2,7 @@
 session folder from synthetic audio and read it."""
 import json
 import os
+import types
 import time
 
 import numpy as np
@@ -51,7 +52,13 @@ def _stream(name, path, sr, t_start, frames, loopback, **kw):
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    """Every home in the test folder, and an empty live registry: a jam running on this machine is never picked."""
     monkeypatch.setattr(LI, 'HOME', tmp_path / 'listen')
+    monkeypatch.setattr(LI, 'DEFAULT_HOME', tmp_path / 'listen')
+    monkeypatch.setattr(LI, 'LEGACY_HOME', tmp_path / 'legacy')
+    monkeypatch.delenv('ISMAIL_LISTEN_HOME', raising=False)
+    (tmp_path / 'registry').mkdir()
+    monkeypatch.setenv('ISMAIL_LIVE_REGISTRY', str(tmp_path / 'registry'))
     (tmp_path / 'listen').mkdir()
     return tmp_path / 'listen'
 
@@ -243,3 +250,227 @@ def test_list_names_sessions_newest_first(home):
     _session(home, name='2026-01-02_120000')
     rows = api.OPS['listen_list']().splitlines()
     assert rows[0].startswith('2026-01-02_120000') and rows[1].startswith('2026-01-01_120000')
+
+
+# ------------------------------------------------------------------ where sessions go
+
+def _engine_note(registry, project):
+    """A live engine running now, as the registry shows it (this test's own pid, so it reads as alive)."""
+    (project / 'live').mkdir(parents=True, exist_ok=True)
+    LI.write_json(project / 'live' / 'engine.json', {'port': 1, 'pid': os.getpid()})
+    LI.write_json(registry / f'{os.getpid()}.json', {'pid': os.getpid(), 'project': str(project), 'port': 1,
+                                                    'started': time.time()})
+
+
+def _mk(p):
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def test_a_session_goes_to_the_project_then_the_live_set_then_the_home(home, tmp_path, monkeypatch):
+    song = _mk(tmp_path / 'song')
+    assert LI.pick_home(str(song)) == (song.resolve() / 'listen', None, 'the project folder')
+    assert LI.pick_home() == (home, None, 'the listening home')
+    monkeypatch.setenv('ISMAIL_LISTEN_HOME', str(tmp_path / 'elsewhere'))
+    assert LI.pick_home()[0] == tmp_path / 'elsewhere'
+    jam = tmp_path / 'jam'
+    _engine_note(tmp_path / 'registry', jam)
+    where, live, why = LI.pick_home()
+    assert where == jam / 'listen' and live == str(jam) and 'live set' in why
+    assert LI.pick_home(str(song))[:2] == (song.resolve() / 'listen', str(jam))     # bars from the set running
+    with pytest.raises(ValueError):
+        LI.pick_home(str(tmp_path / 'no such song'))
+
+
+def test_listen_start_refuses_a_nearly_full_drive_and_a_missing_project(home, tmp_path, monkeypatch):
+    monkeypatch.setattr(LI, 'free_gb', lambda path: 1.2)
+    with pytest.raises(api.OpError) as e:
+        api.OPS['listen_start'](streams=['speakers'], project=str(tmp_path))
+    msg = str(e.value)
+    assert msg.startswith('not started: only 1.2 GB free') and 'project=' in msg and 'ISMAIL_LISTEN_HOME' in msg
+    assert not (tmp_path / 'listen' / 'index.jsonl').exists()
+    with pytest.raises(api.OpError) as e:
+        api.OPS['listen_start'](streams=['speakers'], project=str(tmp_path / 'nope'))
+    assert 'no such folder' in str(e.value)
+
+
+def test_an_id_resolves_wherever_its_session_went(home, tmp_path):
+    old = _session(_mk(tmp_path / 'legacy'), name='2026-01-01_090000')
+    out = api.OPS['listen_stop'](session=old.name, read=False)
+    assert f'It is in {old}' in out
+    d = _session(_mk(tmp_path / 'song' / 'listen'), name='2026-01-03_120000')
+    with pytest.raises(api.OpError) as e:
+        api.OPS['listen_read'](session=d.name)
+    assert 'full path' in str(e.value)
+    LI.remember(d.name, d)
+    assert 'not read' in api.OPS['listen_read'](session=d.name)
+    assert 'not read' in api.OPS['listen_read'](session=str(d))
+    rows = api.OPS['listen_list']().splitlines()
+    assert rows[0].startswith(d.name) and 'in ' + str(d.parent.resolve()) in rows[0]
+
+
+def test_the_recorders_news_is_said_once(home):
+    d = _session(home)
+    LI.add_news(d, 'listening session x stopped by itself: only 1.9 GB free')
+    first = api.OPS['listen_list']()
+    assert 'NEW since your last call:\n  listening session x stopped by itself' in first
+    assert 'NEW since' not in api.OPS['listen_list']()
+
+
+def test_listen_stop_does_not_read_on_a_nearly_full_drive(home, monkeypatch):
+    from ismail import api_listen as AL
+    d = _session(home)
+    monkeypatch.setattr(LI, 'free_gb', lambda path: 0.5)
+    monkeypatch.setattr(AL, '_spawn', lambda *a: pytest.fail('read on a full drive'))
+    out = api.OPS['listen_stop'](session=d.name)
+    assert 'Not read: only 0.5 GB free' in out and f"listen_stop('{d}')" in out
+
+
+def test_the_background_processes_keep_temp_files_in_the_session(tmp_path):
+    from ismail import api_listen as AL
+    env = AL._child_env(tmp_path)
+    assert env['TEMP'] == env['TMP'] == env['TMPDIR'] == str(tmp_path / 'tmp') and (tmp_path / 'tmp').is_dir()
+
+
+# ------------------------------------------------------------------ words as they are said
+
+HSR = 16000
+
+
+def _talk(d, bursts, total, sr=HSR, name='mic'):
+    """A mic file: a quiet room with bursts of 'speech' (loud noise) at [(start s, end s)]."""
+    rng = np.random.default_rng(5)
+    y = 0.001 * rng.standard_normal(int(total * sr))
+    for a, b in bursts:
+        y[int(a * sr):int(b * sr)] += 0.1 * rng.standard_normal(int(b * sr) - int(a * sr))
+    y = y.astype(np.float32)
+    sf.write(d / f'{name}.wav', y, sr, subtype='FLOAT')
+    return _stream(name, d / f'{name}.wav', sr, 0.5, 0, False), len(y)
+
+
+def _onsets(path):
+    """Stand-in transcriber: a word at each loud onset in the chunk (times in the chunk); it notes each call."""
+    x, sr = sf.read(path, dtype='float32')
+    F = int(sr * 0.05)
+    lv = np.sqrt((x[:len(x) // F * F].reshape(-1, F) ** 2).mean(1)) > 0.03
+    _onsets.calls.append((str(path), len(x) / sr))
+    return [{'t': i * 0.05, 'end': i * 0.05 + 1.0, 'word': 'w', 'p': 1}
+            for i in range(len(lv)) if lv[i] and (i == 0 or not lv[i - 1])]
+
+
+def _run(h, mic, n, step_s=1.0):
+    """The recorder's hearing loop over a file that grows by step_s each time."""
+    for k in range(1, int(n / (HSR * step_s)) + 1):
+        mic['frames'] = min(n, int(k * step_s * HSR))
+        h.step()
+    mic['frames'] = n
+    h.step(final=True)
+
+
+def _recording(home):
+    d = _session(home, state='recording', mic=np.zeros(SR, np.float32))
+    st = LI.read_json(d / 'status.json')
+    st.update(wall0=time.time() - 30, elapsed_s=30.0)
+    LI.write_json(d / 'status.json', st)
+    return d, st
+
+
+def test_words_come_cut_at_pauses_on_the_session_clock_with_bars(tmp_path):
+    d = _mk(tmp_path / 's')
+    mic, n = _talk(d, [(2.0, 4.0), (4.5, 5.5), (8.5, 9.5), (12.0, 25.0)], 30)
+    _onsets.calls = []
+    clock = {'wall': 1000.0, 'beat': 0.0, 'bpm': 120.0, 'bpb': 4}
+    h = LI.Hearer(d, mic, wall0=1000.0, stt=_onsets, clock=lambda: (clock, None))
+    _run(h, mic, n)
+    assert all(p == str(d / 'heard' / 'chunk.wav') for p, _ in _onsets.calls)
+    assert all(s <= LI.HEAR_MAX_S + 0.06 for _, s in _onsets.calls), _onsets.calls
+    rows = LI.heard_lines(d)
+    assert [r['text'] for r in rows[:3]] == ['w w', 'w', 'w'], rows
+    for r, t in zip(rows, (2.5, 9.0, 12.5)):                  # burst start + the mic's t_start
+        assert abs(r['t'] - t) < 0.06, rows
+        assert r['bar'] == pytest.approx(r['t'] * 2 / 4 + 1, abs=0.06)
+    assert len(rows) >= 4 and [r['n'] for r in rows] == list(range(1, len(rows) + 1))
+    st = LI.read_json(d / 'hear_mic.json')
+    assert st['failed'] == 0 and st['bars'] is None and st['heard_to_s'] == pytest.approx(30.5, abs=0.06)
+
+
+def test_a_failed_chunk_is_tried_again_then_reported(home):
+    import urllib.error
+    d, st = _recording(home)
+    calls = []
+
+    def flaky(path):
+        calls.append(1)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError('u', 500, 'Internal Server Error', {}, None)
+        return [{'t': 0.1, 'end': 0.4, 'word': 'louder', 'p': 1}]
+    mic, n = _talk(d, [(1.0, 2.0)], 6)
+    _run(LI.Hearer(d, mic, wall0=st['wall0'], stt=flaky, clock=lambda: (None, 'no live set runs'), retry_s=0), mic, n)
+    assert len(calls) == 2 and [r['text'] for r in LI.heard_lines(d)] == ['louder']
+
+    def broken(path):
+        raise urllib.error.HTTPError('u', 500, 'Internal Server Error', {}, None)
+    mic2, n = _talk(d, [(1.0, 2.0), (4.5, 5.5)], 8, name='mic2')
+    _run(LI.Hearer(d, mic2, wall0=st['wall0'], stt=broken, clock=lambda: (None, 'no live set runs'), retry_s=0),
+         mic2, n)
+    out = api.OPS['listen_heard'](session=d.name)
+    assert '#1 ' in out and 'louder' in out
+    assert '#2-3 ' in out and 'not heard (tried twice: the speech server answered 500' in out, out
+    assert 'No bars: no live set runs.' in out and 'Next: listen_heard(since=3).' in out
+    assert 'louder' not in api.OPS['listen_heard'](session=d.name, since=1)
+    assert 'Nothing new since #3.' in api.OPS['listen_heard'](session=d.name, since=3)
+
+
+def test_a_missing_speech_server_is_said_plainly_with_what_still_works(home):
+    import urllib.error
+    d, st = _recording(home)
+
+    def down(path):
+        raise urllib.error.URLError('connection refused')
+    mic, n = _talk(d, [(1.0, 2.0)], 5)
+    _run(LI.Hearer(d, mic, wall0=st['wall0'], stt=down, clock=lambda: (None, 'x'), retry_s=0), mic, n)
+    out = api.OPS['listen_heard'](session=d.name)
+    assert f'the speech server at {LI.SPEAK} does not answer' in out
+    assert 'listen_peek' in out and 'listen_stop reads the words' in out
+
+
+def test_listen_heard_gives_the_last_lines_and_says_when_there_is_no_mic(home):
+    d, _ = _recording(home)
+    for k in range(25):
+        LI.Hearer._add(types.SimpleNamespace(out=d, mic={'name': 'mic'}, wall0=0.0),
+                       {'t': float(k), 'end': k + 0.5, 'text': f'line {k + 1}', 'bar': k + 1.0})
+    out = api.OPS['listen_heard'](session=d.name)
+    assert '#6 0:05.0 bar 6: line 6' in out and '#5 ' not in out and '#25 ' in out
+    assert '#3 ' in api.OPS['listen_heard'](session=d.name, limit=30)
+    quiet = _session(home, name='2026-01-05_120000', state='recording')
+    assert 'records no mic' in api.OPS['listen_heard'](session=quiet.name)
+
+
+def test_listen_peek_points_at_listen_heard_while_the_mic_is_on(home):
+    import threading
+    d, _ = _recording(home)
+
+    def recorder():                                         # answers the peek as the recorder does
+        for _ in range(200):
+            if (d / 'peek.req').exists():
+                sf.write(d / 'peek.wav', np.zeros(SR * 5, np.float32), SR)
+                (d / 'peek.req').unlink()
+                return
+            time.sleep(0.02)
+    th = threading.Thread(target=recorder)
+    th.start()
+    out = api.OPS['listen_peek'](session=d.name)
+    th.join()
+    assert 'listen_heard()' in out and 'silent' in out
+
+
+def test_the_bars_come_from_the_live_engines_clock(tmp_path):
+    from ismail.live.engine import Engine
+    fake = types.SimpleNamespace(midi=types.SimpleNamespace(heard_beat=lambda: 33.25), stream=object(),
+                                 _null_on=False, beat=lambda pos: 0.0, pos=0, bpm=124.0, bpb=4)
+    c = Engine.cmd_clock(fake)
+    assert c['beat'] == 33.25 and c['bpm'] == 124.0 and c['bpb'] == 4 and abs(c['wall'] - time.time()) < 1
+    _mk(tmp_path / 'live')
+    LI.write_json(tmp_path / 'live' / 'engine.json', {'port': 1})
+    clock, why = LI.engine_clock(str(tmp_path))
+    assert clock is None and 'older' in why

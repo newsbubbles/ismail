@@ -34,8 +34,8 @@ CATEGORIES = [
     ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes',
      ('exam_',)),
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
-    ('together', 'listening together: record what plays (a mic only with their yes), mark moments and their messages, '
-                 'read back skips, stretches and what was said on one clock', ('listen_',)),
+    ('together', 'listening together: record what plays (a mic only with their yes), their words as they say them, '
+                 'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
     ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
