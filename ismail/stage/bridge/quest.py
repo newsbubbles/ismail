@@ -11,6 +11,7 @@ function to help us with this"). The bar's lessons (bf_detail.vr_prep / vr_merge
 
 Call quest_diet() just before the bridge, with VR_DETAIL set so the joined parts' sources are left out.
 """
+import json
 import os
 
 import bpy
@@ -111,12 +112,20 @@ def merge_groups():
         if len(kids) + (root.type == 'MESH') < 2:
             continue
         srcs = ([root] if root.type == 'MESH' and not root.hide_render else []) + kids
-        copies = []
-        for o in srcs:
+        copies, parts = [], {}
+        for k, o in enumerate(srcs, 1):
             me = bpy.data.meshes.new_from_object(o.evaluated_get(dg))
+            # each piece's vertices carry its number (_part, exported: the name starts with _), so the page can split
+            # a piece back out of the joined mesh by name and move it live (the user, 2026-10-13: the heater could not
+            # be turned because it no longer existed on its own)
+            me.attributes.new('_part', 'FLOAT', 'POINT').data.foreach_set('value', [float(k)] * len(me.vertices))
             c = _link(bpy.data.objects.new(o.name + '_m', me))
             c.matrix_world = o.matrix_world
             copies.append(c)
+            if o is not root:
+                loc, q, sc = o.matrix_world.decompose()
+                parts[o.name] = {'part': k, 'parent': o.parent.name if o.parent else None,
+                                 'location': list(loc), 'quaternion': list(q), 'scale': list(sc)}
             o.hide_render = True
         with bpy.context.temp_override(active_object=copies[0], selected_editable_objects=copies, selected_objects=copies):
             bpy.ops.object.join()
@@ -130,6 +139,9 @@ def merge_groups():
             j.parent = root
             j.matrix_world = M
             j.name = root.name + '_mesh'
+        merged = json.loads(S.get('vr_merged') or '{}')     # the manifest's merged: piece name -> {into, part, ...}
+        merged.update({n: {'into': j.name, **e} for n, e in parts.items()})
+        S['vr_merged'] = json.dumps(merged)
     print('VR quest: merged', n0, '->', len([o for o in S.objects if o.type == 'MESH' and not o.hide_render]), 'meshes')
 
 

@@ -249,7 +249,9 @@ def stage_cmd(scene: str, type: str, fields: dict = None, timeout: float = 30) -
 def stage_world(scene: str, scenes: str = None, world: dict = None) -> str:
     """Read a scene's world.json (who plays whom, facings, partners, floor, keep-out boxes, spawn, credits, build),
     or with world= write it (checked first; the old one kept in the scene's history/). scenes= the scenes folder when
-    no server runs. The page reads it again on its next load or scene switch."""
+    no server runs. An open page takes it at once (page command world_reload: facings, partners, floor, grab and
+    actors apply now; unloaded sets, props, faces and keep-out boxes are redone; the reply lists what changed and
+    what was redone); with no page open it applies at the next load."""
     d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
     if not (d / scene).is_dir():
         raise OpError(f'no scene {scene!r} in {d}')
@@ -259,7 +261,20 @@ def stage_world(scene: str, scenes: str = None, world: dict = None) -> str:
         f = worldmod.save_world(d, scene, world)
     except ValueError as e:
         raise OpError(str(e))
-    return f'wrote {f}: ' + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': '))
+    return f'wrote {f}: ' + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': ')) + _world_now(scene)
+
+
+def _world_now(scene):
+    """Tell an open page world.json changed (best effort: with no page open it applies at the next load). In a
+    stage_batch the command joins the batch's page commands, in order, and the batch replies for it."""
+    if link.pending() is not None:
+        link.page_cmd(scene, 'world_reload', {}, timeout=30)
+        return ''
+    try:
+        r = link.page_cmd(scene, 'world_reload', {}, timeout=30)
+        return '\nthe page: ' + (r if isinstance(r, str) else json.dumps(r, separators=(', ', ': ')))
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return '\nthe page takes it at its next load'
 
 
 def _set_members(d, scene, items):
@@ -1121,6 +1136,7 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
             if on_page:
                 queued.append((i, name))
                 continue
+            queued.extend((i, f'{name} (page)') for _ in range(link.pending() or 0))   # page commands it sent
             note_changes()
             out.append(f'[{i}] {name}: {r}')
         if not (failed and stop_on_error):
