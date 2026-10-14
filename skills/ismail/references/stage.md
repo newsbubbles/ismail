@@ -234,7 +234,8 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   with `owner="scene"` in this scene's rows (world.json `gestures`; the person's rows win). The page takes it at
   once. A rebind that would share a shape with another row where both are read is refused, naming that row.
   Leaving VR, the performance stop and the voice note are locked (never rebound or off, so nobody is trapped);
-  travel, the snapshot frame, select and hold are fixed to how the shape moves. `stage_gesture_reset` goes back.
+  travel, the snapshot frame, select and hold are fixed to how the shape moves. The yes and no answers can be
+  rebound but not switched off (`stage_ask` waits on them). `stage_gesture_reset` goes back.
 - **Keep tooling in service of the work.** An editor feature is worth building when the scene waits on it; when the
   scene is waiting for layout, build the scene.
 - **The scene's content is yours; how the stage works is the stage dev's.** Models, lights, the street, music, the

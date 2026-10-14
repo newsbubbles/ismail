@@ -96,12 +96,42 @@ def test_world_json_gestures_are_checked(stage):
 
 
 def test_the_page_reads_the_map_in_force(stage):
-    OPS['stage_gesture_set'](scene='room', intent='answer_yes', off=True, scenes=str(stage['scenes']))
+    OPS['stage_gesture_set'](scene='room', intent='drop', off=True, scenes=str(stage['scenes']))
     got = _get(stage['port'], 'gestures?scene=room')[1]
     assert got['collisions'] == []
-    assert got['rows']['answer_yes']['off'] is True and got['rows']['answer_yes']['owner'] == 'person'
+    assert got['rows']['drop']['off'] is True and got['rows']['drop']['owner'] == 'person'
     assert got['rows']['vr_exit']['words'] == 'both thumbs up, held 1.5 s'
     assert _get(stage['port'], 'gestures?scene=../x')[1]['rows']['reload']['owner'] == 'engine'
+
+
+def test_the_answers_can_be_rebound_but_never_switched_off(stage):
+    with pytest.raises(OpError, match='answer_yes cannot be switched off: stage_ask'):
+        OPS['stage_gesture_set'](scene='room', intent='answer_yes', off=True)
+    with pytest.raises(ValueError, match='answer_no cannot be switched off'):
+        gm.check_binding({}, 'scene', 'answer_no', off=True)
+    with pytest.raises(OpError, match='answer_no cannot be switched off'):
+        OPS['stage_world'](scene='room', scenes=str(stage['scenes']), world={'gestures': {'answer_no': {'off': True}}})
+    rows, coll = gm.resolve({'person': {'answer_yes': {'off': True, 'hold_ms': 600}}})   # a hand edit
+    assert not rows['answer_yes'].get('off') and rows['answer_yes']['hold_ms'] == 600
+    assert coll == ['IGNORED person row answer_yes: off True (stage_ask is answered with it)']
+
+
+def test_a_hand_edited_person_file_is_checked_on_read(stage):
+    f = gm.person_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({'rows': {'reload': {'hold_ms': 'long', 'shape': 'ok'}, 'drop': {'hand': 'third'},
+                                      'answer_no': 'nope', 'select': {'shape': 'ok'}}}), encoding='utf-8')
+    listed = OPS['stage_gestures'](scene='room')
+    assert "IGNORED person row reload: hold_ms 'long' is not 0 to 10000" in listed
+    assert 'reload: left ok, held 0.7 s' in listed                 # the good value holds, the engine's hold stands
+    assert "IGNORED person row drop: no hand 'third'" in listed
+    assert "IGNORED person row answer_no: 'nope' is not a binding" in listed
+    assert 'select: either hand pinch' in listed                   # a fixed row is never overridden, not even by hand
+    assert 'IGNORED person row select: it is fixed' in listed
+    got = _get(stage['port'], 'gestures?scene=room')[1]
+    assert got['rows']['reload']['hold_ms'] == 700 and any('IGNORED' in c for c in got['collisions'])
+    OPS['stage_gesture_set'](scene='room', intent='reload', hold_ms=900)    # the next save drops the junk
+    assert json.loads(f.read_text(encoding='utf-8'))['rows']['reload'] == {'shape': 'ok', 'hold_ms': 900}
 
 
 # ---- the page side, run in node
