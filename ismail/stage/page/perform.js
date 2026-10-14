@@ -180,10 +180,9 @@ export function initPerform(ed, hands, voice, live, getActors) {
       const why = age >= CHUNK_MAX_S ? `auto: ${CHUNK_MAX_S} s` : age >= CHUNK_MIN_S && c.voiced && now - c.lastVoice >= PAUSE_S * 1000 ? 'auto: pause' : null;
       if (why) { p.rotating = true; nextClip(why).finally(() => { p.rotating = false; }); }
     }
-    const H = hands.state || {}, down = (s) => H[s] && H[s].g === 'thumbs_down' && !H[s].resting;
-    if (down('left') && down('right')) {
+    if (hands.gestures.on('stop', { lost: true })) {    // gestures.js: stop is a locked row (both thumbs down)
       if (!stopSince) stopSince = now;
-      else if (now - stopSince >= STOP_HOLD_MS) { stopSince = 0; stopAll('both thumbs down'); }
+      else if (now - stopSince >= hands.gestures.hold('stop', STOP_HOLD_MS)) { stopSince = 0; stopAll('both thumbs down'); }
     } else stopSince = 0;
   }, 50);
 

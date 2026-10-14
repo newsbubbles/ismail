@@ -214,7 +214,7 @@ CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoi
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release', 'prop_pin',
              'take_keep_last', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'actor_part', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
-             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now', 'embody', 'grab_mode', 'grab_rule', 'material', 'world_reload'}
+             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now', 'embody', 'grab_mode', 'grab_rule', 'material', 'world_reload', 'gestures_reload'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -729,6 +729,10 @@ class Handler(SimpleHTTPRequestHandler):
             if not NAME.match(name) or not (SCENES / name).is_dir():
                 return self._json(400, {'error': f'no scene {name!r}'})
             return self._json(200, load_world(SCENES, name))
+        if u.path == '/gestures':                  # the gesture map in force for a scene (gestures.py, page/gestures.js)
+            from .gestures import for_page
+            name = parse_qs(u.query).get('scene', [''])[0]
+            return self._json(200, for_page(SCENES, name if NAME.match(name) and (SCENES / name).is_dir() else None))
         if u.path == '/updates.json':              # the update notes (update_note), newest code changes first
             f = STATE / 'updates.json'
             return self._json(200, json.loads(f.read_text(encoding='utf-8')) if f.is_file() else {'updates': []})
