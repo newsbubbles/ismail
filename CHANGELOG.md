@@ -29,6 +29,20 @@
 - Known gaps: keys skip the track's live effects and the safety limiter (a soft clip guards them), and are not in
   `live_record` recordings or streams yet.
 
+### Listening together: words as they are said, sessions off the system drive
+
+- `listen_heard(since)` gives the person's words a few seconds after they say them, cut at pauses or every 8 s
+  at most, each with its time and the bar the live set had sounding (a new `clock` op on the live engine, exempt
+  from its news). It uses the speech server the reading uses and starts nothing; when that server is down it says
+  so and what still works. A chunk that fails is tried once more, then reported, never dropped. `listen_peek`
+  points at it while the mic is on.
+- Sessions go to `<project>/listen/` (`listen_start(project=)`), else the running live set's folder, else
+  `$ISMAIL_LISTEN_HOME`, else `_listen/` in the installed songs folder: never the system drive by default. Ids
+  resolve across all of them and the old home; a full path works too.
+- A 2 GB free-space floor: `listen_start` refuses under it and says what to do, and a running session stops by
+  itself there, keeping its recording, with a line in the next listen reply. Background temp files stay in the
+  session folder.
+
 ### Listening together
 
 - New `listen_*` ops record what plays on this computer while the person listens and talks about it:
