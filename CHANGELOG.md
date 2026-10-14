@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Worktrees: sweep the empty folders removed copies leave
+
+- `python -m ismail.worktrees sweep [--dry-run] [--json]`: removes the empty folders next to the main checkout
+  (`<main>-*`) and in `<main>/.claude/worktrees/` that git no longer lists as copies, with `os.rmdir` only, so a
+  folder holding anything stays. A non-empty `<main>-wt-*` folder git does not list is named as "not a dev copy,
+  left alone"; other projects' folders are not reported. A folder a program still sits in is reported HELD for the
+  next sweep. It also drops the owner records of copies that are gone, as `list` does.
+- `done`: on Windows git removes a copy's files and record but not its folder while a program's working folder is
+  inside it (and exits 1). `done` now goes on, removes the empty folder itself, or says it is HELD instead of
+  reporting plain success.
+- The intake (`python -m ismail.handoffs`) counts empty leftover folders and names `sweep`.
+- `worktrees.md`: the sweep, and the rule: never leave a shell's working folder inside a copy (`git -C <copy>` or a
+  subshell).
+
 ### Stage dev: restarts check presence, not the person's word
 
 - `stage-dev.md`, Deploying: a stage server restart needs only `stage_presence` saying not in VR and nothing in

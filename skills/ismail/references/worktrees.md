@@ -29,6 +29,7 @@ python -m ismail.worktrees new <topic> --owner <name>
 python -m ismail.worktrees claim <path> --owner <name>
 python -m ismail.worktrees sync <path>
 python -m ismail.worktrees done <path>
+python -m ismail.worktrees sweep [--dry-run]        # remove the empty folders removed copies left behind
 ```
 
 A copy's line gives its path, branch, owner, commits ahead and behind `origin/main`, whether it is merged, its last
@@ -74,6 +75,15 @@ enters the repository.
     - **IDLE:** an unmerged copy with no commit for 3 days goes back to its owner, or to the person when it has none.
       `done` refuses anything unmerged: open or finish its pull request, or ask the person before dropping it.
       Nothing unmerged is deleted without a yes.
+    - **An empty folder left behind.** On Windows git cannot remove a copy's folder while a program's working
+      folder is inside it: the files and git's record go, the empty folder stays, and `list` never shows it again.
+      `done` says HELD when that happens; the intake counts such folders. `sweep` removes every empty folder next to
+      the main checkout named `<main>-*`, and in `<main>/.claude/worktrees/`, that git does not list as a copy, and
+      drops the owner records of copies that are gone. It removes only empty folders (never anything inside one);
+      one still HELD stays for the next sweep, and a non-empty `<main>-wt-*` folder git does not list is named for a
+      look, never touched. `--dry-run` lists what it would remove.
+    - **Never leave a shell's working folder inside a copy:** use `git -C <copy> ...` or a subshell
+      (`(cd <copy> && ...)`), so nothing holds the folder when the copy is removed.
 11. **Two agents want the same file.** The owner of that part decides (`development.md`, the roles). Never two
     copies on one topic.
 12. **A different harness** (another agent app, a command line, an editor). Nothing here depends on one harness's
@@ -81,4 +91,4 @@ enters the repository.
     as yours for that topic and `claim` it.
 
 The tool never passes `--force` to git, never stashes and never deletes a file: `done` removes only a copy whose
-work is all in `origin/main` and that holds nothing git does not track.
+work is all in `origin/main` and that holds nothing git does not track, and `sweep` removes only empty folders.

@@ -19,8 +19,9 @@ pull request is never seen only because its author sent word. It uses the GitHub
 installed and signed in, and otherwise says it could not look.
 
 Last, the dev copies (git worktrees, `ismail.worktrees`): the next action, the main checkout when it is behind
-origin/main, and only the copies that need something (no owner, merged, idle, behind), so no dev has to remember
-to look. `python -m ismail.worktrees` lists every copy."""
+origin/main, only the copies that need something (no owner, merged, idle, behind), and the count of empty folders
+removed copies left (`python -m ismail.worktrees sweep`), so no dev has to remember to look.
+`python -m ismail.worktrees` lists every copy."""
 import argparse
 import difflib
 import glob
