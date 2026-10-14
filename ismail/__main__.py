@@ -59,7 +59,7 @@ def parse_args(args):
         try:
             kw[k] = json.loads(v)
         except json.JSONDecodeError:
-            kw[k] = v
+            kw[k] = {'True': True, 'False': False, 'None': None}.get(v, v)   # grab=False was the string 'False': truthy
     return kw
 
 

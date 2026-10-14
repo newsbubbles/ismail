@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Grab by touch: hand-sized things, a let-go after an open-handed take, a steadier count
+
+- A hand takes the outermost group it could carry (up to 2.2 m across), not the outermost group: reaching for a pool
+  ball took the whole pool table. `stage_grab_rule(grab=True)` still allows a big thing.
+- The grip locked at the take counts as at least half closed (120 degrees of bend), so a thing taken with an open
+  palm lets go when the hand stays open flat; before, an open-handed take could never let go.
+- The 1.5 s count pauses through a touch or stillness lost for under 0.4 s instead of starting over: one bottle's
+  count restarted 12 times in 9 s.
+- CLI: `key=False`, `key=True`, `key=None` are Python values, not strings (`grab=False` read as a truthy string and
+  allowed the thing instead).
+
 ### Ops refuse: personal details on a page, questions already granted, a mic without the person's note
 
 - One module, `ismail/guards.py`, holds the three checks; each refusal says why and what the next call is.
