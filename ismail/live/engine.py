@@ -2219,9 +2219,9 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
-    def cmd_played(self, source=None, bars=8):
+    def cmd_played(self, source=None, bars=8, fit=False, from_bar=None):
         try:
-            return self.midi.played(source, bars)
+            return self.midi.played(source, bars, fit, from_bar)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 

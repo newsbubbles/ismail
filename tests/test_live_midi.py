@@ -1,8 +1,10 @@
 """Played keys (live_midi): a MIDI input patched to an instrument in the live engine sounds at the next device
 pull, swaps sound on request, follows note-offs, the sustain pedal, channel and transpose, notices inputs coming
-and going, and logs every key with the beat heard. All silent: device='none', and a stand-in for the MIDI driver."""
+and going, and logs every key with the beat it sounded against; live_played reads the log back and fits a take to
+the 16th grid. All silent: device='none', and a stand-in for the MIDI driver."""
 import json
 import os
+import re
 
 import numpy as np
 import pytest
@@ -171,3 +173,142 @@ def test_what_was_played_reads_back_as_notes_text(eng):
     c4 = next(x for x in lines if 'C4' in x)
     assert 'bar   1' in c4 and 'd=1.95' in c4 and 'v=90' in c4  # two pulls of whole blocks at 120 BPM: the pedal's hold
     assert any('E4' in x and 'v=70' in x for x in lines) and any('G4' in x for x in lines)
+
+
+# ------------------------------------------------------------------ the clock and the fit (live_played)
+
+def test_a_player_by_ear_lands_on_the_beat_he_heard(eng):
+    """The whole path, silent: a kick on every beat goes through the mixer, the fifo and a device with a 180 ms
+    output buffer. A perfect player presses each key one key delay before the kick reaches the speaker, so the note
+    he hears sounds with the kick he hears. live_played must put every key on its beat: logged at the press on the
+    heard clock (as before 2026-10-14) they read 180 ms (0.36 beat) early."""
+    import types
+    from ismail.live import graph as G
+    from ismail.live.engine import AHEAD_S
+    lat = 0.18
+    eng.stream = types.SimpleNamespace(latency=lat)          # only its latency is read
+    eng.cmd_track('k', instrument={'type': 'kick'})
+    eng.cmd_queue([{'track': 'k', 'lanes': {'C1': 'x...x...x...x...'}, 'at': 'next_bar'}])
+    eng.cmd_midi(source='keys', instrument='preset:pluck')
+    dev, presses = [], {}
+
+    def step(press_at=()):
+        while eng._fifo_n < int(AHEAD_S * SR):                  # the mixer keeps its half second ahead
+            eng.tick()
+            eng._fifo.append(eng.mix_block().T.copy())
+            eng._fifo_n += BLOCK
+        for d in press_at:                                        # the key joins the next device buffer
+            if abs(eng.played - d) <= BLOCK // 2:
+                key('ismail keys', 0x90, 60, 100)
+                presses[d] = eng.played
+        for d, at in list(presses.items()):
+            if eng.played - at == 4 * BLOCK:
+                key('ismail keys', 0x80, 60, 0)
+        dev.append(eng._pull(BLOCK))
+
+    for _ in range(int(3.0 * SR / BLOCK)):                        # no keys yet: where does a kick leave the device?
+        step()
+    y = np.abs(np.concatenate(dev)[:, 0])
+    above = y > 0.02
+    hits = np.nonzero(above[1:] & ~above[:-1])[0] + 1
+    beat = eng.sample(1)
+    first = int(hits[0])
+    # the device is handed beat b's music at sample(b) + the path budget + the safety lookahead (the bar 2 kick)
+    assert abs(first - (eng.sample(4) + G.LAT_BUDGET + eng.safety.la)) < 0.001 * SR
+    # it reaches the speaker `lat` later, and a key pressed when the device stands at d reaches it `lat` after d,
+    # so the perfect player's key enters the device at each kick's own position
+    want = [first + (b - 4) * beat for b in range(8, 16)]
+    while eng.played < want[-1] + 8 * BLOCK:
+        step(want)
+    assert len(presses) == 8
+    r = eng.cmd_played(source='keys')
+    starts = [(int(b) - 1) * 4 + float(x) for b, x in re.findall(r'bar\s+(\d+) \+([\d.]+)\s+C4', r)]
+    assert [round(s) for s in starts] == list(range(8, 16)), r
+    assert all(abs(s - round(s)) < 0.03 for s in starts), r     # half a device buffer at most
+    assert 'the key press plus the 180 ms the keys take to reach the speakers' in r
+    recs = [json.loads(x) for x in open(eng.midi.patches['ismail keys']['log']) if x.strip()]
+    on = [x for x in recs if x['st'] == 0x90]
+    assert all(abs(x['beat'] - x['press'] - lat / 0.5) < 0.001 for x in on)    # the press is kept, 0.36 beat before
+
+
+def _log(path, recs):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf8') as f:
+        f.write(''.join(json.dumps(r) + '\n' for r in recs))
+
+
+def test_fit_finds_the_grid_the_shape_and_offers_two_placements(eng, tmp_path):
+    """A take in bars 3-5 played 3-3-2 from the 'and' of beat 1, 45 ms behind the 16ths, two hands per hit 0.04 beat
+    apart, a keyboard that sends v=80. Rounding the raw times would put hits on the wrong 16th; the fit does not."""
+    rng = np.random.default_rng(1)
+    half = [0, 3, 6]                                              # 16ths of the shape in each half bar
+    true = [8.5 + 2 * h + s * 0.25 for h in range(4) for s in half]
+    recs = [{'wall': 0, 'beat': 2.0, 'st': 0x90, 'd1': 50, 'd2': 80},      # an older log line, bar 1
+            {'wall': 0, 'beat': 2.5, 'st': 0x80, 'd1': 50, 'd2': 0}]
+    for t in true:
+        b = t + 0.09 + rng.uniform(-0.015, 0.015)
+        for m, dt in ((57, 0.0), (72, 0.04)):
+            recs.append({'wall': 0, 'beat': b + dt, 'press': b + dt - 0.36, 'st': 0x90, 'd1': m, 'd2': 80})
+            recs.append({'wall': 0, 'beat': b + dt + 0.2, 'press': b + dt - 0.16, 'st': 0x80, 'd1': m, 'd2': 0})
+    recs.append({'wall': 0, 'beat': 30.0, 'press': 29.64, 'st': 0x90, 'd1': 60, 'd2': 80})   # bar 8: not chosen
+    recs.append({'wall': 0, 'beat': 30.5, 'press': 30.14, 'st': 0x80, 'd1': 60, 'd2': 0})
+    _log(os.path.join(str(tmp_path), 'live', 'midi', 'ismail_keys.jsonl'), sorted(recs, key=lambda r: r['beat']))
+
+    r = eng.cmd_played(source='keys', bars=[3, 4], fit=True)
+    assert 'ismail_keys: 22 of 26 notes, bars 3-4' in r, r
+    assert 'the key press plus the 180 ms' in r and '1 notes come from a log written before this clock' in r
+    m = re.search(r'fit: 11 hits .*? they sit (\d+) ms after the 16ths, (\d+) ms rms off them, drifting (\d+) ms per '
+                  r'bar \(steady\)', r)
+    assert m and 38 <= int(m[1]) <= 52 and int(m[2]) <= 12, r
+    assert 'rhythm: 3-3-2 in 16ths, repeating every 8 16ths (2 beats)\n' in r
+    assert 'play both and let the player pick by ear' in r
+    lines = r.splitlines()
+    a = lines.index(next(x for x in lines if x.startswith('A, as played')))
+    b = lines.index(next(x for x in lines if x.startswith('B, groups from beat 1')))
+    assert 'first hit at bar 3 +0.5; as a live_queue clip from the start of bar 3, bars=2' in lines[a]
+    assert lines[a + 1] == ('0.5 A3 0.25 80; 0.5 C5 0.25 80; 1.25 A3 0.25 80; 1.25 C5 0.25 80; 2 A3 0.25 80; '
+                            '2 C5 0.25 80; 2.5 A3 0.25 80; 2.5 C5 0.25 80; 3.25 A3 0.25 80; 3.25 C5 0.25 80')
+    assert 'everything 0.5 beat earlier, so the 3-3-2 groups start on beat 1 and beat 3' in lines[b]
+    assert 'bar 3 +0;' in lines[b]
+    assert lines[b + 1].startswith('0 A3 0.25 80; 0 C5 0.25 80; 0.75 A3 0.25 80')
+    assert 'every key came at v=80' in r and 'accent shape' in r
+    # the lines are live_queue notes as they stand
+    notes = ' ; '.join(lines[a + 1:b])
+    eng.cmd_track('p', instrument='preset:pluck')
+    assert 'c1 p:' in eng.cmd_queue([{'track': 'p', 'notes': notes, 'bars': 2}])
+
+    r = eng.cmd_played(source='keys', bars=[3, 4], fit=True, from_bar=2)
+    assert 'clip from the start of bar 2, bars=3' in r and '\n4.5 A3 0.25 80; 4.5 C5' in r
+
+    # the raw times rounded to 16ths: the 45 ms (0.09 beat) offset pushes 0.75 + 0.09 + jitter toward the wrong line
+    raw = sorted({round(x['beat'], 3) for x in recs if x['st'] == 0x90 and x['d1'] == 57})
+    assert MP.fit_grid(raw)['k'].tolist() == [round(t * 4) for t in true]
+
+
+def test_shape_and_grid_on_their_own():
+    assert MP.rhythm_shape([0, 3, 6, 8, 11, 14, 16]) == ('3-3-2', 8, 0)
+    # 3-2-3 from the first hit is a 3-3-2 cycle that starts 5 16ths in (a take that began on its last 3)
+    assert MP.rhythm_shape([0, 3, 5, 8, 11, 13, 16]) == ('3-3-2', 8, 5)
+    assert MP.rhythm_shape([0, 2, 4, 6, 8]) == ('2', 2, 0)
+    assert MP.rhythm_shape([0, 5, 7]) == ('5-2', None, 0)
+    # half a 16th off: rounding is a coin toss, the free offset is not
+    g = MP.fit_grid([0.125 + 0.25 * k for k in (0, 3, 6, 8, 11, 14)])
+    assert abs(abs(g['offset']) - 0.125) < 0.002 and np.diff(g['k']).tolist() == [3, 3, 2, 3, 3]
+    # a player who drags 0.01 beat per beat over two bars (0.01 / 1.01 of the time played): measured and taken out
+    t = [s + 0.01 * s for s in np.arange(0, 8, 0.75)]
+    g = MP.fit_grid(t)
+    assert abs(g['drift'] - 0.01 / 1.01) < 1e-6 and g['rms'] < 1e-6 and (g['k'] == np.arange(0, 32, 3)).all()
+
+
+def test_played_bars_and_from_bar_say_what_to_do(eng):
+    eng.cmd_midi(source='keys', instrument='preset:pluck')
+    pulls(eng, 1.0)
+    key('ismail keys', 0x90, 60, 90)
+    key('ismail keys', 0x80, 60, 0)
+    assert 'no notes in bars 5-6; it has notes in bars 1-1' in eng.cmd_played(source='keys', bars=[5, 6])
+    with pytest.raises(LiveError, match='bars=\\[a, b\\]'):
+        eng.cmd_played(source='keys', bars=[4, 2])
+    with pytest.raises(LiveError, match='use it with fit=True'):
+        eng.cmd_played(source='keys', from_bar=1)
+    assert 'a grid needs at least 3' in eng.cmd_played(source='keys', fit=True)
+    assert 'no output delay was measured' in eng.cmd_played(source='keys')
