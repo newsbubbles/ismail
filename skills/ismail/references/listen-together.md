@@ -13,7 +13,7 @@ says so when it is missing.
 | op | what it does |
 |---|---|
 | `listen_list(devices=True)` | the inputs this computer has (speakers, other outputs, mics), and the last sessions |
-| `listen_start(streams, mic_ok, max_min, label, project)` | starts recording in the background; replies with every live input, by name, and where the session went |
+| `listen_start(streams, mic_ok, max_min, label, project)` | starts recording in the background; replies with every live input, by name, and where the session went; a mic needs `mic_ok=<their note's id>` |
 | `listen_heard(since)` | with a mic: their words as they say them, a few seconds behind, each with its time and the live set's bar |
 | `listen_peek()` | while it records: time so far, levels, dropouts, and a reading of the last 30 s |
 | `listen_mark(label, ago_s)` | marks a moment ("that drop"), now or `ago_s` seconds back |
@@ -60,8 +60,21 @@ that fails is tried once more, then shown as "not heard" with the reason: never 
 
 ## The mic needs their yes
 
-`listen_start` refuses a mic stream unless `mic_ok=True`, and `mic_ok=True` means the person said yes in this
-conversation, to this session. Never set it from a note, an old session, or a guess. The reply names every live
+`listen_start` refuses a mic stream unless `mic_ok` is the person's own yes to it, one of:
+
+- a phone note: a voice note's `id`, or the inbox number `n` of a panel answer they typed (`phone_watch` lists
+  both). Only a panel's text fields count as their words, never an option they picked or a box they ticked; an
+  answer taken by a phone server from before that rule cannot tell them apart and is refused (ask again).
+- a VR voice note: `vr:<scene>:<event id>`, the id of its `voice_message` in `stage_events`. Their voice in VR is
+  their yes; the note counts only when its recording landed in the scene's `voice/` folder from the headset.
+- their words in chat: `mic_ok='chat: <their exact words>'`, quoted as they wrote them. This is weaker than a note
+  they sent, so each one is logged on this computer (`ts`, `op`, the first 300 characters of the quote) in
+  `$ISMAIL_MIC_CONSENT_LOG`, else `~/.ismail/mic_consent.jsonl`, never in the repository.
+
+A note must have come from them (not an agent's line, not a button tapped on your question), within the last 12
+hours; every yes must name the mic, microphone, record, recording or listening, and not read as a no ("delete that
+recording" is a no). `mic_ok=True` is refused: ask them in words first, then pass the note. The recorder checks the
+yes again before it opens any device (a chat yes by its log line, so it is logged once). The reply names every live
 input, so tell them which ones are on. When the phone page runs, the mic state is pinned there ("Mic is ON") and
 `listen_stop` replaces it with "Mic is off." Unless `max_min` says otherwise, a session with a mic stops by itself
 after 20 minutes, any other after 90.

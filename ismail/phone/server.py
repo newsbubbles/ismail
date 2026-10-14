@@ -1990,6 +1990,7 @@ class Handler(BaseHTTPRequestHandler):
                     rec['answer'] = body.get('answer')
                     if p.get('inputs'):
                         rec['values'] = body.get('values') or {}
+                        rec['typed'] = [x['id'] for x in p['inputs'] if x.get('kind') == 'text']   # their own words
                         vv = {k: ph.voice_files(v) for k, v in (body.get('values_voice') or {}).items() if v}
                         if vv:
                             rec['values_audio'] = vv

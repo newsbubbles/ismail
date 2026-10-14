@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from ..api import OpError, op
-from .. import machine
+from .. import guards, machine
 from . import server as S
 
 
@@ -23,7 +23,24 @@ def _port():
         return None
 
 
+# the fields of each server op that the person reads on the page: guards.check_private scans them before they go
+SHOWN = {'say': ('text',), 'panel_show': ('title', 'text', 'buttons', 'inputs', 'link_label'), 'ask': ('text',),
+         'exam': ('title', 'question', 'chips', 'choices', 'clips'), 'offer': ('label', 'title', 'album', 'artist'),
+         'buttons': ('buttons',), 'now': ('now', 'next', 'recording_why', 'sections'), 'restarting': ('why',)}
+
+
+def _shown(op_name, args):
+    vals = []
+    for f in SHOWN.get(op_name, ()):
+        v = args.get(f)
+        if f == 'clips':                                  # a clip's label and note are shown, never its path
+            v = [{'label': c.get('label'), 'note': c.get('note')} for c in v or [] if isinstance(c, dict)]
+        vals.append(v)
+    return vals
+
+
 def _call(op_name, timeout=30, **args):
+    note = guards.check_private(*_shown(op_name, args)) if op_name in SHOWN else ''
     port = _port()
     if port is None:
         raise OpError("the phone server is not running: phone_start() first (it relays the live set to the phone)")
@@ -39,7 +56,7 @@ def _call(op_name, timeout=30, **args):
         raise OpError(f"the phone server does not answer ({e}): phone_start() again (log: {S.HOME / 'server.log'})")
     if not res.get('ok'):
         raise OpError(res.get('error', 'phone server error'))
-    return res['result']
+    return guards.with_note(res['result'], note)
 
 
 def _tailnet(port):
@@ -313,12 +330,19 @@ def phone_timeline(minutes: float = 15, kinds: list = None, limit: int = 200) ->
 
 @op()
 def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = False, voice: str = None,
-              sender: str = None, priority: str = None) -> str:
+              sender: str = None, priority: str = None, override_grant: str = None) -> str:
     """A caption on the phone. speak=True also says it into the stream (Kokoro, the music ducked under it), so they
     hear it in their pocket: only to answer something they said, never unprompted. pin=True keeps it at the top
     (a "since you left" summary). buzz=True vibrates the phone if the page is open. priority: 'needs you' (sorts
-    first and lights the corner key in the accent colour), 'normal' (the default) or 'low' (sorts last)."""
-    return _call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender, priority=priority)
+    first and lights the corner key in the accent colour), 'normal' (the default) or 'low' (sorts last).
+    Refused: text naming a place or personal detail from the local private terms (rephrase it), and a yes/no
+    question ("should I merge ...?") that a standing grant already answers (act on the grant and say what you did;
+    override_grant='<why it does not fit>' asks anyway and logs the reason). phone.md, "Nothing personal on the
+    page" and "Don't ask for what is granted"."""
+    guards.check_private(text)                    # first, so an override is never logged for text that cannot go
+    g = guards.check_grant(text, guards.asks_yes_no(text), override_grant, 'phone_say')
+    return guards.with_note(_call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender,
+                                  priority=priority), g)
 
 
 @op()
@@ -403,7 +427,7 @@ def phone_video_copy(video, video_wait='10m'):
 def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', image: str = None, buttons: list = None,
                      inputs: list = None, wait: float = 0, sender: str = None, video: str = None,
                      video_wait: str = '10m', priority: str = None, link: str = None,
-                     link_label: str = 'Open') -> str:
+                     link_label: str = 'Open', override_grant: str = None) -> str:
     """A panel over the phone page (the stage_panel_show shape): title, text, an image file, a video file, buttons
     (labels), and inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) |
     'toggle' (on or off) | 'text', 'label', 'options', 'optional'}]. A choice must be picked before a button sends
@@ -424,12 +448,19 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
     link_label naming the button.
     A panel never pops up: it shows as a message on the page's corner key (a short buzz), and the person opens it
     when they choose, switches between open messages, or puts one back with Later. Send one only for something to
-    decide; say everything else in a caption."""
+    decide; say everything else in a caption.
+    Refused: a title, text, button or input naming a place or personal detail from the local private terms
+    (rephrase it), and a yes/no or approve/deny panel (its buttons, or a choice's options, are yes and no words)
+    whose title or text a standing grant covers: act on the grant, then post a caption saying what you did.
+    override_grant='<why the grant does not fit>' shows it anyway and logs the reason (phone.md)."""
+    guards.check_private(title, text, buttons, inputs, link_label)   # before an override is logged or a video copied
+    g = guards.check_grant([title, text], guards.is_yes_no(buttons, inputs, f'{title} {text}'), override_grant,
+                           'phone_panel_show')
     if video:
         video = phone_video_copy(video, video_wait)
-    return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
+    return guards.with_note(_call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
                  buttons=buttons, inputs=inputs, wait=wait, who=sender, video=video, priority=priority,
-                 link=link, link_label=link_label)
+                 link=link, link_label=link_label), g)
 
 
 @op()
@@ -439,9 +470,13 @@ def phone_panel_close(panel_id: str) -> str:
 
 
 @op()
-def phone_ask(text: str, wait: float = 0, sender: str = None) -> str:
-    """A yes/no question on the phone; the answer arrives as kind 'answer'; wait=N blocks up to N seconds for it."""
-    return _call('ask', timeout=float(wait or 0) + 15, text=text, wait=wait, who=sender)
+def phone_ask(text: str, wait: float = 0, sender: str = None, override_grant: str = None) -> str:
+    """A yes/no question on the phone; the answer arrives as kind 'answer'; wait=N blocks up to N seconds for it.
+    Refused when a standing grant already answers it (act on the grant, then say what you did in a caption;
+    override_grant='<why it does not fit>' asks anyway and logs the reason), or when it names a private term."""
+    guards.check_private(text)
+    g = guards.check_grant(text, True, override_grant, 'phone_ask')
+    return guards.with_note(_call('ask', timeout=float(wait or 0) + 15, text=text, wait=wait, who=sender), g)
 
 
 FLOORS = ('64k', '128k', 'same')      # floor pairs: the real clip against a 64 or 128 kb/s MP3 copy, or itself
@@ -659,7 +694,8 @@ def phone_sounds(event: str = None, path: str = None, gain_db: float = 0.0, menu
 def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
     """Take captions back off the phone page, its history and its pinned line: match='text' (several with '|',
     case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
-    other personal details on the page: they may be recording the screen."""
+    other personal details on the page: they may be recording the screen (the ops that show text refuse the terms
+    in ~/.ismail/private_terms.txt, or $ISMAIL_PRIVATE_TERMS, and the git email)."""
     return _call('unsay', match=match, since=since, n=n)
 
 

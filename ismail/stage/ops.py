@@ -272,7 +272,10 @@ def stage_busy(who: str, text: str = '', minutes: float = None, port: int = None
     ("rendering Dell's drums, in line behind 2 jobs, about 5 min"). who= your name as the headset shows it (the
     stage_listen who). The headset shows it beside the "heard by" receipts, and while it runs (minutes, default 10, up
     to 60) a note you have not answered is not called stuck. Set it before anything that can wait on something you do
-    not control (a queue, the GPU, the network); text='' clears it when you are free."""
+    not control (a queue, the GPU, the network); text='' clears it when you are free. A line naming a private term
+    is refused (ismail.guards)."""
+    from .. import guards
+    guards.check_private(text, who, where='the stage')
     rec = link.server_for(port=port)
     got = link.http(rec, 'live/busy', {'who': who, 'text': text, 'minutes': minutes})
     b = got.get('busy')
