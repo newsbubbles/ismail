@@ -405,13 +405,18 @@ def main():
     try:
         data = json.loads(sys.stdin.read() or '{}')
         key = decide(data) if isinstance(data, dict) else None
+        msg = MSG[key] if key else None
     except Exception:                                      # noqa: BLE001  (never block on a guard bug)
         return 0
-    if not key:
+    if not msg:
         return 0
-    sys.stderr.write('ismail named-ops guard: ' + MSG[key] + '\n')
+    sys.stderr.write('ismail named-ops guard: ' + msg + '\n')
     return 2
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        code = main()
+    except Exception:                                      # noqa: BLE001  (a guard bug lets the call through)
+        code = 0
+    sys.exit(code)

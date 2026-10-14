@@ -319,6 +319,41 @@ def test_guard_never_blocks_on_bad_input(guard_env):
         assert (r.returncode, r.stderr) == (0, '')
 
 
+def test_guard_lets_the_call_through_on_its_own_errors(guard_env, monkeypatch, capsys):
+    import io
+    import runpy
+    g = runpy.run_path(str(GUARD))                            # the module's globals, not run as __main__
+    payload = json.dumps({'tool_name': 'Bash', 'tool_input': {'command': 'taskkill /F /IM python.exe'}})
+
+    def boom(_):
+        raise RuntimeError('a guard bug')
+    for bad in (boom, lambda _: 'no_such_rule'):                # a crash, and a rule with no message
+        g['main'].__globals__['decide'] = bad
+        monkeypatch.setattr(sys, 'stdin', io.StringIO(payload))
+        assert g['main']() == 0
+    assert capsys.readouterr().err == ''
+
+
+def _readme_command(path):
+    """The hook command the README tells people to paste, with its <path>/... pointing at `path`."""
+    readme = (GUARD.parent / 'README.md').read_text(encoding='utf-8')
+    block = json.loads(readme.split('```json', 1)[1].split('```', 1)[0])
+    cmd = block['hooks']['PreToolUse'][0]['hooks'][0]['command']
+    assert '<path>/skills/ismail/hooks/named_ops_guard.py' in cmd
+    return cmd.replace('<path>/skills/ismail/hooks/named_ops_guard.py', Path(path).as_posix()).replace(
+        'python ', f'"{sys.executable}" ', 1)
+
+
+def test_the_pasted_hook_passes_everything_while_the_file_is_missing(guard_env, tmp_path):
+    # a hook that exits 2 blocks the call, and python exits 2 on a missing script: the pasted form checks first
+    refused = json.dumps({'tool_name': 'Bash', 'tool_input': {'command': 'taskkill /F /IM python.exe'}})
+    r = subprocess.run(_readme_command(tmp_path / 'not_installed_yet' / 'named_ops_guard.py'), shell=True,
+                       input=refused, capture_output=True, text=True, timeout=30)
+    assert (r.returncode, r.stderr) == (0, '')
+    r = subprocess.run(_readme_command(GUARD), shell=True, input=refused, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 2 and 'stage_restart' in r.stderr          # installed: it refuses as before
+
+
 def test_guard_decides_in_well_under_100_ms(guard_env):
     sys.path.insert(0, str(GUARD.parent))
     try:

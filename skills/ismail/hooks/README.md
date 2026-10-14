@@ -26,15 +26,22 @@ well under 100 ms.
 
 ## Turning it on
 
-Add this to `.claude/settings.json` (the project's) or `~/.claude/settings.json` (every project), with `<path>`
-the folder that holds this repository:
+Install this repository first, so the file is on disk, then add this to `.claude/settings.json` (the project's)
+or `~/.claude/settings.json` (every project), with `<path>` the folder that holds this repository:
 
 ```json
 {"hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell|Write|Edit|MultiEdit",
-  "hooks": [{"type": "command", "command": "python \"<path>/skills/ismail/hooks/named_ops_guard.py\""}]}]}}
+  "hooks": [{"type": "command", "command": "python -S -c \"import os, runpy; p = '<path>/skills/ismail/hooks/named_ops_guard.py'; os.path.isfile(p) and runpy.run_path(p, run_name='__main__')\""}]}]}}
 ```
 
+Paste this form, not `python <path>/named_ops_guard.py`. A hook that exits with code 2 blocks the call, and Python
+exits 2 when the file it is given does not exist. A mistyped path, a checkout that has not caught up yet, or a folder
+that was moved would then block every shell command and edit in every session, including the one that would fix
+it. The `os.path.isfile` check passes every call through until the file is there. Inside the guard, any error of
+its own also lets the call through. Only a refusal exits 2.
+
 The guard's own work takes a few milliseconds; most of a call is Python starting. Where that start is slow (many
-packages installed), `python -S` skips site-packages and starts faster; the guard needs only the standard library.
+packages installed), `python -S` skips site-packages and starts faster; the command above uses it, since the guard
+needs only the standard library.
 
 A refusal reaches the agent as the hook's message (exit code 2), so it switches to the op without asking the person.
