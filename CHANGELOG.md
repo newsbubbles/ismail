@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Stage dev: restarts check presence, not the person's word
+
+- `stage-dev.md`, Deploying: a stage server restart needs only `stage_presence` saying not in VR and nothing in
+  flight. The dev does not ask the person, and an open desktop page posting state does not count as them being in.
+
 ### Stage: named ops for every live edit
 
 - `stage_asset_install(scene, file, kind, name=, scenes=)`: puts a room (`scene.glb`), a piece list
