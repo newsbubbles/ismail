@@ -62,8 +62,8 @@ def per_bar(n_bars, fn, beats_per_bar=4):
 
 
 def metric(feel_bpm, engine_bpm):
-    """Metric modulation: one beat of a feel at feel_bpm, in beats of the running engine (the tempo is fixed per
-    run). 126 over an 84 engine = 2/3: house beats on a trip-hop grid."""
+    """Metric modulation: one beat of a feel at feel_bpm, in beats of the running engine (to keep the engine's
+    tempo; live_tempo changes it). 126 over an 84 engine = 2/3: house beats on a trip-hop grid."""
     return float(engine_bpm) / float(feel_bpm)
 
 

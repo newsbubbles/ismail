@@ -8,6 +8,7 @@ Run: python -m ismail.live.engine --project <dir> --bpm 120 [--bpb 4] [--device 
 Normally started by the live_start op, which also writes <project>/live/engine.json (port, pid).
 """
 import argparse
+import bisect
 import collections
 import contextlib
 import copy
@@ -82,6 +83,49 @@ class Seg:
         self.start, self.y, self.track, self.cid, self.on, self.dead = start, y, track, cid, on, False
 
 
+class TempoMap:
+    """Song beats <-> mix samples. Segments (sample, beat, bpm), each holding from its sample on; the first is
+    (0, 0, start tempo). Immutable: a tempo change makes a new map, so readers on other threads never see half."""
+
+    def __init__(self, segs):
+        self.segs = tuple(segs)
+        self._s = [x[0] for x in self.segs]
+        self._b = [x[1] for x in self.segs]
+
+    def at_sample(self, pos):
+        return self.segs[max(0, bisect.bisect_right(self._s, pos) - 1)]
+
+    def at_beat(self, beat):
+        return self.segs[max(0, bisect.bisect_right(self._b, beat + EPS) - 1)]
+
+    def beat(self, pos):
+        s, b, bpm = self.at_sample(pos)
+        return b + (pos - s) / SR * bpm / 60.0
+
+    def secs(self, beat):
+        """Mix seconds at song `beat` (not rounded to a sample: event lengths stay exact)."""
+        s, b, bpm = self.at_beat(beat)
+        return s / SR + (beat - b) * 60.0 / bpm
+
+    def sample(self, beat):
+        return int(round(self.secs(beat) * SR))
+
+    def changed(self, beat, bpm):
+        """This map with the tempo `bpm` from `beat` on: like clips, a change replaces those at or after it."""
+        return TempoMap([x for x in self.segs if x[1] < beat - EPS] + [(self.sample(beat), float(beat), float(bpm))])
+
+    def sig(self, b0, b1):
+        """The tempo an event over song beats [b0, b1) renders with: the bpm at b0, then each change inside it
+        (beats from b0, bpm). Part of the event's cache key: passes at one tempo share a render."""
+        i = max(0, bisect.bisect_right(self._b, b0 + EPS) - 1)
+        out = (self.segs[i][2],)
+        for _, b, bpm in self.segs[i + 1:]:
+            if b >= b1 - EPS:
+                break
+            out += (round(b - b0, 6), bpm)
+        return out
+
+
 def _tail_s(inst):
     """Seconds a note rings after its gate, for render estimates."""
     t = inst.get('type')
@@ -136,9 +180,8 @@ def _mono_groups(notes, inst):
 class Engine:
     def __init__(self, root, bpm, bpb=4, workers=2, device='default', follow=True, trim_db=None, cap_db=None):
         self.root = os.path.abspath(root)
-        self.bpm = float(bpm)
+        self.tmap = TempoMap([(0, 0.0, float(bpm))])     # live_tempo adds segments; bpm and spb read it at the mix
         self.bpb = int(bpb)
-        self.spb = 60.0 / self.bpm
         self.device = device
         self.follow = bool(follow)      # device 'default': move to a new system default (a speaker connecting)
         self.out_name = None            # the device the stream opened on, by name
@@ -156,7 +199,7 @@ class Engine:
         self.order = []                 # tracks, sidechain sources first
         self.duck_sources = set()
         self.ramps = {}                 # (target, fx index, param) -> Ramp
-        self.swaps = []                 # heap of (sample, seq, fn): chain changes due at a bar line
+        self.swaps = []                 # heap of (sample, seq, fn, lag): chain changes due at a bar line
         self.chain_gen = 0              # a chain scheduled to replace another gets the next number; ramps carry it
         self.meta = {}                  # clip id -> {'groups', 'placed'}
         self.cache = {}                 # (clip id, event) -> array | 'pending' | 'error'
@@ -219,16 +262,31 @@ class Engine:
             self._banks = {self.root: worker.SoundBank(self.root)}     # per song, as each worker keeps them
 
     # ------------------------------------------------------------------ time
+    @property
+    def bpm(self):
+        """The tempo at the mix position (a change queued with live_tempo takes over at its bar)."""
+        return self.tmap.at_sample(self.pos)[2]
+
+    @property
+    def spb(self):
+        return 60.0 / self.bpm
+
     def beat(self, pos):
-        return pos / SR / self.spb
+        return self.tmap.beat(pos)
 
     def sample(self, beat):
-        return int(round(beat * self.spb * SR))
+        return self.tmap.sample(beat)
+
+    def _secs(self, b0, b1):
+        """Seconds from song beat b0 to b1 through the tempo map."""
+        return self.tmap.secs(b1) - self.tmap.secs(b0)
 
     # ------------------------------------------------------------------ rendering
-    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None, need=0, extra=None):
+    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None, need=0, extra=None, bpm=None):
         """need: the sample where the first of these notes must sound (renders go out earliest-needed first);
-        extra: more keys for the worker ('_chunk', '_beat0')."""
+        extra: more keys for the worker ('_chunk', '_beat0'); bpm: the tempo at the event's onset (baked effects
+        and performers keep time with it), else the tempo now."""
+        bpm = self.bpm if bpm is None else bpm
         tr = self.tracks[track]
         inst = self._job_inst(tr, expr, iauto)
         if extra:
@@ -245,14 +303,14 @@ class Engine:
                 self._banks[root] = worker.SoundBank(root)
             instruments.set_resolvers(self._banks[root].sound, self._banks[root].table)
             try:
-                y = worker.render_event(inst, notes_s, lead_s, self.bpm, root)
+                y = worker.render_event(inst, notes_s, lead_s, bpm, root)
                 err = worker.check(y)
             except Exception as e:
                 y, err = None, f"{type(e).__name__}: {e}"
             self._result(jid, None if err else y, time.time() - t0, err)
             return
         self.seq += 1
-        heapq.heappush(self._backlog, (int(need), self.seq, jid, (jid, inst, notes_s, lead_s, self.bpm,
+        heapq.heappush(self._backlog, (int(need), self.seq, jid, (jid, inst, notes_s, lead_s, bpm,
                                                                    tr['root'] or self.root)))
         self._feed()
 
@@ -462,7 +520,19 @@ class Engine:
                 todo = todo[:n]
             for on, c, ei, k in todo:     # render in the order they will sound
                 tp = self._transpose(c.track, on)
-                key = (c.id, ei, tp) + self._variant(c, ei, k)
+                g = self.meta[c.id]['groups'][ei]
+                if isinstance(g, _Span):
+                    # a performer's bar chunk: the notes before it render as context and are dropped
+                    t0, ns, chunk = self._chunk(c, ei, k)
+                    o = on - chunk['pre']           # the song beat the render starts at (its context first)
+                else:
+                    ns, chunk = [c.notes[j] for j in g], None
+                    t0, o = ns[0][0], on
+                span = max(s + d for s, _, d, _ in ns) - t0
+                # the tempo it renders at is part of the key: passes at one tempo share a render, and a tempo
+                # change makes the events after it render again
+                tsig = self.tmap.sig(o, o + span)
+                key = (c.id, ei, tp) + self._variant(c, ei, k) + tsig
                 have = self.cache.get(key)
                 if isinstance(have, np.ndarray):
                     self._place(c.id, c.track, on, have)
@@ -470,35 +540,32 @@ class Engine:
                     self.waiting[key].append(on)
                     if have is None:
                         self.cache[key] = 'pending'
-                        g = self.meta[c.id]['groups'][ei]
                         tr = self.tracks[c.track]
                         extra = {'_bpb': self.bpb}
                         wrapped = False
-                        if isinstance(g, _Span):
-                            # a performer's bar chunk: the notes before it render as context and are dropped
-                            t0, ns, chunk = self._chunk(c, ei, k)
-                            span = max(s + d for s, _, d, _ in ns) - t0
-                            extra['_chunk'] = chunk
+                        o_s = self.tmap.secs(o)
+
+                        def sec(b, o=o, t0=t0, o_s=o_s):        # clip beat -> seconds from the render's start
+                            return self.tmap.secs(o + b - t0) - o_s
+                        if chunk is not None:
+                            extra['_chunk'] = dict(chunk, pre=sec(t0 + chunk['pre']),
+                                                   len=self._secs(on, on + chunk['len']))
                             wrapped = self._variant(c, ei, k)[0]
-                        else:
-                            ns = [c.notes[j] for j in g]
-                            t0 = ns[0][0]
-                            span = max(s + d for s, _, d, _ in ns) - t0
-                        notes_s = [((s - t0) * self.spb, m + tp, d * self.spb, v) for s, m, d, v in ns]
+                        notes_s = [(sec(s), m + tp, sec(s + d) - sec(s), v) for s, m, d, v in ns]
                         # code and mimic voices do not depend on where the note sits in the bar
-                        lead = 0.0 if tr['inst']['type'] in ('code', 'mimic') else (t0 % self.bpb) * self.spb
+                        lead = 0.0 if tr['inst']['type'] in ('code', 'mimic') else (t0 % self.bpb) * 60.0 / tsig[0]
                         expr = None
                         if tr['inst'].get('performer'):
-                            expr = self._event_expr(c, t0, span)
+                            expr = self._event_expr(c, t0, span, sec)
                             # where it sits in the song: keyed variation. A wrapped chunk's context is the previous
                             # pass, at negative clip beats: key it as pass 2, so a voice never sees a negative song
                             # time and every pass after the first shares one render
                             extra['_beat0'] = c.beat0 + t0 + (c.length if wrapped else 0.0)
-                        iauto = self._event_iauto(tr, t0)
+                        iauto = self._event_iauto(tr, t0, sec)
                         ck = (c.track, tr['gen'], round(lead, 6),
                               tuple((round(a, 6), m, round(d, 6), v) for a, m, d, v in notes_s),
                               repr(sorted(expr.items())) if expr else '', repr(sorted(iauto.items())) if iauto else '',
-                              repr(sorted(extra.items())))
+                              repr(sorted(extra.items())), tsig[0])      # the tempo: baked delays keep time with it
                         r = self.renders.get(ck)
                         if isinstance(r, np.ndarray):
                             self.cache[key] = r
@@ -510,7 +577,7 @@ class Engine:
                             self.renders[ck] = 'pending'
                             self.rwait[ck] = [key]
                             self._submit(ck, c.track, notes_s, lead, expr=expr, iauto=iauto, need=self.sample(on),
-                                         extra=extra)
+                                         extra=extra, bpm=tsig[0])
             self._feed()
             for dn, dk in self.decks.items():
                 if dk.held:
@@ -536,7 +603,8 @@ class Engine:
         if not late:
             def on_air(dk=dk):
                 dk.cue = False
-            self._swap_at(self.sample(b) + G.LAT_BUDGET, on_air)     # deck audio runs the path budget behind
+            # deck audio runs the path budget behind
+            self._swap_at(self.sample(b) + G.LAT_BUDGET, on_air, G.LAT_BUDGET)
             dk.held = None
             if b > first + EPS:
                 self.news.append(f"deck {dn}: on air from {fmt_bar(b, self.bpb)}, {(b - first) / self.bpb:g} bars "
@@ -1053,9 +1121,11 @@ class Engine:
                                 f"{list(self.tracks) or 'none'}. Create {d!r} with live_track first, then this chain (or add "
                                 f"the effect to this track afterwards with live_track(fx=...))")
         try:
-            return G.Chain(fxs, self.bpm, dry_default, bake)
+            ch = G.Chain(fxs, self.bpm, dry_default, bake)
         except (F.FxError, ValueError) as e:
             raise LiveError(f"{where}: {e}")
+        ch.retime(*self._grid_origin(self.tmap.at_sample(self.pos)))
+        return ch
 
     def _job_inst(self, tr, expr=None, iauto=None):
         """The instrument as a render job sees it: baked effects, expression lanes and instrument automation
@@ -1108,19 +1178,20 @@ class Engine:
         lo = min([sp.on] + [s for s, _, d, _ in notes if s < sp.on - EPS and (s + d > sp.on + EPS or s >= sp.on - pre)])
         ns = [n for n in notes if lo - EPS <= n[0] < sp.end + CHUNK_LOOK_S / self.spb - EPS]
         fade_in = (ei > 0 and abs(spans[ei - 1].end - sp.on) < EPS) or wrapped
-        out = memo[(ei, wrapped, cut, lead_in)] = (lo, ns, {'pre': (sp.on - lo) * self.spb, 'len': (sp.end - sp.on) * self.spb,
+        # 'pre' and 'len' in beats here; the scheduler turns them into seconds through the tempo map
+        out = memo[(ei, wrapped, cut, lead_in)] = (lo, ns, {'pre': sp.on - lo, 'len': sp.end - sp.on,
                                                    'xf': CHUNK_XF_S, 'fade_in': fade_in, 'cut': cut})
         return out
 
-    def _event_iauto(self, tr, t0):
+    def _event_iauto(self, tr, t0, sec):
         """A deck track's instrument automation for the event starting at clip beat t0: {param: [(seconds from
-        the onset, value)]}."""
+        the onset, value)]}. sec: clip beat -> seconds from the onset, through the tempo map."""
         lanes = tr.get('inst_auto')
         if not lanes:
             return None
-        return {k: [((b - t0) * self.spb, v) for b, v in pts] for k, pts in lanes.items()}
+        return {k: [(sec(b), v) for b, v in pts] for k, pts in lanes.items()}
 
-    def _event_expr(self, c, t0, span):
+    def _event_expr(self, c, t0, span, sec):
         """A clip's expression lanes cut to one event: [(seconds from the event onset, value)], starting with
         the value in force at the onset."""
         if not c.expr:
@@ -1128,7 +1199,7 @@ class Engine:
         out = {}
         for name, pts in c.expr.items():
             before = [v for b, v in pts if b <= t0 + EPS]
-            seg = [((b - t0) * self.spb, v) for b, v in pts if t0 + EPS < b <= t0 + span]
+            seg = [(sec(b), v) for b, v in pts if t0 + EPS < b <= t0 + span]
             out[name] = [(0.0, before[-1] if before else pts[0][1])] + seg
         return out
 
@@ -1196,9 +1267,11 @@ class Engine:
             raise LiveError(str(e))
         return self.sample(beat)
 
-    def _swap_at(self, sample, fn):
+    def _swap_at(self, sample, fn, lag=0):
+        """fn runs at the first block from `sample`, which is a song position plus `lag` samples (a tempo change
+        moves the song position and keeps the lag)."""
         self.seq += 1
-        heapq.heappush(self.swaps, (sample, self.seq, fn))
+        heapq.heappush(self.swaps, (sample, self.seq, fn, lag))
 
     def _keep_ramps(self, key, gen):
         """A chain swap: effect ramps written for other chains stop (volume ramps stay)."""
@@ -1426,7 +1499,7 @@ class Engine:
             if bad:
                 raise LiveError(f"{f['type']} has no params {sorted(bad)}; valid: {sorted(F.FX_DEFAULTS[f['type']])}")
             auto = set(F.AUTOMATABLE.get(f['type'], ()))
-            s1 = s0 + max(int(float(ramp_beats) * self.spb * SR), int(G.MIN_RAMP_S * SR))
+            s1 = max(self.sample(self.beat(s0) + float(ramp_beats)), s0 + int(G.MIN_RAMP_S * SR))
             msg = []
             for name, v in params.items():
                 if name not in auto:
@@ -1516,7 +1589,7 @@ class Engine:
             held = self.decks[deck].values[k]
             sch.add(G.Ramp(self.pos, held, self.pos + 1, held, False))      # holds until the first move starts
         cur = sch.value(s0)
-        s1 = s0 + max(int(float(ramp_beats) * self.spb * SR), int(G.MIN_RAMP_S * SR))
+        s1 = max(self.sample(self.beat(s0) + float(ramp_beats)), s0 + int(G.MIN_RAMP_S * SR))
         sch.add(G.Ramp(s0, cur if v0 is None else v0, s1, v, False))
         self.decks[deck].values[k] = v
         return cur
@@ -1570,7 +1643,7 @@ class Engine:
 
                 def flip(dk=dk, c=bool(cue)):
                     dk.cue = c
-                self._swap_at(s0 + G.LAT_BUDGET, flip)              # deck audio runs the path budget behind
+                self._swap_at(s0 + G.LAT_BUDGET, flip, G.LAT_BUDGET)    # deck audio runs the path budget behind
                 msg.append('cued (off air)' if cue else 'on air')
             return f"deck {deck} ({when}): " + (', '.join(msg) or 'unchanged') + \
                 f"\n  {dk.describe(False, cue=None if cue is None else bool(cue))}"
@@ -1774,7 +1847,7 @@ class Engine:
 
             def on_air(dk=dk):
                 dk.cue = False
-            self._swap_at(self.sample(beat) + G.LAT_BUDGET, on_air)
+            self._swap_at(self.sample(beat) + G.LAT_BUDGET, on_air, G.LAT_BUDGET)
             lines.insert(1, f"  {fmt_bar(beat, self.bpb)}: deck {to} goes on air")
         if stop_from:
             stops = [{'track': k, 'stop': True, 'at': f'bar:{(beat + L) / self.bpb + 1:g}'}
@@ -1788,7 +1861,7 @@ class Engine:
 
                 def off_air(dk=old):
                     dk.cue = True
-                self._swap_at(self.sample(beat + L) + G.LAT_BUDGET, off_air)
+                self._swap_at(self.sample(beat + L) + G.LAT_BUDGET, off_air, G.LAT_BUDGET)
         return '\n'.join(lines)
 
     def _event_s(self, track, dur_beats):
@@ -2001,6 +2074,165 @@ class Engine:
                 out.append(f"cancelled {cid} ({c.track}, was due {fmt_bar(c.start, self.bpb)})")
         return '\n'.join(out) + '\n' + self._runway()
 
+    # ------------------------------------------------------------------ tempo
+    @staticmethod
+    def _grid_origin(seg):
+        """(bpm, the sample song beat 0 would sit at had the song always run at it) for a tempo segment: beat-synced
+        effects count from there, so they stay on the grid after a change."""
+        s, b, bpm = seg
+        return bpm, s - b * 60.0 / bpm * SR
+
+    def _chains(self):
+        """Every live effect chain: playing, scheduled, ringing out, and the decks' master chains."""
+        for node in list(self.tracks.values()) + list(self.buses.values()):
+            yield node['path'].chain
+            for r in node['path'].retiring:
+                yield r[0]
+            for p in node.get('pending', []):
+                yield p[1]
+        for dk in self.decks.values():
+            if dk.master is not None:
+                yield dk.master
+
+    def _synced_fx(self):
+        """The effects that keep time with the beat, as 'track:<name> delay'."""
+        out = []
+        for kind, nodes in (('track', self.tracks), ('bus', self.buses)):
+            for name, node in nodes.items():
+                for f in node['path'].chain.fx:
+                    if (f['type'] == 'delay' and not f.get('time_ms')) or f['type'] == 'gate' or \
+                            f.get('lfo_rate_beats') and f.get('lfo_depth_oct') or f.get('every_beats') or \
+                            f.get('rate_beats') and f['type'] in ('phaser', 'flanger', 'tremolo'):
+                        out.append(f"{kind}:{name} {f['type']}")
+        return out
+
+    def _tempo_lead_s(self, b0, bpm):
+        """Seconds from now that the events in the first bars after a tempo change at b0 need to render again at
+        `bpm`, behind the renders already queued (each repeat of an event renders once)."""
+        w = max(1, self.n_workers)
+        acc = sum(j['est_s'] for j in self.jobs.values())
+        b1 = b0 + max(self.bpb, HORIZON_S * bpm / 60.0)
+        evs, seen = [], set()
+        for c in self.tl.clips.values():
+            m = self.meta.get(c.id)
+            tr = self.tracks.get(c.track)
+            if m is None or tr is None or tr['inst'] is None:
+                continue
+            for _, ei, on in self.tl.events(c, b0, b1, m['groups']):
+                if (c.id, ei) in seen:
+                    continue
+                seen.add((c.id, ei))
+                g = m['groups'][ei]
+                if isinstance(g, _Span):
+                    d = g.end - g.on + CHUNK_PRE_S * bpm / 60.0
+                else:
+                    d = max(c.notes[j][0] + c.notes[j][2] for j in g) - c.notes[g[0]][0]
+                evs.append((on - b0, tr, d))
+        evs.sort(key=lambda x: x[0])
+        lead = 0.0
+        for rel, tr, d in evs[:64]:
+            acc += self._rate(tr) * (d * 60.0 / bpm + _tail_s(tr['inst']))
+            lead = max(lead, MARGIN_S + (1.0 if tr['warming'] else 0.0) + acc / w - rel * 60.0 / bpm)
+        return lead
+
+    def cmd_tempo(self, bpm, at='next_bar', ramp_beats=0):
+        try:
+            bpm = float(bpm)
+            assert 20.0 <= bpm <= 400.0
+        except (TypeError, ValueError, AssertionError):
+            raise LiveError(f"bpm {bpm!r}: a tempo from 20 to 400")
+        if ramp_beats:
+            raise LiveError(f"ramp_beats={ramp_beats!r}: a gradual tempo ramp is not built (every beat of it would "
+                            f"render again and beat-synced delays would jump each beat). Use a step change, or a few "
+                            f"at successive bars: live_tempo(bpm=124, at='bar:9'), then live_tempo(bpm=128, "
+                            f"at='bar:10')")
+        with self.lock:
+            now = self.beat(self.pos)
+            try:
+                want, _ = self.tl.resolve_at(at, now, now)
+                ready = self.beat(self.pos + int(self._tempo_lead_s(want, bpm) * SR))
+                beat, note = self.tl.resolve_at(at, now, ready)
+            except QueueError as e:
+                raise LiveError(f"{e}. The tempo did not change.")
+            old = self.tmap
+            was = old.at_beat(beat)[2]
+            new = old.changed(beat, bpm)
+            S = new.segs[-1][0]
+            dropped = [x for x in old.segs if x[1] >= beat - EPS]
+
+            def remap(x):       # a mix position after the change, moved to where its beat now falls
+                return new.sample(old.beat(x)) if x > S else x
+            self.swaps = [(remap(x[0] - x[3]) + x[3],) + tuple(x[1:]) for x in self.swaps]
+            heapq.heapify(self.swaps)
+            for node in list(self.tracks.values()) + list(self.buses.values()):
+                if node.get('pending'):
+                    node['pending'] = [(remap(p[0]), p[1]) for p in node['pending']]
+            for sch in self.ramps.values():
+                for r in sch.r:
+                    r.p0, r.p1 = remap(r.p0), remap(r.p1)
+                    r.p1 = max(r.p1, r.p0 + 1)
+            if self.rec is not None and self.rec_start > S:
+                self.rec_start = remap(self.rec_start)
+            self.tmap = new
+            # the notes from the change on render again at the new tempo; the ones before it keep their renders and
+            # play to the bar line, so nothing stops while the new ones render
+            placed = collections.Counter()
+            for _, _, sg in self.pending:
+                if not sg.dead and sg.on >= beat - EPS:
+                    sg.dead = True
+                    placed[sg.track] += 1
+            for key in list(self.waiting):
+                c = self.tl.clips.get(key[0])
+                keep = [o for o in self.waiting[key] if o < beat - EPS]
+                if c is not None:
+                    placed[c.track] += len(self.waiting[key]) - len(keep)
+                self.waiting[key] = keep
+            for c in self.tl.clips.values():
+                m = self.meta.get(c.id)
+                if m is not None and m['placed'] is not None:
+                    m['placed'] = min(m['placed'], max(beat, c.start))
+
+            def retime(seg=new.segs[-1]):
+                if seg not in self.tmap.segs:            # replaced by a later live_tempo
+                    return
+                for ch in self._chains():
+                    ch.retime(*self._grid_origin(seg))
+            retime.tempo = True
+            self._swap_at(S, retime)
+            parts = sorted({c.track for c in self.tl.clips.values() if c.end is None or c.end > beat + EPS})
+            lines = [f"tempo {fmt_num(was)} -> {fmt_num(bpm)} BPM at {fmt_bar(beat, self.bpb)} ({at})"
+                     + (f"; replaces the change queued at " + ', '.join(f"{fmt_bar(b, self.bpb)} ({fmt_num(t)} BPM)"
+                                                                        for _, b, t in dropped) if dropped else '')]
+            if parts:
+                n = sum(placed.values())
+                lines.append(f"  re-renders from {fmt_bar(beat, self.bpb)}: {', '.join(parts)}"
+                             + (f" ({n} notes already rendered for after it render again)" if n else '')
+                             + "; the notes before it keep their renders and play up to it")
+            else:
+                lines.append("  nothing is queued past it: clips queued from now on play at the tempo of their bars")
+            fx = self._synced_fx()
+            if fx:
+                jump = " (echoes already in a delay jump once)" if any(x.endswith('delay') for x in fx) else ''
+                lines.append(f"  beat-synced effects follow at {fmt_bar(beat, self.bpb)}: {', '.join(fx)}{jump}")
+            if self.midi.patches:
+                lines.append("  played keys keep their sounds (rendered in seconds, nothing re-renders)")
+            if self.rec is not None:
+                self._write_rec_meta()
+                lines.append(f"  recording: {os.path.basename(self.rec_path[:-4])}.json lists the change")
+            if note:
+                lines.append(f"  note: {note}")
+        self.tick()
+        return '\n'.join(lines) + '\n' + self._runway()
+
+    def _write_rec_meta(self):
+        """The take's sidecar: its first bar, the tempo there, and each tempo change after it as [bar, bpm, seconds
+        into the file]."""
+        changes = [[round(b / self.bpb + 1, 4), bpm, round((s - self.rec_start) / SR, 6)]
+                   for s, b, bpm in self.tmap.segs if s > self.rec_start]
+        with open(self.rec_path[:-4] + '.json', 'w', encoding='utf8') as f:
+            json.dump({'bpm': self.tmap.at_sample(self.rec_start)[2], 'beats_per_bar': self.bpb,
+                       'first_bar': self.rec_bar, 'tempo': changes}, f)
+
     def _runway(self):
         now = self.beat(self.pos)
         last = self.tl.last_change(now)
@@ -2012,7 +2244,7 @@ class Engine:
         tail = f"after that: {', '.join(loops)} loop forever" if loops else "after that: silence"
         if last is None:
             return f"runway: nothing scheduled to change; {tail}"
-        return f"runway: last scheduled change at {fmt_bar(last, self.bpb)} (in {(last - now) * self.spb:.1f} s); {tail}"
+        return f"runway: last scheduled change at {fmt_bar(last, self.bpb)} (in {self._secs(now, last):.1f} s); {tail}"
 
     @staticmethod
     def _held_db(node):
@@ -2056,7 +2288,7 @@ class Engine:
         and one hat loop played on for 10 minutes; silence checks never fire on that)."""
         if self.runway_out is None or self.sounded is None:
             return ''
-        bars = (self.pos - self.runway_out) / SR / (self.spb * self.bpb)
+        bars = (self.beat(self.pos) - self.beat(self.runway_out)) / self.bpb
         if bars < RUNWAY_ENDED_BARS:
             return ''
         loops = [t for t in self.tracks if (cs := self.tl.track_clips(t)) and cs[-1].end is None]
@@ -2203,7 +2435,8 @@ class Engine:
             head = s.y[:, :min(s.y.shape[1], SR // 10)]
             pk = float(np.max(np.abs(head))) if head.size else 0.0
             out.append({'t': s.track, 'b': round(self.beat(s.start), 3), 'l': round(20 * math.log10(pk + 1e-9), 1)})
-        return {'beat': round(now, 3), 'bpm': self.bpm, 'bpb': self.bpb, 'onsets': out}
+        return {'beat': round(now, 3), 'bpm': self.bpm, 'bpb': self.bpb, 'onsets': out,
+                'tempo': [[round(b, 4), t] for _, b, t in self.tmap.segs]}
 
     def cmd_midi(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
                  remove=False):
@@ -2228,6 +2461,10 @@ class Engine:
                      f"({self.played / SR:.0f} s) | mixed ahead {max(0.0, (self.pos - self.played) / SR):.2f} s | "
                      f"output {self.out_name or self.device}" + (" (follows the default)" if self.device == 'default' and self.follow and self.stream is not None else '')
                      + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
+            ahead = [x for x in self.tmap.segs if x[0] > self.pos]
+            if ahead:
+                lines.append("tempo changes queued: " + ', '.join(f"{fmt_num(t)} BPM at {fmt_bar(b, self.bpb)}"
+                                                                  for _, b, t in ahead))
             sn = self.hub.names()
             if sn:
                 lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
@@ -2304,8 +2541,9 @@ class Engine:
                       for k, sch in self.ramps.items() if sch.target.p1 > self.pos]
             if moving:
                 lines.append("ramps: " + '; '.join(moving))
-            if self.swaps:
-                lines.append("pending fx changes at: " + ', '.join(fmt_bar(self.beat(s[0]), self.bpb) for s in sorted(self.swaps)))
+            fxsw = [x for x in sorted(self.swaps) if not getattr(x[2], 'tempo', False)]
+            if fxsw:
+                lines.append("pending fx changes at: " + ', '.join(fmt_bar(self.beat(x[0]), self.bpb) for x in fxsw))
             lines.append(self._runway())
             backlog = sum(1 for j in self.jobs.values() if not j['warm'])
             if self.mix_load is not None:
@@ -2380,8 +2618,15 @@ class Engine:
             done = int(self.beat(self.pos - lag) // self.bpb)    # bars 1..done are fully written to the air log
             if done < 1:
                 raise LiveError("no complete bar has played yet; wait one bar and call again")
-            keep = int(air.shape[1] / SR / (self.bpb * self.spb))
-            n = max(1, min(int(bars), done, keep, 32))
+            # the analysis grid has one tempo: the window starts no earlier than the last tempo change before it
+            _, b0, bpm = self.tmap.at_beat(done * self.bpb - 0.5)
+            since = math.ceil(b0 / self.bpb - EPS)                  # bars before since+1 are at another tempo
+            if done - since < 1:
+                raise LiveError(f"the tempo changed inside bar {done}; wait for a whole bar at {fmt_num(bpm)} BPM")
+            keep = int(air.shape[1] / SR / (self.bpb * 60.0 / bpm))
+            n = max(1, min(int(bars), done, keep, 32, done - since))
+            note = (f"bars before {fmt_bar(since * self.bpb, self.bpb)} are left out: the tempo changed there "
+                    f"(this grid is {fmt_num(bpm)} BPM)") if int(bars) > n and since > 0 and done - since == n else None
             first = done - n + 1
             s0 = self.sample((first - 1) * self.bpb)
             s1 = self.sample(done * self.bpb)
@@ -2392,7 +2637,7 @@ class Engine:
         os.makedirs(os.path.join(self.root, 'live'), exist_ok=True)
         path = os.path.join(self.root, 'live', 'listen.wav' if deck is None else f'listen_{deck}.wav')
         sf.write(path, y.T, SR)
-        return {'path': path, 'first': first, 'last': done, 'bpm': self.bpm, 'bpb': self.bpb}
+        return {'path': path, 'first': first, 'last': done, 'bpm': bpm, 'bpb': self.bpb, 'note': note}
 
     def cmd_record(self, on=True):
         import soundfile as sf
@@ -2403,12 +2648,13 @@ class Engine:
                 self.rec_path = os.path.join(d, time.strftime('rec_%Y%m%d_%H%M%S.wav'))
                 bar = int(self.beat(self.pos) // self.bpb) + 2            # next full bar not yet mixed
                 self.rec_start = self.sample((bar - 1) * self.bpb)
+                self.rec_bar = bar
                 self.rec_n = 0
-                with open(self.rec_path[:-4] + '.json', 'w', encoding='utf8') as f:
-                    json.dump({'bpm': self.bpm, 'beats_per_bar': self.bpb, 'first_bar': bar}, f)
+                self._write_rec_meta()
                 self.rec = sf.SoundFile(self.rec_path, 'w', SR, 2, 'PCM_24')
                 return (f"recording to {self.rec_path} from bar {bar} (file starts on that downbeat; "
-                        f"{os.path.basename(self.rec_path[:-4])}.json has bpm and first_bar for analysis)")
+                        f"{os.path.basename(self.rec_path[:-4])}.json has bpm, first_bar and tempo changes for "
+                        f"analysis)")
             if not on and self.rec is not None:
                 self.rec.close()
                 self.rec = None
@@ -2509,7 +2755,7 @@ def serve(engine, port=0, idle_min=None):
            'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
-           'midi': engine.cmd_midi, 'played': engine.cmd_played}
+           'midi': engine.cmd_midi, 'played': engine.cmd_played, 'tempo': engine.cmd_tempo}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):

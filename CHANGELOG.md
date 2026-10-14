@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Live: tempo changes
+
+- `live_tempo(project, bpm, at='next_bar')` changes a running set's tempo at a bar, with no restart and no gap.
+  Clips are in beats, so every part stays on the beat: the notes from the change bar on render again at the new
+  tempo while the ones before it play up to it. When those renders cannot be ready in time, the change moves to a
+  later bar and the reply names it. The reply says the bar, which tracks render again and which effects follow.
+- One tempo map drives every beat and sample conversion: queued moves, fx changes, ramps and deck changes after
+  the change bar move with it, and `live_status` lists the changes still to come.
+- Beat-synced effects follow at the bar: delays in beats, gates, `every_beats` ducks, filter, phaser, flanger and
+  tremolo LFOs in beats. Played keys keep their sounds; nothing of theirs renders again.
+- A recording's `.json` lists each change as `[bar, bpm, seconds into the file]`; `live_listen` keeps to one tempo
+  per window and says when it left bars out.
+- Known gaps: `ramp_beats` is refused (queue step changes at successive bars), echoes already in a delay jump
+  once, a note held across the change keeps its old render, and `@ms` offsets in clips convert at the tempo when
+  queued.
+
 ### Live: played keys
 
 - `midi_sources()` lists the MIDI inputs (keyboards, pads, loopMIDI ports). Windows reads them through winmm with

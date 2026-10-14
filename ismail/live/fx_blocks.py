@@ -21,10 +21,14 @@ from ..notation import parse_steps  # noqa: F401
 # samples: its output is its input delayed by that much. apply_fx compensates it, the live engine aligns tracks.
 
 class Env:
-    """What a processor is built with. offset_samples: processor-time sample of song beat 0 (grid effects)."""
+    """What a processor is built with. offset_samples: processor-time sample of song beat 0 (grid effects). sync0:
+    the same origin for the beat-synced LFOs (filter, phaser, flanger); 0 in the studio, where they never had one,
+    and moved with offset_samples when the live engine changes tempo (Proc.retime). hz0: the origin of LFOs in Hz,
+    which never moves (a tempo change does not jump their phase)."""
 
     def __init__(self, sr=SR, bpm=120.0, dry=1.0, offset_samples=0):
         self.sr, self.bpm, self.dry, self.offset_samples = sr, float(bpm), float(dry), int(offset_samples)
+        self.sync0, self.hz0 = 0, self.offset_samples
 
 
 class Block:
@@ -119,6 +123,11 @@ class Proc:
     def process(self, x, blk):
         raise NotImplementedError
 
+    def retime(self, bpm, origin):
+        """A live tempo change: from now on a beat lasts 60/bpm s and song beat 0 sits at processor sample
+        `origin` (extrapolated back at the new tempo), so beat-synced effects stay on the grid."""
+        self.env.bpm, self.env.offset_samples, self.env.sync0 = float(bpm), origin, origin
+
 
 class _Bypass(Proc):
     def process(self, x, blk):
@@ -150,7 +159,7 @@ class _Filter(Proc):
         fx, n = self.fx, x.shape[1]
         cut = dsp.as_curve(blk.param('cutoff', fx['cutoff']), n)
         if fx['lfo_rate_beats'] and fx['lfo_depth_oct']:
-            ph = _lfo_phase(n, None, fx['lfo_rate_beats'], self.env.bpm, self.sr, blk.pos)
+            ph = _lfo_phase(n, None, fx['lfo_rate_beats'], self.env.bpm, self.sr, blk.pos - self.env.sync0)
             cut = cut * 2 ** (fx['lfo_depth_oct'] * dsp.lfo_wave(fx['lfo_shape'], ph))
         res = blk.param('res', fx['res'])
         wet = np.stack([dsp.filt_s(np.ascontiguousarray(x[c]), fx['mode'], cut, res, self.sr, 1.0, self.st[c])
@@ -341,6 +350,23 @@ class _Delay(Proc):
         self.coef = 1 - np.exp(-2 * np.pi * fx['lp_hz'] / self.sr)
         self.bl, self.br, self.st = np.zeros(self.ds + 1), np.zeros(self.ds + 1), np.zeros(3)
 
+    def retime(self, bpm, origin):
+        super().retime(bpm, origin)
+        if self.fx['time_ms']:
+            return
+        ds = max(int(self.fx['time_beats'] * 60 / self.env.bpm * self.sr), 1)
+        if ds == self.ds:
+            return
+        # the echoes in flight keep their order: oldest first, padded with silence (longer) or cut (shorter)
+        w, size = int(self.st[0]), ds + 1
+        for k in ('bl', 'br'):
+            old = np.roll(getattr(self, k), -w)
+            new = np.zeros(size)
+            m = min(size, len(old))
+            new[size - m:] = old[len(old) - m:]
+            setattr(self, k, new)
+        self.ds, self.st[0] = ds, 0
+
     def process(self, x, blk):
         src = x if self.hp is None else self.hp(x)
         wl, wr = dsp.feedback_delay_s(src[0].copy(), src[1].copy(), self.ds, float(self.fx['feedback']),
@@ -450,7 +476,7 @@ class _Chorus(Proc):
         fx, n = self.fx, x.shape[1]
         is_flanger = fx['type'] == 'flanger'
         rate = fx['rate_hz'] if not is_flanger or not fx.get('rate_beats') else self.env.bpm / 60 / fx['rate_beats']
-        ph = (blk.pos + np.arange(n)) * rate / self.sr
+        ph = (blk.pos - (self.env.sync0 if is_flanger and fx.get('rate_beats') else 0) + np.arange(n)) * rate / self.sr
         outs = []
         for ch, off in ((0, 0.0), (1, 0.25)):
             d = (fx['delay_ms'] + fx['depth_ms'] * (0.5 + 0.5 * np.sin(2 * np.pi * (ph + off)))) / 1000 * self.sr
@@ -466,7 +492,8 @@ class _Phaser(Proc):
 
     def process(self, x, blk):
         fx, n, sr = self.fx, x.shape[1], self.sr
-        ph = _lfo_phase(n, fx['rate_hz'], fx['rate_beats'], self.env.bpm, sr, blk.pos)
+        ph = _lfo_phase(n, fx['rate_hz'], fx['rate_beats'], self.env.bpm, sr,
+                        blk.pos - (self.env.sync0 if fx['rate_beats'] else 0))
         outs = []
         for ch, off in ((0, 0.0), (1, 0.25)):
             m = fx['center'] + 0.5 * fx['depth'] * np.sin(2 * np.pi * (ph + off))
@@ -482,7 +509,7 @@ class _Tremolo(Proc):
     def process(self, x, blk):
         fx, n = self.fx, x.shape[1]
         ph = _lfo_phase(n, fx['rate_hz'], fx['rate_beats'], self.env.bpm, self.sr,
-                        blk.pos - self.env.offset_samples) + fx['phase']
+                        blk.pos - (self.env.offset_samples if fx['rate_beats'] else self.env.hz0)) + fx['phase']
         w = dsp.lfo_wave(fx['shape'], ph)
         d = blk.param('depth', fx['depth'])
         if fx['mode'] == 'pan':

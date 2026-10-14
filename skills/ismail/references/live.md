@@ -17,7 +17,7 @@ section costs a minute or more. Compose whole sections only for real changes, an
 
 0. **Set Sheet** (in your reply, before any tool call): the Session Sheet plus an **arc**: which clip plays on
    which bars, what changes at each boundary, and how long the queue runs before it needs you (the runway).
-1. **Rig**: `live_start(project, bpm)` (tempo is fixed per run), `live_bus` for a shared reverb, then one
+1. **Rig**: `live_start(project, bpm)` (the starting tempo; `live_tempo` changes it at a bar), `live_bus` for a shared reverb, then one
    `live_track` per part with its instrument, `fx` chain and `sends`. A track plays one clip at a time: to layer
    two patterns on one sound, use two tracks.
 2. **Queue the arc in one `live_queue` batch.** Chain with `at='after:#k'` (item k of the same batch) and loop
@@ -146,7 +146,8 @@ camera, facial expression categories); treat it the same way.
 - **Check after every addition**: the new track's level (a track reading -120 dBFS while "playing" is silent,
   see below), the master `limiter` (layers add up: pull faders when it reads more than ~3 dB), late events.
 
-Changing style at a fixed tempo: the tempo is fixed per run, so change the feel by **metric modulation**. At a
+Changing style: `live_tempo` moves the whole set to a new tempo at a bar (below). To keep the tempo and change the
+feel, use **metric modulation**. At a
 house tempo T, 1.5T is a triplet grid: trap at 141.9 over G-funk at 94.6, with 6 trap bars = 4 house bars and
 every trap beat = 2/3 of a house beat (write in trap beats, multiply by 2/3). A breakdown whose hats move to
 triplets first announces the new grid; then drop. 2T and T/2 (half-time) work the same way.
@@ -189,7 +190,9 @@ showcase.
 2. **Cut generously** from the take that covers the moment: the whole section around it (from the build to the
    end of the drop), not the one bar. A phone tap carries `heard`, the bar they heard: cut around that bar, not the
    engine's now. The take's `.json` gives `first_bar`, `bpm` and `beats_per_bar`, so bar b starts at
-   `(b - first_bar) * beats_per_bar * 60 / bpm` seconds into the file. A short fade at each end.
+   `(b - first_bar) * beats_per_bar * 60 / bpm` seconds into the file. A `tempo` list holds each tempo change as
+   `[bar, bpm, seconds into the file]`: past one, bar b starts at `seconds + (b - bar) * beats_per_bar * 60 / bpm`
+   with that change's numbers. A short fade at each end.
 3. **Save it as an mp3** in `<project>/live/highlights/<slug>.mp3`: cut to a temporary wav outside the project,
    encode, remove the temporary file. Never overwrite a highlight.
 4. **Index it** in `live/highlights/INDEX.md`: when, what was playing, their words verbatim, and the section
@@ -400,8 +403,14 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   so use the arguments. `live_status` prints the trim and cap in use. Then keep the limiter near 0 dB with faders.
 - **Sounds you are unsure of**: try them on a muted or quiet track (`volume_db=-40`, then fade with a ramp on a
   gain fx) rather than straight onto the main part.
-- **Tempo change** = `live_stop`, then `live_start` with the new tempo (a gap). Inside a set, change the feel
-  with metric modulation instead (above).
+- **Tempo change** = `live_tempo(project, bpm, at='next_bar')`: no restart, no gap. Clips are in beats, so
+  every part keeps its notes on the beat; from the change bar on they render again at the new tempo, and the notes
+  before it keep playing up to it. If those renders cannot be ready in time the change moves to a later bar and
+  the reply names it, so ask a bar or two ahead (`at='next_4'`) for a busy set. Beat-synced effects (delays in
+  beats, gates, `every_beats` ducks, LFOs in beats) follow at the same bar; echoes already in a delay jump once.
+  Played keys (`live_midi`) keep their sounds. There is no gradual ramp: for one, queue a few step changes at
+  successive bars. `live_listen` keeps to one tempo per window (it says when it left bars out), and with
+  `recording=` the bars must not cross a change. Metric modulation (above) changes the feel with no change at all.
 - **Gliding parts** (a portamento synth lead, a Moog bass) belong on the synth engine (`mono`, `glide`) with
   measured harmonics (an `additive` osc or a fitted filter): mimic renders each note alone and does not glide.
 - **Pre-flight.** `live_start` names any other engine still running on the machine (a forgotten set held a
@@ -503,8 +512,8 @@ from earlier bars are not played).
 
 Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
 `loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
-deck's song has it; otherwise use fx params, or expr lanes on a performer), tempo changes inside a run, and placed
-audio clips on a deck.
+deck's song has it; otherwise use fx params, or expr lanes on a performer), gradual tempo
+ramps (`live_tempo` steps at a bar), and placed audio clips on a deck.
 
 ### Sung takes, tuned
 
