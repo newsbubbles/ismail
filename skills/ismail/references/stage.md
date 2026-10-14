@@ -31,6 +31,22 @@ person and an agent change the same scene.
   file) that posts to the page or edits the scene's files: it skips the checks, the undo, the save and the events
   the op gives, and it needs a fresh permission every time. If the edit you need has no op, that is the gap to
   fix: add the op (and its page command), rather than scripting around it.
+  **Every off-path form has a named op**; a blocked command prompts for permission, and a prompt in the headset
+  throws the person out of VR:
+
+  | Blocked form | Named op |
+  |---|---|
+  | `python -c` (or a heredoc) with ismail code | `python -m ismail <op> key=value` (`python -m ismail ops` lists them) |
+  | `cp`, `mv`, `Copy-Item`, `robocopy` or `shutil` of a file into a scenes folder | `stage_asset_install(scene, file, kind=scene, manifest, actor or tree, name=)` |
+  | `Stop-Process`, `taskkill` or `kill` of the stage server or a live engine | `stage_restart(port=)` (waits while they are in VR; `now=True` after a yes from `stage_ask`), `stage_stop`, `live_stop(project=)` |
+  | editing `world.json` by hand | `stage_world(scene, update={...})`: only the keys given change (`world=` replaces the whole file and resets keys left out) |
+  | reading voice notes by tailing files | `stage_listen` or `stage_events(scene, types=["voice_message"], wait=)` |
+
+  `stage_asset_install` keeps the file it replaces in the scene's `history/` and tells an open page (a new room or
+  piece list reloads the room, so ask first in VR; a replaced body shows at the next page load). `stage_restart`
+  restarts the server with the arguments it was started with, refuses while a page is in VR (and says so in the
+  headset), and replies once `/health` answers. An optional guard for Claude Code refuses these forms before they
+  run and names the op instead: `skills/ismail/hooks/README.md`. Other harnesses get the same rule from this table.
 - **Edits apply in place while they are in the room; nothing needs a reload for them.** Objects
   (`stage_object_set`, `stage_object_drop`), lights (`stage_light_set`), material colours (`stage_material_set`:
   every mesh with that material changes), captions and cards, the sky, actors, load sets, props and `stage_world`
