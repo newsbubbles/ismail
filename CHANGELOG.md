@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Live: played keys on the beat the player heard
+
+- The key log's `beat` is now where the key sounded against the music (the press plus the output buffer, about
+  180 ms on laptop speakers), which is where a player by ear meant it. It was the press, so a take read about one
+  key delay early. The press stays in the log as `press`; old logs still read, and `live_played` says which clock
+  it used and the delay it added.
+- `live_played(fit=True)` fits a 16th grid with a free offset to the hits (keys within 0.15 beat are one hit),
+  reports the offset, the rms error in ms, the drift per bar and the rhythm's shape (3-3-2), and prints the
+  snapped notes for `live_queue` twice: as played, and with the shape's groups from beat 1. `bars=[a, b]` picks
+  the bars, `from_bar` sets the clip's bar 1. It is the method that lined up a played riff in the 2026-10-13 jam
+  after four tries at rounding.
+- When every key in the bars has one velocity, `live_played` says so and suggests an accent shape (the data is
+  unchanged).
+
 ### Live: played keys
 
 - `midi_sources()` lists the MIDI inputs (keyboards, pads, loopMIDI ports). Windows reads them through winmm with
