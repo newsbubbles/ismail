@@ -938,14 +938,15 @@ def _gesture_lines(scenes, scene):
     for intent, r in rows.items():
         tag = ', '.join(x for x in (r['owner'], r.get('lock'), 'off' if r.get('off') else None) if x)
         out.append(f'{intent}: {gm.describe(r)} ({gm.WHERE[r["where"]]}) means {r["means"]} [{tag}]')
-    return out + [f'COLLISION {c}' for c in coll]
+    return out + [c if c.startswith('IGNORED') else f'COLLISION {c}' for c in coll]
 
 
 @op()
 def stage_gestures(scene: str, scenes: str = None) -> str:
     """The gesture map in force in VR for this scene: each intent (what a gesture means), the hand shape and hand that
     do it, how long it is held, where it is read, and who owns the row (engine, person, scene; locked and fixed rows
-    are the engine's), then any collisions. Shapes: pinch, ok, pinch_middle, thumbs_up, thumbs_down, fist, open, gun,
+    are the engine's), then any collisions and any saved value IGNORED because it cannot be used (the engine's value
+    stands). Shapes: pinch, ok, pinch_middle, thumbs_up, thumbs_down, fist, open, gun,
     point, phone, peace, rock. Rebind with stage_gesture_set; stage_gesture_reset goes back to the defaults."""
     return '\n'.join(_gesture_lines(_gesture_dir(scene, scenes), scene))
 

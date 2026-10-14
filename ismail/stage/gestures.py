@@ -60,6 +60,8 @@ DEFAULTS = {
              'means': 'drop the selected thing onto what is under it', 'proof': 'drop'},
 }
 LAYERS = ('person', 'scene')        # who can own a row besides the engine; the person wins over the scene
+# intents that can be rebound but never switched off: stage_ask waits on them, and a spoken yes is not asked for
+NEVER_OFF = {'answer_yes': 'stage_ask is answered with it', 'answer_no': 'stage_ask is answered with it'}
 
 
 def person_file():
@@ -80,22 +82,52 @@ def layers(scenes, scene):
     from .world import world_path
     person = _read(person_file()).get('rows') or {}
     w = _read(world_path(scenes, scene)) if scene else {}
-    return {'person': person if isinstance(person, dict) else {}, 'scene': w.get('gestures') or {}}
+    g = w.get('gestures') or {}
+    return {'person': person if isinstance(person, dict) else {}, 'scene': g if isinstance(g, dict) else {}}
+
+
+def _bad(intent, k, v):
+    """Why one saved value of a binding cannot be used (None: it can). The files can be edited by hand."""
+    if k == 'shape' and v not in SHAPES:
+        return f'no shape {v!r}'
+    if k == 'hand' and v not in HANDS:
+        return f'no hand {v!r}'
+    if k == 'hold_ms' and not (isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 10000):
+        return f'hold_ms {v!r} is not 0 to 10000'
+    if k == 'off' and (not isinstance(v, bool) or (v and intent in NEVER_OFF)):
+        return f'off {v!r}' + (f' ({NEVER_OFF[intent]})' if intent in NEVER_OFF else ' is not true or false')
+    if k not in ('shape', 'hand', 'hold_ms', 'off'):
+        return f'no field {k!r}'
+    return None
 
 
 def resolve(lay):
-    """The map in force: {intent: row} with the owner of each row, then the collisions in it (a list of lines)."""
-    rows = {}
+    """The map in force: {intent: row} with the owner of each row, then the problems in it (a list of lines): the
+    collisions, and lines starting 'IGNORED' for saved values that cannot be used (the engine's value stands)."""
+    rows, ignored = {}, []
     for intent, d in DEFAULTS.items():
         r = {**d, 'intent': intent, 'owner': 'engine'}
-        if not d.get('lock'):
+        if d.get('lock'):                                          # locked and fixed rows are never overridden
+            ignored += [f'IGNORED {o} row {intent}: it is {d["lock"]}' for o in LAYERS if (lay.get(o) or {}).get(intent)]
+        else:
             for owner in LAYERS:                                   # the person first: it wins over the scene
                 b = (lay.get(owner) or {}).get(intent)
-                if b:
-                    r.update({k: v for k, v in b.items() if k in ('shape', 'hand', 'hold_ms', 'off')}, owner=owner)
-                    break
+                if not b:
+                    continue
+                if not isinstance(b, dict):
+                    ignored.append(f'IGNORED {owner} row {intent}: {b!r} is not a binding')
+                    continue
+                good = {}
+                for k, v in b.items():
+                    why = _bad(intent, k, v)
+                    if why:
+                        ignored.append(f'IGNORED {owner} row {intent}: {why}')
+                    else:
+                        good[k] = v
+                r.update(good, owner=owner)
+                break
         rows[intent] = r
-    return rows, collisions(rows)
+    return rows, ignored + collisions(rows)
 
 
 def _hands_meet(a, b):
@@ -163,7 +195,10 @@ def check_binding(lay, owner, intent, shape=None, hand=None, hold_ms=None, off=N
         raise ValueError(f'hand is one of {", ".join(HANDS)}')
     if hold_ms is not None and not (isinstance(hold_ms, (int, float)) and 0 <= hold_ms <= 10000):
         raise ValueError('hold_ms is 0 to 10000')
-    b = dict((lay.get(owner) or {}).get(intent) or {})
+    if off and intent in NEVER_OFF:
+        raise ValueError(f'{intent} cannot be switched off: {NEVER_OFF[intent]}; rebind it to another shape instead')
+    b = (lay.get(owner) or {}).get(intent) or {}
+    b = {k: v for k, v in b.items() if not _bad(intent, k, v)} if isinstance(b, dict) else {}   # a save drops hand-edited junk
     b.update({k: v for k, v in (('shape', shape), ('hand', hand), ('hold_ms', hold_ms)) if v is not None})
     if off is not None:
         if off:

@@ -28,6 +28,10 @@
   the shape moves: travel, the snapshot frame, select, hold. Rebindable: the update reload, the yes and no answers,
   drop. A rebind that would share a shape with another row where both are read is refused, naming that row and
   its owner. The update card and the answer prompt sit over the hand the map names and say its gesture.
+- The yes and no answers can be rebound but never switched off: `stage_ask` is answered with them. Saved rows are
+  checked when read too, so a hand-edited value that cannot be used (a hold that is not a number, a shape that does
+  not exist, a row for a locked intent) is ignored with an `IGNORED` line in `stage_gestures` and the engine's value
+  stands; the next save drops it from the file.
 
 ### Stage: edits apply in place, no reload
 
