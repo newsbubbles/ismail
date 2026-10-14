@@ -286,6 +286,15 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   reads; `trial=True` moves it without saving. Camera moves keyed on the clock want `stage_key_interp(mode="smooth")`.
   A whole move goes in one call: `stage_keys_set(keys=[{name, t, location, look}, ...], interp={name: "smooth"})`
   keys from values (`look` aims a camera at a point) without moving anything to each spot first.
+- **A camera move is seen and recorded in the room.** `stage_trail(object=<camera>)` draws its path on the clock
+  (blue at the start to orange at the end, a small frustum at each key, a bright ball where the playhead puts it); in
+  VR a key picked on the ray scrubs the clock there, and carried, it moves (its time stays; `stage_anim_save` keeps
+  it). The camera's menu has the same: Path, and Record move. `stage_camera_record(camera, t0, t1)` records a move
+  like a take: a countdown, then the clock plays and the camera is the person's eyes (`source="head"`, hidden while
+  it records) or wherever it is carried (`source="hold"`: unlocked with Move first). The samples are smoothed and
+  thinned to a few smooth keys (within 2 cm and 2 degrees) that replace the camera's keys between t0 and the last
+  sample; keys outside that window stay. A Keep / Redo / Undo panel follows; nothing is saved before Keep. Watch
+  the `cam_record` events, and do not talk over a take.
 - **A Follow is a performance: be quick and quiet in it.** From the moment someone follows the person, the mic
   records in clips and their gestures do nothing. Watch the `perform_*` events; when a part is worth reading,
   `stage_perform(action="next_clip")` cuts the clip there (its words come back as `perform_clip`, on the Follow

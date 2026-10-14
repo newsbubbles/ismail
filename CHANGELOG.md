@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Camera moves in VR: the path on the clock, and a move recorded like a take
+
+- `stage_trail(object)` (page command `trail`) draws a keyed camera's path over the clock span in the room: a line
+  coloured from the span's start to its end, a small frustum and the time at each key, and the playhead bright. In
+  VR a key picked on the ray scrubs the clock to it; carried, it moves the key (same time, new place). The camera
+  menu has Path / Hide path.
+- `stage_camera_record(camera, action, source, t0, t1, countdown)` (page command `cam_record`, menu: Record move):
+  after a countdown the clock plays from t0 to t1 while the camera is the person's eyes (`head`) or wherever it is
+  carried (`hold`). The pose is sampled every frame, smoothed (a local quadratic fit, so frame jitter and hand
+  shake do not become keys) and thinned to smooth keys within 2 cm and 2 degrees; they replace the camera's keys
+  inside the recorded window and keep the rest. Keep saves anim.json; Redo and Undo put the old keys back.
+- `interp.js` `thinKeys` and `easeSamples` (shared by recorded moves); the clock holds a recorded object off its
+  keys while it records.
+
 ### Ops refuse: personal details on a page, questions already granted, a mic without the person's note
 
 - One module, `ismail/guards.py`, holds the three checks; each refusal says why and what the next call is.
