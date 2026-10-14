@@ -120,6 +120,12 @@ def done_collecting():
     _BATCH.cmds = None
 
 
+def pending():
+    """How many page commands the batch holds now (None: no batch is collecting)."""
+    cmds = getattr(_BATCH, 'cmds', None)
+    return None if cmds is None else len(cmds)
+
+
 def page_cmd(scene, ctype, fields, timeout=30):
     """Queue one command for the page showing `scene`; wait for its cmd_done; reply with the page's answer."""
     if getattr(_BATCH, 'cmds', None) is not None:

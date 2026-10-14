@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Stage: edits apply in place, no reload
+
+- `stage_material_set(scene, color, material= | object=)` sets a material's base colour on the open page now, as an
+  undoable edit that saves to edits.json like a hand edit.
+- `stage_world` with `world=` tells an open page (page command `world_reload`): it reads world.json again and redoes
+  what was built from it (load sets, changed bodies, props, mouth tracks, keep-out boxes). Before, it waited for the
+  next load or scene switch. In a `stage_batch` the reload goes with the page commands after it, in order (one
+  more reply line, `[i] stage_world (page)`).
+- Pieces the Quest diet merged into their group keep their names: `merge_groups` numbers each piece's vertices
+  (`_part`) and the manifest lists them (`merged`). The first op that names one (`stage_object_set`, `drop`,
+  `select`, ...) splits it back out with its children; saved edits of a piece split it at load. Rooms exported before
+  this split nothing until their next export.
+- The stage docs: live edits go through named ops only (`python -m ismail <op>`, `stage_batch @file.json`), never an
+  inline script; a missing op is the gap to fix.
+
 ### Live: played keys
 
 - `midi_sources()` lists the MIDI inputs (keyboards, pads, loopMIDI ports). Windows reads them through winmm with

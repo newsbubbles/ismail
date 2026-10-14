@@ -200,6 +200,25 @@ export const t2bScale = (s, aimed) => (aimed ? [s.x, s.y, s.z] : [s.x, s.z, s.y]
 
 const r7 = (a) => a.map((x) => Math.round(x * 1e7) / 1e7);
 const lin = (rgb) => new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2], THREE.LinearSRGBColorSpace);
+// the triangles tri (indices into src) as a geometry of their own, holding only the vertices they use
+function subGeometry(src, tri) {
+  const map = new Map(), idx = new Uint32Array(tri.length);
+  for (let i = 0; i < tri.length; i++) {
+    let v = map.get(tri[i]);
+    if (v === undefined) { v = map.size; map.set(tri[i], v); }
+    idx[i] = v;
+  }
+  const order = [...map.keys()], g = new THREE.BufferGeometry(), get = ['getX', 'getY', 'getZ', 'getW'];
+  for (const [k, a] of Object.entries(src.attributes)) {
+    const n = a.itemSize, arr = new a.array.constructor(order.length * n);
+    for (let j = 0; j < order.length; j++) for (let c = 0; c < n; c++) arr[j * n + c] = a[get[c]](order[j]);
+    g.setAttribute(k, new THREE.BufferAttribute(arr, n, a.normalized));
+  }
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  return g;
+}
 const rgbOf = (c) => [c.r, c.g, c.b];
 
 export class Editor extends THREE.EventDispatcher {
@@ -727,6 +746,7 @@ export class Editor extends THREE.EventDispatcher {
   }
   restore(s) {
     this.items.forEach((it, i) => {
+      if (!s.items[i]) return;                     // split out after this snapshot (unmerge): stays where it is
       const [p, q, sc, inten, col] = s.items[i];
       it.obj.position.copy(p); it.obj.quaternion.copy(q); it.obj.scale.copy(sc);
       if (it.light) { it.light.intensity = inten; it.light.color.copy(col); it.handle.material.color.copy(col); }
@@ -740,6 +760,7 @@ export class Editor extends THREE.EventDispatcher {
     const moved = [], lights = [], materials = [];
     const mats = [...this.materials.entries()];
     this.items.forEach((it, i) => {
+      if (!a.items[i] || !b.items[i]) return;
       const [p, q, s, li, lc] = a.items[i], [p2, q2, s2, li2, lc2] = b.items[i];
       const qa = q.toArray(), qb = q2.toArray();
       const dq = Math.min(Math.max(...qa.map((v, k) => Math.abs(v - qb[k]))), Math.max(...qa.map((v, k) => Math.abs(v + qb[k]))));
@@ -853,6 +874,71 @@ export class Editor extends THREE.EventDispatcher {
   }
   dirty() { return this.loaded && JSON.stringify(this.computeEdits()) !== this.savedJSON; }   // (never save a half-loaded page)
 
+  // ---- merged pieces. The Quest diet (quest.py merge_groups) joins each group into one mesh; manifest.merged keeps
+  // every piece's name, its number in the joined mesh's _part vertex attribute, its Blender parent and its build
+  // transform. The first edit of a piece by name splits its triangles back out into an item of its own, with its
+  // children, so it moves, saves (under its Blender name; the next build applies that before the diet) and undoes like
+  // any object, without reloading the room (the user, 2026-10-13: the heater could not be turned in VR).
+  // Returns the item, or null when the name is not a merged piece.
+  unmerge(name) {
+    const mm = (this.manifest && this.manifest.merged) || {};
+    if (this.byName.has(name)) return this.byName.get(name);
+    const e = mm[name] || mm[Object.keys(mm).find((n) => n.toLowerCase() === String(name).toLowerCase())];
+    if (!e) return null;
+    name = Object.keys(mm).find((n) => mm[n] === e);
+    const into = this.byName.get(e.into);
+    if (!into) return null;
+    const parentIt = (e.parent && (mm[e.parent] ? this.unmerge(e.parent) : this.byName.get(e.parent))) || into.parent;
+    if (this.byName.has(name)) return this.byName.get(name);      // split out with its parent just now
+    const meshes = [];
+    into.obj.traverse((o) => { if (o.isMesh && this.itemOf(o) === into && o.geometry.attributes._part) meshes.push(o); });
+    const parentObj = parentIt ? parentIt.obj : into.obj.parent, g = new THREE.Group();
+    g.name = name;
+    parentObj.updateWorldMatrix(true, false);
+    new THREE.Matrix4().copy(parentObj.matrixWorld).invert()
+      .multiply(new THREE.Matrix4().compose(b2tPos(e.location), b2tQuat(e.quaternion), b2tScale(e.scale)))
+      .decompose(g.position, g.quaternion, g.scale);
+    parentObj.add(g);
+    g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    let tris = 0;
+    for (const m of meshes) {
+      const geo = m.geometry, part = geo.attributes._part, idx = geo.index ? geo.index.array : null;
+      const n = idx ? idx.length : geo.attributes.position.count, at = (i) => (idx ? idx[i] : i), mine = [], rest = [];
+      for (let i = 0; i < n; i += 3) {
+        const to = Math.round(part.getX(at(i))) === e.part ? mine : rest;
+        to.push(at(i), at(i + 1), at(i + 2));
+      }
+      if (!mine.length) continue;
+      tris += mine.length / 3;
+      const pm = new THREE.Mesh(subGeometry(geo, mine), m.material);
+      pm.name = m.name;
+      pm.castShadow = m.castShadow; pm.receiveShadow = m.receiveShadow; pm.layers.mask = m.layers.mask;
+      m.updateWorldMatrix(true, false);
+      new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld).decompose(pm.position, pm.quaternion, pm.scale);
+      g.add(pm);
+      geo.setIndex(rest);                          // emptied, not hidden: the room's reveal shows meshes again
+    }
+    if (!tris) { parentObj.remove(g); return null; }
+    const mo = { type: 'MESH', location: e.location, quaternion: e.quaternion, scale: e.scale, merged_into: e.into,
+      ...(into.man.locked ? { locked: true } : {}) };   // a piece of the building stays fixed to hands
+    const it = { name, type: 'MESH', aimed: false, obj: g, man: mo, parent: parentIt || null, children: [],
+      depth: parentIt ? parentIt.depth + 1 : 0, base: { pos: g.position.clone(), quat: g.quaternion.clone(), scale: g.scale.clone() } };
+    g.userData.item = it;
+    if (parentIt) parentIt.children.push(it);
+    it.top = parentIt ? parentIt.top : it;
+    it.path = parentIt ? [...parentIt.path, it] : [it];
+    it.box = new THREE.Box3().setFromObject(g, true);
+    it.big = false;
+    this.items.push(it);                           // last: undo snapshots taken before it simply do not have it
+    this.byName.set(name, it);
+    this.manifest.objects[name] = mo;
+    for (const [n, x] of Object.entries(mm)) if (x.parent === name) this.unmerge(n);    // its children come with it
+    console.info('[vr] split', name, 'out of', e.into, tris, 'triangles');
+    this.emit('change');
+    return it;
+  }
+
   // ---- edits.json in Blender world space
   changed(it) {      // component-wise: Quaternion.angleTo is acos-noisy (~7e-4 rad) for identical inputs
     const o = it.obj, b = it.base, q = o.quaternion.toArray(), q0 = b.quat.toArray();
@@ -909,6 +995,7 @@ export class Editor extends THREE.EventDispatcher {
   // returns {applied, missing}: the names it set and the names this scene does not have
   applyEdits(ed, quiet = false) {
     const objs = ed.objects || {}, applied = [], missing = [];
+    for (const name of Object.keys(objs)) if (!this.byName.has(name)) this.unmerge(name);   // an edited merged piece
     for (const name of Object.keys(objs)) if (!this.byName.has(name)) { console.warn('edits: no object', name); missing.push(name); }
     for (const it of this.items) {                 // parents before children: values are world transforms
       const t = objs[it.name];

@@ -42,7 +42,8 @@ export function initLive(ed, desktop, xr) {
     children: it.children.length, path: it.path.map((x) => x.name) } : null);
   function find(name) {
     if (!name) throw new Error('no object given');
-    const it = ed.byName.get(name) || ed.items.find((x) => x.name.toLowerCase() === String(name).toLowerCase());
+    const it = ed.byName.get(name) || ed.items.find((x) => x.name.toLowerCase() === String(name).toLowerCase())
+      || ed.unmerge(name);                            // a piece the Quest diet merged into its group: split it out
     if (!it) throw new Error(`no object "${name}"`);
     return it;
   }
@@ -379,6 +380,22 @@ export function initLive(ed, desktop, xr) {
       if (c.color) ed.setLightColor(it, lin(c.color));
       ed.endEdit();
       return { light: it.name, energy: rn(ed.energy(it), 4), color: rv(rgbOf(it.light.color)) };
+    },
+    material: (c) => {           // {"type": "material", "material": name | "object": name, "color": linear rgb}
+      let name = c.material || c.name;
+      if (!name && c.object) {    // an object's own material, when it has exactly one
+        const ms = ed.materialsOf(find(c.object));
+        if (ms.length !== 1) throw new Error(`"${c.object}" has ${ms.length} materials (${ms.join(', ') || 'none'}): pass material`);
+        name = ms[0];
+      }
+      if (name && !ed.materials.has(name)) name = [...ed.materials.keys()].find((n) => n.toLowerCase() === String(name).toLowerCase()) || name;
+      const e = name && ed.materials.get(name);
+      if (!e) throw new Error(`no material "${name}"`);
+      if (!c.color) throw new Error('material needs color (linear rgb)');
+      ed.beginEdit('claude');
+      ed.setMaterialColor(name, lin(c.color));
+      ed.endEdit();
+      return { material: name, color: rv(rgbOf(e.mats[0].color)), color0: rv(rgbOf(e.color0)), meshes: e.mats.length };
     },
     async walk(c) {
       if (presenting()) throw new Error('not in XR');

@@ -25,6 +25,21 @@ person and an agent change the same scene.
   `stage_object_select`, `stage_say`, `stage_panel_show`, `stage_waypoint_set`, `stage_actor_play`, `stage_stream`,
   `stage_scene_go` and the rest. A tool fails with the next step when no page shows the scene; `stage_cmd` is only
   for a command that has no tool yet.
+- **Live edits go through named ops only.** From a shell that is `python -m ismail <op> key=value ...` (e.g.
+  `python -m ismail stage_say scene=room text="..."`), or several at once with `python -m ismail stage_batch
+  @moment.json` (the file holds `{"scene": ..., "ops": [...]}`). Never an inline script (`python -c`, a scratch
+  file) that posts to the page or edits the scene's files: it skips the checks, the undo, the save and the events
+  the op gives, and it needs a fresh permission every time. If the edit you need has no op, that is the gap to
+  fix: add the op (and its page command), rather than scripting around it.
+- **Edits apply in place while they are in the room; nothing needs a reload for them.** Objects
+  (`stage_object_set`, `stage_object_drop`), lights (`stage_light_set`), material colours (`stage_material_set`:
+  every mesh with that material changes), captions and cards, the sky, actors, load sets, props and `stage_world`
+  (world.json: an open page reads it again at once and redoes what was built from it). A piece the headset export
+  merged into its group (the Quest diet joins each group into one mesh) is split back out the first time an op
+  names it, with its children, and then moves, saves and undoes like any object. What still needs the room
+  rebuilt (`stage_scene_export`, swapped in under the construct, so only when they are out or ask): new or changed
+  geometry, modelling, modifiers, textures and any material change other than the base colour, a new object, and
+  a new merged piece list (a room exported before pieces were numbered splits nothing until its next export).
 - **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
   moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
   `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.
