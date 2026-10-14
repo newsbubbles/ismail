@@ -38,6 +38,8 @@ import { initLoadSets } from './loadsets.js';
 import { initBehaviours } from './behaviours.js';
 import { setPickEmit } from './pickcycle.js';
 import { CAPTURE, runCapture } from './capture.js';
+import { initTrails } from './trails.js';
+import { initCamRec } from './camrec.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -111,6 +113,8 @@ live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reloa
 const stageClock = initClock(ed, live, xr, panels);   // the 4D timeline: keyed objects, tree growth
 window.VR_clock = stageClock;
 window.VR_trees = initTrees(ed, live, stageClock);   // grow_tree.py's trees, grown on the clock
+const trails = initTrails(ed, live, stageClock, xr);   // a keyed object's path on the clock, its keys to pick and move
+window.VR_trails = trails;
 fetch(`scenes/${encodeURIComponent(name)}/names.json`, { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : {})).then((n) => { ed.names = n; }).catch(() => {});
 ed.preRender.push(() => { if (actors.playing.size) wake(); });   // a playing actor keeps the desktop view drawing
@@ -187,7 +191,10 @@ window.VR_behaviours = initBehaviours(ed, live, panels, hands);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,
-  get actors() { return actors; }, get embody() { return embody; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
+  get actors() { return actors; }, get embody() { return embody; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; }, trails, get camrec() { return camrec; } });   // defined below; used on a menu press
+// a camera move recorded like a take: the user's head or a carried camera while the clock plays (camrec.js)
+const camrec = initCamRec(ed, live, stageClock, panels, { countdown: actions.countdown, trails });
+window.VR_camrec = camrec;
 live.handlers.take_stop = () => stopTake();
 const sayText = live.handlers.say;                 // in VR there is no caption to read: speak it (or with --voice)
 // a line queued while the page was away is old news by the time it connects: caption it, do not speak it (the user

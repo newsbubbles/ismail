@@ -275,7 +275,10 @@ export function initXR(ed, desktop) {
   }
   const HOLD_TO_GRAB_MS = 350;
   function onRelease(s, kind) {
-    if (s.panelDrag && s.panelDrag.kind === kind) s.panelDrag = null;
+    if (s.panelDrag && s.panelDrag.kind === kind) {
+      if (s.panelDrag.api.release) s.panelDrag.api.release();          // trails.js: a key handle carried, put down
+      s.panelDrag = null;
+    }
     if (s.pending && s.pending.kind === kind) s.pending = null;          // a quick pinch: it only selected
     if (s.grab && s.grab.kind === kind) {
       if (s.grab.started) ed.endEdit();

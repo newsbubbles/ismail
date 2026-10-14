@@ -728,6 +728,41 @@ def stage_key_interp(scene: str, object: str, mode: str) -> str:
 
 
 @op(mutates=True)
+def stage_trail(scene: str, object: str | list = None, show: bool = True) -> str:
+    """Draw a keyed object's path on the clock in the room (page command: trail): a line through every place it
+    passes, blue at the span's start to orange at its end, a small frustum at each key of a camera (where it looks),
+    each key's time beside it and a bright ball where the playhead puts it now. In VR a key is picked to scrub the
+    clock there and grabbed to move it (the key keeps its time; the move is a new key value, saved with
+    stage_anim_save). object: a name or a list of names; none with show=True draws every keyed camera, none with
+    show=False hides every path. The path redraws when its keys change. Page replies {shown: [{name, keys, seconds}]}."""
+    names = [object] if isinstance(object, str) else (list(object) if object else None)
+    return page_cmd(scene, 'trail', {'show': bool(show), 'names': names}, timeout=30)
+
+
+@op(mutates=True)
+def stage_camera_record(scene: str, camera: str, action: str = 'start', source: str = 'head', t0: float = None,
+                        t1: float = None, countdown: float = 3) -> str:
+    """Record a camera move like a take (page command: cam_record). action 'start': a countdown, then the clock
+    plays from t0 (default: where it is) to t1 (default: the span's end) and the camera's pose is sampled every frame;
+    source 'head' puts the camera at the user's eyes (hidden while it records), 'hold' samples it wherever it is
+    carried (the camera unlocked with Move). The take ends at t1, at a loop back or with action 'stop'; the samples
+    are thinned into smooth keys (every sample within 2 cm and 2 degrees of what the keys play back) that replace the
+    camera's keys inside the recorded window, the path is drawn (stage_trail) and a panel asks Keep / Redo / Undo.
+    action 'keep' saves anim.json, 'redo' puts the old keys back and records again, 'undo' puts the old keys back,
+    'state' reports. Page replies {state, name, keys?, err_m?, err_deg?, window?}."""
+    if action not in ('start', 'stop', 'keep', 'redo', 'undo', 'state'):
+        raise OpError("action is start, stop, keep, redo, undo or state")
+    if source not in ('head', 'hold'):
+        raise OpError("source is 'head' or 'hold'")
+    c = {'action': action, 'name': camera, 'source': source, 'countdown': countdown}
+    if t0 is not None:
+        c['t0'] = t0
+    if t1 is not None:
+        c['t1'] = t1
+    return page_cmd(scene, 'cam_record', c, timeout=30 + (countdown or 0))
+
+
+@op(mutates=True)
 def stage_control_set(scene: str, person: str, part: str, mode: str = 'default', joint: str | list = None,
                       at: str | list = None, scale: float = None, touch: bool = False) -> str:
     """Change what drives one part of a person, now, during a Follow too (page command: control_set). The built-in
@@ -793,4 +828,4 @@ def stage_actor_part(scene: str, person: str, part: str = None, show: bool = Tru
     return page_cmd(scene, 'actor_part', {'person': person, 'part': part, 'show': show, 'move': move,
                                           'seconds': seconds, 'reset': reset or None}, timeout=30)
 
-TYPED = {'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
