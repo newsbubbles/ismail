@@ -601,7 +601,8 @@ def midi_sources() -> str:
     names = midi.sources()
     if not names:
         return ("no MIDI inputs. A keyboard plugged in over USB shows up here; on Windows, loopMIDI makes a "
-                "virtual one (a port named for it, e.g. 'ismail keys').")
+                "virtual one (a port named for it, e.g. 'ismail keys'). With no instrument at all, live_keys_page "
+                "puts keys on a screen.")
     return "MIDI inputs:\n" + '\n'.join(f"  {n}" for n in names)
 
 
@@ -609,8 +610,8 @@ def midi_sources() -> str:
 def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
               transpose: int = None, channel: int = None, remove: bool = False) -> str:
     """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
-    same speakers. source: the input's name or a unique part of it (midi_sources); with no source, says what is
-    plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
+    same speakers. source: the input's name or a unique part of it (midi_sources), or 'screen keys' (the on-screen
+    keys page, live_keys_page); with no source, says what is plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
     included) or instrument=... (as live_track takes it: 'preset:<name>', a dict, a code voice). Call again with
     another track or instrument to swap: the old sound plays until the new notes land. The notes render once on
     the render workers (C2 to C7, or a kit's pads; a few seconds to a minute); a key then sounds one output buffer
@@ -642,3 +643,45 @@ def live_played(project: str, source: str = None, bars=8, fit: bool = False, fro
     pick by ear. When every key has the same velocity (a keyboard that sends one), the reply says so and suggests
     an accent shape; the lines keep the velocity."""
     return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
+
+
+@op()
+def live_keys_page(project: str, phone: bool = False, sender: str = None) -> str:
+    """Optional: an on-screen keyboard for someone with no MIDI instrument who wants to play a part (a jam, a lead
+    over the set). A real keyboard needs none of this (midi_sources, live_midi). The page plays straight into this
+    project's running engine as the input 'screen keys', with no virtual MIDI port: patch it like any input,
+    live_midi(source='screen keys', track=... or instrument=...), and live_played(source='screen keys') reads back
+    what they played. It has two to three octaves (two rows on a phone held upright), octave shift, a sustain
+    toggle, velocity from where the key is pressed (near the top is soft), multi-touch chords, the mouse, and the
+    computer keyboard (Z and Q rows, arrows for octave, Space for the pedal); it says whether it is connected and
+    what it plays. The reply gives the address on this computer (the engine serves it) and, while the phone server
+    runs, the phone's. phone=True also puts a panel on the phone page with a button that opens the keys (sender:
+    your name, as phone_panel_show takes it). The keys sound from this computer's speakers, not in the phone's
+    stream, and opening them leaves the phone page (its stream stops): for someone in the room. Tell the person
+    before their keys first sound."""
+    st = _call(project, 'keys')
+    port = (_engine_record(project) or {}).get('port')
+    L = [f"keys page here: http://127.0.0.1:{port}/keys (this computer's browser: mouse, touch screen or the "
+         f"computer keyboard)"]
+    from ..phone import ops as PO
+    pport = PO._port()
+    if pport is None:
+        if phone:
+            raise OpError("the phone server is not running: phone_start() first, then live_keys_page(phone=True)")
+        L.append("on a phone: phone_start(), then live_keys_page(phone=True)")
+    else:
+        url, hint = PO._tailnet(pport)
+        L.append(f"on the phone: {url}keys" if url else f"on the phone: not reachable yet ({hint})")
+        if phone:
+            PO._call('panel_show', title='Play along', link='/keys?from=phone', link_label='Open the keys',
+                     text='Keys on the screen that play into the set from the speakers in the room. Near the top '
+                          'of a key is soft, near the bottom is loud.', who=sender)
+            L.append("posted a panel on the phone page with a button that opens the keys")
+    if st.get('patched'):
+        ready = '' if st['ready'] >= st['of'] else f" ({st['ready']} of {st['of']} notes ready)"
+        L.append(f"the keys play {st['what']}{ready}")
+    else:
+        L.append(f"the keys play nothing yet: live_midi(project={project!r}, source='screen keys', track='<a live "
+                 f"track>' or instrument=...) first; until then the page says no sound is chosen")
+    L.append("they sound from this computer's speakers; live_played(source='screen keys') reads what was played")
+    return '\n'.join(L)

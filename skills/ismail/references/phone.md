@@ -291,6 +291,11 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
 - `phone_buttons([...])`: your own buttons, as data, for this moment of the set ("darker", "drop it now"). Clear
   them when the moment passes.
 - `phone_buzz()`, `phone_status()` (who listens, the bar they hear, how far behind the room), `phone_stop()`.
+- `live_keys_page(project, phone=True)`: optional, for someone in the room with no MIDI instrument who wants to
+  play a part. It posts a panel whose button opens on-screen keys (`/keys` on the page's address) that play into the
+  set from the computer's speakers, not into the stream; opening them leaves the page, so the stream stops until
+  they come back (the keys page has a Phone button back). Patch them first with
+  `live_midi(source='screen keys', track=... or instrument=...)`. A real keyboard needs none of this.
 
 ## Their phone
 

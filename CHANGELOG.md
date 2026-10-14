@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Live: keys on the screen
+
+- `live_keys_page(project, phone=False, sender=None)`: optional, for someone with no MIDI instrument who wants to
+  play a part (a real keyboard needs none of it). An on-screen keyboard that plays straight into the running engine
+  as the input `'screen keys'`, no loopMIDI: `live_midi(source='screen keys', ...)` patches it and `live_played`
+  reads it back (`live/midi/screen_keys.jsonl`).
+- Served by the engine on this computer (`http://127.0.0.1:<port>/keys`) and by the phone server (`/keys`, relayed
+  to the engine); `phone=True` posts a phone panel that opens it. One small POST per key, no polling.
+- Two to three octaves (two rows on a phone held upright), octave shift, a sustain toggle, velocity from where the
+  key is pressed (near the top is soft), multi-touch chords, the mouse, and the computer keyboard's Z and Q rows.
+  The top line says whether it is connected and what it plays. Each message carries a sequence number, so a
+  late one never undoes a newer key.
+
 ### Stage: edits apply in place, no reload
 
 - `stage_material_set(scene, color, material= | object=)` sets a material's base colour on the open page now, as an

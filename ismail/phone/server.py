@@ -1652,7 +1652,7 @@ class Handler(BaseHTTPRequestHandler):
              'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8'}
 
     def log_message(self, fmt, *a):
-        if '/api/state' not in (a[0] if a else ''):
+        if not any(x in (a[0] if a else '') for x in ('/api/state', '/api/keys')):   # a poll, or a key: no line each
             sys.stderr.write('[phone] ' + (fmt % a) + '\n')
 
     def _json(self, code, obj):
@@ -1799,6 +1799,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._eye()
         if path in ('/', '/index.html'):
             return self._file(PAGE / 'index.html')
+        if path == '/keys':                       # the on-screen keys page (live_keys_page)
+            return self._file(PAGE / 'keys.html')
         if re.fullmatch(r'/cues/(start|end|sent|error)\.mp3', path):
             return self._file(PAGE / path[1:])
         if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png',
@@ -1934,6 +1936,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {'error': f'what: one of {sorted(TAPS)}, mood, button:<id>'})
                 ph.cmd('view')
                 return self._json(200, {'ok': True, 'n': rec['n'], 'heard': rec['heard']})
+            if u.path == '/api/keys':           # the on-screen keys page: one small message per key, to the playing engine
+                e = ph.engine
+                if not e:
+                    return self._json(200, {'ok': True, 'result': {'connected': False}})
+                try:
+                    r = engine_call(e['port'], 'keys', timeout=3, events=body.get('events') or [], sid=sid)
+                except RuntimeError as ex:                     # the engine refused the message
+                    return self._json(400, {'ok': False, 'error': str(ex)})
+                except (OSError, ValueError) as ex:            # it stopped since the last poll
+                    return self._json(200, {'ok': True, 'result': {'connected': False, 'error': str(ex)}})
+                return self._json(200, {'ok': True, 'result': r})
             if u.path == '/api/output':                       # ledger:M179: he sets it, no agent needed
                 e = ph.engine
                 if not e:

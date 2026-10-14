@@ -25,6 +25,7 @@ STATUS = "live 120 BPM 4/4 | heard bar 5 beat 2 (9 s) | mixed ahead 0.50 s | out
 
 
 DEVICE_CALLS = []
+KEY_CALLS = []
 
 
 class FakeEngine(BaseHTTPRequestHandler):
@@ -36,7 +37,14 @@ class FakeEngine(BaseHTTPRequestHandler):
         req = json.loads(self.rfile.read(n))
         if req['op'] == 'device':
             DEVICE_CALLS.append(req['args'])
-        b = json.dumps({'ok': True, 'result': STATUS if req['op'] == 'status' else ''}).encode()
+        res = {'ok': True, 'result': STATUS if req['op'] == 'status' else ''}
+        if req['op'] == 'keys':
+            KEY_CALLS.append(req['args'])
+            res = {'ok': True, 'result': {'patched': True, 'what': 'preset:pluck', 'ready': 61, 'of': 61,
+                                          'connected': True}}
+            if any(ev[1] == 0xF0 for ev in req['args']['events']):
+                res = {'ok': False, 'error': 'event [1, 240, 0, 0]: status a note-off, note-on or controller'}
+        b = json.dumps(res).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(b)))
         self.end_headers()
@@ -1242,3 +1250,27 @@ def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, 
             break
         time.sleep(0.1)
     assert rows and rows[-1]['media'][0]['t'] == 42.37                          # the answers file has it too
+
+
+def test_the_keys_page_is_served_and_its_keys_reach_the_playing_engine(phone, monkeypatch):
+    """live_keys_page: the phone server serves the on-screen keys and relays each key, one small message, to the
+    engine; no engine, and the page says so instead of failing."""
+    ph, base, _ = phone
+    with urllib.request.urlopen(base + '/keys', timeout=10) as r:
+        page = r.read().decode('utf8')
+    assert "fetch('/api/keys'" in page and 'name="viewport"' in page and '--ground:#0e0d0b' in page
+    KEY_CALLS.clear()
+    j = post(base, '/api/keys', {'sid': 'k1', 'events': [[1, 0x90, 60, 90], [2, 0x80, 60, 0]]})
+    assert j == {'ok': True, 'result': {'patched': True, 'what': 'preset:pluck', 'ready': 61, 'of': 61,
+                                        'connected': True}}
+    assert KEY_CALLS == [{'events': [[1, 0x90, 60, 90], [2, 0x80, 60, 0]], 'sid': 'k1'}]
+    with pytest.raises(urllib.error.HTTPError) as e:
+        post(base, '/api/keys', {'sid': 'k1', 'events': [[3, 0xF0, 0, 0]]})
+    assert e.value.code == 400 and 'note-off, note-on or controller' in json.loads(e.value.read())['error']
+    monkeypatch.setattr(S, 'live_engines', lambda: {})                   # the set stopped
+    for _ in range(50):
+        if not ph.engine:
+            break
+        time.sleep(0.1)
+    assert post(base, '/api/keys', {'sid': 'k1', 'events': []}) == {'ok': True, 'result': {'connected': False}}
+    assert not any(r.get('kind') == 'keys' for r in ph.read_inbox(0))     # keys are not messages for an agent
