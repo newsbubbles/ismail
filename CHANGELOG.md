@@ -17,6 +17,8 @@
 - `skills/ismail/hooks/named_ops_guard.py`: an optional Claude Code hook that refuses `python -c` with ismail code,
   copies into a scenes folder, killing the stage or a live engine by process, and hand edits of `world.json`,
   `scene.glb` or `manifest.json`, naming the op to use instead (`skills/ismail/hooks/README.md`).
+- The hook fails open: the settings text in its README checks the file exists before running it (a hook exiting 2
+  blocks the call, and Python exits 2 on a missing script), and any error inside the guard lets the call through.
 - `references/stage.md` has the table of blocked forms and their ops.
 
 ### Live: keys on the screen
