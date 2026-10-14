@@ -87,7 +87,7 @@ def _session(home, name='2026-01-01_120000', state='stopped', mic=None, events=(
 def test_a_mic_needs_the_persons_yes():
     with pytest.raises(api.OpError) as e:
         api.OPS['listen_start'](streams=['speakers', 'mic'])
-    assert 'mic_ok=True' in str(e.value) and 'yes' in str(e.value)
+    assert "mic_ok=<that note's id>" in str(e.value) and 'yes' in str(e.value) and 'phone' in str(e.value)
 
 
 def test_an_unknown_stream_names_the_kinds():

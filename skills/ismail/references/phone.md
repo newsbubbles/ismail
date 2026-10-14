@@ -184,8 +184,26 @@ for 70 s after the person pressed pause). Starting again is yours, when they say
 The page may be on someone's screen recording or a shared video: never put where the person lives, their name, or
 other personal details in a caption, a panel or a title (10-06: a story named the person's town while they
 recorded).
+The ops refuse it for you: every op that sends text to the page (`phone_say`, `phone_panel_show`, `phone_ask`,
+`phone_exam`, `phone_now`, `phone_buttons`, the offer and restart lines) and every stage op that shows text
+(`stage_say`, `stage_ask`, `stage_panel_show`, cues, markers, `stage_busy`) scans it first against a local list
+that never goes in the repository: `$ISMAIL_PRIVATE_TERMS`, else `~/.ismail/private_terms.txt`, one place or name
+per line, `#` starting a comment line, plus the git `user.email` of the checkout. Words match whole and
+case-insensitive; an email matches anywhere. A hit refuses with the term, to you only: rephrase without it. With no
+file only the email is checked, and each reply carries one line saying so and how to turn the rest on.
 `phone_unsay(match='text')` (or `since='HH:MM'`, or `n=`) takes lines back off the page, its history, its pinned
 line and its notification; it cannot reach a recording already made.
+
+## Don't ask for what is granted
+
+A person who said "you can always merge reviewed work" should not get the question again. Their standing grants
+live in a local file: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a JSON list of
+`{"id", "date", "topic", "keywords": [...], "says"}`. A yes/no or approve/deny panel (its buttons, or a choice's
+options, are all yes and no words), a `phone_ask`, a `phone_say` that asks ("should I merge #12?"), a `stage_ask`
+or a yes/no `stage_panel_show` whose title or text holds a grant's keyword (whole word, any case) is refused with
+the grant: act on it, then post a caption saying what you did. When the grant really does not fit, pass
+`override_grant='<why it does not fit>'`: the question goes out and the reason is appended to
+`grant_overrides.jsonl` beside the grants file (never a tracked file). No grants file: no check.
 
 ## The page's sounds: make them, attach them
 

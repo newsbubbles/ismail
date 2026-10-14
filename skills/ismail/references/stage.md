@@ -274,7 +274,9 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **A sign-off in the headset is a right thumbs up** (the map's `answer_yes`; `stage_gestures` says if the person
   moved it). Before anything that hitches or changes the room around them (a reload, a re-export, a scene switch),
   ask with `stage_ask`: right thumbs up is yes, down is no. Never wait for them to say a word for it, and never use
-  the left hand, which takes updates. An open ask holds no other command.
+  the left hand, which takes updates. An open ask holds no other command. An ask (or a yes/no panel) that a standing
+  grant already answers is refused, and text naming a private term is refused on every op that shows it: phone.md,
+  "Nothing personal on the page" and "Don't ask for what is granted".
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
   `stage_take_keep_last`. Leave everyone else unpinned: a Follow sets itself up from the body (seated stays on the

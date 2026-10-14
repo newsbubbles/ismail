@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Ops refuse: personal details on a page, questions already granted, a mic without the person's note
+
+- One module, `ismail/guards.py`, holds the three checks; each refusal says why and what the next call is.
+- Nothing personal on a page: every op that sends text to the phone page (through the one phone call path:
+  captions, panels and their buttons and inputs, asks, exams, now-playing, buttons, offers) and every stage page
+  command that shows text (say, ask, panel, cue, marker, and `stage_busy`) is scanned against a local list:
+  `$ISMAIL_PRIVATE_TERMS`, else `~/.ismail/private_terms.txt` (one term per line, `#` comments), plus the git
+  `user.email`. Whole words, any case; an email anywhere. A hit refuses with "Rephrase without it". With no file,
+  only the email is checked and the reply says how to turn the scan on.
+- Don't ask for what is granted: `phone_panel_show` (yes/no or approve/deny panels, told by their buttons),
+  `phone_ask`, a `phone_say` that asks, `stage_ask` and yes/no `stage_panel_show` are refused when a standing grant's
+  keyword is in the title or text. Grants: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a list
+  of `{id, date, topic, keywords, says}`. `override_grant='<why it does not fit>'` lets the question through and
+  appends the reason to `grant_overrides.jsonl` beside the grants file. No file, no check.
+- The mic needs the person's own note: `listen_start(mic_ok=...)` takes the id of their voice note or typed answer
+  from the phone inbox, sent in the last 12 hours, naming the mic or recording and not a no. `mic_ok=True` is
+  refused. The recorder checks the note again before it opens a device.
+
 ### Worktrees: sweep the empty folders removed copies leave
 
 - `python -m ismail.worktrees sweep [--dry-run] [--json]`: removes the empty folders next to the main checkout

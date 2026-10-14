@@ -6,6 +6,7 @@ with what the page answered (positions in Blender metres, z up). A page that is 
 the page refuses, raises OpError with the next step. Coordinates on the wire are Blender world space.
 """
 from ..api import OpError, op
+from .. import guards
 from .link import page_cmd
 
 
@@ -159,15 +160,20 @@ def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, vo
 
 
 @op(mutates=True)
-def stage_ask(scene: str, text: str, seconds: float = 60, sender: str = None) -> str:
+def stage_ask(scene: str, text: str, seconds: float = 60, sender: str = None, override_grant: str = None) -> str:
     """Ask a yes/no question out loud and wait for a RIGHT thumbs up (yes) or down (no) held 400 ms (page command:
     ask). Waits until answered or `seconds` pass; other commands go on meanwhile. Use it for every sign-off in the
     headset (a reload, a re-export). Only answerable in VR (the thumbs are hand
     gestures). A second ask while one is open does not raise: the page replies {error: 'already asking: ...'} (the op
     should turn that into OpError). Page replies {question, answer: yes | no | 'no answer', seconds}. Emits: answer,
     voice_spoken, voice_error. While it waits, the question shows over the person's right hand (the hand that
-    answers) with what up and down mean, under sender= (your name as they know it)."""
-    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds, 'from': sender}, timeout=((60 if seconds is None else seconds) + 30))
+    answers) with what up and down mean, under sender= (your name as they know it).
+    Refused when a standing grant already answers it (~/.ismail/standing_grants.json): act on the grant and say what
+    you did; override_grant='<why it does not fit>' asks anyway and logs the reason."""
+    guards.check_private(text, where='the stage')     # first, so an override is never logged for text that cannot go
+    g = guards.check_grant(text, True, override_grant, 'stage_ask')
+    return guards.with_note(page_cmd(scene, 'ask', {'text': text, 'seconds': seconds, 'from': sender},
+                                     timeout=((60 if seconds is None else seconds) + 30)), g)
 
 
 @op(mutates=True)
@@ -193,7 +199,7 @@ def stage_voice_note(scene: str, action: str = 'start') -> str:
 def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: str = '', image: str = None,
                buttons: list = None, width: float = None, seconds: float = None, quiet: bool = False,
                wait: bool = None, near: list = None, anchor: str = 'world', side: str = None,
-               sender: str = None) -> str:
+               sender: str = None, override_grant: str = None) -> str:
     """Open a panel in VR with a title, text, an image (URL) and buttons (page command: panel). anchor='world'
     (default) fixes it 0.7 m in front of the person: for a note about a place. anchor='body' makes it ride with them,
     just out of view to the `side` ('right' or 'left') of where their body faces, so they turn their head to read it
@@ -207,12 +213,17 @@ def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: st
     command queue until the answer; wait=False replies at once. The same panel_id replaces an open panel. near is used
     by the page's own modules as a three.js vector; from a command it is unclear (a JSON list has no x/y/z) and should
     not be relied on. Page replies {id, answer, via, seconds}, {id, answer: null, why} when closed unanswered, or
-    {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed."""
+    {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed.
+    A yes/no panel (its buttons are yes and no words) whose title or text a standing grant covers is refused: act on
+    the grant and say what you did; override_grant='<why it does not fit>' shows it anyway and logs the reason."""
     if anchor not in ('world', 'body') or side not in (None, 'right', 'left'):
         raise OpError(f"anchor is 'world' or 'body' and side 'right' or 'left' (got {anchor!r}, {side!r})")
+    guards.check_private(title, text, buttons, where='the stage')
+    g = guards.check_grant([title, text], guards.is_yes_no(buttons, None, f'{title} {text}'), override_grant,
+                           'stage_panel_show')
     if wait is None:
         wait = anchor == 'world'
-    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side, 'from': sender}, timeout=((60 if seconds is None else seconds) + 120))
+    return guards.with_note(page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side, 'from': sender}, timeout=((60 if seconds is None else seconds) + 120)), g)
 
 
 @op(mutates=True)

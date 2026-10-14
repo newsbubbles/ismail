@@ -126,8 +126,18 @@ def pending():
     return None if cmds is None else len(cmds)
 
 
+# the fields of each page command the person reads in the headset or on the desktop page: scanned for private terms
+SHOWN = {'say': ('text',), 'ask': ('text',), 'panel': ('title', 'text', 'buttons'), 'cue': ('title', 'text', 'buttons'),
+         'marker': ('label',)}
+
+
 def page_cmd(scene, ctype, fields, timeout=30):
-    """Queue one command for the page showing `scene`; wait for its cmd_done; reply with the page's answer."""
+    """Queue one command for the page showing `scene`; wait for its cmd_done; reply with the page's answer. A command
+    that shows text (SHOWN) is refused when the text names a private term (ismail.guards)."""
+    note = ''
+    if ctype in SHOWN:
+        from .. import guards
+        note = guards.check_private(*[fields.get(f) for f in SHOWN[ctype]], where='the stage')
     if getattr(_BATCH, 'cmds', None) is not None:
         if scene != _BATCH.scene:
             raise _op_error(f'a batch drives one scene ({_BATCH.scene!r}); {ctype} asked for {scene!r}')
@@ -137,7 +147,10 @@ def page_cmd(scene, ctype, fields, timeout=30):
         _BATCH.timeout += timeout
         return QUEUED
     e = send(scene, ctype, fields, timeout)
-    return e if isinstance(e, str) else reply(ctype, e)
+    out = e if isinstance(e, str) else reply(ctype, e)
+    if note and isinstance(out, str):
+        out += '\n' + note
+    return out
 
 
 def send(scene, ctype, fields, timeout=30):
