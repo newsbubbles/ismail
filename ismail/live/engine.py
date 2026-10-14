@@ -2205,6 +2205,13 @@ class Engine:
             out.append({'t': s.track, 'b': round(self.beat(s.start), 3), 'l': round(20 * math.log10(pk + 1e-9), 1)})
         return {'beat': round(now, 3), 'bpm': self.bpm, 'bpb': self.bpb, 'onsets': out}
 
+    def cmd_clock(self):
+        """The beat heard now and the wall time it was read at, for a process that stamps its own events on this
+        set's bars (listen_heard places the person's words with it). The same heard beat the keys log uses; with no
+        output running, the mixed position. Asking it hands over none of the engine's news."""
+        beat = self.midi.heard_beat() if (self.stream is not None or self._null_on) else self.beat(self.pos)
+        return {'wall': time.time(), 'beat': round(beat, 4), 'bpm': self.bpm, 'bpb': self.bpb}
+
     def cmd_midi(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
                  remove=False):
         try:
@@ -2212,9 +2219,9 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
-    def cmd_played(self, source=None, bars=8):
+    def cmd_played(self, source=None, bars=8, fit=False, from_bar=None):
         try:
-            return self.midi.played(source, bars)
+            return self.midi.played(source, bars, fit, from_bar)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
@@ -2509,7 +2516,7 @@ def serve(engine, port=0, idle_min=None):
            'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
-           'midi': engine.cmd_midi, 'played': engine.cmd_played}
+           'midi': engine.cmd_midi, 'played': engine.cmd_played, 'clock': engine.cmd_clock}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -2548,9 +2555,11 @@ def serve(engine, port=0, idle_min=None):
                 engine.hub.unsubscribe(name, sub)
 
         def do_POST(self):
+            req = {}
             try:
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
-                engine.last_cmd = time.time()
+                if req.get('op') != 'clock':            # a listener reading the clock does not keep a set awake
+                    engine.last_cmd = time.time()
                 fn = ops.get(req.get('op'))
                 if fn is None:
                     res = {'ok': False, 'error': f"unknown op {req.get('op')!r}; ops: {sorted(ops)}"}
@@ -2563,7 +2572,7 @@ def serve(engine, port=0, idle_min=None):
             except Exception as e:
                 traceback.print_exc()
                 res = {'ok': False, 'error': f"engine error {type(e).__name__}: {e}"}
-            news = engine.drain_news()
+            news = engine.drain_news() if req.get('op') != 'clock' else None   # news is for the agent's calls
             if news:
                 k = 'result' if res['ok'] else 'error'
                 res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)
@@ -2618,7 +2627,8 @@ def main():
     os.makedirs(d, exist_ok=True)
     info = os.path.join(d, 'engine.json')
     rec = {'port': httpd.server_address[1], 'pid': os.getpid(), 'bpm': a.bpm, 'bpb': a.bpb,
-           'device': a.device, 'started': time.time(), 'project': eng.root, 'priority': prio}
+           'device': a.device, 'started': time.time(), 'project': eng.root, 'priority': prio,
+           'clock': True}                   # it answers op 'clock' (listen_heard asks only an engine that does)
     with open(info, 'w', encoding='utf8') as f:
         json.dump(rec, f)
     reg = registry_path(os.getpid())

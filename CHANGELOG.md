@@ -17,6 +17,20 @@
 - The stage docs: live edits go through named ops only (`python -m ismail <op>`, `stage_batch @file.json`), never an
   inline script; a missing op is the gap to fix.
 
+### Live: played keys on the beat the player heard
+
+- The key log's `beat` is now where the key sounded against the music (the press plus the output buffer, about
+  180 ms on laptop speakers), which is where a player by ear meant it. It was the press, so a take read about one
+  key delay early. The press stays in the log as `press`; old logs still read, and `live_played` says which clock
+  it used and the delay it added.
+- `live_played(fit=True)` fits a 16th grid with a free offset to the hits (keys within 0.15 beat are one hit),
+  reports the offset, the rms error in ms, the drift per bar and the rhythm's shape (3-3-2), and prints the
+  snapped notes for `live_queue` twice: as played, and with the shape's groups from beat 1. `bars=[a, b]` picks
+  the bars, `from_bar` sets the clip's bar 1. It is the method that lined up a played riff in the 2026-10-13 jam
+  after four tries at rounding.
+- When every key in the bars has one velocity, `live_played` says so and suggests an accent shape (the data is
+  unchanged).
+
 ### Live: played keys
 
 - `midi_sources()` lists the MIDI inputs (keyboards, pads, loopMIDI ports). Windows reads them through winmm with
@@ -29,6 +43,20 @@
   back as notes lines, the format tracks take.
 - Known gaps: keys skip the track's live effects and the safety limiter (a soft clip guards them), and are not in
   `live_record` recordings or streams yet.
+
+### Listening together: words as they are said, sessions off the system drive
+
+- `listen_heard(since)` gives the person's words a few seconds after they say them, cut at pauses or every 8 s
+  at most, each with its time and the bar the live set had sounding (a new `clock` op on the live engine, exempt
+  from its news). It uses the speech server the reading uses and starts nothing; when that server is down it says
+  so and what still works. A chunk that fails is tried once more, then reported, never dropped. `listen_peek`
+  points at it while the mic is on.
+- Sessions go to `<project>/listen/` (`listen_start(project=)`), else the running live set's folder, else
+  `$ISMAIL_LISTEN_HOME`, else `_listen/` in the installed songs folder: never the system drive by default. Ids
+  resolve across all of them and the old home; a full path works too.
+- A 2 GB free-space floor: `listen_start` refuses under it and says what to do, and a running session stops by
+  itself there, keeping its recording, with a line in the next listen reply. Background temp files stay in the
+  session folder.
 
 ### Listening together
 
