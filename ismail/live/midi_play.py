@@ -9,7 +9,12 @@ started with live_record and the streams (the phone) do not yet.
 
 Every key is logged with the bar of the music heard when it was pressed (live/midi/<source>.jsonl), for turning a
 performance into a part later. The engine also watches for inputs plugged in or removed and says so in its news.
+
+One input needs no driver: 'screen keys', the on-screen keyboard page (live_keys_page), for someone with no MIDI
+instrument. Its keys arrive as small HTTP messages (the engine's /api/keys, or the phone server's, which relays them)
+and are fed to the patch here exactly as a driver's would be.
 """
+import collections
 import json
 import os
 import re
@@ -27,6 +32,8 @@ ONESHOT_S = 0.2             # a drum's or a kit pad's gate (note-offs are ignore
 MAX_VOICES = 48
 POLL_S = 2.0
 KNEE = 0.9                  # the keys plus the set above this are soft-clipped (they skip the safety limiter)
+SCREEN = 'screen keys'      # the on-screen keys page, an input that is always there (live_keys_page)
+MAX_EVENTS = 64             # messages in one request from the page
 
 
 class Voice:
@@ -44,6 +51,17 @@ def _slug(name):
     return re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_').lower() or 'midi'
 
 
+class ScreenInput:
+    """The on-screen keys page as an input: open while it is patched, fed by MidiPlay.screen instead of a driver."""
+
+    def __init__(self, play, name, on_msg):
+        self.play, self.name = play, name
+        play.feeds[name] = on_msg
+
+    def close(self):
+        self.play.feeds.pop(self.name, None)
+
+
 class MidiPlay:
     def __init__(self, engine, sources=None, opener=None):
         """sources, opener: stand-ins for midi.sources and midi.Input (tests)."""
@@ -56,17 +74,20 @@ class MidiPlay:
         self.known = None
         self.clipped = 0
         self._log = []
+        self.feeds = {}                     # an open screen input -> its message handler
+        self.seqs = collections.OrderedDict()   # page id -> {key: (last seq, was a note-off)}
 
     # ------------------------------------------------------------------ the command
     def find(self, source):
         names = self.sources()
-        if source in names:
+        if source in names or source == SCREEN:
             return source
-        hits = [n for n in names if source.lower() in n.lower()]
+        hits = [n for n in names if source.lower() in n.lower()] or ([SCREEN] if source.lower() in SCREEN else [])
         if len(hits) == 1:
             return hits[0]
         raise ValueError(f"MIDI input {source!r}: " + (f"matches {hits}, name one" if hits else
-                         f"no such input; inputs: {names or 'none (plug a keyboard in, or add a loopMIDI port)'}"))
+                         f"no such input; inputs: {names or 'none (plug a keyboard in, or add a loopMIDI port)'}, "
+                         f"and {SCREEN!r} (the on-screen keys page, live_keys_page)"))
 
     def cmd(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
             remove=False):
@@ -107,7 +128,7 @@ class MidiPlay:
             p['channel'] = int(channel) or None
         msg = []
         if new:
-            p['input'] = self.opener(name, self._on(name))
+            p['input'] = (self._screen if name == SCREEN else self.opener)(name, self._on(name))
             self.patches[name] = p
             msg.append(f"{name}: patched")
         if track is not None or instrument is not None:
@@ -166,6 +187,51 @@ class MidiPlay:
         if len(p['bank']) == len(p['want']):
             p['prev'] = {}
             self.e.news.append(f"keys {name}: all {len(p['want'])} notes of {p['what']} are ready")
+
+    def _screen(self, name, on_msg):
+        return ScreenInput(self, name, on_msg)
+
+    # ------------------------------------------------------------------ the on-screen keys page
+    def screen(self, events=(), sid=None):
+        """Messages from the on-screen keys page: events [[seq, status, data1, data2], ...], numbered by the page
+        `sid` in the order it made them, fed to the 'screen keys' patch as a driver would. Each key is its own
+        request and requests travel side by side, so one can overtake another: an event older than the last one
+        for its key (or controller) from that page is dropped, except a note-on overtaken by its own note-off,
+        which plays as a short tap rather than not at all. With no events, only says what the page shows."""
+        if not isinstance(events, (list, tuple)) or len(events) > MAX_EVENTS:
+            raise ValueError(f"events: a list of at most {MAX_EVENTS} [seq, status, data1, data2]")
+        ok = []
+        for ev in events:
+            if not (isinstance(ev, (list, tuple)) and len(ev) == 4 and all(isinstance(x, int) for x in ev)
+                    and 0x80 <= ev[1] <= 0xBF and 0 <= ev[2] <= 127 and 0 <= ev[3] <= 127):
+                raise ValueError(f"event {ev!r}: [seq, status, data1, data2], status a note-off, note-on or "
+                                 f"controller (0x80 to 0xBF), data 0 to 127")
+            ok.append(ev)
+        on = self.feeds.get(SCREEN)
+        if on is not None and ok:
+            last = self.seqs.setdefault(str(sid), {})
+            self.seqs.move_to_end(str(sid))
+            while len(self.seqs) > 8:
+                self.seqs.popitem(last=False)
+            for seq, st, d1, d2 in ok:
+                kind = st & 0xF0
+                is_off = kind == 0x80 or (kind == 0x90 and not d2)
+                k = ('c' if kind == 0xB0 else 'n', st & 0x0F, d1)
+                prev = last.get(k)
+                if prev is not None and seq <= prev[0]:
+                    if kind == 0x90 and d2 and prev[1]:      # its note-off came first: a quick tap
+                        on(time.time(), st, d1, d2)
+                        on(time.time(), 0x80 | (st & 0x0F), d1, 0)
+                    continue
+                last[k] = (seq, is_off)
+                on(time.time(), st, d1, d2)
+        p = self.patches.get(SCREEN)
+        if p is None:
+            return {'patched': False}
+        keys = None if p['oneshot'] and len(p['want']) == 1 else [m - p['transpose'] for m in p['want']]
+        return {'patched': True, 'what': p['what'], 'ready': len(p['bank']), 'of': len(p['want']),
+                'keys': sorted(keys) if keys is not None else None, 'sustain': p['sustain'],
+                'out_ms': self.out_latency() * 1000 // SR}
 
     # ------------------------------------------------------------------ keys (the driver's thread)
     def _on(self, name):
@@ -404,7 +470,8 @@ class MidiPlay:
     def describe(self):
         names = self.sources()
         lines = ["MIDI inputs: " + (', '.join(repr(n) for n in names) if names else
-                                    "none (plug a keyboard in, or add a loopMIDI port; this notices it)")]
+                                    "none (plug a keyboard in, or add a loopMIDI port; this notices it)"),
+                 f"and {SCREEN!r}, the on-screen keys page (live_keys_page), for someone with no MIDI instrument"]
         lines += [self.line(p) for p in self.patches.values()] or \
             ["nothing patched: live_midi(source=..., instrument=... or track=...) plays one through the set"]
         if self.clipped:

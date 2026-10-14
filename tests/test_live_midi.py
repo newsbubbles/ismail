@@ -171,3 +171,105 @@ def test_what_was_played_reads_back_as_notes_text(eng):
     c4 = next(x for x in lines if 'C4' in x)
     assert 'bar   1' in c4 and 'd=1.95' in c4 and 'v=90' in c4  # two pulls of whole blocks at 120 BPM: the pedal's hold
     assert any('E4' in x and 'v=70' in x for x in lines) and any('G4' in x for x in lines)
+
+
+def test_the_screen_keys_play_into_the_engine_with_no_port(eng, tmp_path):
+    """The on-screen keys page (live_keys_page): its messages reach the 'screen keys' patch as a driver's would."""
+    assert eng.cmd_keys(events=[[1, 0x90, 60, 100]], sid='a') == {'patched': False, 'connected': True}
+    assert eng.midi.voices == []                                # not patched: the key is dropped
+    assert "'screen keys', the on-screen keys page (live_keys_page)" in eng.cmd_midi()
+    r = eng.cmd_midi(source='screen keys', instrument='preset:pluck')
+    assert 'screen keys: patched' in r and 'screen keys' not in FakeInput.opened   # no MIDI port opened
+    st = eng.cmd_keys(sid='a')
+    assert st['patched'] and st['what'] == 'preset:pluck' and st['ready'] == st['of'] == 25
+    assert st['keys'] == list(range(48, 73)) and st['sustain'] is False and st['connected']
+    eng.cmd_keys(events=[[2, 0x90, 60, 30]], sid='a')
+    soft = np.max(np.abs(eng._pull(BLOCK)))
+    assert soft > 0.001
+    eng.midi.voices = []
+    eng.cmd_keys(events=[[3, 0x80, 60, 0], [4, 0x90, 62, 127]], sid='a')
+    assert np.max(np.abs(eng._pull(BLOCK))) > 3 * soft          # near the bottom of the key is loud
+    assert eng.cmd_keys(events=[[5, 0xB0, 64, 127], [6, 0x80, 62, 0]], sid='a')['sustain'] is True
+    assert len(eng.midi.voices) == 1 and eng.midi.voices[0].rel is None   # the pedal holds it
+    eng.cmd_keys(events=[[7, 0xB0, 64, 0]], sid='a')
+    assert eng.midi.voices[0].rel is not None
+    eng.midi.flush()
+    recs = [json.loads(x) for x in open(os.path.join(str(tmp_path), 'live', 'midi', 'screen_keys.jsonl'))]
+    assert [(r['st'], r['d1'], r['d2']) for r in recs][:2] == [(0x90, 60, 30), (0x80, 60, 0)]
+    assert eng.cmd_played(source='screen keys').startswith('screen_keys: 2 of 2 notes')
+
+
+def test_a_screen_key_that_arrives_late_never_undoes_a_newer_one(eng):
+    eng.cmd_midi(source='screen keys', instrument='preset:pluck')
+    eng.cmd_keys(events=[[10, 0x80, 64, 0]], sid='a')           # the release overtook its press
+    eng.cmd_keys(events=[[9, 0x90, 64, 100]], sid='a')
+    assert len(eng.midi.voices) == 1 and eng.midi.voices[0].rel is not None   # a short tap, not a stuck note
+    eng.cmd_keys(events=[[12, 0x90, 65, 90]], sid='a')
+    eng.cmd_keys(events=[[14, 0xB0, 64, 0]], sid='a')
+    eng.cmd_keys(events=[[11, 0x90, 65, 40], [13, 0xB0, 64, 127]], sid='a')   # older than what it played: dropped
+    assert len(eng.midi.voices) == 2 and eng.midi.patches['screen keys']['sustain'] is False
+    eng.cmd_keys(events=[[1, 0x90, 67, 90]], sid='b')           # another page counts on its own
+    assert len(eng.midi.voices) == 3
+
+
+def test_the_screen_keys_say_what_is_wrong_and_partial_names_still_find_real_inputs(eng):
+    with pytest.raises(LiveError, match='status a note-off, note-on or controller'):
+        eng.cmd_keys(events=[[1, 0xF0, 0, 0]])
+    with pytest.raises(LiveError, match='at most 64'):
+        eng.cmd_keys(events=[[i, 0x90, 60, 100] for i in range(65)])
+    with pytest.raises(LiveError, match=r'\[seq, status, data1, data2\]'):
+        eng.cmd_keys(events=[[1, 0x90, 60]])
+    assert eng.midi.find('keys') == 'ismail keys' and eng.midi.find('screen') == 'screen keys'
+    with pytest.raises(ValueError, match=r"'screen keys' \(the on-screen keys page, live_keys_page\)"):
+        eng.midi.find('piano')
+
+
+def test_the_engine_serves_the_keys_page_and_a_key_leaves_the_agents_news(eng):
+    import urllib.request
+    from ismail.live.engine import serve
+    eng.cmd_midi(source='screen keys', instrument='preset:pluck')
+    eng.drain_news()
+    httpd = serve(eng, 0)
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with urllib.request.urlopen(base + '/keys', timeout=10) as r:
+            assert r.headers['Content-Type'].startswith('text/html') and b"'/api/keys'" in r.read()
+        eng.news.append('a chapter changed')
+        req = urllib.request.Request(base + '/api/keys', data=json.dumps({'sid': 'p', 'events': [[1, 0x90, 60, 90]]})
+                                     .encode(), headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            j = json.loads(r.read())
+        assert j['ok'] and j['result']['patched'] and j['result']['connected'] and len(eng.midi.voices) == 1
+        assert list(eng.news) == ['a chapter changed']               # still there for the agent's next call
+    finally:
+        httpd.shutdown()
+
+
+def test_live_keys_page_gives_the_addresses_and_puts_a_panel_on_the_phone(eng, tmp_path, monkeypatch):
+    from ismail.api import OpError
+    from ismail.live import ops as LO
+    from ismail.live.engine import serve
+    from ismail.phone import ops as PO
+    httpd = serve(eng, 0)
+    port = httpd.server_address[1]
+    os.makedirs(os.path.join(str(tmp_path), 'live'), exist_ok=True)
+    with open(os.path.join(str(tmp_path), 'live', 'engine.json'), 'w', encoding='utf8') as f:
+        json.dump({'port': port}, f)
+    panels = []
+    try:
+        monkeypatch.setattr(PO, '_port', lambda: None)
+        r = LO.live_keys_page(str(tmp_path))
+        assert f'http://127.0.0.1:{port}/keys' in r and 'phone_start(), then live_keys_page(phone=True)' in r
+        assert "live_midi(project=" in r and "source='screen keys'" in r            # nothing patched yet
+        with pytest.raises(OpError, match=r'phone_start\(\) first'):
+            LO.live_keys_page(str(tmp_path), phone=True)
+        eng.cmd_midi(source='screen keys', instrument='preset:pluck')
+        monkeypatch.setattr(PO, '_port', lambda: 8870)
+        monkeypatch.setattr(PO, '_tailnet', lambda p: ('https://box.tail.ts.net:8870/', ''))
+        monkeypatch.setattr(PO, '_call', lambda op, **kw: panels.append((op, kw)))
+        r = LO.live_keys_page(str(tmp_path), phone=True, sender='jam')
+        assert 'on the phone: https://box.tail.ts.net:8870/keys' in r and 'the keys play preset:pluck' in r
+        assert panels[0][0] == 'panel_show' and panels[0][1]['link'] == '/keys?from=phone'
+        assert panels[0][1]['who'] == 'jam'
+    finally:
+        httpd.shutdown()

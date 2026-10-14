@@ -2212,6 +2212,13 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
+    def cmd_keys(self, events=None, sid=None):
+        """The on-screen keys page (live_keys_page): its key messages in, what the page shows out."""
+        try:
+            return dict(self.midi.screen(events or [], sid), connected=True)
+        except ValueError as e:
+            raise LiveError(str(e))
+
     def cmd_played(self, source=None, bars=8):
         try:
             return self.midi.played(source, bars)
@@ -2509,7 +2516,8 @@ def serve(engine, port=0, idle_min=None):
            'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
-           'midi': engine.cmd_midi, 'played': engine.cmd_played}
+           'midi': engine.cmd_midi, 'played': engine.cmd_played, 'keys': engine.cmd_keys}
+    keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -2519,8 +2527,23 @@ def serve(engine, port=0, idle_min=None):
             # /stream?name=master|bus:<b>|deck:<d>: raw PCM, int16 LE stereo at SR, until the client leaves
             from urllib.parse import urlparse, parse_qs
             u = urlparse(self.path)
+            if u.path == '/keys':                       # the on-screen keys page, for this computer's browser
+                try:
+                    with open(keys_page, 'rb') as f:
+                        body = f.read()
+                except OSError:
+                    self.send_error(404, f"no keys page at {keys_page}")
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if u.path != '/stream':
-                self.send_error(404, "GET /stream?name=master (or bus:<name>, deck:<name>); everything else is POST")
+                self.send_error(404, "GET /stream?name=master (or bus:<name>, deck:<name>), or /keys (the on-screen "
+                                     "keys page); everything else is POST")
                 return
             name = (parse_qs(u.query).get('name') or ['master'])[0]
             try:
@@ -2548,8 +2571,11 @@ def serve(engine, port=0, idle_min=None):
                 engine.hub.unsubscribe(name, sub)
 
         def do_POST(self):
+            req = {}
             try:
                 req = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
+                if self.path.split('?')[0] == '/api/keys':     # the keys page posts its own body: {sid, events}
+                    req = {'op': 'keys', 'args': {k: req.get(k) for k in ('sid', 'events')}}
                 engine.last_cmd = time.time()
                 fn = ops.get(req.get('op'))
                 if fn is None:
@@ -2563,7 +2589,8 @@ def serve(engine, port=0, idle_min=None):
             except Exception as e:
                 traceback.print_exc()
                 res = {'ok': False, 'error': f"engine error {type(e).__name__}: {e}"}
-            news = engine.drain_news()
+            # the agent's news waits for the agent: a key from the page must not take it (nor carry it)
+            news = None if isinstance(req, dict) and req.get('op') == 'keys' else engine.drain_news()
             if news:
                 k = 'result' if res['ok'] else 'error'
                 res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)

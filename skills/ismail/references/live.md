@@ -465,9 +465,18 @@ straight to the speakers.
   lines (`bar | +beat | pitch | d= | v=`, the format tracks take). Read it to answer what they played, quote a
   phrase back in their words, or turn a phrase into a part: edit the lines (fix a note, quantize, move it to bar 1)
   and give them to `live_track` so the set plays it from then on.
-- **No MIDI keyboard?** Optional, only for someone who wants to play and has no instrument: on Windows, loopMIDI
-  makes a virtual port (name it, e.g. "ismail keys"), and any on-screen keyboard page that sends Web MIDI to that
-  port plays through `live_midi` like a real one. Someone with a keyboard needs none of this.
+- **No MIDI keyboard?** Optional, only for someone who wants to play and has no instrument; someone with a
+  keyboard needs none of this. `live_keys_page()` gives an on-screen keyboard that plays straight into the running
+  engine as the input `'screen keys'`, no virtual port: patch it like any input,
+  `live_midi(source='screen keys', track='bass')`, and `live_played(source='screen keys')` reads it back. It is
+  served on this computer (`http://127.0.0.1:<engine port>/keys`: mouse, touch screen, or the computer keyboard's
+  Z and Q rows) and on the phone page's address while it runs (`live_keys_page(phone=True)` posts a panel with a
+  button that opens it). Two to three octaves, octave shift, a sustain toggle, multi-touch chords, and velocity
+  from where the key is pressed (near the top is soft); its top line says whether it is connected and what it
+  plays. The keys sound from this computer's speakers, so it is for someone in the room.
+- **Other software as the keyboard** (a DAW, a sequencer, a Web MIDI page): on Windows, loopMIDI makes a virtual
+  port (name it, e.g. "ismail keys"); whatever sends MIDI to that port plays through `live_midi` like a real
+  keyboard.
 
 ## Playing for a screen recording
 
