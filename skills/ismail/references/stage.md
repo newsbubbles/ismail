@@ -347,8 +347,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   a Follow, and is saved with the scene. `clear=True` unpins it.
 - **Grab by touch (in VR, hand tracking).** `stage_grab_mode(scene, on=True, objects="unlocked", hold_s=1.5,
   release_s=1.0)`: a hand takes a thing by resting on it, the palm or the finger bases touching it and the hand nearly
-  still, for `hold_s` (a ring fills); it holds it until the hand opens past half its grip for `release_s` (a ring
-  empties; closing again keeps it). Let go, it falls onto what is under it with the hand's speed, so a toss flies.
+  still, for `hold_s` (a ring fills; a touch or stillness lost for under 0.4 s pauses the ring instead of
+  restarting it); it holds it until the hand opens past half its grip for `release_s` (a ring empties; closing again
+  keeps it). The grip counts as at least half closed, so a thing taken with an open palm drops when the hand stays
+  open flat: close the fingers around it to carry it. A hand takes the outermost group up to 2.2 m across (a mic
+  stand, a chair, a pool ball under its table's group; never the table), unless a rule says `grab=True`. Let go, it falls onto what is under it with the hand's speed, so a toss flies.
   Fingertips alone stay the pinch for menus. Inside a person (`stage_embody`) the person's hand holds it, and the grab
   and the drop go into the take and play back with it. `objects` can be a list of names or globs (`["drum_stick_*"]`).
   `stage_grab_rule(scene, object, grab=True, fixed=False)` sets one thing: `fixed=True` for a bar or a rail the hand
