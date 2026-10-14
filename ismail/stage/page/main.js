@@ -32,7 +32,7 @@ import { initGrab } from './grab.js';
 import { initParts } from './parts.js';
 import { initFaces } from './faces.js';
 import { initPerform } from './perform.js';
-import { loadWorld } from './world.js';
+import { loadWorld, world } from './world.js';
 import { initLoadSets } from './loadsets.js';
 import { initBehaviours } from './behaviours.js';
 import { setPickEmit } from './pickcycle.js';
@@ -360,6 +360,37 @@ window.VR_waypoints = waypoints;
 window.VR_cues = initCues(ed, live, panels);
 window.VR_anchors = initAnchors(ed, xr, live);   // objects pinned to a hand joint, session only
 window.VR_props = initProps(ed, live, actors);   // props pinned to a person's bone, saved with the scene (props.js)
+
+// world.json changed under an open page (stage_world writes it, then sends world_reload): read it again and bring what
+// was built from it up to date, so the room is never reloaded for it (the user, 2026-10-13: "I'm getting sick of
+// reloading entire scenes"). Facings, partners, floor, grab and actors are read when used, so they apply at once;
+// what was built from them is redone here. Replies {changed, applied}.
+live.handlers.world_reload = async () => {
+  const old = JSON.parse(JSON.stringify(world()));
+  await loadWorld(ed.sceneName);
+  const W = world(), same = (k) => JSON.stringify(old[k] ?? null) === JSON.stringify(W[k] ?? null);
+  const changed = [...new Set([...Object.keys(old), ...Object.keys(W)])].filter((k) => !same(k)), applied = [];
+  if (!same('unloaded') || !same('sets')) {
+    const was = new Set(old.unloaded || []), now = new Set(W.unloaded || []);
+    for (const n of now) if (!was.has(n) && (W.sets || {})[n]) loadSets.unload(n, W.sets[n]);
+    for (const n of was) if (!now.has(n)) await loadSets.load(n);
+    applied.push('unloaded');
+  }
+  if (!same('actors')) {                          // a new or changed body: rest it again from its own glb
+    for (const p of new Set([...Object.keys(old.actors || {}), ...Object.keys(W.actors || {})])) {
+      if ((old.actors || {})[p] === (W.actors || {})[p]) continue;
+      actors.unrest(p);
+      const it = ed.byName.get(p);
+      if (it) it.obj.visible = true;
+      await actors.rest(p).catch((e) => console.warn('[world] rest', p, e));
+    }
+    applied.push('actors');
+  }
+  if (!same('props')) { window.VR_props.reload(); applied.push('props'); }
+  if (!same('faces') && live.handlers.face_reload) { live.handlers.face_reload({}); applied.push('faces'); }
+  if (!same('keep_out') && live.handlers.trees_reload) { await live.handlers.trees_reload({}); applied.push('keep_out'); }
+  return { changed, applied };
+};
 // grab by touch: a hand holds a thing it rests on, a release lets it fall (grab.js); the fist grab of touch.js steps aside
 const grab = initGrab(ed, live, xr, hands, () => actors, window.VR_props);
 touch.skip = (it, how) => !!grab.heldBy(it) || (how === 'fist' && grab.takeable(it));

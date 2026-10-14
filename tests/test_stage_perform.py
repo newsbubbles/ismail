@@ -153,13 +153,14 @@ def test_a_batch_sends_page_ops_together_and_keeps_the_order(stage):
         out = OPS['stage_batch'](scene='room', ops=[
             {'op': 'stage_follow_anchor', 'person': 'person_b', 'to': 'stool_3'},
             {'op': 'stage_perform', 'action': 'mark', 'label': 'legs now'},
-            {'op': 'stage_world', 'world': {'actors': {'person_b': 'mh_man'}}},      # runs here, between
+            {'op': 'stage_world', 'world': {'actors': {'person_b': 'mh_man'}}},      # runs here, between; the page takes it with say
             {'op': 'stage_say', 'text': 'feet next', 'sender': 'film agent'},
         ])
         batches = [c for c in page.seen if c['type'] == 'batch']
-        assert [[x['type'] for x in b['cmds']] for b in batches] == [['follow_anchor', 'perform'], ['say']]
+        assert [[x['type'] for x in b['cmds']] for b in batches] == [['follow_anchor', 'perform'], ['world_reload', 'say']]
         lines = out.splitlines()
-        assert [ln.split(':')[0] for ln in lines] == ['[0] stage_follow_anchor', '[1] stage_perform', '[2] stage_world', '[3] stage_say']
+        assert [ln.split(':')[0] for ln in lines] == ['[0] stage_follow_anchor', '[1] stage_perform', '[2] stage_world',
+                                                  '[2] stage_world (page)', '[3] stage_say']
         assert 'mh_man' in (stage['scenes'] / 'room' / 'world.json').read_text(encoding='utf-8')
     finally:
         page.stop = True
