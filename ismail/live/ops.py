@@ -618,8 +618,8 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     after the press (live_status says how long). Played keys skip the track's effects and the safety limiter (a
     soft clip guards them). volume_db: the keys' level, at most +6 (default: the track's fader, or -6 dB for an
     instrument). transpose: semitones; channel: 1 to 16 (0 = every channel, the
-    default). Every key is logged with the bar heard to <project>/live/midi/<source>.jsonl (live_played reads it
-    back as notes). remove=True unpatches.
+    default). Every key is logged with the beat it sounded against to <project>/live/midi/<source>.jsonl
+    (live_played reads it back as notes). remove=True unpatches.
     Tell the person before their keys first sound."""
     if instrument is not None:
         instrument = _check_instrument(project, instrument)
@@ -628,13 +628,21 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
 
 
 @op()
-def live_played(project: str, source: str = None, bars: int = 8) -> str:
+def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None) -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
-    bars, the same notes format tracks take (note-offs held while the sustain pedal was down). The last `bars` bars
-    that had keys, per input (source: one input). Read it to answer what they played, to quote a phrase back, or to
-    turn a phrase into a track: edit the lines (fix a note, quantize, move it to bar 1) and give them to live_track
-    or a studio track."""
-    return _call(project, 'played', source=source, bars=bars)
+    bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last
+    `bars` bars that had keys, or [a, b] for those bars (ask the player which part; never guess). Per input
+    (source: one input). Read it to answer what they played or to quote a phrase back.
+    Clock: each note is where it sounded against the beat the player heard (the press plus the keys' delay to the
+    speakers, which the header names in ms), because a player by ear lines up what they hear with the kick.
+    To loop a take back, use fit=True rather than rounding the lines to the grid: it groups the hits (keys within
+    0.15 beat are one), fits a 16th grid with a free offset, says the offset, the rms error in ms, the drift per
+    bar and the rhythm's shape in 16ths (3-3-2), and prints the snapped notes twice as live_queue notes (beats from
+    the clip start, bar 1 = the take's first bar, or from_bar): A as played, B with the first hit on a downbeat.
+    Where the take sits against the kick is a musical choice the data cannot make: play both and let the player
+    pick by ear. When every key has the same velocity (a keyboard that sends one), the reply says so and suggests
+    an accent shape; the lines keep the velocity."""
+    return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
 
 
 @op()

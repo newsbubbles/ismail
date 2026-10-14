@@ -461,10 +461,32 @@ straight to the speakers.
   sustain pedal, `transpose` and `channel` are followed. Tell the person before their keys first sound.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
-- **What they played is text.** Every key is logged with the bar heard. `live_played()` reads it back as notes
-  lines (`bar | +beat | pitch | d= | v=`, the format tracks take). Read it to answer what they played, quote a
-  phrase back in their words, or turn a phrase into a part: edit the lines (fix a note, quantize, move it to bar 1)
-  and give them to `live_track` so the set plays it from then on.
+- **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
+  (`bar | +beat | pitch | d= | v=`, the format tracks take). Read it to answer what they played or quote a phrase
+  back in their words. `bars=[a, b]` reads those bars; with a number it reads the last ones played.
+- **The clock.** A key sounds one output buffer after the press (about 180 ms on a laptop's speakers), and the music
+  reaches the speakers through the same buffer. Someone playing by ear lines up the note they hear with the beat they
+  hear, so each note is placed where it sounded against the music: the press plus the keys' delay. The header of
+  `live_played` names that delay in ms; the press times stay in the log (`press`). A log written before this clock
+  holds the press, about one key delay early, and the header says so.
+- **Looping their take back.** Never round the raw lines to the grid: a take that sits near half a 16th off rounds
+  the wrong way ("it sounds like a half off", 2026-10-13). In order:
+  1. **Ask which bars.** The player says which part was good (aloud with the mic on, or by bar number); quote the
+     bars back. Never guess where the good part starts.
+  2. `live_played(bars=[a, b], fit=True)` groups the hits (keys within 0.15 beat are one), fits a 16th grid with a
+     free offset, and says the offset, the rms error in ms, the drift per bar and the rhythm's shape in 16ths
+     (3-3-2). It prints the snapped notes twice, ready for `live_queue` (beats from the clip start, bar 1 = the
+     take's first bar, or `from_bar=`): **A as played**, and **B with the shape's groups from beat 1**. When they
+     are the same it prints one.
+  3. **Offer both by ear.** Where the take sits against the kick is a musical choice the data cannot make. Say each
+     in words ("A: as you played it; B: the groups start on the beat") and play them so the answer is one word.
+     A snare on 2 and 4 gives the player something to hear the placement against.
+  4. **Keep the choice for the run.** Once the player says a take is right, later takes in the same run usually need
+     the same placement (same keys, same engine): use the same letter first.
+- **Flat velocities.** A cheap keyboard sends every key at one velocity (often 80); `live_played` says so. The lines
+  keep it. When looping it, write an accent shape and say you did: the bar's downbeat loudest, then the beats, then
+  pushed 16ths, offbeat 8ths softest; in a chord the top note leads and the lower notes sit well under it (about 30
+  under sounded right in one jam; 14 was too close).
 - **No MIDI keyboard?** Optional, only for someone who wants to play and has no instrument; someone with a
   keyboard needs none of this. `live_keys_page()` gives an on-screen keyboard that plays straight into the running
   engine as the input `'screen keys'`, no virtual port: patch it like any input,

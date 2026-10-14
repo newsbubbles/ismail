@@ -13,15 +13,50 @@ says so when it is missing.
 | op | what it does |
 |---|---|
 | `listen_list(devices=True)` | the inputs this computer has (speakers, other outputs, mics), and the last sessions |
-| `listen_start(streams, mic_ok, max_min, label)` | starts recording in the background; replies with every live input, by name |
+| `listen_start(streams, mic_ok, max_min, label, project)` | starts recording in the background; replies with every live input, by name, and where the session went |
+| `listen_heard(since)` | with a mic: their words as they say them, a few seconds behind, each with its time and the live set's bar |
 | `listen_peek()` | while it records: time so far, levels, dropouts, and a reading of the last 30 s |
 | `listen_mark(label, ago_s)` | marks a moment ("that drop"), now or `ago_s` seconds back |
 | `listen_note(text)` | a message the person typed, placed over the seconds they spent typing it |
-| `listen_stop(read=True)` | stops, then reads in the background; `discard=True` deletes the session unread |
+| `listen_stop(session, read=True)` | stops, then reads in the background; `discard=True` deletes the session unread. `session` is an id or a full path |
 | `listen_read(part)` | the reading: `summary`, `timeline`, `stretch:<k>`, `all`, with `start`/`end` in seconds |
 
 Streams are `speakers` (what plays on the default output), `loop:<name>` (another output), `mic` (the default
 mic) and `mic:<name>`. The default is `['speakers']`.
+
+## Where sessions go
+
+Never the system drive by default. In order:
+
+1. `<project>/listen/` when `listen_start(project=<the song's folder>)` names one.
+2. The running live set's folder (`<project>/listen/`), so a jam's session sits with the jam.
+3. `$ISMAIL_LISTEN_HOME`, when set.
+4. `_listen/` in the installed songs folder, on the checkout's drive.
+
+An id resolves wherever its session went (an index in `_listen/`, plus the old home `~/.ismail/listen`), so
+`listen_stop('<id>')` works after the home changed; a full path always works.
+
+**The free-space floor.** Each input takes about 1.4 GB an hour, and the reading copies each stretch once more.
+`listen_start` refuses a drive with under 2 GB free (`FREE_FLOOR_GB` in `ismail/listen.py`) and says what to do:
+free some space, name a project on a drive with room, or set `ISMAIL_LISTEN_HOME`. A running session checks every
+10 s; under the floor it stops by itself, keeps what it recorded, and the next listen op says so once (under
+"NEW since your last call", with the mic off on the phone page). `listen_stop` does not read on a short drive.
+The background processes keep their temp files in the session's own `tmp/` folder.
+
+## Words as they are said
+
+With a mic on, the recorder also cuts the mic at pauses (2 s, as the reading groups utterances), or at 8 s at
+most, and sends each chunk (16 kHz, under 300 KB) to the speech server the reading uses (`ISMAIL_SPEAK`, by
+default `http://127.0.0.1:8765`). Nothing starts or installs that server: when it does not answer, `listen_start`
+and `listen_heard` say so, and the recording, `listen_peek`, `listen_mark` and `listen_note` still work;
+`listen_stop` reads the words from the recording once it runs.
+
+`listen_heard()` gives the last 20 lines, `listen_heard(since=<n>)` only the newer ones; each reply ends with the
+`n` to pass next. A line is `#n m:ss bar 17.3: the words`: the time since the session began, placed as the reading
+places words (the mic's lag behind the speakers is measured every minute when the speakers are recorded too), and
+the bar the live set had sounding then, from the live engine's clock (the same heard beat its played keys use).
+Without a live set, or with one started before this op existed, there are no bars and the reply says why. A chunk
+that fails is tried once more, then shown as "not heard" with the reason: never dropped.
 
 ## The mic needs their yes
 
@@ -56,3 +91,4 @@ Answer in time, not bars, unless the person works in bars.
 - Track times said aloud are shown, not converted to session time.
 - The skip test can miss a half-beat jump under 95 BPM; it reads as a change.
 - Without the speech server the music is still read; the words are missing, and the reading says so.
+- `listen_heard` hears the mic with the music in it, so lyrics can come through as words, as in the reading.

@@ -171,7 +171,7 @@ nudges you, follow it.
 | the person wants to listen to music together and talk about it | `listen_start` (the mic only after their yes), `listen_mark` / `listen_note` while it plays, then `listen_read` (`references/listen-together.md`) |
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
-| the person wants to play a part themselves (a jam, a lead over the set) | `midi_sources`, then `live_midi` to patch their keys to a track's sound; `live_played` reads what they played as notes; no instrument: `live_keys_page` (on-screen keys) (`references/live.md`, "Played keys") |
+| the person wants to play a part themselves (a jam, a lead over the set) | `midi_sources`, then `live_midi` to patch their keys to a track's sound; `live_played` reads what they played as notes, and `fit=True` snaps a take to loop back; no instrument: `live_keys_page` (on-screen keys) (`references/live.md`, "Played keys") |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
 
 ## Where things are
