@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import threading
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -243,7 +244,7 @@ def test_a_good_note_opens_the_mic(phone):
     got = guards.mic_note('v1')
     assert got['id'] == 'v1' and 'record the mic' in got['text']
     _inbox(phone, {'n': 3, 'ts': _iso(), 'kind': 'answer', 'id': 'p1', 'sid': 's1', 'answer': 'Send',
-                   'values': {'say': 'sure, use the microphone'}})
+                   'values': {'say': 'sure, use the microphone'}, 'typed': ['say']})
     assert guards.mic_note(3)['id'] == 'p1' and guards.mic_note('n3')['text'] == 'sure, use the microphone'
 
 
@@ -258,7 +259,7 @@ def test_a_note_the_person_did_not_send_is_refused(phone):
         assert "not the person's own note" in str(e.value)
     with pytest.raises(api.OpError) as e:
         guards.mic_note('v404')
-    assert 'phone_watch lists' in str(e.value)
+    assert 'phone_watch and stage_events list' in str(e.value)
 
 
 def test_an_old_note_is_refused(phone):
@@ -271,7 +272,8 @@ def test_an_old_note_is_refused(phone):
 def test_a_note_without_a_mic_word_or_saying_no_is_refused(phone):
     _voice(phone, 1, 'v1', 'yes, play the next one')
     _voice(phone, 3, 'v2', 'delete that recording')
-    _inbox(phone, {'n': 5, 'ts': _iso(), 'kind': 'answer', 'id': 'p1', 'sid': 's1', 'answer': 'yes', 'values': {}})
+    _inbox(phone, {'n': 5, 'ts': _iso(), 'kind': 'answer', 'id': 'p1', 'sid': 's1', 'answer': 'yes', 'values': {},
+                   'typed': []})
     for key in ('v1', 5):
         with pytest.raises(api.OpError) as e:
             guards.mic_note(key)
@@ -279,6 +281,113 @@ def test_a_note_without_a_mic_word_or_saying_no_is_refused(phone):
     with pytest.raises(api.OpError) as e:
         guards.mic_note('v2')
     assert 'reads as a no' in str(e.value)
+
+
+def test_an_option_picked_is_not_their_words(phone):
+    _inbox(phone, {'n': 1, 'ts': _iso(), 'kind': 'answer', 'id': 'p1', 'sid': 's1', 'answer': 'Send',
+                   'values': {'mode': 'record the mic', 'boxes': ['record the mic'], 'on': True, 'say': 'sounds good'},
+                   'typed': ['say']},
+           {'n': 2, 'ts': _iso(), 'kind': 'answer', 'id': 'p2', 'sid': 's1', 'answer': 'Send',
+            'values': {'mode': 'record the mic'}})
+    with pytest.raises(api.OpError) as e:            # the picked option and the ticked box do not count
+        guards.mic_note(1)
+    assert 'does not mention the mic' in str(e.value) and 'sounds good' in str(e.value)
+    with pytest.raises(api.OpError) as e:            # an answer that cannot tell typed from picked gives nothing
+        guards.mic_note(2)
+    assert 'which of its fields were typed' in str(e.value)
+
+
+def _vr(tmp_path, monkeypatch, text, hours_ago=0.0, with_audio=True, landed=True, etype='voice_message'):
+    scenes = tmp_path / 'scenes'
+    (scenes / 'room' / 'live').mkdir(parents=True)
+    (scenes / 'room' / 'voice').mkdir()
+    rel = str(Path('voice') / 'note1.webm')
+    if with_audio:
+        (scenes / 'room' / rel).write_bytes(b'\0' * 16)
+    evs = []
+    if landed:
+        evs.append({'id': 7, 'ts': _iso(hours_ago), 'type': 'voice_in', 'file': rel, 'bytes': 16})
+    evs.append({'id': 8, 'ts': _iso(hours_ago), 'type': etype, 'file': rel, 'text': text})
+    (scenes / 'room' / 'live' / 'events.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in evs),
+                                                          encoding='utf8')
+    monkeypatch.setattr(guards, '_stage_scene_dirs', lambda: [scenes])
+    return scenes
+
+
+def test_a_vr_voice_note_opens_the_mic(phone, tmp_path, monkeypatch):
+    _vr(tmp_path, monkeypatch, 'yeah go ahead and record the mic')
+    got = guards.mic_note('vr:room:8')
+    assert got['from'] == 'vr' and got['key'] == 'vr:room:8' and 'record the mic' in got['text']
+
+
+def test_a_vr_note_is_checked_like_a_phone_note(phone, tmp_path, monkeypatch):
+    cases = [(dict(text='record the mic', with_audio=False), "not the person's own note"),
+             (dict(text='record the mic', landed=False), "not the person's own note"),
+             (dict(text='record the mic', etype='say'), "not the person's own note"),
+             (dict(text=None), 'has no transcript'),
+             (dict(text='record the mic', hours_ago=guards.MIC_NOTE_MAX_H + 1), 'ask them again'),
+             (dict(text='play the next one'), 'does not mention the mic'),
+             (dict(text='do not record the mic'), 'reads as a no')]
+    for i, (kw, want) in enumerate(cases):
+        _vr(tmp_path / str(i), monkeypatch, **kw)
+        with pytest.raises(api.OpError) as e:
+            guards.mic_note('vr:room:8')
+        assert want in str(e.value), (kw, str(e.value))
+    with pytest.raises(api.OpError) as e:
+        guards.mic_note('vr:hall:8')
+    assert 'no VR voice note' in str(e.value)
+
+
+def test_the_refusal_names_both_note_sources(phone):
+    with pytest.raises(api.OpError) as e:
+        guards.mic_note(True)
+    assert 'phone inbox' in str(e.value) and 'VR voice note' in str(e.value) and 'chat:' in str(e.value)
+    with pytest.raises(api.OpError) as e:
+        guards.mic_note('v404')
+    assert 'phone inbox' in str(e.value) and 'VR voice notes' in str(e.value)
+
+
+def test_a_chat_yes_is_checked_and_logged_locally(phone, tmp_path, monkeypatch):
+    log = tmp_path / 'local' / 'mic_consent.jsonl'
+    monkeypatch.setenv(guards.MIC_CONSENT_ENV, str(log))
+    got = guards.mic_note('chat: "sure, record the mic while we listen"', 'listen_start')
+    assert got['from'] == 'chat' and got['key'] == 'chat-log:1'
+    rows = [json.loads(x) for x in log.read_text(encoding='utf8').splitlines()]
+    assert rows == [{'ts': rows[0]['ts'], 'op': 'listen_start', 'quote': 'sure, record the mic while we listen'}]
+    assert guards.mic_note('chat-log:1', 'listen.record')['text'] == 'sure, record the mic while we listen'
+    assert len(log.read_text(encoding='utf8').splitlines()) == 1      # checking it again logs nothing
+    for quote, want in (('chat: sounds good', 'does not mention the mic'),
+                        ("chat: don't record the mic", 'reads as a no'), ('chat:   ', 'exact words')):
+        with pytest.raises(api.OpError) as e:
+            guards.mic_note(quote)
+        assert want in str(e.value)
+    assert len(log.read_text(encoding='utf8').splitlines()) == 1      # a refused quote is not logged
+    with pytest.raises(api.OpError):
+        guards.mic_note('chat-log:9')
+
+
+def test_a_chat_yes_reaches_the_recorder_as_its_log_line(phone, tmp_path, monkeypatch):
+    log = tmp_path / 'mic_consent.jsonl'
+    monkeypatch.setenv(guards.MIC_CONSENT_ENV, str(log))
+    seen = {}
+
+    def stop_here(project):
+        seen['logged'] = log.read_text(encoding='utf8')
+        raise ValueError('past the mic check')
+    monkeypatch.setattr(LI, 'pick_home', stop_here)
+    with pytest.raises(api.OpError) as e:
+        api.OPS['listen_start'](streams=['speakers', 'mic'], mic_ok='chat: yes, record the mic')
+    assert str(e.value) == 'past the mic check' and '"op": "listen_start"' in seen['logged']
+    d = tmp_path / 'session'
+    d.mkdir()
+    LI.write_json(d / 'request.json', {'streams': ['mic'], 'max_s': 60, 'mic_note': 'chat-log:5'})
+
+    def no_devices():
+        raise AssertionError('the recorder reached the audio devices')
+    monkeypatch.setattr(LI, '_pa', no_devices)
+    LI.record(d)                                      # a log line that is not there: refused before any device
+    st = LI.read_json(d / 'status.json')
+    assert st['state'] == 'failed' and 'no chat yes' in st['error']
 
 
 def test_listen_start_passes_a_good_note_on_to_the_recorder(phone, monkeypatch):
@@ -302,4 +411,4 @@ def test_the_recorder_checks_the_note_again_before_any_device(phone, tmp_path, m
     monkeypatch.setattr(LI, '_pa', no_devices)
     LI.record(d)
     st = LI.read_json(d / 'status.json')
-    assert st['state'] == 'failed' and st['error'].startswith('mic refused: mic_ok needs the id')
+    assert st['state'] == 'failed' and st['error'].startswith("mic refused: mic_ok needs the person's yes")

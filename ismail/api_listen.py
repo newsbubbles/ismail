@@ -14,10 +14,12 @@ import psutil
 from .api import OpError, op
 from . import guards, listen as LI
 
-MIC_CONSENT = ("A mic records the room, so it starts only on the person's own yes for this session, sent from their "
-               "phone. Ask them in words (\"may I record the mic while we listen, so I can catch what you say?\"); "
-               "when their voice note or typed answer says yes, call again with mic_ok=<that note's id> (phone_watch "
-               "lists ids). Without a mic, they can type and you add their messages with listen_note.")
+MIC_CONSENT = ("A mic records the room, so it starts only on the person's own yes for this session. Ask them in words "
+               "(\"may I record the mic while we listen, so I can catch what you say?\"); when they say yes, call "
+               "again with mic_ok=<that note's id>: a phone note (phone_watch lists ids) or a VR voice note "
+               "(vr:<scene>:<event id>, stage_events lists them), or mic_ok='chat: <their exact words>' when they "
+               "said it here (logged locally). Without a mic, they can type and you add their messages with "
+               "listen_note.")
 
 
 def _dir(session=None, want_live=False):
@@ -115,9 +117,10 @@ def listen_start(streams: list = None, max_min: float = None, mic_ok: str | int 
                  read_on_max: bool = True, project: str = None) -> str:
     """Start listening together: record what this computer plays while you and the person listen to a song and
     talk about it. streams: 'speakers' (the default output, the default), 'loop:<device name part>', 'mic' or
-    'mic:<name part>'. A mic needs mic_ok=<the id of the person's own phone note saying yes to it>: a voice note's id
-    or a typed answer's line number, as phone_watch lists them, sent in the last 12 h and naming the mic, microphone,
-    recording or listening (mic_ok=True is refused: ask them in words first). project: the
+    'mic:<name part>'. A mic needs mic_ok=<the person's yes to it>: a phone voice note's id or a typed answer's line
+    number (phone_watch lists them), a VR voice note as vr:<scene>:<event id> (stage_events), or 'chat: <their exact
+    words>' (logged in ~/.ismail/mic_consent.jsonl); sent in the last 12 h, naming the mic, microphone, recording or
+    listening, and not a no (mic_ok=True is refused: ask them in words first). project: the
     song's folder; the session goes in <project>/listen/ (left out: the running live set's folder, else
     $ISMAIL_LISTEN_HOME, else _listen/ in the installed songs folder). It refuses a drive with under 2 GB free, and
     stops by itself if the drive gets there. It stops by itself after max_min (90 min, 20 with a mic: then ask
@@ -134,7 +137,7 @@ def listen_start(streams: list = None, max_min: float = None, mic_ok: str | int 
     if mic:
         if mic_ok is None or mic_ok is False or mic_ok == '':
             raise OpError(MIC_CONSENT)
-        yes = guards.mic_note(mic_ok)                 # their own note, recent, naming the mic, not a no
+        yes = guards.mic_note(mic_ok, 'listen_start')  # their own yes, recent, naming the mic, not a no
     try:
         home, live, why = LI.pick_home(project)
     except ValueError as e:
@@ -159,7 +162,7 @@ def listen_start(streams: list = None, max_min: float = None, mic_ok: str | int 
     d.mkdir(parents=True, exist_ok=False)
     LI.write_json(d / 'request.json', {'streams': streams, 'max_s': mm * 60, 'label': label or '',
                                        'read_on_max': bool(read_on_max), 'live': live,
-                                       'mic_note': str(mic_ok) if mic else None})
+                                       'mic_note': yes['key'] if mic else None})
     LI.remember(sid, d)
     _spawn(d, 'record', 'rec.log')
     end = time.time() + 15
@@ -180,7 +183,8 @@ def listen_start(streams: list = None, max_min: float = None, mic_ok: str | int 
         where = _phone(f"Mic is ON: recording the room while we listen (up to {mm:.0f} min). Say stop any time.")
         L.append(f"The mic is ON: {where}. Say \"stop\" or \"delete that\" works any time "
                  f"(listen_stop(discard=True) deletes it unread).")
-        L.append(f"On their note {yes['id'] or yes['n']} ({yes['ts']}): \"{yes['text'][:160]}\"")
+        L.append(f"On their {dict(phone='phone note', vr='VR voice note', chat='words in chat (logged)')[yes['from']]} "
+                 f"{yes['id'] or yes['n']} ({yes['ts']}): \"{yes['text'][:160]}\"")
         if LI.speech_up():
             L.append("listen_heard() gives their words as they say them, a few seconds behind" +
                      (", each on the live set's bar." if live else "."))

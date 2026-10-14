@@ -11,9 +11,11 @@ Three refusals, each saying why and what the next call is:
    live in a local file: $ISMAIL_STANDING_GRANTS, else ~/.ismail/standing_grants.json, a JSON list of
    {"id", "date", "topic", "keywords": [...], "says"}. With no file there is no check. override_grant='<why it does
    not fit>' lets the question through and appends the reason to grant_overrides.jsonl beside the grants file.
-3. A mic opens only on the person's own note. listen_start (and any recorder that opens an input device) takes the
-   id of a note the person sent from the phone page (a voice note, or typed words in a panel), sent within
-   MIC_NOTE_MAX_H hours, that names the mic or recording and does not read as a no.
+3. A mic opens only on the person's own yes. listen_start (and any recorder that opens an input device) takes the
+   id of a note the person sent from the phone page (a voice note, or words typed in a panel's text field) or a VR
+   voice note (vr:<scene>:<event id>), sent within MIC_NOTE_MAX_H hours, that names the mic or recording and does not
+   read as a no; or 'chat: <their exact words>', the same word checks, logged to mic_consent.jsonl beside the other
+   local files ($ISMAIL_MIC_CONSENT_LOG, else ~/.ismail/mic_consent.jsonl).
 
 The local files are read on every call, so a change takes effect at once. Nothing they hold is written to a tracked
 file: a refusal names the matched term to the agent only.
@@ -265,13 +267,15 @@ def check_grant(question, yes_no, override_grant=None, op_name=''):
     return f"(standing grant {g.get('id')} set aside: {why}; logged in {log})"
 
 
-# ------------------------------------------------------------------ 3. the mic needs the person's own note
+# ------------------------------------------------------------------ 3. the mic needs the person's own yes
 
 MIC_WORDS = re.compile(r'\b(mic|mics|microphone|record|recording|listen|listening)\b', re.IGNORECASE)
 MIC_NO = re.compile(r"\b(no|not|don'?t|do not|never|stop|delete|off|cancel)\b", re.IGNORECASE)
+MIC_CONSENT_ENV = 'ISMAIL_MIC_CONSENT_LOG'
 _TRUE = {'true', 'yes', '1', 'y', 'on'}
-NEEDS_NOTE = ("mic_ok needs the id of the person's note saying yes to the mic in this session (phone_watch lists "
-              "ids); ask them in words first.")
+NEEDS_NOTE = ("mic_ok needs the person's yes to the mic in this session: the id of their note saying so, from the "
+              "phone inbox (phone_watch lists ids) or a VR voice note as vr:<scene>:<event id> (stage_events lists "
+              "them), or chat: <their exact words>; ask them in words first.")
 
 
 def _phone_home():
@@ -279,8 +283,7 @@ def _phone_home():
     return Path(S.HOME)
 
 
-def _inbox_rows():
-    p = _phone_home() / 'inbox.jsonl'
+def _jsonl(p):
     rows = []
     try:
         with open(p, encoding='utf8') as f:
@@ -291,30 +294,43 @@ def _inbox_rows():
                     continue
     except OSError:
         pass
-    return p, rows
+    return rows
 
 
-def _note_text(r):
-    k = r.get('kind')
-    if k == 'voice_text':
-        return str(r.get('text') or '')
-    if k == 'answer':                           # their words in the panel's fields, not the button they tapped
-        return ' '.join(_flat([r.get('values')]))
-    if k == 'exam':
-        return str((r.get('answers') or {}).get('note') or '')
-    return ''
+def _inbox_rows():
+    p = _phone_home() / 'inbox.jsonl'
+    return p, _jsonl(p)
 
 
-def mic_note(note):
-    """The person's own note that says yes to the mic: {'id', 'n', 'ts', 'text'}; OpError with the next step if it
-    is missing, not theirs, too old, silent about the mic, or a no. note: a voice note id (phone_watch's `id`) or the
-    inbox line number of a typed answer (its `n`)."""
-    if note is None or note is False or (isinstance(note, str) and not note.strip()):
-        raise OpError(NEEDS_NOTE)
-    if note is True or (isinstance(note, str) and note.strip().lower() in _TRUE):
-        raise OpError(NEEDS_NOTE)
-    key = str(note).strip()
-    path, rows = _inbox_rows()
+def _stage_scene_dirs():
+    """The scenes folders of the running stage servers (where VR voice notes land)."""
+    try:
+        from .stage import link
+        return [Path(r['scenes']) for r in link.servers() if r.get('scenes')]
+    except Exception:                                            # noqa: BLE001  no stage server: no VR notes
+        return []
+
+
+def mic_consent_log():
+    return Path(os.environ.get(MIC_CONSENT_ENV) or _local_dir() / 'mic_consent.jsonl').expanduser()
+
+
+def _answer_words(r):
+    """The words they typed in a panel: only its free-text inputs, never an option they picked or a box they ticked.
+    The phone server names the text inputs in `typed`; an answer without it cannot tell the two apart (None)."""
+    typed = r.get('typed')
+    if not isinstance(typed, list):
+        return None
+    vals = r.get('values') or {}
+    return ' '.join(str(vals[k]) for k in typed if isinstance(vals.get(k), str))
+
+
+def _not_own(key, what):
+    raise OpError(f"note {key!r} is not the person's own note ({what}); only a voice note they recorded (phone or VR) "
+                  f"or words they typed count: ask them in words first, then pass that note's id.")
+
+
+def _phone_note(key, rows, path):
     by_n = None
     if re.fullmatch(r'n?\d+', key):
         n = int(key.lstrip('n'))
@@ -325,20 +341,113 @@ def mic_note(note):
     if r is None:
         r = next((x for x in reversed(rows) if x.get('id') == key and x.get('kind') in ('answer', 'exam')), None)
     if r is None:
-        raise OpError(f"no note {key!r} in the phone inbox ({path}): phone_watch lists the person's notes with their "
-                      f"ids; pass the id of the one where they said yes to the mic, or ask them in words first.")
+        raise OpError(f"no note {key!r} in the phone inbox ({path}) or among the VR voice notes (those are "
+                      f"vr:<scene>:<event id>): phone_watch and stage_events list the person's notes; pass the one "
+                      f"where they said yes to the mic, or ask them in words first.")
     k = r.get('kind')
-    own = False
+    text = ''
     if k == 'voice_text':                       # the words of a voice note: its recording came from the page
         v = next((x for x in rows if x.get('kind') == 'voice' and x.get('id') == r.get('id')), None)
-        own = bool(v and v.get('sid') and v.get('file') and Path(v['file']).is_file())
-    elif k in ('answer', 'exam'):
-        own = bool(r.get('sid')) and not r.get('dismissed')
-    if not own:
-        what = f"a {k} line" if k else 'a line'
-        raise OpError(f"note {key!r} is not the person's own note ({what} the page did not send from their phone); only "
-                      f"a voice note or typed words they sent count: ask them in words first, then pass that note's "
-                      f"id.")
+        if not (v and v.get('sid') and v.get('file') and Path(v['file']).is_file()):
+            _not_own(key, 'a transcript with no recording the page sent from their phone')
+        text = str(r.get('text') or '')
+    elif k == 'answer':
+        if not r.get('sid') or r.get('dismissed'):
+            _not_own(key, 'an answer the page did not send from their phone')
+        text = _answer_words(r)
+        if text is None:
+            raise OpError(f"answer {key!r} does not say which of its fields were typed (the phone server that took it "
+                          f"predates that), so an option picked could pass for their words: ask them again in words "
+                          f"(a voice note, or a panel with a text field once phone_start has restarted the server).")
+    elif k == 'exam':
+        if not r.get('sid') or r.get('dismissed'):
+            _not_own(key, 'an answer the page did not send from their phone')
+        text = str((r.get('answers') or {}).get('note') or '')
+    else:
+        _not_own(key, f"a {k} line the page did not send from their phone" if k else 'a line')
+    return {'id': r.get('id'), 'n': r.get('n'), 'ts': r.get('ts'), 'text': text, 'key': key, 'from': 'phone'}
+
+
+def _vr_note(key):
+    m = re.fullmatch(r'vr:([^:]+):(\d+)', key)
+    if not m:
+        raise OpError(f"a VR voice note is vr:<scene>:<event id> (the voice_message's id in stage_events), not {key!r}")
+    scene, n = m.group(1), int(m.group(2))
+    for d in _stage_scene_dirs():
+        evs = _jsonl(d / scene / 'live' / 'events.jsonl')
+        r = next((e for e in evs if e.get('id') == n), None)
+        if r is None:
+            continue
+        if r.get('type') != 'voice_message':
+            _not_own(key, f"a {r.get('type')} event, not a voice message")
+        f = str(r.get('file') or '')
+        landed = any(e.get('type') == 'voice_in' and e.get('file') == f for e in evs)
+        if not (f and Path(f).parts[:1] == ('voice',) and (d / scene / f).is_file() and landed):
+            _not_own(key, 'a voice_message with no recording the headset sent')
+        if r.get('text') is None:
+            why = r.get('error') or 'not heard yet'
+            raise OpError(f"VR voice note {key!r} has no transcript ({why}): wait for it, or ask them again.")
+        return {'id': key, 'n': n, 'ts': r.get('ts'), 'text': str(r['text']), 'key': key, 'from': 'vr'}
+    raise OpError(f"no VR voice note {key!r}: no running stage server has event {n} in scene {scene!r} "
+                  f"(stage_events lists them; phone notes go by their own ids).")
+
+
+def _check_words(key, text):
+    if not MIC_WORDS.search(text):
+        raise OpError(f"note {key!r} does not mention the mic or recording (it says: \"{text[:160]}\"); ask them "
+                      f"about the mic in words and pass the note where they say yes to it.")
+    if MIC_NO.search(text):
+        raise OpError(f"note {key!r} reads as a no to the mic (\"{text[:160]}\"): do not record. If they meant yes, "
+                      f"ask them for a plain yes and pass that note's id.")
+
+
+def _chat_quote(quote, op):
+    """Their words in chat, quoted exactly. Weaker than a note they sent, so each one is logged locally."""
+    quote = quote.strip().strip('"“”').strip()
+    if not quote:
+        raise OpError("mic_ok='chat: <their exact words>' needs the words they said yes with, quoted as they wrote "
+                      "them.")
+    _check_words('chat: ' + quote[:60], quote)
+    log = mic_consent_log()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    n = len(_jsonl(log)) + 1
+    ts = datetime.datetime.now().isoformat(timespec='seconds')
+    with open(log, 'a', encoding='utf8') as f:
+        f.write(json.dumps({'ts': ts, 'op': op, 'quote': quote[:300]}, ensure_ascii=False) + '\n')
+    return {'id': f'chat-log:{n}', 'n': n, 'ts': ts, 'text': quote, 'key': f'chat-log:{n}', 'from': 'chat'}
+
+
+def _logged_chat(key):
+    """A chat yes logged earlier (chat-log:<line>): how the recorder checks it again without the quote on disk."""
+    n = int(key.split(':', 1)[1])
+    rows = _jsonl(mic_consent_log())
+    if not 0 < n <= len(rows):
+        raise OpError(f"no chat yes {key!r} in {mic_consent_log()}: pass mic_ok='chat: <their exact words>'")
+    r = rows[n - 1]
+    return {'id': key, 'n': n, 'ts': r.get('ts'), 'text': str(r.get('quote') or ''), 'key': key, 'from': 'chat'}
+
+
+def mic_note(note, op=''):
+    """The person's own yes to the mic: {'id', 'n', 'ts', 'text', 'key', 'from'}; OpError with the next step if it is
+    missing, not theirs, too old, silent about the mic, or a no. note: a phone voice note id (phone_watch's `id`),
+    the inbox line number of a typed answer (its `n`), a VR voice note as vr:<scene>:<event id>, or
+    'chat: <their exact words>' (logged locally with op in mic_consent.jsonl). The reply's `key` checks the same yes
+    again later (the recorder does) without logging it twice or writing the quote anywhere else."""
+    if note is None or note is False or (isinstance(note, str) and not note.strip()):
+        raise OpError(NEEDS_NOTE)
+    if note is True or (isinstance(note, str) and note.strip().lower() in _TRUE):
+        raise OpError(NEEDS_NOTE)
+    key = str(note).strip()
+    low = key.lower()
+    if low.startswith('chat:'):
+        return _chat_quote(key[5:], op)            # just said: no age to check
+    if re.fullmatch(r'chat-log:\d+', low):
+        r = _logged_chat(low)
+    elif low.startswith('vr:'):
+        r = _vr_note(key)
+    else:
+        path, rows = _inbox_rows()
+        r = _phone_note(key, rows, path)
     try:
         ts = datetime.datetime.fromisoformat(str(r.get('ts')))
     except ValueError:
@@ -347,11 +456,6 @@ def mic_note(note):
     if ts is None or (now - ts).total_seconds() > MIC_NOTE_MAX_H * 3600:
         raise OpError(f"note {key!r} is from {r.get('ts') or 'an unknown time'}, more than {MIC_NOTE_MAX_H:g} h ago; "
                       f"the yes is for this session: ask them again in words and pass the new note's id.")
-    text = _note_text(r).strip()
-    if not MIC_WORDS.search(text):
-        raise OpError(f"note {key!r} does not mention the mic or recording (it says: \"{text[:160]}\"); ask them "
-                      f"about the mic in words and pass the note where they say yes to it.")
-    if MIC_NO.search(text):
-        raise OpError(f"note {key!r} reads as a no to the mic (\"{text[:160]}\"): do not record. If they meant yes, "
-                      f"ask them for a plain yes and pass that note's id.")
-    return {'id': r.get('id'), 'n': r.get('n'), 'ts': r.get('ts'), 'text': text}
+    r['text'] = r['text'].strip()
+    _check_words(key, r['text'])
+    return r

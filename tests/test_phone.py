@@ -697,6 +697,7 @@ def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypat
                                'values': {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True}})
     a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
     assert a['values'] == {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True} and a['for'] == 'dj'
+    assert a['typed'] == []                     # options picked, boxes ticked: none of it is their own words
 
 
 def test_a_second_panel_waits_and_not_now_is_a_dismissal(phone):
@@ -1218,6 +1219,7 @@ def test_a_panel_text_box_said_by_voice_carries_its_audio(phone, monkeypatch):
                                'values_voice': {'why': [vid]}})
     a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
     assert a['values'] == {'why': 'warmer'} and a['values_audio']['why'][0].endswith(f'{vid}.webm')
+    assert a['typed'] == ['why']                # a text box: their own words
 
 
 def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, monkeypatch, tmp_path):

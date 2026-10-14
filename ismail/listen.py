@@ -414,7 +414,7 @@ def record(out):
     if any(is_mic(s) for s in specs):        # a mic opens only on the person's own note, checked again here
         from . import guards
         try:
-            guards.mic_note(req.get('mic_note'))
+            guards.mic_note(req.get('mic_note'), 'listen.record')
         except ValueError as e:
             write_json(out / 'status.json', {'state': 'failed', 'pid': os.getpid(), 'error': f'mic refused: {e}'})
             return

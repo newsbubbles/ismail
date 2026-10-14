@@ -16,9 +16,17 @@
   keyword is in the title or text. Grants: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a list
   of `{id, date, topic, keywords, says}`. `override_grant='<why it does not fit>'` lets the question through and
   appends the reason to `grant_overrides.jsonl` beside the grants file. No file, no check.
-- The mic needs the person's own note: `listen_start(mic_ok=...)` takes the id of their voice note or typed answer
-  from the phone inbox, sent in the last 12 hours, naming the mic or recording and not a no. `mic_ok=True` is
-  refused. The recorder checks the note again before it opens a device.
+- The mic needs the person's own yes: `listen_start(mic_ok=...)` (and the recorder, and `session_rec.py
+  --mic-note`) takes the id of their voice note or typed answer from the phone inbox, a VR voice note as
+  `vr:<scene>:<event id>`, or `'chat: <their exact words>'`; a note sent in the last 12 hours, every yes naming the
+  mic or recording and not a no. `mic_ok=True` is refused. The recorder checks the yes again before it opens a
+  device.
+- A chat yes is weaker, so each one is logged locally (`ts`, `op`, the quote's first 300 characters) in
+  `$ISMAIL_MIC_CONSENT_LOG`, else `~/.ismail/mic_consent.jsonl`; the recorder checks it by its log line
+  (`chat-log:<n>`), so the quote is written nowhere else.
+- A typed answer counts only its free-text fields: the phone server now records an answer's `typed` field ids, so
+  an option picked or a box ticked never passes for their words. Answers taken before the phone server restarts
+  carry no `typed` and are refused as a mic yes (ask again).
 
 ### Worktrees: sweep the empty folders removed copies leave
 

@@ -28,15 +28,17 @@ def _the_suite_is_one_heavy_job(request):
 
 @pytest.fixture(scope='session', autouse=True)
 def _no_local_guard_files(tmp_path_factory):
-    """The checks in ismail.guards read local files (private terms, standing grants) and the git email. The suite
-    never reads the person's own: an empty terms file (so no 'scan is off' line in replies), no grants file, and no
-    git email. A test that wants them sets its own through the same env vars (tests/test_guards.py)."""
+    """The checks in ismail.guards read local files (private terms, standing grants, the chat mic log) and the git
+    email. The suite never reads or writes the person's own: an empty terms file (so no 'scan is off' line in
+    replies), no grants file, a tmp mic log, and no git email. A test that wants them sets its own through the same
+    env vars (tests/test_guards.py)."""
     from ismail import guards
     d = tmp_path_factory.mktemp('guards')
     (d / 'private_terms.txt').write_text('# none in the suite\n', encoding='utf8')
-    old = {k: os.environ.get(k) for k in (guards.PRIVATE_TERMS_ENV, guards.GRANTS_ENV)}
+    old = {k: os.environ.get(k) for k in (guards.PRIVATE_TERMS_ENV, guards.GRANTS_ENV, guards.MIC_CONSENT_ENV)}
     os.environ[guards.PRIVATE_TERMS_ENV] = str(d / 'private_terms.txt')
     os.environ[guards.GRANTS_ENV] = str(d / 'no_grants' / 'standing_grants.json')
+    os.environ[guards.MIC_CONSENT_ENV] = str(d / 'mic_consent.jsonl')
     email = guards._git_email
     guards._git_email = lambda: None
     yield
