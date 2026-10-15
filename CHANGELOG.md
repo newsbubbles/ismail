@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### skill: pages that take the person's voice open in their own browser
+
+- `blind-tests.md` (page mechanics) and `user-experience.md`: a desk page with voice boxes, recorded takes or any mic
+  input is served locally and opened in the person's default browser, since an app's browser pane has no microphone,
+  and it brings back everything they typed or said when reopened. Agents kept rebuilding this; the rule points at the
+  pages that already do it.
+
 ### stage_preflight: one check before every VR session or demo
 
 - `stage_preflight(port=, say=, wait=, headless=)` runs on its own scratch scene, `_preflight` (a floor and a
