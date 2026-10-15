@@ -40,8 +40,8 @@ def _get(url, headers=None):
         return r.status, r.headers, r.read()
 
 
-def _post(url, data, ctype='application/json'):
-    req = urllib.request.Request(url, data=data, method='POST', headers={'Content-Type': ctype})
+def _post(url, data, ctype='application/json', headers=None):
+    req = urllib.request.Request(url, data=data, method='POST', headers={'Content-Type': ctype, **(headers or {})})
     with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read())
 
@@ -151,6 +151,29 @@ def test_bad_posts_are_refused(env):
     with pytest.raises(urllib.error.HTTPError) as e:
         _get(f'http://127.0.0.1:{srv.port}/f/nope/')
     assert e.value.code == 404
+
+
+def test_writes_from_another_site_are_refused(env):
+    srv = _serve(env)
+    _page(env, open=False)
+    base = f'http://127.0.0.1:{srv.port}'
+    url = base + '/f/song-r1/'
+    body = json.dumps({'q': 1, 'text': 'from the page'}).encode()
+    assert _post(url + 'text', body, headers={'Origin': base, 'Sec-Fetch-Site': 'same-origin'})['ok']
+    assert _post(url + 'text', body, headers={'Origin': f'http://localhost:{srv.port}'})['ok']
+    assert _post(url + 'text', json.dumps({'q': 1, 'text': 'from an op'}).encode())['ok']     # no Origin: urllib
+    for path, data, h in (('text', body, {'Origin': 'http://evil.example'}),
+                          ('voice?q=1', WEBM, {'Origin': 'http://127.0.0.1:1'}),
+                          ('text', body, {'Sec-Fetch-Site': 'cross-site'})):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _post(url + path, data, headers=h)
+        assert e.value.code == 403
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _post(base + '/shutdown', b'{}', headers={'Origin': 'http://evil.example'})
+    assert e.value.code == 403
+    assert FB.running() == srv.port
+    st = FB.read_json(env['song'] / 'work' / 'feedback' / 'r1' / 'answers.json')
+    assert st['1']['text'] == 'from an op' and not st['1']['said']
 
 
 def test_reopening_the_round_keeps_answers(env):

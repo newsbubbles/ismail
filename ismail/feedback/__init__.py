@@ -512,8 +512,21 @@ def handler(store, page_html):
                 return self._file(d / 'voice' / mv.group(1))
             return self._send(404, {'error': 'not found'})
 
+        def _foreign(self):
+            """A write from another site: any web page open in the person's browser can POST to 127.0.0.1, and its
+            answers would reach an agent as the person's words. The page itself sends its own origin; the ops and
+            urllib send none."""
+            port = self.server.server_address[1]
+            origin = self.headers.get('Origin')
+            if origin is not None and origin not in (f'http://127.0.0.1:{port}', f'http://localhost:{port}'):
+                return True
+            site = self.headers.get('Sec-Fetch-Site')
+            return site is not None and site not in ('same-origin', 'none')
+
         def do_POST(self):
             from urllib.parse import parse_qs, urlparse
+            if self._foreign():
+                return self._send(403, {'error': 'writes come only from this page'})
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             if u.path == '/shutdown':
