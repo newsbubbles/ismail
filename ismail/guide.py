@@ -60,6 +60,7 @@ HEAR (audio -> text), cheapest first
   analyze_melody      monophonic line -> notes (+confidence) analyze_formants  vowels of a voice
   stem_parts          one part or several in a stem (a second player, bleed), before tone matching to it
   analyze_timbre / analyze_spectrum / sound_compare          spectrogram (PNG, last resort)
+  sound_zoom          one window time-sharp + frequency-sharp sound_zoom_diff  where yours differs from >= 3 takes
   analyze_kit         drum kit pieces (NMF) + their patterns analyze_swing     how late swung hats land
   analyze_sections    loudness per section, dynamic range, a build as loud as its climax
 

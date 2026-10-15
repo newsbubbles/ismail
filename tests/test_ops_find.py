@@ -26,6 +26,9 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('swing feel of the drums', 'analyze_swing'),
     ('put a yes or no question on the phone', 'phone_ask'),
     ('an on-screen keyboard for someone with no MIDI instrument', 'live_keys_page'),
+    ('where does my render differ from the real takes', 'sound_zoom_diff'),
+    ('zoom into one word at two resolutions', 'sound_zoom'),
+    ('level of one band in one moment of a sound', 'region_measure'),
 ])
 def test_a_need_in_plain_words_finds_its_op_first(need, first):
     out = api.OPS['ops_find'](need=need, n=3)

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### sound_zoom, sound_zoom_diff and region_measure: zoom into a sound, and find where it differs from the real takes
+
+- `sound_zoom`: one time x frequency box of a sound at two resolutions, stacked in one PNG: time-sharp on top
+  (256-point window, 32-sample hop at 44.1 kHz) and frequency-sharp below (2048-point). Both panels sit on
+  `spectrogram`'s eye-mode plot box (the same picture code, now with a window and hop per panel), so a box has the
+  same pixels in each, and the .json beside it maps a pixel to (s, Hz) and one address in either panel.
+- `sound_zoom_diff(test, refs)`: where a take differs from 3 or more takes of the same words, beyond their own
+  take-to-take spread, at three scales (grain, strokes, plumes), measured on power; with 4 or more, every take in the
+  test's place makes an own-source control. Hot-spot text first (scale, band, quarter of the word, brighter or
+  darker, z, the control rate in the same cell and whether the spot is beyond every control spot there; a spot
+  counts only where the control lights its cell less often; capped at 12), then a picture of at most 1600 px: the
+  test above the anchor take, the counted spots outlined. With 3 takes the spots are listed uncontrolled and none is
+  counted. Every clip is set to -25 LUFS first, peak under 0.89 (vox's level match; `level_lufs=None` when you
+  matched them). With fewer than 3 takes it refuses and says what to record; there is no absolute threshold. `debias=False` keeps a level across a whole band, which the de-bias
+  absorbs.
+- `region_measure`: power in a box of time and frequency, in dB, and its share of the whole spectrum at that moment.
+- The method moved from the Voice agent's work (`ismail/zoom.py`: `spectrogram_diff` with its defaults unchanged,
+  `region_measure`, `smooth_path` and `frac`, the synthetic parity fixture). On the fixture, seeds 0 to 9 with every
+  take as the anchor, it gives the same maps and spots as the original, cell for cell.
+- New tests (`tests/test_zoom_diff.py`, synthetic audio only): the fixture's box found at the strokes and plumes
+  scales, +5.9 dB in `region_measure`, the one stray cell at seed 4, the refusals, 3 takes without a control, power
+  against mean of dB, the de-bias and `debias=False`, the control-rate rule, the caps, the level match (with its
+  peak cap), and the two-resolution picture.
+  `ISMAIL_ZOOM_ALL_SEEDS=1` runs all ten seeds.
+
 ### stage: replay a take as input, ask the person for a test take, keep the last 2 minutes
 
 - `stage_take_replay(scene, take, start=, end=, rate=, grab=)` plays a recorded take on a page nobody wears: the

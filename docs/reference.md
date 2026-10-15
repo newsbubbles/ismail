@@ -270,7 +270,8 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
 | Vowels of a voice | `analyze_formants` |
-| A picture, if you really need one | `spectrogram` (PNG) |
+| A picture, if you really need one | `spectrogram` (PNG), `sound_zoom` (one window time-sharp and frequency-sharp) |
+| Where yours differs from the real takes | `sound_zoom_diff` (hot spots beyond the takes' own spread), `region_measure` (power in a box) |
 
 Sources are `render`, `track:<name>` (after `render(stems=True)`), `ref`, `ref:<stem>`, `sound:<name>` or a file path.
 

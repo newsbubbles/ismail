@@ -27,8 +27,10 @@ CATEGORIES = [
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
       'levels_from_ref', 'ref_retune')),
     ('render', 'rendering and playing', ('render', 'play_file')),
-    ('listen', 'measuring audio as text (and one picture): notes, chords, drums, timbre, formants, structure',
-     ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare')),
+    ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
+               'and where two takes differ',
+     ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
+      'region_measure')),
     ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
     ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_',)),
     ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes, '

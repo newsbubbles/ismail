@@ -44,15 +44,21 @@ frequency, and you frame any part of it at the resolution the question needs. Re
 
 How: draw the reference and yours on the same window and read them one above the other. Zoom two ways: a few ms
 around an edge (a time-sharp view shows a start early or late) and a whole word or note (a frequency-sharp view shows
-texture up high). For a blind check of your own, `exam_eye_crops` then `exam_eye_score`: if you can pick the real
+texture up high). `sound_zoom` draws one window both ways in one picture (256-point window above, 2048-point below,
+the same pixel box in each). For a blind check of your own, `exam_eye_crops` then `exam_eye_score`: if you can pick the real
 one from the picture, the person will most likely hear the difference too.
 
-To see where two takes differ, diff the zooms against the reference's own spread. Use at least 3 takes of the
-reference line, level-match every clip first, and light a cell only where the test lies outside the reference's
-take-to-take spread in that cell. Run a control too, one of the reference's own takes in the test's place: what
-lights there is the method's noise, not a difference. Then group the lit cells into spots and fix the largest, and
-after the fix check the spot again: it should close. This lives in a song's work folder for now
-(`songs/vox/work/spectrogram_diff.py`: `spectrogram_diff`, `spot_clusters`, `closing_check`), not as an op yet.
+To see where two takes differ, diff the zooms against the reference's own spread: `sound_zoom_diff(test, refs)`.
+It needs at least 3 takes of the reference line for their spread and refuses with fewer, since there is no
+absolute threshold to fall back on. It level-matches every clip first (-25 LUFS, peak under 0.89) and lights a cell
+only where the test lies outside the reference's take-to-take spread in that cell, measured on power. With 4 takes or
+more it runs a control too, each of the reference's own takes in the test's place: what lights there is the method's
+noise, not a difference, so a spot counts only where the control lights its cell less often. With 3 it lists the
+spots uncontrolled and counts none; a 4th take adds the control. It reads the hot spots first (scale, band, quarter
+of the word, brighter or darker, the control rate and whether the spot is beyond every control spot there), then a
+picture of yours above the reference take with the spots outlined. Fix the largest, and after the fix check the spot again: it should close. Its de-bias takes a level
+across a whole band as the band's offset, so a band that is darker for the whole word does not show as a spot: run
+`debias=False`, or `region_measure` on the band (power in a box of time and frequency, in dB) for yours and a take.
 
 What they said, and what the zoom found (the Voice agent's rounds):
 
