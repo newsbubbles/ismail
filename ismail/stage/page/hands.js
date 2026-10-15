@@ -258,6 +258,41 @@ export function initHands(ed, xrApi, emit) {
     return r;
   }
   function discardLast() { const had = !!lastFollow; lastFollow = null; return { discarded: had }; }
+
+  // ---- the last RECENT_S seconds in VR, always, in memory (the user, 2026-10-15: a moment worth testing with happens
+  // when nothing records). keepRecent saves the newest part as a take ("keep that"). Half the take rate: a replay
+  // interpolates, and the buffer runs all session. No audio. Kept until a reload, across VR sessions.
+  const RECENT_S = 120, RECENT_HZ = 15;
+  const recent = { t0: performance.now(), last: 0, frames: [], marks: [] };
+  function sampleRecent(now) {
+    recent.last = now;
+    const fr = makeFrame(now, recent.t0);
+    if (recent.marks.length) { fr.ev = recent.marks.map(({ at, ...e }) => ({ ...e, t: r4((at - recent.t0) / 1000) })); recent.marks = []; }
+    recent.frames.push(fr);
+    const max = RECENT_S * RECENT_HZ;
+    if (recent.frames.length > max * 1.1) recent.frames.splice(0, recent.frames.length - max);
+  }
+  const recentInfo = () => {
+    const fr = recent.frames;
+    return { frames: fr.length, seconds: fr.length ? r4(fr[fr.length - 1].t - fr[0].t) : 0 };
+  };
+  async function keepRecent(seconds = 30, name = '') {
+    const fr = recent.frames;
+    if (fr.length < 2) throw new Error('nothing in the recent buffer: it fills only while someone is in VR on this page');
+    const tEnd = fr[fr.length - 1].t, from = tEnd - Math.max(1, Math.min(+seconds || 30, RECENT_S));
+    const keep = fr.filter((f) => f.t >= from);
+    const t0 = keep[0].t, secs = r4(tEnd - t0);
+    const started = new Date(Date.now() - (performance.now() - recent.t0) + t0 * 1000);
+    const label = name || 'recent', id = takeId(started, label);
+    const out = keep.map((f) => ({ ...f, t: r4(f.t - t0), ...(f.ev ? { ev: f.ev.map((e) => ({ ...e, t: r4(e.t - t0) })) } : {}) }));
+    await post('take/meta', { id, name: label, scene: scene_(), started: started.toISOString(), ...TAKE_FORMAT, hz: RECENT_HZ,
+      presenting: true, from: 'recent' }, id);
+    for (let i = 0; i < out.length; i += 300) await post('take/frames', out.slice(i, i + 300), id);
+    await post('take/meta', { ended: new Date(started.getTime() + secs * 1000).toISOString(), frames: out.length, seconds: secs }, id);
+    const r = { id, take: id, frames: out.length, seconds: secs };
+    emit('recent_kept', r);
+    return r;
+  }
   const r4 = (x) => Math.round(x * 1e4) / 1e4;
   const pose = (o) => {
     const p = new THREE.Vector3(), q = new THREE.Quaternion();
@@ -301,7 +336,7 @@ export function initHands(ed, xrApi, emit) {
   // grab.js: a grab or a drop inside a person goes into the take being made (a take or a Follow's shadow), on the next
   // frame, with its own time (a drop is marked when the hand began to open, up to a second or two back)
   let marks = [];
-  function mark(ev) { if (rec.on || shadow.on) marks.push(ev); }
+  function mark(ev) { if (rec.on || shadow.on) marks.push(ev); if (xr.isPresenting) recent.marks.push(ev); }
   function withMarks(fr, t0) {
     if (marks.length) { fr.ev = marks.map(({ at, ...e }) => ({ ...e, t: r4((at - t0) / 1000) })); marks = []; }
     return fr;
@@ -404,6 +439,7 @@ export function initHands(ed, xrApi, emit) {
       shadow.frames.push(withMarks(makeFrame(now, shadow.t0), shadow.t0));
       if (shadow.frames.length > SHADOW_MAX_S * REC_HZ) shadow.frames.shift();
     }
+    if (xr.isPresenting && now - recent.last >= 1000 / RECENT_HZ - 1) sampleRecent(now);
   }
   xr.addEventListener('sessionend', () => { hideAim(); if (rec.on) stopTake(); });
 
@@ -411,6 +447,7 @@ export function initHands(ed, xrApi, emit) {
   const frameNow = () => makeFrame(performance.now(), 0);
   const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false,
     shadowStart, shadowStop, mark, keepLast, discardLast, lastFollowInfo, lastFollowData: () => lastFollow, performing: false,
+    keepRecent, recentInfo,
     addUIGuard: (fn) => uiGuards.push(fn) };
   return api;
 }

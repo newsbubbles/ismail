@@ -5,6 +5,9 @@ Each op queues the command on the stage server's live link for `scene`, waits fo
 with what the page answered (positions in Blender metres, z up). A page that is not showing the scene, or a command
 the page refuses, raises OpError with the next step. Coordinates on the wire are Blender world space.
 """
+import json
+import time
+
 from ..api import OpError, op
 from .. import guards
 from .link import page_cmd
@@ -351,6 +354,69 @@ def stage_take_view_clear(scene: str) -> str:
 
 
 @op(mutates=True)
+def stage_take_replay(scene: str, take: str, takes: str = None, start: float = None, end: float = None, rate: float = 1,
+                      grab: bool = None, show: bool = True, wait: bool = True) -> str:
+    """Replay a take as input: its head drives the page's camera and its tracked hands drive the page's hands, through
+    the same hands.js, touch.js and grab.js a real hand goes through, so gestures, pinches, grabs and drops happen
+    again offline (page command: replay_input, page/replay.js). The test for "he reached for the ball and took the
+    table": replay his take and read what the page grabbed. takes= the scene the take is in (default `scene`);
+    start/end trim it in the take's seconds; rate 1 for grab verdicts (grab counts use wall time); grab=True turns
+    grab by touch on for the replay and back after; show draws the joints as small balls (left blue, right orange).
+    Hands only: a controller take, a runtime select or a stick does not replay; the target ray is approximated from the
+    shoulder through the palm. Refused while someone is in VR on that page: run it on a page nobody wears (a private
+    stage, or the live one while stage_presence says nobody is in VR). wait=True waits for the take to finish and
+    replies with what the page did, one line per event with the take's time, then what the take itself recorded
+    (its own grab and drop marks) to compare; wait=False replies at once, and the result comes as the replay_done
+    event. replay_input {stop: true} (stage_take_replay_stop) ends it early. Emits: replay_start, replay_done, and
+    whatever the hands do (gesture, hand_rest, grab_counting, grabbed, grab_releasing, grab_released, grab_landed)."""
+    from . import link
+    rec = link.server_for(scene)
+    last = link.http(rec, f'live/events?{link.q(scene=scene, limit=1)}')['last']
+    e = link.send(scene, 'replay_input', {'take': take, 'takes': takes, 'from': start, 'to': end, 'rate': rate,
+                                          'grab': grab, 'show': show}, timeout=60)
+    head = link.reply('replay_input', e) if not isinstance(e, str) else e
+    if not wait or isinstance(e, str):
+        return head
+    res = e.get('result') or {}
+    deadline = time.time() + float(res.get('seconds') or 0) + 30
+    while time.time() < deadline:
+        got = link.http(rec, f'live/events?{link.q(scene=scene, since=last, wait=min(25, max(1, deadline - time.time())), limit=1000)}',
+                        timeout=40)
+        last = got['last']
+        done = next((x for x in got['events'] if x.get('type') == 'replay_done' and x.get('take') == take), None)
+        if done:
+            return head + '\n' + _replay_verdict(done)
+    raise OpError(f'the replay of {take} did not finish in time; stage_events(types=["replay_done"]) shows it when it '
+                  'does, stage_take_replay_stop ends it')
+
+
+def _replay_verdict(done: dict) -> str:
+    """replay_done as text: what happened (one line per event), what the take recorded, what was still held."""
+    def line(x):
+        rest = {k: v for k, v in x.items() if k not in ('t', 'type')}
+        return f'  {x.get("t", 0):7.2f} s  {x.get("type")}  ' + json.dumps(rest, separators=(', ', ': '), default=str)[:300]
+    evs = done.get('events') or []
+    out = [f'replayed {done.get("take")}: {done.get("frames")} frames in {done.get("seconds")} s ({done.get("why")}); '
+           f'{len(evs)} events']
+    out += [line(x) for x in evs]
+    grabbed = [x.get('object') for x in evs if x.get('type') == 'grabbed']
+    landed = [f'{x.get("object")} onto {x.get("onto")}' for x in evs if x.get('type') == 'grab_landed']
+    out.append(f'grabbed: {", ".join(map(str, grabbed)) or "nothing"}; landed: {", ".join(landed) or "nothing"}'
+               + (f'; still held at the end (let go): {", ".join(done["held"])}' if done.get('held') else ''))
+    rec = done.get('recorded') or []
+    out.append(f'the take recorded {len(rec)} marks' + (':' if rec else ''))
+    out += [line(x) for x in rec]
+    return '\n'.join(out)
+
+
+@op(mutates=True)
+def stage_take_replay_stop(scene: str) -> str:
+    """End a take replay early (page command: replay_input {stop: true}); the head and hands go back to the desktop
+    view. Page replies the replay_done result, or {stopped: false} when none was running. Emits: replay_done."""
+    return page_cmd(scene, 'replay_input', {'stop': True}, timeout=30)
+
+
+@op(mutates=True)
 def stage_actor_play(scene: str, person: str, take: str, actor: str = None, loop: bool = True, rate: float = 1,
                trim: list = None, in_place: bool = False, assets: str = None, takes: str = None, voice: bool = None,
                mirror: bool = None, at_music: float = None) -> str:
@@ -670,6 +736,19 @@ def stage_take_keep_last(scene: str, name: str = None) -> str:
 
 
 @op(mutates=True)
+def stage_take_keep_recent(scene: str, seconds: float = 30, name: str = None, info: bool = False) -> str:
+    """Keep what the person just did as a take ("keep that"), though nothing was recording (page command:
+    take_keep_recent). While someone is in VR the page always holds their last 2 minutes of head and hands (and the
+    body when tracked, and grab and drop marks) in memory, at 15 Hz; this saves the newest `seconds` (1..120) as a
+    take named `name` (default "recent", meta from: recent). No audio. The buffer lasts until a reload, across VR
+    sessions, so it works after the headset comes off too. info=True only reports how much the buffer holds. Then
+    stage_take_note to say what it shows, and stage_take_replay to test with it. Page replies {id, frames, seconds},
+    or {frames, seconds} for info. Errors: nothing in the buffer (nobody has been in VR on this page). Emits:
+    recent_kept."""
+    return page_cmd(scene, 'take_keep_recent', {'seconds': seconds, 'name': name, 'info': info or None}, timeout=120)
+
+
+@op(mutates=True)
 def stage_perform(scene: str, action: str = 'state', label: str = None) -> str:
     """Your hand on a performance (page command: perform). A Follow is a performance: while someone follows the person
     no gesture acts (pokes still press panels), your speech is shown and not spoken (stage_say aloud=True speaks), and
@@ -828,4 +907,4 @@ def stage_actor_part(scene: str, person: str, part: str = None, show: bool = Tru
     return page_cmd(scene, 'actor_part', {'person': person, 'part': part, 'show': show, 'move': move,
                                           'seconds': seconds, 'reset': reset or None}, timeout=30)
 
-TYPED = {'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'replay_input': 'stage_take_replay', 'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'take_keep_recent': 'stage_take_keep_recent', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

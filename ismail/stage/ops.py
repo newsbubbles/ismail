@@ -827,6 +827,52 @@ def stage_take_note(scene: str, take: str, label: str = None, note: str = None, 
 
 
 @op(mutates=True)
+def stage_test_take(scene: str, ask: str, name: str, seconds: float = 15, countdown: float = 4, sender: str = None,
+                    voice: bool = True) -> str:
+    """Ask the person in VR to act something out for a test, and record it (the user, 2026-10-15: "prompt me for a
+    take while I'm in there, start it and then I act it out, then you take that and roll with it"). Says the ask (spoken
+    when voice=True, as sender) with "Start when you see Go.", waits `countdown` seconds after the line, records a take
+    named test_<name> for `seconds` (up to 120) under a "Go." caption (shown, not spoken into the take), says it is done, and labels the take "test <name>"
+    with the ask as a note, so stage_takes(query=<name>) finds it. The take's meta.json gets kind "test" and the ask.
+    Replay it offline with stage_take_replay(scene, take=<id>) as often as a test needs. Frames are only sampled while
+    the page is in VR: a take with 0 frames says so. Write the ask as one thing to do, e.g. "Pick up the bottle on table
+    two and put it on the bar." Replies the take id, frames and seconds."""
+    from . import takes
+    from .ops_page import stage_say
+    seconds = max(1.0, min(float(seconds), 120.0))
+    slug = ''.join(c if c.isalnum() else '_' for c in name.strip().lower()).strip('_') or 'take'
+    stage_say(scene, f'{ask} Start when you see Go.', seconds=countdown + 6, voice=voice, sender=sender, aloud=True)
+    time.sleep(countdown + (0.35 * len(ask.split()) if voice else 0))   # the line is queued, not yet spoken
+    e = link.send(scene, 'take_start', {'name': f'test_{slug}'}, timeout=30)
+    res = (e.get('result') if isinstance(e, dict) else None) or {}
+    take = res.get('id')
+    if not take:
+        raise OpError(f'the take did not start: {e}')
+    stage_say(scene, 'Go.', seconds=2, sender=sender)          # recording: shown, not spoken into the take
+    time.sleep(seconds)
+    e = link.send(scene, 'take_stop', {}, timeout=600)
+    got = (e.get('result') if isinstance(e, dict) else None) or {}
+    stage_say(scene, 'Got it, thanks.', seconds=3, sender=sender)
+    d = _scene_dir(scene) / 'takes' / take
+    for _ in range(20):                                    # the page posts meta.json at the start; wait for it
+        if (d / 'meta.json').is_file():
+            break
+        time.sleep(0.25)
+    if not (d / 'meta.json').is_file():
+        raise OpError(f'take {take} has no meta.json on the server; stage_takes shows what landed')
+    takes.note(_scene_dir(scene), take, label=f'test {name}', text=f'asked: {ask}', at=0, by=sender or 'agent')
+    takes._write_meta(d, {'kind': 'test', 'ask': ask})
+    frames = got.get('frames')
+    out = f'{take}: {frames if frames is not None else "?"} frames, {got.get("seconds", "?")} s, labelled "test {name}"'
+    if not frames:
+        out += ('\nno frames: the page was not in VR while it recorded (takes sample only in VR); ask again when '
+                'stage_presence shows the person in the headset')
+    else:
+        out += f'\nreplay it: stage_take_replay(scene={scene!r}, take={take!r})'
+    return out
+
+
+@op(mutates=True)
 def stage_take_transcribe(scene: str, take: str) -> str:
     """Transcribe a take's own audio now (takes recorded before takes were transcribed as they land, or one whose
     transcription failed): writes takes/<id>/voice.json with the words on the take's clock, snapped onto the
