@@ -79,6 +79,8 @@ the person is out (below).
 - **Check it from their side after**: the server's health through the headset's own route, the served page carries
   the change, presence shows the listeners back. A restart drops every listener: tell the sessions that were
   listening, or check they reconnected.
+- **Run `stage_preflight` before saying "go in"** and after every deploy: load, hot swap, live insert, say and
+  listen on its own scratch scene, plus the allow rule and the guard hook. Fix or report each BLOCKED line first.
 - **Saying "go in" is your act too.** Before you tell the person the stage is ready, start listening yourself, even
   when another session is the usual listener. On the day the stage moved into ismail, six notes went unheard
   because two sessions each said it was ready and neither was listening.

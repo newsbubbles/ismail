@@ -39,7 +39,8 @@ HOOK_EVENTS = ('entered_vr', 'left_vr', 'voice_note', 'voice_unheard', 'session_
 # what stage_listen hears: the person's voice and headset, scene switches, and what an agent must answer for the things
 # it wrote (a behaviour that failed, a message an object sent, a page error; until 2026-10-12 only stage_events showed them)
 INBOX_TYPES = {'voice_in', 'voice_message', 'voice_heard', 'headset', 'vr_exit', 'scene_switched', 'perform_clip',
-               'behaviour_error', 'object_message', 'page_error', 'session_stuck'}
+               'behaviour_error', 'object_message', 'page_error', 'session_stuck',
+               'preflight_ping'}    # stage_preflight's synthetic event (marked synthetic): proves the listen round trip
 ANSWERS = {'ack', 'say', 'ask'}
 REPLIES = {'say', 'ask', 'panel'}    # what counts as an answer for the stuck check (an ack can be automatic)
 
