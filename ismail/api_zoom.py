@@ -75,17 +75,25 @@ def _band(s):
     return f"{s['band_lo_hz'] / 1000:.0f}-{s['band_hi_hz'] / 1000:.0f} kHz"
 
 
+def _control(s):
+    """The control in a spot's own cell, side by side: its rate and whether the spot is beyond every control spot."""
+    if s['control_cell_rate'] is None:
+        return 'no control'
+    return (f"control {s['control_cell_rate']:.2f}, beyond control {'yes' if s['beyond_control'] else 'no'} "
+            f"(control peak z {s['control_cell_peak_z_max']:.1f})")
+
+
 def _spot_line(i, s, word):
     where = f"quarter {s['quarter']} of '{word}'" if word else f"quarter {s['quarter']} of the window"
-    return (f"{i}. {s['scale']}, {_band(s)}, {where}, {s['sign']}, z {s['peak_z_spread']:.1f}, control "
-            f"{s['control_cell_rate']:.2f}{' (beyond every control spot there)' if s['beyond_control'] else ''}; "
+    return (f"{i}. {s['scale']}, {_band(s)}, {where}, {s['sign']}, z {s['peak_z_spread']:.1f}, {_control(s)}; "
             f"at {s['t_peak_s']:.3f} s {s['f_peak_hz'] / 1000:.1f} kHz (box {s['t0_s']:.3f}-{s['t1_s']:.3f} s, "
             f"{s['f_lo_hz'] / 1000:.1f}-{s['f_hi_hz'] / 1000:.1f} kHz)")
 
 
 def hot_spots(D, top=6):
     """(counted, not counted): the spots of every scale, a spot counted only when the control rate in its own cell
-    is under its own (1, one run), ranked by that margin then peak z; both capped (top, HOT_MAX)."""
+    is under its own (1, one run), ranked by that margin then peak z; both capped (top, HOT_MAX). beyond_control is
+    shown, not required. Without a control (3 takes) nothing is counted."""
     spots = [s for S in D['scales'].values() for s in S['spots']]
     key = lambda s: (-(1.0 - s['control_cell_rate']), -s['peak_z_spread'])     # noqa: E731
     counted = sorted([s for s in spots if s['control_cell_rate'] is not None and s['control_cell_rate'] < 1.0], key=key)
@@ -104,26 +112,27 @@ def sound_zoom_diff(project: str, test: str, refs: list, seconds: list = None, r
     PNG (at most 1600 px) of the test above the anchor take with the spots outlined. Reach for it when you need to
     find where my render, synth or copy differs from the real takes, which part of a word is wrong, or whether a
     fix closed a spot.
-    test: the source under test; refs: >= 4 sources, takes of the same words (3 give the spread, the 4th makes the
-    own-source control: each take in the test's place, judged by the takes that are neither); with fewer it refuses,
-    as there is no absolute threshold to fall back on. seconds: [t0, t1] of the word in test (s in the file; None =
+    test: the source under test; refs: >= 3 sources, takes of the same words (3 give the spread; a 4th makes the
+    own-source control: each take in the test's place, judged by the takes that are neither). With 3 the spots are
+    listed uncontrolled and none is counted; with fewer it refuses, as there is no absolute threshold to fall back on. seconds: [t0, t1] of the word in test (s in the file; None =
     the whole file); ref_seconds: one [t0, t1] per ref (default: test's, for a clip timed from a take). anchor: the
     ref the test is compared with. f_lo/f_hi: list spots only in this band (Hz). level_lufs: every clip is set to
-    this loudness first (whole file, as vox does at -25 LUFS); None when you level-matched them yourself. Cut long
+    this loudness first, then kept under a 0.89 peak (whole file, vox's loud at -25 LUFS); None when you
+    level-matched them yourself. Cut long
     files to the line first: the level match and the spread assume one line of words.
     Measured on power (blur and band means of power, then dB), never on mean of dB. z is in units of the reference's
     own spread per time-frequency cell, at three scales: grain (cells), strokes, plumes. A spot counts only where the
-    control lights its cell less often than the test does. debias=True removes a smooth per-band offset, so a
+    control lights its cell less often than the test does; every spot shows its control rate and whether it is beyond
+    every control spot in that cell. debias=True removes a smooth per-band offset, so a
     deficit across a whole band is absorbed and does not show as a spot: for a band-wide level run debias=False or
     read region_measure on the band. params: zoom.DEFAULTS overrides (z_thr, min_cells, top_spots, ...); the
     defaults are the tested method."""
     P = _load(project)
     refs = list(refs or [])
-    if len(refs) < Z.MIN_REFS_CONTROL:
-        raise OpError(f"sound_zoom_diff needs at least {Z.MIN_REFS_CONTROL} takes of the same words in refs "
-                      f"({Z.MIN_REFS} for their spread, one more for the own-source control); got {len(refs)}. "
-                      f"Record or cut more takes of the same line (sound_import cuts one from a file), then call "
-                      f"again with every take in refs")
+    if len(refs) < Z.MIN_REFS:
+        raise OpError(f"sound_zoom_diff needs at least {Z.MIN_REFS} takes of the same words in refs for their spread "
+                      f"({Z.MIN_REFS_CONTROL} for the own-source control); got {len(refs)}. Record or cut more takes "
+                      f"of the same line (sound_import cuts one from a file), then call again with every take in refs")
     if ref_seconds is not None and len(ref_seconds) != len(refs):
         raise OpError(f"ref_seconds has {len(ref_seconds)} windows for {len(refs)} refs; give one [t0, t1] per ref, "
                       f"or none to use test's seconds for every ref")
@@ -135,14 +144,15 @@ def sound_zoom_diff(project: str, test: str, refs: list, seconds: list = None, r
     ys = [_mono(P.resolve_audio(r), sr)[0] for r in refs]
     lv = ''
     if level_lufs is not None:
-        y, ys = Z.level_match(y, sr, level_lufs), [Z.level_match(r, sr, level_lufs) for r in ys]
-        lv = f"every clip set to {level_lufs:.0f} LUFS (whole file)"
+        lv = f"every clip set to {level_lufs:.0f} LUFS, peak under 0.89 (whole file)"
     else:
         lv = 'levels as given (you level-matched them)'
     t0, t1 = (float(seconds[0]), float(seconds[1])) if seconds else (None, None)
     spans = [tuple(map(float, s)) for s in ref_seconds] if ref_seconds is not None else None
     kw = dict(params or {}, debias=bool(debias))
     try:
+        if level_lufs is not None:
+            y, ys = Z.level_match(y, sr, level_lufs), [Z.level_match(r, sr, level_lufs) for r in ys]
         D = Z.spectrogram_diff(y, sr, t0, t1, f_lo, f_hi, refs=ys, ref_spans=spans, ref_ids=list(refs),
                                anchor=int(anchor), word=word, **kw)
     except Z.ZoomError as e:
@@ -150,15 +160,27 @@ def sound_zoom_diff(project: str, test: str, refs: list, seconds: list = None, r
     counted, rest = hot_spots(D, top)
     L = [f"zoom diff of {test} against {len(refs)} takes (anchor {D['anchor_id']}, {D['n_controls']} controls); {lv}; "
          f"measured on power{', de-biased per band' if D['debias'] else ', no de-bias'}"]
-    L.append('HOT SPOTS (counted: the control lights the same cell less often than the test):' if counted else
-             'HOT SPOTS: none counted (no spot past the spread that the control does not light as often)')
-    L += ['  ' + _spot_line(i, s, word) for i, s in enumerate(counted, 1)]
+    if not D['n_controls']:
+        L.append(f"HOT SPOTS: none counted: with {len(refs)} takes there is no own-source control (each take in the "
+                 f"test's place needs {Z.MIN_REFS - 1} others to judge it), so no spot can be told from the method's "
+                 f"noise; a {Z.MIN_REFS_CONTROL}th take of the same words adds the control. Uncontrolled spots, for "
+                 f"information:" if rest else
+                 f"HOT SPOTS: none, and none could be counted: with {len(refs)} takes there is no own-source control; "
+                 f"a {Z.MIN_REFS_CONTROL}th take of the same words adds one")
+        L += ['  ' + _spot_line(i, s, word) for i, s in enumerate(rest, 1)]
+        rest = []
+    else:
+        L.append('HOT SPOTS (counted: the control lights the same cell less often than the test):' if counted else
+                 'HOT SPOTS: none counted (no spot past the spread that the control does not light as often)')
+        L += ['  ' + _spot_line(i, s, word) for i, s in enumerate(counted, 1)]
     if rest:
         L.append("not counted (the controls light the same cell as often): " +
-                 '; '.join(f"{s['scale']} {_band(s)} q{s['quarter']} {s['sign']} z {s['peak_z_spread']:.1f}" for s in rest))
+                 '; '.join(f"{s['scale']} {_band(s)} q{s['quarter']} {s['sign']} z {s['peak_z_spread']:.1f}, "
+                           f"{_control(s)}" for s in rest))
     for sc, S in D['scales'].items():
-        L.append(f"  {sc}: mean |z| {S['mean_abs_z_spread']:.2f} (controls {S['control_mean_abs_z_spread']:.2f}), "
-                 f"spots {len(S['spots'])}")
+        cm = S['control_mean_abs_z_spread']
+        L.append(f"  {sc}: mean |z| {S['mean_abs_z_spread']:.2f} "
+                 f"({'no controls' if cm is None else f'controls {cm:.2f}'}), spots {len(S['spots'])}")
     if D['debias']:
         L.append("a level across a whole band does not show here (the de-bias absorbs it): debias=False, or "
                  "region_measure on the band, of test and of a take")
@@ -202,9 +224,9 @@ def region_measure(project: str, source: str = None, bars: list = None, seconds:
     P = _load(project)
     path, a, b = _window(P, source, bars, seconds)
     y, sr = _mono(path)
-    if level_lufs is not None:
-        y = Z.level_match(y, sr, level_lufs)
     try:
+        if level_lufs is not None:
+            y = Z.level_match(y, sr, level_lufs)
         r = Z.region_measure(y, sr, a, b, f_lo, f_hi, ref_f_lo, ref_f_hi)
     except Z.ZoomError as e:
         raise OpError(f"region_measure: {e}")

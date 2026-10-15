@@ -7,7 +7,7 @@ ops live in api_zoom.py and the pictures in analysis.py.
   region_measure(y, sr, t0, t1, f_lo, f_hi, ...)               power in a box, dB re a reference band
   smooth_path, frac                                            the warp (DTW, made smooth and monotone)
   parity_fixture(seed)                                         the synthetic check: a 6 dB box in noise + harmonics
-  level_match(y, sr)                                           the caller's level match (-25 LUFS, as vox does)
+  level_match(y, sr)                                           the caller's level match (vox's loud: -25 LUFS, peak 0.89)
 
 Method of spectrogram_diff, per scale (grain, strokes, plumes):
   - pictures: STFT power of the word window (+- pad_s), 0 to f_max_hz, resampled to n_cols columns, so a column is a
@@ -30,9 +30,9 @@ Method of spectrogram_diff, per scale (grain, strokes, plumes):
     every spot carries the control's rate in its own cell, and counts only above it;
   - spots: connected cells past z_thr (min_cells, the top_spots strongest by peak z times root area), placed at their
     peak cell: quarter of the word window, band, sign (test brighter or darker than the anchor).
-Levels: the caller level-matches every clip first (vox sets each clip to -25 LUFS; level_match does that). Default
-sizes match vox at 44.1 kHz (1024-point window, 64-sample hop, 128 columns per word); they are in seconds and Hz, so
-another rate keeps the same resolution.
+Levels: the caller level-matches every clip first (vox sets each clip to -25 LUFS with its peak under 0.89;
+level_match does that). Default sizes match vox at 44.1 kHz (1024-point window, 64-sample hop, 128 columns per word);
+they are in seconds and Hz, so another rate keeps the same resolution.
 Fixture at the move (parity 0-9, vox 10-08, reproduced here cell for cell, tests/test_zoom_diff.py): the box found at
 strokes and plumes in 10 of 10 seeds, region_measure +5.9 dB for the 6 dB box, no stray cell outside the box in 9 of
 10 seeds (seed 4: one darker strokes cell beside the box, 3-6 kHz, in its quarter)."""
@@ -390,21 +390,25 @@ def region_measure(y, sr, t0=None, t1=None, f_lo=None, f_hi=None, ref_f_lo=0.0, 
 
 
 def loudness_db(y, sr):
-    """Integrated loudness (BS.1770, LUFS) of a mono clip; under 0.4 s, or with nothing pyloudnorm can gate, the RMS
-    level in dB minus 0.691 (the same scale for a steady sound). Returns (level, 'LUFS' | 'dB RMS')."""
+    """Loudness of a mono clip as vox's common.loud measures it: BS.1770 integrated loudness (LUFS) via pyloudnorm,
+    or, when pyloudnorm is missing or refuses the clip (shorter than its 0.4 s block), the RMS of the loud part (the
+    2048-sample moving RMS above 30% of its peak), in dB."""
     try:
         import pyloudnorm as pyln
-        if len(y) >= int(0.45 * sr):
-            v = float(pyln.Meter(sr).integrated_loudness(y))
-            if np.isfinite(v):
-                return v, 'LUFS'
+        lv = pyln.Meter(sr).integrated_loudness(y)
     except Exception:
-        pass
-    return 20 * np.log10(float(np.sqrt(np.mean(y ** 2))) + 1e-12) - 0.691, 'dB RMS'
+        e = np.sqrt(np.convolve(y ** 2, np.ones(2048) / 2048, 'same'))
+        lv = 20 * np.log10(np.sqrt(np.mean(e[e > e.max() * 0.3] ** 2)) + 1e-12)
+    return float(lv)
 
 
-def level_match(y, sr, lufs=LEVEL_LUFS):
-    """y scaled to a loudness (default -25 LUFS, as vox sets every clip before a diff). No peak limit: this is for
-    measuring, never for playback."""
-    lv, _ = loudness_db(y, sr)
-    return y * 10 ** ((lufs - lv) / 20)
+def level_match(y, sr, lufs=LEVEL_LUFS, peak=0.89):
+    """y scaled to a loudness (default -25 LUFS, as vox sets every clip before a diff), then scaled down so no
+    sample passes peak (0.89): vox's common.loud, on the whole clip."""
+    lv = loudness_db(y, sr)
+    if not np.isfinite(lv):
+        raise ZoomError(f"a clip of {len(y) / sr:.2f} s is silent (loudness {lv}); trim it to the sound, or pass "
+                        f"the takes level-matched already")
+    out = y * 10 ** ((lufs - lv) / 20)
+    pk = np.abs(out).max()
+    return out / pk * peak if pk > peak else out

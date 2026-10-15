@@ -128,9 +128,24 @@ def test_too_few_takes_refuse_and_say_what_to_do_next(tmp_path):
         Z.spectrogram_diff(inp['y'], inp['sr'], inp['t0'], inp['t1'], refs=inp['refs'][:2])
     D = Z.spectrogram_diff(inp['y'], inp['sr'], inp['t0'], inp['t1'], refs=inp['refs'][:3])
     assert D['n_controls'] == 0 and all(s['control_cell_rate'] is None for S in D['scales'].values() for s in S['spots'])
+    proj = _project(tmp_path, inp, n=2)
+    with pytest.raises(api.OpError, match='at least 3 takes.*own-source control.*then call again'):
+        OPS['sound_zoom_diff'](proj, 'test.wav', [f'take{i}.wav' for i in range(2)], seconds=[0.1, 0.7])
+
+
+def test_three_takes_list_the_spots_uncontrolled_and_count_none(tmp_path):
+    """3 takes give the spread but no own-source control: the spots are listed, none counted, and the text says a
+    4th take adds the control."""
+    inp, _, _ = Z.parity_fixture(0)
     proj = _project(tmp_path, inp, n=3)
-    with pytest.raises(api.OpError, match='at least 4 takes.*own-source control.*then call again'):
-        OPS['sound_zoom_diff'](proj, 'test.wav', [f'take{i}.wav' for i in range(3)], seconds=[0.1, 0.7])
+    out = OPS['sound_zoom_diff'](proj, 'test.wav', [f'take{i}.wav' for i in range(3)], seconds=[0.1, 0.7],
+                                 word='fixture')
+    lines = out.splitlines()
+    assert '0 controls' in lines[0]
+    assert lines[1].startswith('HOT SPOTS: none counted: with 3 takes there is no own-source control'), out
+    assert '4th take of the same words adds the control' in lines[1]
+    assert lines[2].startswith('  1. ') and 'no control' in lines[2] and 'brighter' in lines[2], out
+    assert not any(l.startswith('not counted') for l in lines)
 
 
 def test_power_not_mean_of_db():
@@ -171,15 +186,29 @@ def test_a_spot_counts_only_above_the_control_rate_in_its_own_cell():
                                           dict(base, peak_z_spread=4.0, control_cell_rate=0.0)]}}}
     counted, rest = hot_spots(D)
     assert [s['peak_z_spread'] for s in counted] == [4.0, 3.0] and [s['peak_z_spread'] for s in rest] == [9.0]
+    D['scales']['strokes']['spots'][1]['beyond_control'] = False      # shown beside the rate, never required
+    assert [s['peak_z_spread'] for s in hot_spots(D)[0]] == [4.0, 3.0]
+    uncontrolled = {'scales': {'strokes': {'spots': [dict(base, peak_z_spread=5.0, control_cell_rate=None)]}}}
+    assert hot_spots(uncontrolled) == ([], uncontrolled['scales']['strokes']['spots'])
     many = {'scales': {'grain': {'spots': [dict(base, peak_z_spread=float(i), control_cell_rate=0.0) for i in range(40)]}}}
     assert len(hot_spots(many, top=99)[0]) == 12 and len(hot_spots(many, top=3)[0]) == 3
 
 
-def test_level_match_sets_minus_25_lufs():
+def test_level_match_sets_minus_25_lufs_under_a_0_89_peak():
+    """vox's loud: BS.1770 to -25 LUFS, then scaled down when a sample passes 0.89; under pyloudnorm's 0.4 s block
+    the RMS of the loud part stands in."""
     sr, rng = 44100, np.random.default_rng(5)
     a, b = 0.3 * rng.standard_normal(sr), 0.01 * rng.standard_normal(sr)
-    la, lb = (Z.loudness_db(Z.level_match(x, sr), sr)[0] for x in (a, b))
+    la, lb = (Z.loudness_db(Z.level_match(x, sr), sr) for x in (a, b))
     assert abs(la + 25) < 0.1 and abs(lb + 25) < 0.1
+    spiky = 0.001 * rng.standard_normal(sr)
+    spiky[sr // 2] = 1.0                                       # one click far above a quiet bed
+    y = Z.level_match(spiky, sr)
+    assert abs(np.abs(y).max() - 0.89) < 1e-12 and Z.loudness_db(y, sr) < -25.5
+    short = 0.05 * rng.standard_normal(int(0.2 * sr))
+    assert abs(20 * np.log10(np.sqrt(np.mean(Z.level_match(short, sr) ** 2))) + 25) < 1.0
+    with pytest.raises(Z.ZoomError, match='silent.*trim it'):
+        Z.level_match(np.zeros(sr), sr)
 
 
 def _project(tmp_path, inp, n=None):
@@ -200,7 +229,7 @@ def test_the_op_reads_hot_spots_first_and_draws_a_bounded_picture(tmp_path):
     lines = out.splitlines()
     assert lines[1].startswith('HOT SPOTS (counted')
     first = lines[2]
-    assert 'brighter' in first and "of 'fixture'" in first and 'control 0.00' in first, out
+    assert 'brighter' in first and "of 'fixture'" in first and 'control 0.00, beyond control yes' in first, out
     assert first.split('. ')[1].split(',')[0] in ('strokes', 'plumes') and '1-3 kHz' in first or '3-6 kHz' in first
     png = lines[-1].split('picture: ')[1].split(' (')[0]
     v = json.load(open(png + '.json'))
