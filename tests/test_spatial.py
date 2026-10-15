@@ -374,3 +374,29 @@ def test_a_gap_in_the_blocks_takes_the_new_position():
         assert np.all(np.isfinite(y))
     assert p.sp.st[S.S_BASE] == pytest.approx(3 / 343 * SR + 3 + math.ceil(0.5 * S.HEAD_A / S.C_SOUND
                                                                           * (math.pi / 2 + 1) * SR), abs=1)
+
+
+def _far_hat(tmp_path):
+    """A hat at 250 m, live: its sound is still in flight for 0.73 s after the note has ended."""
+    from ismail.live.engine import BLOCK, Engine
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    e.cmd_track('f', instrument={'type': 'hat'}, fx=[{'type': 'spatial', 'x': 0.0, 'y': 250.0, 'room': 0.0}])
+    e.cmd_queue([{'track': 'f', 'lanes': {'C1': 'x...............'}, 'loop': 1}])      # one hit at bar 2 (2.0 s)
+    for _ in range(int(4.0 * SR / BLOCK)):
+        e.tick()
+        e.mix_block()
+    return np.abs(e.air[:, :e.pos]).max(axis=0)
+
+
+def test_a_far_burst_arrives_live_and_is_not_cut(tmp_path):
+    a = _far_hat(tmp_path)
+    heard = np.nonzero(a > 1e-5)[0]
+    assert len(heard) and a.max() > 5e-5
+    assert heard[0] / SR == pytest.approx(2.0 + 250.0 / S.C_SOUND, abs=0.01)     # after its flight, on song time
+
+
+def test_without_the_hold_the_far_burst_was_cut(tmp_path, monkeypatch):
+    """The guard above means something: a path that slept after the usual 0.5 s lost the hat in flight."""
+    from ismail.live import spatial_blocks
+    monkeypatch.setattr(spatial_blocks._Spatial, 'hold_s', 0.0)
+    assert _far_hat(tmp_path).max() < 1e-6

@@ -154,6 +154,7 @@ class Chain:
             self.procs.append(F.make(f, F.Env(SR, bpm, dry, 0)))
         self.latency = sum(p.latency for p in self.procs)
         self.noise = sum(p.noise for p in self.procs)      # self-noise of the chain (amp hiss, tape hiss)
+        self.hold_s = sum(p.hold_s for p in self.procs)    # sound still in flight after the output goes quiet
         self.gr = {}
         self.gen = 0                # set when the chain is scheduled to replace another (ramps carry it)
 

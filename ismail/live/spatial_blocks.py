@@ -11,6 +11,9 @@ from .fx_blocks import Proc
 
 
 class _Spatial(Proc):
+    hold_s = S.MAX_DELAY_S + 0.25     # every read lies within MAX_DELAY_S + 0.1 s (delay, ground, early reflections):
+                                      # the path stays awake until a far source's sound has arrived
+
     def __init__(self, fx, env):
         super().__init__(fx, env)
         self.sp = S.Spatializer(fx, env.sr)

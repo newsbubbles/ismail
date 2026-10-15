@@ -110,6 +110,7 @@ class _Lfilter:
 class Proc:
     latency = 0
     noise = 0.0         # RMS of the noise the processor makes by itself (an amp's hiss and hum), for dormancy
+    hold_s = 0.0        # seconds of silent output while sound is still in flight inside it (a far source), for dormancy
 
     def __init__(self, fx, env):
         self.fx = fx

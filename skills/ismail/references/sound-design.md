@@ -73,6 +73,10 @@ send small: the effect carries its own room, which grows as the sound goes furth
   darker and quieter while the room does not, so the far sound turns reverb-heavy.
 - `doppler=0` on pitched parts that must stay in key; leave it on for things that fly by.
 - Cues need broadband sound. A pure sine cannot be placed in front or behind, up or down.
+- Sound takes time to travel (about 0.3 s per 100 m, up to 1 s): a far call is heard late, as outdoors. Live, the
+  track stays awake until it arrives.
+- `hrtf='sadie_d2'` uses a measured dummy head on headphones. It needs `samples_fetch('sadie_d2')` (about 60 MB)
+  after the person says yes; its download link has not been checked yet, and that first fetch confirms it.
 
 ## Guitars and other played strings
 

@@ -16,7 +16,11 @@
   which fall slower with distance than the direct sound. `spread`, `listener_yaw` (automatable), `doppler` 1 or 0.
 - Optional measured head: `hrtf='sadie_d2'` (SADIE II KU100, Apache 2.0) after `samples_fetch('sadie_d2')` on the
   person's yes; converted once into `~/.ismail/hrtf` (reading the SOFA file needs h5py). Without it the built-in
-  head is used and needs no data. `samples_list` shows it as a set the spatial effect plays.
+  head is used and needs no data. `samples_list` shows it as a set the spatial effect plays. The download link and
+  size are not yet checked against the York site: the first fetch, after the person's yes, confirms them.
+- Live, a far source is not cut: its sound takes up to 1 s to arrive, so a track or bus holding `spatial` waits
+  1.25 s of quiet (not the usual 0.5 s) before it goes dormant. Each live processor can now ask for such a hold
+  (`Proc.hold_s`, summed per chain, next to `noise`).
 - Fix: a change to `rig.py` (and now `spatial.py`) invalidates cached track renders; before, a rig change could
   serve a stale render.
 
