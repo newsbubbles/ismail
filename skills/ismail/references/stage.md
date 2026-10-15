@@ -329,6 +329,16 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Find takes by what was said.** The person names takes and talks about them while recording; every take keeps
   those words. `stage_takes(query="glass")` finds them with the second each word was said; `stage_take_note` names
   a take or adds your own note.
+- **Test with the person's own hands while they are away.** `stage_take_replay(scene, take, start=, end=)` plays a
+  take as input on a page nobody wears: the camera takes the head, each tracked hand drives the page's hands, touch
+  and grab through the same code as a real hand, and the reply lists what happened ("grabbed: cup; landed: cup onto
+  shelf"), what the take itself recorded, and what was still held at the end. `grab=True` turns grab on for the
+  replay only. To get the take you need, ask for it while they are in VR: `stage_test_take(scene, ask="Pick up the
+  cup and put it on the shelf.", name="cup to shelf")` says the ask, records it, and labels it "test cup to shelf"
+  so `stage_takes(query=)` finds it later. When they say "keep that" about something they just did,
+  `stage_take_keep_recent(scene, seconds=30, name=)` saves it: while anyone is in VR the page holds their last 2
+  minutes of head and hands (15 Hz, no audio). Limits: hands only (controller takes carry no joints), the aiming ray is
+  approximated, rate 1 for a grab verdict, refused while someone is in VR on that page.
 - **Put dances on the beat by number.** `stage_take_sync(scene, takes, bpm)` reads each take's pulse, its own BPM,
   the rate that puts it on the beat, its seam, and the lag between takes; `loops=True` lists the best whole-bar
   windows of a long take (clear pulse on the beat, small seam, little travel). `stage_take_loop(take, name, bpm=)`

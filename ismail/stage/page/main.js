@@ -187,6 +187,7 @@ live.onEmit((type, d) => {
   else if (type === 'actor_stop' && d && d.live) { hands.shadowStop(); perform.stop(); }
 });
 live.handlers.take_keep_last = (c) => keepLast(c.name || null);
+live.handlers.take_keep_recent = (c) => (c.info ? hands.recentInfo() : hands.keepRecent(c.seconds, c.name || ''));   // hands.js: the last 2 min in VR
 // things that do things: a scene's own small functions, run on a press, a menu item or a wire (behaviours.js)
 window.VR_behaviours = initBehaviours(ed, live, panels, hands);
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
