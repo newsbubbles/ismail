@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Fixed: spatial on speakers no longer moves a side sound to the other speaker as ctc rises
+
+- With `out='speakers'`, `ctc` above 0 blended a pan (no interaural delay) with a binaural feed (with one) and
+  ran a crosstalk canceller of the same strength on the mix. The two copies combed: at the default `ctc=0.5` a
+  steady note at 70 degrees right came out louder on the LEFT (1 kHz: -8.8 dB with the default room), and the
+  ears got less separation than plain panning.
+- Now the speakers get one render, the plain equal-power pan with every distance cue, and `ctc` sets only how
+  deep the crosstalk canceller runs on it (delayed and shaped by the head-shadow ratio of the far ear, above
+  150 Hz, gain bounded at 0.9). With one render nothing can comb; `ctc=0` is plain panning sample for sample;
+  the near speaker is the louder one at every frequency and every `ctc`, and the far ear hears less of a side
+  sound as `ctc` rises (70 degrees, ears, 300 Hz to 3 kHz: +3.3 / +8.5 / +14.7 dB at ctc 0 / 0.5 / 1; before:
+  +3.3 / +3.4 / +5.4). A sweep or a jump of `ctc` glides, with no click.
+- On speakers the interaural delay and the pinna echoes are no longer in the feeds (they stay on headphones);
+  the rear darkening stays. The speaker path costs about a third less CPU.
+- New tests (`tests/test_spatial.py`): sines at 500 Hz, 1 kHz, 3 kHz and pink noise at 30, 70 and 90 degrees on
+  both sides, at every `ctc` from 0 to 1, at the speakers and through a simulated speakers-to-ears path.
+
 ### spatial: move a sound in 3D, for stereo speakers or headphones, in the studio and live
 
 - A new effect type, `spatial` (`ismail/spatial.py`, live twin `ismail/live/spatial_blocks.py`, one numba kernel

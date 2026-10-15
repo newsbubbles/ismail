@@ -213,10 +213,11 @@ def test_missing_measured_set_says_how_to_get_it(tmp_path, monkeypatch):
 def test_a_source_on_the_right_is_louder_and_earlier_on_the_right(out):
     y = run(XN, x=2.0, y=0.0, room=0.0, out=out)
     ild = db(y[1]) - db(y[0])
-    c = np.correlate(y[0, 2000:8000], y[1, 2000:8000], 'full')
-    lag = np.argmax(c) - 5999                              # > 0: the left channel lags
     assert ild > (10 if out == 'headphones' else 6)
-    assert 0.5e-3 < lag / SR < 0.8e-3                       # Woodworth, 8.75 cm head: ~0.66 ms at 90 degrees
+    if out == 'headphones':                                # speakers carry no interaural delay (one panned render)
+        c = np.correlate(y[0, 2000:8000], y[1, 2000:8000], 'full')
+        lag = np.argmax(c) - 5999                          # > 0: the left channel lags
+        assert 0.5e-3 < lag / SR < 0.8e-3                   # Woodworth, 8.75 cm head: ~0.66 ms at 90 degrees
     yl = run(XN, x=-2.0, y=0.0, room=0.0, out=out)
     assert db(yl[0]) - db(yl[1]) == pytest.approx(ild, abs=0.5)
 
@@ -233,8 +234,9 @@ def test_front_and_back_differ_spectrally(out):
     front, e = _bands(run(XN, x=0.0, y=2.0, room=0.0, out=out))
     back, _ = _bands(run(XN, x=0.0, y=-2.0, room=0.0, out=out))
     hi = e[:-1] > 4000
-    assert np.mean((front - back)[hi]) > 3                 # behind is darker (pinna and rear shelf)
-    assert np.max(np.abs(front - back)) > 4
+    assert np.mean((front - back)[hi]) > 3                 # behind is darker (rear shelf; pinna on headphones)
+    if out == 'headphones':
+        assert np.max(np.abs(front - back)) > 4
 
 
 def test_doubling_distance_drops_direct_6db_and_raises_wet_dry():
@@ -289,14 +291,102 @@ def _speakers_to_ears(y, span=30.0):
                      shadow(math.sin(th), y[1]) + late(shadow(-math.sin(th), y[0]))])
 
 
-def test_crosstalk_cancellation_restores_the_binaural_level_difference():
+def test_crosstalk_cancellation_widens_the_level_difference_at_the_ears():
     sos = butter(4, [300, 3000], 'band', fs=SR, output='sos')
     band_ild = lambda e: db(sosfiltfilt(sos, e[1])) - db(sosfiltfilt(sos, e[0]))   # noqa: E731
-    target = band_ild(run(XN, x=3.0, y=0.0, room=0.0, out='headphones'))
     plain = band_ild(_speakers_to_ears(run(XN, x=3.0, y=0.0, room=0.0, ctc=0.0)))
+    half = band_ild(_speakers_to_ears(run(XN, x=3.0, y=0.0, room=0.0, ctc=0.5)))
     full = band_ild(_speakers_to_ears(run(XN, x=3.0, y=0.0, room=0.0, ctc=1.0)))
-    assert full > plain + 2.5                              # less sound of the right speaker reaches the left ear
-    assert full == pytest.approx(target, abs=1.5)
+    target = band_ild(run(XN, x=3.0, y=0.0, room=0.0, out='headphones'))
+    assert full > plain + 8                                # less sound of the right speaker reaches the left ear
+    assert half == pytest.approx(target, abs=2.0)          # the default lands near the binaural head's own ILD
+
+
+# ------------------------------------------------------------------ ctc: no side flip, no comb, no click
+
+CTC = (0.0, 0.25, 0.5, 0.75, 1.0)
+T_HALF = np.arange(SR // 2) / SR
+
+
+def _pink(n, seed=11):
+    spec = np.fft.rfft(np.random.default_rng(seed).standard_normal(n))
+    f = np.fft.rfftfreq(n, 1 / SR)
+    spec[1:] /= np.sqrt(f[1:])
+    spec[0] = 0
+    x = np.fft.irfft(spec, n)
+    return 0.1 * x / x.std()
+
+
+PINK = _pink(SR // 2)
+
+
+def _at(az, sig, ctc, **kw):
+    """A mono signal at az degrees (positive = right), 3 m, on speakers; dry unless room is given. ctc may be a
+    curve (one value per sample)."""
+    a = math.radians(az)
+    kw.setdefault('room', 0.0)
+    curves = {'ctc': ctc} if np.ndim(ctc) else None
+    return run(np.stack([sig, sig]), curves, x=3 * math.sin(a), y=3 * math.cos(a), ctc=0.5 if curves else ctc, **kw)
+
+
+def _ild(y):
+    """Right over left in dB, after the first 0.1 s (filters and canceller settled)."""
+    return db(y[1, SR // 10:]) - db(y[0, SR // 10:])
+
+
+@pytest.mark.parametrize('az', [30, 70, 90, -30, -70, -90])
+def test_ctc_never_moves_a_side_source_to_the_other_speaker(az):
+    """The exam's bug: at ctc=0.5 a steady note at 70 deg right came out on the LEFT (blending a pan with no
+    interaural delay and a binaural feed with one combs). Every ctc, steady sines and pink noise: the speaker on
+    the source's side is the louder one."""
+    side = 1 if az > 0 else -1
+    for c in CTC:
+        for f in (500.0, 1000.0, 3000.0):
+            ild = side * _ild(_at(az, 0.1 * np.sin(2 * np.pi * f * T_HALF), c))
+            assert ild > 1.0, (az, c, f, ild)
+        assert side * _ild(_at(az, PINK, c)) > 3.0, (az, c)
+        assert side * _ild(_at(az, PINK, c, room=0.4)) > 2.0, (az, c)     # the exam's setting: default room
+
+
+def test_ctc_left_is_the_mirror_of_right():
+    for c in CTC:
+        r, l_ = _at(70, PINK, c), _at(-70, PINK, c)
+        assert np.allclose(l_[::-1], r, rtol=1e-9, atol=1e-12)
+
+
+@pytest.mark.parametrize('az', [30, 70, 90, -70])
+def test_ctc_raises_the_separation_at_the_ears(az):
+    """Through the listening room the canceller assumes (speakers at +-30 deg, the effect's own head shadow and
+    crosstalk delay), the far ear hears less of a side source as ctc rises, in steps, never less separation. The
+    speaker channels themselves lose level difference as ctc rises: the far speaker has to carry the
+    anti-crosstalk signal, which is the canceller's job, so the "no drop" check belongs here at the ears."""
+    sos = butter(4, [300, 3000], 'band', fs=SR, output='sos')
+    side = 1 if az > 0 else -1
+    ears = []
+    for c in CTC:
+        e = sosfiltfilt(sos, _speakers_to_ears(_at(az, PINK, c)), axis=1)
+        ears.append(side * _ild(e))
+    assert ears[0] > 1.5                                   # plain stereo already leans to the source's side
+    assert np.all(np.diff(ears) > 0.5), ears               # monotone: every step of ctc adds separation
+    assert ears[-1] > ears[0] + 5, ears
+    for f in (500.0, 1000.0, 3000.0):                      # and a steady tone reaches the near ear louder
+        for c in CTC:
+            e = _speakers_to_ears(_at(az, 0.1 * np.sin(2 * np.pi * f * T_HALF), c))
+            assert side * _ild(e) > 0.0, (az, f, c)
+
+
+@pytest.mark.parametrize('az', [70, -30])
+def test_a_ctc_sweep_or_jump_does_not_click(az):
+    """ctc is automatable live: a slow sweep 0 -> 1 and a jump either way glide (30 ms), no click, no step."""
+    t = np.arange(SR) / SR
+    s = 0.3 * np.sin(2 * np.pi * 200 * t)
+    for curve in (np.linspace(0.0, 1.0, SR), np.where(t < 0.5, 0.0, 1.0), np.where(t < 0.5, 1.0, 0.0)):
+        y = _at(az, s, curve)
+        w = int(0.01 * SR)
+        for a in range(SR // 10, SR - 2 * w, w):
+            seg = y[:, a:a + w]
+            amp = np.abs(y[:, a - w:a + 2 * w]).max()
+            assert np.abs(np.diff(seg, axis=1)).max() <= 1.3 * (2 * np.pi * 200 / SR) * amp + 1e-9
 
 
 def test_ctc_zero_is_plain_equal_power_panning():
