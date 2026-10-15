@@ -117,6 +117,8 @@ a view of the stage) has been the fastest route to a good result. The rules that
   with `phone_exam`, questions with `phone_ask`, answers with `phone_say`. One person (10-06) loved doing their voice tests
   on the phone and spends whole days away from the desk: plan exams that work on a phone and
   earbuds.
+- A desk page that takes their voice or mic opens in their own browser, not an app pane (a pane has no
+  microphone), and brings back everything they typed or said when reopened (`blind-tests.md`, page mechanics).
 
 ## Bars or time: their unit
 
