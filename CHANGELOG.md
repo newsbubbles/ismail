@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### stage: a command sent right after a scene switch runs
+
+- `stage_scene_go` now answers only after the page has read the new scene's last command id, so an op sent the
+  moment it returns is newer and runs. Before, the page's first poll on the new scene took every queued command as
+  old, and an op sent within about 2 s of the switch was dropped (it timed out after 30 s). A poll that was still
+  reading the old scene when the switch happened is ignored.
+
 ### toms: real toms retuned to the note, struck where and how you say
 
 - `toms` (drums, performer): the Big Rusty toms (Big Rusty Drums by Karoryfer Samples, CC0 1.0: 14", 15", 18"
