@@ -1,0 +1,309 @@
+<title>Who Made Ismail</title>
+<meta name="description" content="Highlights: who built ismail, whose ideas went in, and how one listener's ear steered the sound, 26 Sep to 3 Oct 2026.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap">
+<style>
+/* Layout: one reading column, four acts (ledgers, ideas, ears, songs); brass = Nate, sea = Claude, as in the ismail logo */
+:root{
+  --bg:#f6f4ef; --panel:#ffffff; --panel-2:#efece5; --line:#dcd7cd; --text:#1b1c1e; --dim:#585e65; --faint:#8b9097;
+  --you:#a87a22; --you-soft:rgba(184,134,43,.14); --me:#2f7d7d; --joint:#1F2A44; --on-bar:#ffffff;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+  --serif:'IBM Plex Serif',Georgia,'Times New Roman',serif;
+  --logo-ink:#1F2A44; --logo-brass:#B8862B; --logo-sea:#3E8A8A;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0d0e10; --panel:#15171a; --panel-2:#1b1e22; --line:#2a2e34; --text:#e9e6df; --dim:#9aa0a6; --faint:#6b7178;
+    --you:#D4A24C; --you-soft:rgba(212,162,76,.16); --me:#6FC2BD; --joint:#ECE6D6; --on-bar:#111111;
+    --logo-ink:#ECE6D6; --logo-brass:#D4A24C; --logo-sea:#6FC2BD;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0d0e10; --panel:#15171a; --panel-2:#1b1e22; --line:#2a2e34; --text:#e9e6df; --dim:#9aa0a6; --faint:#6b7178;
+  --you:#D4A24C; --you-soft:rgba(212,162,76,.16); --me:#6FC2BD; --joint:#ECE6D6; --on-bar:#111111;
+  --logo-ink:#ECE6D6; --logo-brass:#D4A24C; --logo-sea:#6FC2BD;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font:16px/1.6 var(--sans);margin:0}
+.wrap{max-width:960px;margin:0 auto;padding-inline:20px;padding-block:32px 72px}
+h1,h2,h3{text-wrap:balance;line-height:1.2;margin:0}
+h1{font:500 clamp(38px,7vw,64px)/1.05 var(--serif);letter-spacing:-.02em}
+h2{font:500 clamp(24px,3.4vw,30px)/1.2 var(--serif);letter-spacing:-.01em}
+h3{font-size:16px;font-weight:600}
+p{margin:0}
+.eyebrow{font:500 12px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.lede{font-size:19px;max-width:58ch}
+.dim{color:var(--dim)} .faint{color:var(--faint)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.you{color:var(--you)} .me{color:var(--me)}
+section{display:grid;gap:22px;padding-block:52px;border-top:1px solid var(--line)}
+section>header{display:grid;gap:10px;max-width:64ch}
+header.top{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center;padding-bottom:40px}
+header.top .logo svg{width:130px;height:auto;display:block}
+.logo .k{fill:var(--logo-ink)} .logo .b{fill:var(--logo-brass)} .logo .s{fill:var(--logo-sea)}
+.hero{display:grid;gap:14px;min-width:0}
+@media (max-width:640px){header.top{grid-template-columns:1fr;gap:18px} header.top .logo svg{width:92px}}
+.facts{display:flex;flex-wrap:wrap;gap:8px 22px;font:13px var(--mono);color:var(--dim);font-variant-numeric:tabular-nums}
+.facts b{color:var(--text);font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--dim)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.dot.n{background:var(--you)} .dot.c{background:var(--me)} .dot.j{background:linear-gradient(90deg,var(--you) 50%,var(--me) 50%)}
+
+/* ledgers */
+.ledgers{display:grid;gap:26px}
+.ledger{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px 22px;align-items:center}
+.ledger .name{font:500 20px var(--serif)}
+.ledger .name small{display:block;font:400 12px var(--mono);color:var(--dim);letter-spacing:.03em}
+.bar{display:flex;height:36px;border-radius:4px;overflow:hidden;background:var(--panel-2)}
+.bar>div{display:flex;align-items:center;padding-inline:12px;font:500 13px var(--mono);white-space:nowrap;min-width:0;color:var(--on-bar);overflow:hidden}
+.bar .n{background:var(--you)} .bar .c{background:var(--me)}
+.ledger .why{grid-column:2;font-size:14.5px;color:var(--dim);max-width:64ch}
+.nobar{font:500 13px var(--mono);color:var(--you);border-left:3px solid var(--you);padding:8px 12px;background:var(--you-soft);border-radius:0 4px 4px 0}
+@media (max-width:640px){.ledger{grid-template-columns:1fr}.ledger .why{grid-column:1}}
+
+/* idea timeline */
+.ixwrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+#ix{display:block}
+#ix text{fill:var(--dim);font:11px var(--mono)}
+#ix .lane{font:600 11px var(--mono);letter-spacing:.06em;fill:var(--text)}
+#ix .m{cursor:pointer}
+#ix .m:focus{outline:none}
+#ix .m:focus-visible circle,#ix .m.sel circle,#ix .m:focus-visible path,#ix .m.sel path{stroke:var(--text);stroke-width:2.5}
+.detail{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px 18px;display:grid;gap:6px;min-height:104px}
+.detail .who{font:600 12px var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.detail .idea{font:500 18px/1.4 var(--serif)}
+.detail .became{font-size:14.5px;color:var(--dim)}
+details.list>summary{cursor:pointer;color:var(--dim);font-size:14px;padding:4px 0}
+details.list ol{list-style:none;margin:8px 0 0;padding:0;display:grid}
+details.list li{display:grid;grid-template-columns:70px 14px minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+details.list li .d{font:12px var(--mono);color:var(--faint);padding-top:3px}
+details.list li .s{width:4px;border-radius:2px;justify-self:center}
+details.list li.n .s{background:var(--you)} details.list li.c .s{background:var(--me)} details.list li.j .s{background:linear-gradient(var(--you) 50%,var(--me) 50%)}
+details.list li small{display:block;color:var(--dim);font-size:13.5px}
+
+/* exam squares */
+.ladders{display:grid;gap:22px}
+.ladder{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px 20px;display:grid;gap:12px;min-width:0}
+.ladder .what{font-size:14.5px;color:var(--dim);max-width:64ch}
+.rounds{display:grid;gap:8px}
+.round{display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;align-items:start;font-size:13.5px}
+.round .r{font:12px var(--mono);color:var(--dim);padding-top:1px}
+.sq{display:inline-flex;gap:3px;flex-wrap:wrap;vertical-align:middle;margin-right:10px}
+.sq i{width:9px;height:14px;border-radius:1px;background:var(--line)}
+.sq i.u{background:var(--you)}
+.round .score{font:12.5px var(--mono);font-variant-numeric:tabular-nums}
+.round .tell{display:block;color:var(--dim);font-size:13px;margin-top:2px}
+.round.hit .score{color:var(--you);font-weight:500}
+
+/* songs */
+.songs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+@media (max-width:760px){.songs{grid-template-columns:1fr}}
+.song{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px 20px;display:grid;gap:12px;align-content:start;min-width:0}
+.song h3{font:500 21px var(--serif)}
+.song .kind{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.song .premise{font-size:14.5px;color:var(--dim)}
+.path{display:flex;align-items:center;gap:0;padding-block:4px}
+.path i{width:12px;height:12px;border-radius:50%;flex:none;border:2px solid var(--panel)}
+.path i.n{background:var(--you)} .path i.c{background:var(--me)} .path i.j{background:linear-gradient(90deg,var(--you) 50%,var(--me) 50%)}
+.path i.end{background:var(--panel);border-color:var(--faint)}
+.path b{flex:1 1 auto;height:2px;background:var(--line);min-width:6px}
+.turns{margin:0;padding-left:18px;display:grid;gap:5px;font-size:14px}
+.ab{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:420px){.ab{grid-template-columns:1fr}}
+.ab .lab{font:500 12px var(--mono);color:var(--dim);margin-bottom:4px}
+audio{width:100%;height:36px}
+footer{padding-top:28px;font-size:13.5px;color:var(--dim);border-top:1px solid var(--line);display:grid;gap:8px;max-width:72ch}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--you);outline-offset:2px}
+@media (prefers-reduced-motion:no-preference){
+  .bar>div{transition:width .8s cubic-bezier(.2,.7,.2,1)}
+  .rise{animation:rise .6s ease both}
+  @keyframes rise{from{transform:translateY(8px)}to{transform:none}}
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="12 22 196 150" width="392" height="300"><title>ismail</title><desc>Four automaton musicians on a boat, after al-Jazari (1206).</desc>
+<rect class="k" x="41" y="68" width="14" height="32" rx="3"/><circle class="k" cx="48" cy="56" r="8"/>
+<rect class="k" x="77" y="46" width="14" height="54" rx="3"/><circle class="k" cx="84" cy="34" r="8"/>
+<rect class="k" x="113" y="74" width="14" height="26" rx="3"/><circle class="k" cx="120" cy="62" r="8"/>
+<rect class="k" x="149" y="58" width="14" height="42" rx="3"/><circle class="k" cx="156" cy="46" r="8"/>
+<circle class="b" cx="40" cy="84" r="9"/>
+<path class="b" d="M90.5 38.5 L93.5 36.5 L108 57 L105 59 Z"/>
+<path class="b" d="M130 98 L130 70 Q143 76 146 98 Z"/>
+<path class="b" d="M151 82 L173 82 C173 92 168 98 162 98 C156 98 151 92 151 82 Z"/>
+<path class="b" d="M16 90 C20 96 24 100 32 100 L168 100 C177 100 182 93 185 84 C188 75 195 70 200 74 C203 77 201 83 196 83 C198 80 196 77 193 79 C189 82 191 96 181 110 C170 124 144 131 100 131 C58 131 34 123 25 109 C21 103 18 97 16 90 Z"/>
+<rect class="b" x="191" y="47" width="10" height="10"/><path class="b" d="M196 44.9 L203.1 52 L196 59.1 L188.9 52 Z"/>
+<path class="s" d="M22 146 C36 138 48 138 60 144 C72 150 84 150 96 144 C108 138 120 138 132 144 C144 150 156 150 170 143 L174 146 C160 153 148 153 136 147 C124 141 112 141 100 147 C88 153 76 153 64 147 C52 141 40 141 26 149 Z"/>
+<path class="s" opacity=".55" d="M52 162 C64 155 76 155 88 160 C100 165 112 165 124 160 C136 155 146 155 156 159 L160 162 C150 158 140 158 128 163 C116 168 104 168 92 163 C80 158 68 158 56 165 Z"/>
+</svg></div>
+    <div class="hero">
+      <div class="eyebrow">ismail · 26 Sep to 3 Oct 2026</div>
+      <h1>Who made ismail?</h1>
+      <p class="lede">Eight days. Nate didn't write the code; Claude did the building. The ideas, and the ears that judged the sound, are a different story.</p>
+      <div class="facts"><span><b>594</b> messages from Nate</span><span><b>18,762</b> tool calls by Claude</span><span><b>~118,000</b> lines written by Claude</span><span><b>171</b> commits</span><span><b>30</b> sessions</span></div>
+    </div>
+  </header>
+
+  <section id="ledgers">
+    <header><div class="eyebrow">Three ledgers</div><h2>Three ways to count, three different answers</h2></header>
+    <div class="ledgers" id="ledgerList"></div>
+  </section>
+
+  <section id="ideas">
+    <header><div class="eyebrow">Idea timeline</div><h2>Where the ideas came from</h2>
+      <p class="dim">A selection of the ideas that shaped ismail, by day. Nate's above the line, Claude's below, shared ideas on it. Pick one to see what it became.</p></header>
+    <div class="legend"><span><i class="dot n"></i>Nate</span><span><i class="dot c"></i>Claude</span><span><i class="dot j"></i>both</span></div>
+    <div class="ixwrap"><svg id="ix" role="group" aria-label="Ideas by day: Nate's above the line, Claude's below"></svg></div>
+    <div class="detail" id="detail" aria-live="polite"></div>
+    <details class="list"><summary>Read them as a list</summary><ol id="ideaList"></ol></details>
+  </section>
+
+  <section id="ears">
+    <header><div class="eyebrow">Exam squares</div><h2>One listener, blind</h2>
+      <p class="dim">Each square is one blind trial: a real recording against ismail's copy, in random order. A filled square is a trial where the copy went undetected (picked as real, or "can't tell"). Every trial had the same listener: Nate.</p></header>
+    <div class="legend"><span><i class="sq"><i class="u"></i></i>copy undetected</span><span><i class="sq"><i></i></i>real one picked</span></div>
+    <div class="ladders" id="ladders"></div>
+  </section>
+
+  <section id="songs">
+    <header><div class="eyebrow">Song journeys</div><h2>From the first render to the last</h2>
+      <p class="dim">Each dot is a version. Its colour says what drove the change: Nate's ear, eye or idea, a measurement or Claude's call, or both together (his note named the problem and a measurement found the fix).</p></header>
+    <div class="legend"><span><i class="dot n"></i>Nate's ear, eye or idea</span><span><i class="dot c"></i>measurement or Claude</span><span><i class="dot j"></i>both</span></div>
+    <div class="songs" id="songList"></div>
+  </section>
+
+  <footer>
+    <p>How this was counted. The messages, tool calls, lines, commits and sessions are exact counts for 26 Sep to 3 Oct 2026. The idea share is one AI reader's labels of who proposed what across those sessions; a second, independent reader has not checked it yet. Each exam result is one listener, Nate, on one day.</p>
+    <p>The clips are the first and last render of each song.</p>
+  </footer>
+</div>
+
+<script>
+(function(){
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+const WHO = {n: 'Nate', c: 'Claude', j: 'Both'};
+
+// ---------- ledgers ----------
+const LEDGERS = [
+  {name: 'Hands', sub: 'code · renders · measuring', n: 0, label: ['', 'Claude'],
+   why: 'Every line of code, every render and every commit came from Claude Code sessions. Nate wrote none of it.'},
+  {name: 'Ideas', sub: 'concepts · stories · rules', n: 74, label: ['Nate ~74%', 'Claude ~26%'],
+   why: "By one AI reader's count of who proposed what, about three quarters of the ideas were Nate's. That count has no second reader yet."},
+  {name: 'Ears', sub: 'listening · looking', n: null, label: ['', ''],
+   why: 'Every blind test and every eye exam had one listener. His answers decided what got fixed next.'},
+];
+$('ledgerList').innerHTML = LEDGERS.map(l => `<div class="ledger"><div class="name">${l.name}<small>${l.sub}</small></div>
+  ${l.n === null ? `<div class="nobar">Not a share. Every trial had the same listener: Nate.</div>` : `<div class="bar" role="img" aria-label="${l.name}: ${esc(l.label.filter(Boolean).join(', ') || 'Claude')}">
+    ${l.n ? `<div class="n" style="width:${l.n}%">${esc(l.label[0])}</div>` : ''}${l.n < 100 ? `<div class="c" style="width:${100 - l.n}%">${esc(l.label[1])}</div>` : ''}</div>`}
+  <p class="why">${esc(l.why)}</p></div>`).join('');
+
+// ---------- ideas ----------
+const IDEAS = [
+  ['2026-09-26','n','A DAW an agent drives with text, reading MIDI and audio back as text.','ismail itself: the text readback and the analysis layer.'],
+  ['2026-09-26','n','A comparison tool that returns drill-down data the agent cannot fool itself with.','The comparison engine: summary, sections, bars, worst moments, zoom.'],
+  ['2026-09-26','c','Check every new metric against the ear: it must rank the draft Nate disliked below the one he liked.','A "fairer" score was thrown out when it failed this check.'],
+  ['2026-09-26','n','A skill that teaches any agent to compose with ismail.','The ismail skill, which has carried every lesson since.'],
+  ['2026-09-29','c','mimic: measure a few recorded notes and play from the measurement, with no neural net.','The measured instruments.'],
+  ['2026-09-29','n','The eye exam: named options that each change one thing, so the ear can steer.','Exam pages, and later the blind tests.'],
+  ['2026-09-29','n','Live music generation: notation queued on the beat, at every scale from DJing to one voice.','ismail live.'],
+  ['2026-09-29','c','Render ahead: every voice renders whole notes ahead of the playhead, so no streaming synth is needed.','The live engine, built as proposed.'],
+  ['2026-09-29','n','Several turntables and a mixer: prepare the next sequence while one plays.','Decks and queued transitions.'],
+  ['2026-09-30','j','A comparison the ear can truly judge. Nate asked for it; Claude proposed blind trials on single matched gestures.','The blind-test method behind the guitar ladder below.'],
+  ['2026-09-30','n','Small edits make a faster live loop, because agent latency grows with how much is written per call.','The opening rule of the live guide.'],
+  ['2026-09-30','c','A story premise and a title: Crossroads, rewired.','The song, its story and its tempo trick (a 72 shuffle as 144 half-time).'],
+  ['2026-09-30','n','Make it horror: Claude\'s machine devil becomes the devil proper, in a minor key.','The song rewritten in E minor, with the devil through the whole story.'],
+  ['2026-09-30','n','Lucy: the amp as a vintage synth with a waveform monitor.','The main character of the music video.'],
+  ['2026-09-30','n','Eye exams for anything visual, because metrics and vision tools miss what the eye spots.','Side-by-side lens sheets for every visual decision.'],
+  ['2026-10-01','n','Bird calls that start as a cacophony and order themselves into a rhythmic song.','Tambopata, and the bird call engine.'],
+  ['2026-10-01','n','Song work stays in the song folder; one integrating agent merges the handoffs.','The split between song work and engine work, and the migration loop.'],
+  ['2026-10-01','n','Edit the scene in VR, with your hands.','The VR stage.'],
+  ['2026-10-01','n','Act the parts yourself and let physics finish the animation.','The take recorder: body-tracked takes that play on any rigged character.'],
+  ['2026-10-02','n','The engine is missing a per-note start offset.','Per-note offsets in ismail (PR #17).'],
+  ['2026-10-02','n',"A two-way map between his musical words and the system's.",'The lexicon.'],
+  ['2026-10-02','c','A machine governor: one GPU job at a time and a shared job ledger.','The governor every heavy job checks first.'],
+  ['2026-10-02','n','A voice channel inside VR: Claude hears, sees what one eye sees, and talks back.','Voice notes and talk-back in the headset.'],
+  ['2026-10-03','n','Cut highlights from a live stream only when he says he likes something.','The highlights folder, with his words for each clip.'],
+].map(([d, w, idea, became], i) => ({d, w, idea, became, i}));
+const DAYS = ['2026-09-26','2026-09-27','2026-09-28','2026-09-29','2026-09-30','2026-10-01','2026-10-02','2026-10-03'];
+const dayName = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC'});
+let sel = 0;
+function detail(e){
+  const col = e.w === 'n' ? 'you' : e.w === 'c' ? 'me' : '';
+  $('detail').innerHTML = `<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><span class="who ${col}">${WHO[e.w]}</span><span class="mono faint" style="font-size:12px">${dayName(e.d)}</span></div>
+    <p class="idea">${esc(e.idea)}</p><p class="became">Became: ${esc(e.became)}</p>`;
+}
+function draw(){
+  const svg = $('ix'), W = Math.max(720, $('ix').parentNode.clientWidth - 2), padL = 78, padR = 12, cell = 15, r = 6;
+  const colW = (W - padL - padR) / DAYS.length;
+  const stack = {};
+  const place = IDEAS.map(e => { const side = e.w === 'n' ? -1 : e.w === 'c' ? 1 : 0, k = e.d + side; stack[k] = (stack[k] || 0) + 1; return {e, side, n: stack[k], x: padL + (DAYS.indexOf(e.d) + .5) * colW}; });
+  // spread a day's stack over two columns when it is tall
+  const up = Math.max(1, ...place.filter(p => p.side < 0).map(p => p.n)), dn = Math.max(1, ...place.filter(p => p.side > 0).map(p => p.n));
+  const axisY = 30 + up * cell + 8, H = axisY + 12 + dn * cell + 16;
+  svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.innerHTML = '';
+  DAYS.forEach((d, i) => { const x = padL + i * colW;
+    el('line', {x1: x, x2: x, y1: 20, y2: H - 6, stroke: 'var(--line)'}, svg);
+    el('text', {x: x + 5, y: 14}, svg, dayName(d)); });
+  el('line', {x1: padL, x2: W - padR, y1: axisY, y2: axisY, stroke: 'var(--faint)'}, svg);
+  el('text', {x: 8, y: axisY - 8, class: 'lane'}, svg, 'NATE ↑');
+  el('text', {x: 8, y: axisY + 16, class: 'lane'}, svg, 'CLAUDE ↓');
+  place.forEach(({e, side, n, x}) => {
+    const y = side < 0 ? axisY - 12 - (n - 1) * cell : side > 0 ? axisY + 12 + (n - 1) * cell : axisY;
+    const g = el('g', {class: 'm' + (sel === e.i ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': `${WHO[e.w]}, ${dayName(e.d)}: ${e.idea}`}, svg);
+    el('circle', {cx: x, cy: y, r: 10, fill: 'transparent'}, g);
+    if (side === 0) {
+      el('path', {d: `M${x} ${y - r}a${r} ${r} 0 0 0 0 ${2 * r}z`, fill: 'var(--you)', stroke: 'var(--panel)', 'stroke-width': 1.5}, g);
+      el('path', {d: `M${x} ${y - r}a${r} ${r} 0 0 1 0 ${2 * r}z`, fill: 'var(--me)', stroke: 'var(--panel)', 'stroke-width': 1.5}, g);
+    } else el('circle', {cx: x, cy: y, r, fill: side < 0 ? 'var(--you)' : 'var(--me)', stroke: 'var(--panel)', 'stroke-width': 1.5}, g);
+    const pick = () => { sel = e.i; detail(e); svg.querySelectorAll('.m.sel').forEach(m => m.classList.remove('sel')); g.classList.add('sel'); };
+    g.addEventListener('click', pick); g.addEventListener('mouseenter', () => detail(e)); g.addEventListener('mouseleave', () => detail(IDEAS[sel]));
+    g.addEventListener('keydown', k => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); pick(); } });
+  });
+}
+$('ideaList').innerHTML = IDEAS.map(e => `<li class="${e.w}"><span class="d">${e.d.slice(5).replace('-', '/')}</span><span class="s"></span><span><span class="${e.w === 'n' ? 'you' : e.w === 'c' ? 'me' : ''}" style="font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase">${WHO[e.w]}</span> ${esc(e.idea)}<small>Became: ${esc(e.became)}</small></span></li>`).join('');
+detail(IDEAS[0]); draw();
+let rt; if (window.ResizeObserver) new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(draw, 120); }).observe($('ix').parentNode);
+
+// ---------- exam squares ----------
+const LADDERS = [
+  {title: 'Guitar notes, Windward', what: "Single guitar gestures: a note from the record against ismail's copy. Four rounds, each tuned from what he heard in the one before.",
+   rounds: [['round 1', 1, 16, 'A flawed test: the record\'s clips ran past the note. After it: one picked note per clip.'], ['round 2', 3, 28, 'After it: wah fitted per note, starts snapped, a softer pick.'], ['round 3', 14, 24, 'After it: pick variation, fret rattle, amp hiss, the record\'s level curve.'], ['round 4', 20, 22, 'Good enough, he said, and the guitar went into the band.']]},
+  {title: 'Birds, Tambopata', what: 'Twenty-one bird species, each a real recording against two mimic copies, in one blind round.',
+   rounds: [['round 1', 21, 21, '"Can\'t tell" on every trial.']]},
+  {title: "A metal record's intro, Two Kinds of Tears", what: 'Three trials a round. For six rounds the real record was found every time. The score never moved, but each round what gave it away named the next fix.',
+   rounds: [['round 1', 0, 3, 'The notes, and a digital tone. After it: sampled guitars.'], ['round 2', 0, 3, 'Guitar far too low. After it: levels set band by band.'], ['round 3', 0, 3, 'Closer; strum timing and notes. After it: a transcription with the record\'s real starts.'], ['round 4', 0, 3, 'Stuttering, and his idea: get the score. After it: parts from a fan tab.'], ['round 5', 0, 3, 'Timing of single hits, and a stadium reverb. After it: starts snapped, a long hall.'], ['round 6', 0, 3, 'Guitar not powerful enough. Two open (not blind) rounds of tone choices followed.'], ['round 7', 2, 3, '"Can\'t tell" on 2 of 3.']]},
+];
+$('ladders').innerHTML = LADDERS.map(L => `<div class="ladder"><h3>${esc(L.title)}</h3><p class="what">${esc(L.what)}</p><div class="rounds">
+  ${L.rounds.map(([r, u, n, t]) => `<div class="round${u / n >= .6 ? ' hit' : ''}"><div class="r">${r}</div><div><span class="sq" role="img" aria-label="${u} of ${n} undetected">${Array.from({length: n}, (_, i) => `<i class="${i < u ? 'u' : ''}"></i>`).join('')}</span><span class="score">${u} of ${n}</span>${t ? `<span class="tell">${esc(t)}</span>` : ''}</div></div>`).join('')}
+  </div></div>`).join('');
+
+// ---------- songs ----------
+const SONGS = [
+  {title: 'Windward', kind: 'original instrumental', slug: 'paligap', path: 'cjjjjncj',
+   premise: 'An original instrumental, sound-matched to a Hendrix record, with a guitar voice measured from it.',
+   turns: ['Heard as fake, about a third of the way there: a rebuilt guitar, then the voice from the four blind rounds above.', 'Dissonant notes, and a question about microtiming: scales set per chord, timing fitted to the record.', 'Sloppy after six seconds: a finer pitch scan, which also showed the timing model was fitted to noise.']},
+  {title: 'Tambopata', kind: 'original · bird chamber piece', slug: 'tambopata', path: 'nnncjnnnj',
+   premise: 'Real bird species rebuilt from measured calls: a cacophony that orders itself into a rhythmic song.',
+   turns: ['Birds should answer each other across the canopy: answering pairs.', 'Village instruments, far off across the river.', 'A duel between a panpipe player and the birds, a mesmerized unison, then the birds as an orchestra in a danceable groove.']},
+  {title: 'Crossroads Rewired', kind: 'original · blues and brostep', slug: 'crossroads', path: 'cnjnjcjnj',
+   premise: 'A blues player meets the devil. The premise and title were Claude\'s; the devil proper, and the horror, were Nate\'s.',
+   turns: ['Too modern: the guitar went back to the 50s and 60s (tweed amp, slapback).', 'Too major: E minor, with a lick that bends through B flat.', "The devil's boogie felt too short, so it doubled."]},
+  {title: 'Two Kinds of Tears, metal', kind: 'cover · after a metal record', slug: 'tears_metal', path: 'njjnjnnnjjnc',
+   premise: 'A dark metal version of an earlier ismail song, built part by part against a band record.',
+   turns: ['He asked which effects the band used: the amp stack came from that question.', 'Drums heard as synthetic: a real multisampled kit instead.', 'Seven blind rounds on the intro (the third ladder above).']},
+];
+$('songList').innerHTML = SONGS.map(s => `<article class="song"><div class="kind">${esc(s.kind)}</div><h3>${esc(s.title)}</h3><p class="premise">${esc(s.premise)}</p>
+  <div class="path" role="img" aria-label="${s.path.length} versions after the first render">
+    <i class="end" title="first render"></i>${[...s.path].map(k => `<b></b><i class="${k}" title="${k === 'n' ? "Nate's ear, eye or idea" : k === 'c' ? 'measurement or Claude' : 'both'}"></i>`).join('')}</div>
+  <ul class="turns">${s.turns.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+  <div class="ab"><div><div class="lab">first render</div><audio controls preload="none" src="audio/${s.slug}_first.mp3"></audio></div><div><div class="lab">last render</div><audio controls preload="none" src="audio/${s.slug}_final.mp3"></audio></div></div></article>`).join('');
+})();
+</script>
