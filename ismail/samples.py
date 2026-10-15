@@ -24,7 +24,8 @@ SETS = {
     'big_rusty': {
         'voice': 'rusty', 'env': 'RUSTY_SAMPLES', 'sub': 'Samples', 'check': 'kick_24', 'min_files': 1,
         'what': 'Big Rusty Drums (Karoryfer): a 1980s kit, multi-velocity round robins, close/bottom/overhead mics; '
-                'the pieces the voice plays (kick, snare, hats, ride, crash, toms)',
+                'the pieces the voice plays (kick, snare, hats, ride, crash, toms), and every stroke of the toms the toms voice '
+                'plays (center, mallet, brush, rim click, shell)',
         'repo': 'sfzinstruments/karoryfer.big-rusty-drums', 'branch': 'main',
         'paths': ['Samples/kick_24/', 'Samples/snare_14/', 'Samples/hihat_14/', 'Samples/ride_22/', 'Samples/crash_17/',
                   'Samples/crash_sizzle_17/', 'Samples/tom_14/', 'Samples/tom_15/', 'Samples/tom_18/',
@@ -74,6 +75,16 @@ def path(name):
         if _ok(c, s):
             return os.path.abspath(c)
     return None
+
+
+def paths(name):
+    """Every folder on this machine that passes the set's check, in path()'s order (a voice that needs more of a set
+    than the check, such as toms' tom folders, looks through them all: a registered copy may be partial)."""
+    s, out = SETS[name], []
+    for c in (os.environ.get(s['env'], ''), _registry().get(name, ''), os.path.join(root(), name, s['sub'])):
+        if _ok(c, s) and os.path.abspath(c) not in out:
+            out.append(os.path.abspath(c))
+    return out
 
 
 def need(name):

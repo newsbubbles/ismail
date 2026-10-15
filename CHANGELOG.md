@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### toms: real toms retuned to the note, struck where and how you say
+
+- `toms` (drums, performer): the Big Rusty toms (Big Rusty Drums by Karoryfer Samples, CC0 1.0: 14", 15", 18"
+  and a 22" kick played as a floor tom). The note is the drum's pitch: the nearest real drum is retuned to it, each
+  recorded layer from its own measured pitch, its ring bent back to a drum at that pitch, then checked as rendered
+  and corrected toward the real drums (pitch per round robin, ring fitted to their envelope). Lanes `pos` (0
+  center .. 1 rim: the fundamental gives up 6 dB toward the rim, fitted on the snare's center and edge hits) and
+  `stroke` (stick, mallet, brush, rimshot, rimclick, shell, dead) per hit; velocity picks the recorded layer.
+  Heard as real F#1-A3; in a blind exam of 5 pairs one listener found the real drum in none. About 2 s per hit.
+- Samples: `$TOM_SAMPLES`, then the project's `ref/` (any Big Rusty Samples folder holding tom_14, tom_15,
+  tom_18 and tom_22), then every folder of the `big_rusty` set (`samples.paths`: a registered copy may lack the
+  toms). Missing, it says to `samples_fetch('big_rusty')`, which already brings every tom folder and stroke.
+  The closed loop's corrections are kept in `~/.ismail/cache/toms` (`$ISMAIL_TOMS_CACHE`), one file per
+  version of the voice's code and data.
+- Performers that name `project_root` get the project folder (studio and live).
+- `sketch` reaches for it on toms, tom fills or grooves, floor, rack, tribal, melodic or pitched toms: a `toms`
+  part on the key's tonic, a fifth and an octave; a tom groove alone, only the fills over a kit. With no toms on
+  the machine the part is left out and said (nothing stands in for a pitched tom).
+
 ### Camera moves in VR: the path on the clock, and a move recorded like a take
 
 - `stage_trail(object)` (page command `trail`) draws a keyed camera's path over the clock span in the room: a line

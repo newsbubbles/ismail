@@ -1,5 +1,5 @@
 {
- "about": "The voices a first sketch reaches for: each one measured from real recordings or fitted against a record, so a newcomer's first sound is never a console patch. guide shows this list to a new person, voices_list marks these with *, and sketch builds only from them. Add a voice when it is measured and has passed an ear test. A voice with `needs` plays samples fetched on the person's word (samples_fetch); until then sketch uses its `standin` and says so.",
+ "about": "The voices a first sketch reaches for: each one measured from real recordings or fitted against a record, so a newcomer's first sound is never a console patch. guide shows this list to a new person, voices_list marks these with *, and sketch builds only from them. Add a voice when it is measured and has passed an ear test. A voice with `needs` plays samples fetched on the person's word (samples_fetch); until then sketch uses its `standin` and says so (a voice with no stand-in, such as toms, is left out and said).",
  "voices": [
   {
    "name": "grand_piano",
@@ -309,6 +309,28 @@
     "drums"
    ],
    "why": "a real 1980s kit, sampled (Big Rusty Drums, Karoryfer, CC0): velocity layers, round robins, its mics"
+  },
+  {
+   "name": "toms",
+   "family": "drums",
+   "voice": "toms",
+   "instrument": {
+    "type": "code",
+    "voice": "toms",
+    "tail": 3.0,
+    "params": {
+     "spread": 0.5,
+     "humanize_ms": 2.0
+    }
+   },
+   "needs": "big_rusty",
+   "ready_check": true,
+   "standin": null,
+   "range": "F#1-A3, pitched",
+   "roles": [
+    "toms"
+   ],
+   "why": "real toms (Big Rusty Drums, Karoryfer, CC0) retuned to the note: tom grooves and fills, tribal and melodic toms; per hit where the stick lands and how (stick, mallet, brush, rimshot, dead stroke)"
   },
   {
    "name": "emily",

@@ -478,13 +478,29 @@ def render_sampler(p, notes, total_n, auto, sr):
 
 # ------------------------------------------------------------------ code instrument
 
-def takes_beat0(perform):
-    """A performer that keys its randomness on the song beat (see voices/guitar/electric.py) takes beat0."""
+def takes_arg(perform, name):
+    """True when a performer names the argument in its signature (a **kw catch-all does not count)."""
     import inspect
     try:
-        return 'beat0' in inspect.signature(perform).parameters
+        return name in inspect.signature(perform).parameters
     except (TypeError, ValueError):
         return False
+
+
+def takes_beat0(perform):
+    """A performer that keys its randomness on the song beat (see voices/guitar/electric.py) takes beat0."""
+    return takes_arg(perform, 'beat0')
+
+
+def performer_kw(perform, params, beat0, root):
+    """A performer's keyword arguments: its params, plus beat0 and project_root (the project folder, for a voice
+    that finds files in the project's ref/, such as toms) when it names them."""
+    kw = dict(params or {})
+    if takes_beat0(perform):
+        kw['beat0'] = beat0
+    if root and takes_arg(perform, 'project_root'):
+        kw.setdefault('project_root', root)
+    return kw
 
 
 def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.0):
@@ -501,9 +517,7 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
             # a performer voice renders the whole part at once (strings that ring on, legato, whammy):
             # it gets every note and its expression lanes (automation 'inst.lane.<name>', per-sample curves)
             lanes = {k[5:]: v for k, v in (auto or {}).items() if k.startswith('lane.')}
-            kw = dict(p.get('params') or {})
-            if takes_beat0(perform):
-                kw['beat0'] = beat0
+            kw = performer_kw(perform, p.get('params'), beat0, root)
             y = np.asarray(perform(notes, total_n, sr, bpm=bpm, lanes=lanes, **kw), dtype=np.float64)
             if y.ndim == 1:
                 y = np.stack([y, y])
