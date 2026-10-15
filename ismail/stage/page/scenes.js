@@ -45,6 +45,7 @@ export function initScenes(ed, live, xr, construct, mods) {
         }
         return r;
       });
+      if (live.rebased) await Promise.race([live.rebased(), new Promise((res) => setTimeout(res, 3000))]);
       const res = { from, to: name, objects: info.objects, ms: Math.round(performance.now() - t0) };
       live.emit('scene_switched', res);
       return res;
