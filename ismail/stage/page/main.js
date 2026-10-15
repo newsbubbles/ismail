@@ -30,6 +30,7 @@ import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initProps } from './props.js';
 import { initGrab } from './grab.js';
+import { initReplay } from './replay.js';
 import { initParts } from './parts.js';
 import { initFaces } from './faces.js';
 import { initPerform } from './perform.js';
@@ -260,11 +261,16 @@ ed.renderer.xr.addEventListener('sessionstart', () => {
   setTimeout(() => live.emit('headset', { state: 'entered VR' }), 3000);   // cues can greet the user (cues.js)
 });
 ed.renderer.xr.addEventListener('sessionend', () => console.log(`[xr] session ended after ${xrFrames} frames`));
+let replay = null;                                 // replay.js: a take drives the head and hands while nobody is in VR
 ed.renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   guard('xr', () => xr.update(dt));
+  const replaying = !!(replay && guard('replay', () => replay.update()));
+  if (ed.renderer.xr.isPresenting || replaying) {
+    guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('grab', () => grab.update());
+  }
   if (ed.renderer.xr.isPresenting) {
-    guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('grab', () => grab.update()); guard('voice', () => voice.update());
+    guard('voice', () => voice.update());
     guard('body', () => body.update());
     if (!guard('exitVR', () => exitVR.update())) { guard('updates', () => updates.update()); guard('panels', () => panels.update()); }
     guard('gallery', () => gallery.update()); guard('actions', () => actions.update());
@@ -406,6 +412,8 @@ live.handlers.world_reload = async () => {
 const grab = initGrab(ed, live, xr, hands, () => actors, window.VR_props);
 touch.skip = (it, how) => !!grab.heldBy(it) || (how === 'fist' && grab.takeable(it));
 window.VR_grab = grab;
+replay = initReplay(ed, live, xr, hands, grab, desktop);
+window.VR_replay = replay;
 window.VR_parts = initParts(ed, live, () => actors);   // worn parts: glasses off, a mask down (parts.js)
 window.VR_faces = initFaces(ed, live, actors, () => music.now());   // mouth tracks on the music clock (faces.js); capture swaps music.now
 live.emit('page_boot', { scene: name, in_construct: true });
