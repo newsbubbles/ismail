@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### feedback_page: a page the person answers by voice or typing, kept on this computer
+
+- `feedback_page(project, round, items, questions, voice=True, title=None, open=True, port=None)` writes a page
+  into `<project>/work/feedback/<round>/`: the items (clips, pictures or text, each with a label), then numbered
+  questions, each with a text box and a Record button. One shared server on 127.0.0.1 serves every round (found or
+  started by the op, on a free port it records); the page opens in the person's default browser, since an app's
+  browser pane has no microphone. Every typed answer is saved as it changes (`answers.json`, each write also in
+  `answers_log.jsonl`), every recording as a file in `voice/`, transcribed in the background by the speech server
+  the phone page uses, waiting while the CPU is busy. Reopening the page brings back the text, the recordings with
+  their players and the transcripts; clips left waiting when the server stopped are picked up when it starts again.
+- `feedback_read(project, round, since=None)`: the answers verbatim per question, typed text and each clip's file,
+  length and transcript, with times, bounded; says when nothing has come in yet and when transcription is still
+  running. `feedback_list(project=None)` lists rounds, links and what is waiting; `feedback_stop()` stops the server.
+- The skill points to it first for any desk page that takes the person's voice (`blind-tests.md` page mechanics,
+  `user-experience.md`, the SKILL table); hand-built servers only for what it cannot do.
+
 ### skill: pages that take the person's voice open in their own browser
 
 - `blind-tests.md` (page mechanics) and `user-experience.md`: a desk page with voice boxes, recorded takes or any mic

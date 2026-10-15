@@ -31,8 +31,8 @@ CATEGORIES = [
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare')),
     ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
     ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_',)),
-    ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes',
-     ('exam_',)),
+    ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes, '
+             'feedback pages they answer by voice or typing', ('exam_', 'feedback_')),
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
     ('together', 'listening together: record what plays (a mic only with their yes), their words as they say them, '
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
