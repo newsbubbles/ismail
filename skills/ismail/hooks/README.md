@@ -45,3 +45,6 @@ packages installed), `python -S` skips site-packages and starts faster; the comm
 needs only the standard library.
 
 A refusal reaches the agent as the hook's message (exit code 2), so it switches to the op without asking the person.
+
+`stage_preflight` checks whether this hook is on (it only reads the settings files) and, when it is not, prints
+the entry above with this machine's path, ready to paste.

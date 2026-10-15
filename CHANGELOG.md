@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### stage_preflight: one check before every VR session or demo
+
+- `stage_preflight(port=, say=, wait=, headless=)` runs on its own scratch scene, `_preflight` (a floor and a
+  box built in code, hidden from the page's scene list, overwritten on every run), and reports one line per
+  check: server, presence, allow_rule, guard_hook, scratch, load (a headless, muted browser opens the scene and
+  its selftest passes), hot_swap (`stage_asset_install` of a new `scene.glb`, answered by the page's reload),
+  live_insert (`stage_world update=`, then `stage_set_load` unload and load), say (`stage_say`, a caption) and
+  listen (a synthetic `preflight_ping`, marked synthetic, comes back through `stage_listen`). Each is PASS,
+  BLOCKED with the next step, or SKIPPED, with its time; then the verdict, shown on the stage (in VR the headset
+  says it; never spoken on the computer).
+- The settings checks only read `~/.claude/settings.json` and the project's `.claude/settings.json` and
+  `settings.local.json`. A missing allow rule or guard hook is BLOCKED with the exact entry to add and where.
+- While someone is in VR, the checks that need a test page are skipped and say so; the person's own scene is
+  never loaded over, moved or reloaded.
+- `stage_listen` now also hears `preflight_ping` (a server started before this change answers BLOCKED: restart
+  it when nobody is in VR). `stage_asset_install` takes the scratch scene `_preflight`.
+
 ### stage: a command sent right after a scene switch runs
 
 - `stage_scene_go` now answers only after the page has read the new scene's last command id, so an op sent the

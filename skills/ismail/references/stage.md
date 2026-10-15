@@ -21,6 +21,16 @@ person and an agent change the same scene.
   `<address>?scene=<name>` on the desktop, or in the headset through `tailscale serve` (https). One server per port;
   `stage_status` lists servers, scenes, which pages are live and the server's health (workers busy, long-polls,
   threads, free disk; GET /health).
+- **Preflight before a VR session or a demo:** `stage_preflight()` (or `python -m ismail stage_preflight`). On its
+  own scratch scene, `_preflight` (hidden from the page's scene list, overwritten on every run), a headless, muted
+  browser loads a page; then a new `scene.glb` is hot-swapped under it (`stage_asset_install`), `world.json` and
+  a load set change live (`stage_world update=`, `stage_set_load`), `stage_say` shows a caption, and a synthetic
+  event (`preflight_ping`, marked synthetic) goes round the inbox to `stage_listen`. It also reads, never writes,
+  `~/.claude/settings.json` and the project's `.claude/settings.json` and `settings.local.json`: is there an allow
+  rule for `python -m ismail`, and is the named-ops guard in the PreToolUse hooks. One line per check, PASS,
+  BLOCKED with the next step, or SKIPPED; then the verdict, shown on the stage (in VR the headset says it; out of
+  VR it is a caption, never spoken on the computer). While someone is in VR the checks that need the test page
+  are skipped and the line says so; the person's own scene is never loaded over or moved.
 - **Drive:** each page command is a typed tool that waits for the page's answer: `stage_object_set`,
   `stage_object_select`, `stage_say`, `stage_panel_show`, `stage_waypoint_set`, `stage_actor_play`, `stage_stream`,
   `stage_scene_go` and the rest. A tool fails with the next step when no page shows the scene; `stage_cmd` is only

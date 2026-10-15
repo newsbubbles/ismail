@@ -427,7 +427,8 @@ def stage_asset_install(scene: str, file: str, kind: str, name: str = None, scen
         if not ok:
             raise OpError(f'{src} is not a JSON object; a {kind} file must be one')
     d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
-    if not worldmod.NAME_OK(scene) or not (d / scene).is_dir():
+    # _preflight: stage_preflight's own scratch scene (hidden names start with _; it hot-swaps its room there)
+    if not (worldmod.NAME_OK(scene) or scene == '_preflight') or not (d / scene).is_dir():
         raise OpError(f'no scene {scene!r} in {d} (stage_scenes or stage_status lists them; stage_scene_new makes one)')
     if kind in ('scene', 'manifest'):
         if name:
@@ -708,6 +709,7 @@ def stage_note(scenes: str, title: str, level: str = 'normal') -> str:
 
 
 from . import ops_page  # noqa: E402,F401  (registers the page command ops)
+from . import preflight  # noqa: E402,F401  (registers stage_preflight)
 
 
 @op()
