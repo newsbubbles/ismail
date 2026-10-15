@@ -136,6 +136,10 @@ Find any tool by what you need or by role with `ops_find`.
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
   rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_list`, `feedback_stop`): questions the person
+  answers by typing or by voice at the desk, served on this computer, opened in their default browser (an app's
+  browser pane has no microphone), with every typed answer and voice clip saved in the song and transcribed, and
+  all of it back when they reopen the page.
 - **The first session** for someone new: `guide(new_person=True)`, `sketch` versions 1, 2 and 3 on the showcase
   voices (`sketch(base=)`, `sketch_keep` for the next round), and feeling words ("happier", "calmer", "darker") that
   change a sketch by named moves.
@@ -403,6 +407,7 @@ ismail/
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
   phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
   exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer
+  feedback/      feedback pages answered by typing or voice, kept and transcribed; the feedback_* ops (api_feedback.py)
   capture.py     faults in a recording found before it is measured (soft-limited peaks, band-limited capture)
   sketch.py      first sketches from a brief on the showcase voices, versions 1, 2, 3, feeling words
   machine.py     the shared machine's governor: one board for GPU, CPU and memory, heavy jobs run in its slots
