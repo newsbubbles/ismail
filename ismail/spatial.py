@@ -15,10 +15,11 @@ Signal chain, per sample, causal (one numba kernel that both the studio and the 
   -> head model: Brown-Duda head shadow per ear, pinna echoes that move with elevation and front/back, a rear
      high-shelf cue; or measured HRIRs (min-phase, crossfaded per 128 samples) when hrtf names a fetched set
   -> out='headphones': the two ear signals (binaural).
-     out='speakers': ctc=0 is plain equal-power panning with every distance cue; ctc>0 blends in the binaural
-     signal through a recursive 2x2 crosstalk canceller for speakers at +-30 degrees (the exact inverse of the
-     symmetric head-shadow plant, regularised: crosstalk path below 150 Hz is left alone and the loop gain is
-     bounded at 0.9)
+     out='speakers': one render, equal-power panning with every distance cue (no interaural delay, so nothing
+     combs), run through a recursive 2x2 crosstalk canceller for speakers at +-30 degrees whose depth is ctc
+     (0 = off: plain panning; the exact inverse of the symmetric head-shadow plant, regularised: crosstalk below
+     150 Hz is left alone and the loop gain is bounded at 0.9). The near speaker stays the louder one at every
+     frequency and every ctc, and the far ear hears less of the sound as ctc rises
   plus the effect's own room: early reflections and an 8-line feedback delay network fed from the un-occluded
   line, sent at a level that falls slower than the direct sound, so far sources turn reverb-dominant.
 
@@ -59,9 +60,10 @@ DOCS = {
     "spatial": (
         "move a sound in 3D. x, y, z metres (listener at 0,0,0; x right, y front, z up), automatable; the input is "
         "summed to mono, so leave the track's pan at centre. out='speakers' (default) | 'headphones' (binaural). "
-        "ctc 0-1 (speakers only, experimental, default 0.5): 0 = plain stereo panning with the distance cues, above 0 "
-        "blends in crosstalk-cancelled binaural for a listener centred between speakers at +-30 deg, which can place "
-        "sounds outside the speakers; rear and height stay weak on speakers. doppler 1|0: the propagation delay "
+        "ctc 0-1 (speakers only, experimental, default 0.5): 0 = plain stereo panning with the distance cues; above 0 "
+        "a crosstalk canceller of that depth runs on the same pan, so for a listener centred between speakers at "
+        "+-30 deg less of each speaker reaches the far ear and side sounds move outside the speakers (the near "
+        "speaker stays the louder one); rear and height stay weak on speakers. doppler 1|0: the propagation delay "
         "(pitch moves on a flyby, a far sound arrives late); 0 for pitched parts that must stay in key. occlusion 0-1: "
         "stuff in the way (foliage), darker, quieter, smeared direct sound; the reverb is not occluded, so far + "
         "occluded turns reverb-dominant. ground 'soft' | 'hard' (strong floor reflection, sound over water). room 0-1: "
@@ -406,7 +408,7 @@ S_CHP = 16                  # ctc highpass x1, y1 per channel (4)
 S_CSH = 20                  # ctc shelf x1, y1 per channel (4)
 S_ERLP = 24                 # early reflection lowpass L, R
 S_FDNLP = 26                # 8 damping states
-S_REAR2 = 34                # rear lp for the right pan channel
+                            # 34: spare
 S_PAR = 35                  # smoothed occlusion, spread, ctc, room
 N_STATE = 39
 
@@ -533,19 +535,22 @@ def _kernel(mono, cur, sr, doppler, headphones, g_ground, a_ground,
         base = st[S_BASE]
         lat = math.asin(min(1.0, max(-1.0, ux)))
         itd = HEAD_A / C_SOUND * (lat + math.sin(lat)) * sr
-        sL = _cubic(lineA, maskA, cnt - (base + 0.5 * itd))
-        sR = _cubic(lineA, maskA, cnt - (base - 0.5 * itd))
         sC = _cubic(lineA, maskA, cnt - base)
         gnd = _cubic(lineA, maskA, cnt - st[S_BASEG])
         if a_ground > 0:
             st[S_GLP] = (1 - a_ground) * gnd + a_ground * st[S_GLP]
             gnd = st[S_GLP]
         gnd *= g_ground / max(rg, R_MIN)
-        rl = math.sqrt((px + HEAD_A) ** 2 + py * py + pz * pz)
-        rr = math.sqrt((px - HEAD_A) ** 2 + py * py + pz * pz)
-        rc = max(r, R_MIN)
-        eL = g_dir * rc / max(rl, R_MIN) * sL + gnd
-        eR = g_dir * rc / max(rr, R_MIN) * sR + gnd
+        eL = 0.0
+        eR = 0.0
+        if headphones:              # the ear reads (ITD) and per-ear near-field level: the head model's input
+            sL = _cubic(lineA, maskA, cnt - (base + 0.5 * itd))
+            sR = _cubic(lineA, maskA, cnt - (base - 0.5 * itd))
+            rl = math.sqrt((px + HEAD_A) ** 2 + py * py + pz * pz)
+            rr = math.sqrt((px - HEAD_A) ** 2 + py * py + pz * pz)
+            rc = max(r, R_MIN)
+            eL = g_dir * rc / max(rl, R_MIN) * sL + gnd
+            eR = g_dir * rc / max(rr, R_MIN) * sR + gnd
         pc = g_dir * sC + gnd
         rear = max(0.0, -uy)
         # --- spread: decorrelated copies of the centre direct
@@ -559,10 +564,12 @@ def _kernel(mono, cur, sr, doppler, headphones, g_ground, a_ground,
                 ap[j, cnt & mask_a] = vv
                 u = -AP_G * vv + L
             dec[side] = u
-        # --- head: Brown-Duda shadow + rear cue + pinna, or measured HRIRs
+        # --- head (headphones only): Brown-Duda shadow + rear cue + pinna, or measured HRIRs
         bL = 0.0
         bR = 0.0
-        if use_hrir:
+        if not headphones:
+            pass
+        elif use_hrir:
             hh[0, cnt & mask_h] = eL
             hh[1, cnt & mask_h] = eR
             ph = cnt % HRIR_K
@@ -637,29 +644,31 @@ def _kernel(mono, cur, sr, doppler, headphones, g_ground, a_ground,
         if headphones:
             oL, oR = bL, bR
         else:
-            # plain stereo: equal-power pan from the lateral angle, rear darkening. Its two reads slide from the
-            # centre (ctc=0: plain panning, no time difference) to the ear reads as ctc rises, so blending it with
-            # the transaural feeds does not comb
+            # Speakers: ONE render, the equal-power pan of the centre read (every distance cue, rear darkening,
+            # no interaural delay), and ctc sets only how deep a crosstalk canceller runs on it. There is no
+            # second render to blend, so nothing can comb at any ctc, and ctc=0 is the plain pan sample for sample.
+            # Why not the binaural feed: the exact transaural inverse of a source beyond the speakers drives the
+            # far speaker LOUDER than the near one around 0.8-2 kHz (the target's interaural delay is longer than
+            # the crosstalk delay, so there the cancelling term adds to the far feed instead of taking away), and
+            # a partly cancelled binaural feed sends a low note to the wrong ear. With a pan (spread 0) the target
+            # ratio pL/pR = k is real (one signal, 0 <= k <= 1), and with a crosstalk path |h| <= CTC_G < 1 the
+            # speakers are S_L/S_R = (k - h) / (1 - k h), whose size is below 1 at every frequency
+            # (|1 - k h|^2 - |k - h|^2 = (1 - k^2)(1 - |h|^2) > 0): the near speaker is always the louder one,
+            # and the far ear's share falls steadily as ctc rises.
             c = st[S_PAR + 2]
             pp = (min(1.0, max(-1.0, ux)) + 1) * math.pi / 4
-            pL = 0.0
-            pR = 0.0
-            for e in range(2):
-                sP = _cubic(lineA, maskA, cnt - (base + (0.5 if e == 0 else -0.5) * c * itd))
-                v = g_dir * sP + gnd
-                k = S_REAR + 2 if e == 0 else S_REAR2
-                st[k] = (1 - a_rear) * v + a_rear * st[k]
-                v = v - REAR_CUT * rear * (v - st[k])
-                if e == 0:
-                    pL = keep * v * math.cos(pp) * math.sqrt(2.0) + 0.7 * sp * dec[0]
-                else:
-                    pR = keep * v * math.sin(pp) * math.sqrt(2.0) + 0.7 * sp * dec[1]
-            # transaural: the target slides from the panned to the binaural signal and a recursive crosstalk
-            # canceller of the same strength runs on it (ctc=0: off, the plain pan comes out as it is)
+            st[S_REAR + 2] = (1 - a_rear) * pc + a_rear * st[S_REAR + 2]
+            v = keep * (pc - REAR_CUT * rear * (pc - st[S_REAR + 2])) * math.sqrt(2.0)
+            pL = v * math.cos(pp) + 0.7 * sp * dec[0]
+            pR = v * math.sin(pp) + 0.7 * sp * dec[1]
+            # recursive crosstalk canceller (Atal-Schroeder form, the exact inverse of the symmetric plant for
+            # speakers at +-CTC_SPAN_DEG): each feed subtracts the OTHER feed as it reaches the far ear relative to
+            # the near one, i.e. delayed by the crosstalk path (dx samples) and shaped by the contra/ipsi head
+            # shadow ratio, high-passed at CTC_HP_HZ, with its gain bounded by CTC_G. ctc scales that gain only.
             xr = _lin(xh[1], mask_x, cnt - dx)
             xl = _lin(xh[0], mask_x, cnt - dx)
-            fL = (1 - c) * pL + c * bL - c * CTC_G * xr
-            fR = (1 - c) * pR + c * bR - c * CTC_G * xl
+            fL = pL - c * CTC_G * xr
+            fR = pR - c * CTC_G * xl
             for e in range(2):
                 f = fL if e == 0 else fR
                 hp = hb0 * (f - st[S_CHP + 2 * e]) - ha1 * st[S_CHP + 2 * e + 1]

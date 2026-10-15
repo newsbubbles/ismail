@@ -67,8 +67,9 @@ so leave the track's pan at centre. Put it late in the chain (after tone and dyn
 send small: the effect carries its own room, which grows as the sound goes further away.
 
 - `out='speakers'` (default) for stereo speakers, `'headphones'` for binaural. On speakers, `ctc` (0 to 1,
-  experimental) trades plain panning for crosstalk cancellation: sounds can go outside the speakers for a listener
-  centred between them, but it colours the sound off-centre. Let the person's ear set it.
+  experimental) adds crosstalk cancellation to the plain panning: side sounds can go outside the speakers for a
+  listener centred between them, and the near speaker stays the louder one, but it colours the sound off-centre.
+  Let the person's ear set it.
 - Far and hidden (across a river, behind trees): a large distance plus `occlusion` 0.5 to 1. The direct sound gets
   darker and quieter while the room does not, so the far sound turns reverb-heavy.
 - `doppler=0` on pitched parts that must stay in key; leave it on for things that fly by.
