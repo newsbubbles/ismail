@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### stage: replay a take as input, ask the person for a test take, keep the last 2 minutes
+
+- `stage_take_replay(scene, take, start=, end=, rate=, grab=)` plays a recorded take on a page nobody wears: the
+  camera takes the take's head pose and each tracked hand becomes a hand on the page (25 joints with their radii),
+  so the page's gestures, touch and grab read it through the same code as a live hand. The reply lists the page's
+  events while it played, a "grabbed / landed onto" line, the take's own recorded marks and anything still held
+  at the end (let go when the replay ends). `stage_take_replay_stop` ends one early. New page module
+  `page/replay.js`, page command `replay_input`, events `replay_start` and `replay_done`.
+- `stage_test_take(scene, ask, name, seconds=15)` asks the person in VR to act something out, records it as
+  `test_<name>`, and labels it with the ask (meta `kind: test`), so an agent can test offline with the person's
+  own hands later. A take recorded outside VR has no frames, and the reply says so.
+- `stage_take_keep_recent(scene, seconds=30, name=)` keeps what the person just did ("keep that") though nothing
+  was recording: while anyone is in VR the page holds their last 2 minutes of head, hands, body and grab marks in
+  memory at 15 Hz (no audio), until a reload. `info=True` says how much it holds. Page command `take_keep_recent`,
+  event `recent_kept`, meta `from: recent`.
+- Limits: hands only (no controller takes, no recorded selects or sticks), the target ray is approximated from
+  the head through the palm, grab hold and release counts use wall time (rate 1 for a grab verdict), and a replay
+  is refused while someone is in VR on that page and stops if VR starts.
+- New tests (`tests/test_stage_replay.py`).
+
 ### Fixed: spatial on speakers no longer moves a side sound to the other speaker as ctc rises
 
 - With `out='speakers'`, `ctc` above 0 blended a pan (no interaural delay) with a binaural feed (with one) and
