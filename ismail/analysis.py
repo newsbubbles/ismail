@@ -1372,80 +1372,154 @@ def spectrogram_png(path, out_png, t0=0.0, t1=None, grid=None, n_mels=128, f_lo=
     return out_png
 
 
+EYE_PX_MAX = 1600                        # no eye picture is taller or wider than this (a page and an agent read it whole)
+ZOOM_VIEWS = (('time-sharp', 256, 32), ('frequency-sharp', 2048, 128))   # (name, window, hop) in samples at 44.1 kHz,
+# scaled to the file's rate: pulses, onsets and stripes; harmonics and formant ridges (vox eye_zoom, ledger:M193)
+MARK_COLORS = {'brighter': '#4fc3f7', 'darker': '#b2ff59'}
+
+
+def _mono(path):
+    import soundfile as sf
+    y, sr = sf.read(str(path), dtype='float64')
+    return (y.mean(axis=1) if y.ndim > 1 else y), sr
+
+
 def _eye_png(path, out_png, t0, t1, f_lo, f_hi, words, target, ruler, box, size=(6.4, 4.2), dpi=100):
+    y, sr = _mono(path)
+    return _eye_stack(out_png, [dict(y=y, sr=sr, t0=t0, t1=t1, words=words, target=target, name=str(path))],
+                      f_lo, f_hi, ruler, box, size, dpi)
+
+
+def zoom_png(path, out_png, t0=0.0, t1=None, f_lo=0.0, f_hi=16000.0, words=None, target=None, ruler=True,
+             views=ZOOM_VIEWS):
+    """One time x frequency box of a sound drawn at two resolutions, stacked: the time-sharp view (256-point
+    window, 32-sample hop at 44.1 kHz: pulses, onsets, a boundary 50 ms early) above the frequency-sharp one
+    (2048-point: harmonics, formant ridges). Each panel is an eye picture (spectrogram_png's plot box, words, ruler),
+    so a box has the same pixel box in both panels (one panel lower) and a spot the same eye_address; out_png +
+    '.json' lists the panels. Windows scale with the file's rate, so a view keeps its ms and Hz resolution."""
+    y, sr = _mono(path)
+    k = sr / 44100.0
+    panels = [dict(y=y, sr=sr, t0=t0, t1=t1, words=words or [], target=target, name=str(path), label=name,
+                   nfft=max(16, int(round(n * k))), hop=max(1, int(round(h * k)))) for name, n, h in views]
+    return _eye_stack(out_png, panels, f_lo, f_hi, ruler, EYE_BOX)
+
+
+def _eye_stack(out_png, panels, f_lo, f_hi, ruler, box, size=(6.4, 4.2), dpi=100):
+    """Eye pictures stacked top to bottom in one PNG, each on its own copy of the plot box `box` (so every panel has
+    the pixel geometry of a lone eye picture, one panel height lower). A panel: y, sr, t0, t1 (s), words, target,
+    name, and optional nfft/hop (samples; default 1024/64), label (drawn in the corner), marks [{t0, t1, f_lo, f_hi,
+    sign, label}] (outlined boxes in s and Hz of that panel's file). Writes out_png + '.json': the single-picture
+    keys of the first panel, plus 'panels' when there are several."""
     import json
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import matplotlib.mlab as mlab
-    import soundfile as sf
-    y, sr = sf.read(str(path), dtype='float64')
-    if y.ndim > 1:
-        y = y.mean(axis=1)
-    t1 = len(y) / sr if t1 is None else t1
+    from matplotlib.patches import Rectangle
     if not 0 <= f_lo < f_hi:
         raise ValueError(f"f_lo {f_lo} Hz must be under f_hi {f_hi} Hz")
-    seg = y[max(0, int((t0 - 0.03) * sr)):int((t1 + 0.03) * sr)]
-    S, f, t = mlab.specgram(seg, NFFT=1024, Fs=sr, noverlap=1024 - 64)
-    t = t + max(0.0, t0 - 0.03)
-    m = (t >= t0) & (t <= t1)
-    if not m.any():
-        raise ValueError(f"window {t0:.3f}-{t1:.3f} s holds no frame of {path} ({len(y) / sr:.2f} s)")
-    d = t1 - t0
-    fig = plt.figure(figsize=size, dpi=dpi)
-    ax = fig.add_axes(list(box))
-    ax.imshow(10 * np.log10(S[:, m] + 1e-20), origin='lower', aspect='auto', cmap='magma', vmin=-150, vmax=-40,
-              extent=[0, d * 1000, 0, f[-1]], interpolation='nearest')
-    ax.set_ylim(f_lo, f_hi)
-    ax.set_xlim(0, d * 1000)
-    ticks = [x for x in (0, 2000, 4000, 8000, 12000, 16000, 20000) if f_lo <= x <= f_hi]
-    ax.set_yticks(ticks)
-    ax.set_yticklabels([f"{x // 1000}k" if x else '0' for x in ticks], fontsize=7)
-    if ruler:
-        step = 50 if d < 0.6 else 100 if d < 2 else 500 if d < 10 else 1000
-        ax.set_xticks(np.arange(0, d * 1000 + 1, step))
-        ax.tick_params(axis='x', labelsize=7)
-        ax.set_xlabel('ms', fontsize=7, labelpad=1)
-    else:
-        ax.set_xticks([])
-    top = f_lo + (f_hi - f_lo) * 15300 / 16000
-    for w in words:
-        if w['t1'] < t0 or w['t0'] > t1:
-            continue
-        hot = bool(target) and w['w'] == target['w'] and abs(w['t0'] - target['t0']) < 1e-6
-        for e in (w['t0'], w['t1']) if hot else (w['t0'],):
-            if t0 <= e <= t1:
-                ax.axvline((e - t0) * 1000, color='w', lw=1.2 if hot else 0.6, alpha=0.9 if hot else 0.5)
-        ax.text(max(0.0, (w['t0'] - t0) * 1000) + 3, top, w['w'], color='w', fontsize=10 if hot else 8,
-                fontweight='bold' if hot else 'normal', va='top')
+    n = len(panels)
+    if n * size[1] * dpi > EYE_PX_MAX:
+        raise ValueError(f"{n} panels make a picture over {EYE_PX_MAX} px tall; draw at most "
+                         f"{int(EYE_PX_MAX // (size[1] * dpi))}")
+    fig = plt.figure(figsize=(size[0], size[1] * n), dpi=dpi)
+    views = []
+    for i, pn in enumerate(panels):
+        y, sr, t0 = pn['y'], pn['sr'], pn['t0']
+        t1 = len(y) / sr if pn.get('t1') is None else pn['t1']
+        nfft, hop = pn.get('nfft', 1024), pn.get('hop', 64)
+        seg = y[max(0, int((t0 - 0.03) * sr)):int((t1 + 0.03) * sr)]
+        S, f, t = mlab.specgram(seg, NFFT=nfft, Fs=sr, noverlap=nfft - hop)
+        t = t + max(0.0, t0 - 0.03)
+        m = (t >= t0) & (t <= t1)
+        if not m.any():
+            plt.close(fig)
+            raise ValueError(f"window {t0:.3f}-{t1:.3f} s holds no frame of {pn['name']} ({len(y) / sr:.2f} s)")
+        d = t1 - t0
+        pbox = [box[0], (n - 1 - i + box[1]) / n, box[2], box[3] / n]
+        ax = fig.add_axes(pbox)
+        ax.imshow(10 * np.log10(S[:, m] + 1e-20), origin='lower', aspect='auto', cmap='magma', vmin=-150, vmax=-40,
+                  extent=[0, d * 1000, 0, f[-1]], interpolation='nearest')
+        ax.set_ylim(f_lo, f_hi)
+        ax.set_xlim(0, d * 1000)
+        ticks = [x for x in (0, 2000, 4000, 8000, 12000, 16000, 20000) if f_lo <= x <= f_hi]
+        ax.set_yticks(ticks)
+        ax.set_yticklabels([f"{x // 1000}k" if x else '0' for x in ticks], fontsize=7)
+        if ruler:
+            step = 50 if d < 0.6 else 100 if d < 2 else 500 if d < 10 else 1000
+            ax.set_xticks(np.arange(0, d * 1000 + 1, step))
+            ax.tick_params(axis='x', labelsize=7)
+            ax.set_xlabel('ms', fontsize=7, labelpad=1)
+        else:
+            ax.set_xticks([])
+        top = f_lo + (f_hi - f_lo) * 15300 / 16000
+        words, target = pn.get('words') or [], pn.get('target')
+        for w in words:
+            if w['t1'] < t0 or w['t0'] > t1:
+                continue
+            hot = bool(target) and w['w'] == target['w'] and abs(w['t0'] - target['t0']) < 1e-6
+            for e in (w['t0'], w['t1']) if hot else (w['t0'],):
+                if t0 <= e <= t1:
+                    ax.axvline((e - t0) * 1000, color='w', lw=1.2 if hot else 0.6, alpha=0.9 if hot else 0.5)
+            ax.text(max(0.0, (w['t0'] - t0) * 1000) + 3, top, w['w'], color='w', fontsize=10 if hot else 8,
+                    fontweight='bold' if hot else 'normal', va='top')
+        for mk in pn.get('marks') or []:
+            c = MARK_COLORS.get(mk.get('sign'), 'w')
+            x0, x1 = (max(mk['t0'], t0) - t0) * 1000, (min(mk['t1'], t1) - t0) * 1000
+            ax.add_patch(Rectangle((x0, mk['f_lo']), max(x1 - x0, 1.0), max(mk['f_hi'] - mk['f_lo'], 1.0), fill=False,
+                                   edgecolor=c, lw=1.4))
+            if mk.get('label'):
+                ax.text(x0 + 2, min(mk['f_hi'], f_hi), mk['label'], color=c, fontsize=8, fontweight='bold', va='bottom')
+        if pn.get('label'):
+            ax.text(0.01, 0.02, pn['label'], transform=ax.transAxes, color='w', fontsize=7, va='bottom')
+        views.append({'axes': pbox, 't0': round(t0, 4), 't1': round(t1, 4), 'nfft': nfft, 'hop': hop,
+                      'label': pn.get('label'), 'words': [{'w': w['w'], 't0': w['t0'], 't1': w.get('t1')}
+                                                           for w in words if w['t1'] >= t0 and w['t0'] <= t1]})
     fig.savefig(out_png)
     plt.close(fig)
+    v0 = views[0]
+    meta = {'png': os.path.basename(str(out_png)), 'axes': v0['axes'] if n > 1 else list(box),
+            'px': [int(size[0] * dpi), int(size[1] * dpi * n)], 't0': v0['t0'], 't1': v0['t1'], 'f_lo': f_lo,
+            'f_hi': f_hi, 'words': v0['words']}
+    if n > 1:
+        meta['panels'] = views
     with open(str(out_png) + '.json', 'w', encoding='utf8') as fh:
-        json.dump({'png': os.path.basename(str(out_png)), 'axes': list(box), 'px': [int(size[0] * dpi), int(size[1] * dpi)],
-                   't0': round(t0, 4), 't1': round(t1, 4), 'f_lo': f_lo, 'f_hi': f_hi,
-                   'words': [{'w': w['w'], 't0': w['t0'], 't1': w.get('t1')} for w in words
-                             if w['t1'] >= t0 and w['t0'] <= t1]}, fh)
+        json.dump(meta, fh)
     return out_png
+
+
+def _eye_panel_at(view, fx, fy):
+    """(panel, u, v): the panel of an eye picture under a spot (the view itself for a lone picture) and the spot as
+    fractions of its plot box, or None off every plot box."""
+    for pn in view.get('panels') or [view]:
+        l, b, w, h = pn['axes']
+        u, v = (fx - l) / w, (1 - fy - b) / h
+        if 0 <= u <= 1 and 0 <= v <= 1:
+            return pn, u, v
+    return None
 
 
 def eye_point(view, fx, fy):
     """A spot on an eye picture as fractions of the image (fx from the left, fy from the top, as a page reads a
-    click) -> (s from the start of the file, Hz), or None off the plot box. view: the picture's .json."""
-    l, b, w, h = view['axes']
-    u, v = (fx - l) / w, (1 - fy - b) / h
-    if not (0 <= u <= 1 and 0 <= v <= 1):
+    click) -> (s from the start of the file, Hz), or None off the plot box. view: the picture's .json (a stacked
+    picture from zoom_png: the panel under the spot)."""
+    hit = _eye_panel_at(view, fx, fy)
+    if hit is None:
         return None
-    return view['t0'] + u * (view['t1'] - view['t0']), view['f_lo'] + v * (view['f_hi'] - view['f_lo'])
+    pn, u, v = hit
+    return pn['t0'] + u * (pn['t1'] - pn['t0']), view['f_lo'] + v * (view['f_hi'] - view['f_lo'])
 
 
 def eye_address(view, fx, fy, label=''):
     """The shared address of a spot, as the person reads it off a screenshot and the agent finds it again:
-    '<label> 0.19 s 7.9 kHz "this" hiss' (time from the window start; the word under it or 'gap'; the band name)."""
-    p = eye_point(view, fx, fy)
-    if p is None:
+    '<label> 0.19 s 7.9 kHz "this" hiss' (time from the window start; the word under it or 'gap'; the band name).
+    On a stacked picture the same moment gives the same address in every panel."""
+    hit = _eye_panel_at(view, fx, fy)
+    if hit is None:
         return None
-    t, f = p
-    w = [x for x in view.get('words') or [] if x['t0'] <= t]
+    pn = hit[0]
+    t, f = eye_point(view, fx, fy)
+    w = [x for x in pn.get('words') or [] if x['t0'] <= t]
     word = w[-1]['w'] if w and (w[-1].get('t1') is None or t <= w[-1]['t1'] + 0.02) else 'gap'
     band = next(n for top, n in EYE_BANDS if f < top) if f < EYE_BANDS[-1][0] else EYE_BANDS[-1][1]
-    return (f"{label} " if label else '') + f'{t - view["t0"]:.2f} s {f / 1000:.1f} kHz "{word}" {band}'
+    return (f"{label} " if label else '') + f'{t - pn["t0"]:.2f} s {f / 1000:.1f} kHz "{word}" {band}'

@@ -2227,7 +2227,8 @@ def spectrogram(project: str, source: str = None, bars: list = None, out: str = 
     gargle, old TTS, cut off, pre-delay, reversed, phaser); the numbers say close but the ear says no; the sound is a
     voice, sung words or a played instrument; two rounds passed without progress; or to see that a fix made its spot
     fade. Draw the reference and yours on the same window, two ways (a few ms around an edge; a whole word or note for
-    texture), and read them one above the other (references/listening.md, "When to zoom")."""
+    texture; sound_zoom draws both in one picture), and read them one above the other (references/listening.md,
+    "When to zoom"). Where yours differs beyond the reference's own spread: sound_zoom_diff."""
     P = _load(project)
     path, g = P.source(source, bars)
     a, b = (g.bar_time(bars[0]), g.bar_time(bars[1] + 1)) if bars else (0.0, None)
@@ -2325,6 +2326,7 @@ def call(name, /, **kw):
 from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison ops)
 from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)
 from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
+from . import api_zoom  # noqa: E402,F401  (registers sound_zoom, sound_zoom_diff, region_measure, ledger:M193)
 from . import api_exam  # noqa: E402,F401  (registers exam_check, the exam pre-flight)
 from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list/measure, ledger:M177)
 from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
