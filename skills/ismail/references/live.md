@@ -564,6 +564,8 @@ it like any recorded phrase. The studio side (autotune first in the chain, one p
   renders, so the reply moves slow first launches a bar or two later; every later pass reuses them, and
   identical notes (a repeated chord) render once. Performers render a bar at a time with a second of context:
   `kit70` about 5x realtime; check `live_status` for `electric` with your part. Queue them a phrase ahead.
+  `toms` is slower than realtime (about 2 s per hit, more the first time a drum and stroke is retuned): render
+  its part in the studio and play it as audio rather than live.
 - `live_start` takes ~20 to 30 s: the render workers warm up every instrument kind and every mimic profile in
   the folder before it returns, so the first clips land on time.
 - Mimic profiles come out quiet next to synths and code voices (about 9 dB): check their level in

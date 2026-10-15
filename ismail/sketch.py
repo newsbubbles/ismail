@@ -46,7 +46,7 @@ LEVEL = {('drums', 'kit70'): 7.0, ('bass', 'pbass70'): -9.0, ('bass', 'contrabas
          ('keys', 'grand_piano'): -7.0, ('melody', 'grand_piano'): 0.0, ('melody', 'violin'): -1.0,
          ('melody', 'strat70_clean'): 1.0, ('counter', 'cello'): 1.0, ('pad', 'cello'): -3.0,
          ('chords', 'strat70_rhythm'): -3.0, ('harmony', 'grand_piano'): -10.0, ('keys', 'rhodes'): -12.0,
-         ('drums', 'rusty'): 5.0, ('melody', 'emily'): 0.0, ('fx', 'crackle'): -6.0}
+         ('drums', 'rusty'): 5.0, ('melody', 'emily'): 0.0, ('fx', 'crackle'): -6.0, ('toms', 'toms'): 0.0}
 # a classical or soft sketch: the tune on top, every other part under it (the dress rehearsal's cello read 17 to
 # 22 dB over the piano melody, and the chord readout named its notes instead of the chords)
 LEVEL_UNDER = {'counter': -9.0, 'pad': -13.0, 'bass': -13.0, 'harmony': -11.0, 'keys': -11.0}
@@ -95,6 +95,8 @@ INSTRUMENTS = [
     (r'vocals?|singer|singing|voice|rap\w*|choir', None, None,
      'no singing voice in the showcase yet: {word} left out (say it to the person)'),
     (r'vinyl(?: crackle)?|crackle|record noise|surface noise|dusty', 'fx', 'crackle', None),
+    (r'toms|tom[- ]toms?|(?:floor|rack|tribal|melodic|pitched|big) toms?|tom (?:fills?|grooves?|rolls?)|'
+     r'tribal (?:drums?|percussion)', 'toms', 'toms', None),
     (r'breakbeats?|breaks|boom[- ]?bap|live drums|acoustic drums|sampled (?:kit|drums)', 'drums', 'rusty', None),
     (r'drums?|kit|beat|percussion|hats|hi-?hats?|ride', 'drums', 'kit70', None),
 ]
@@ -124,10 +126,11 @@ PLAIN = {'grand_piano': 'a grand piano', 'violin': 'a violin', 'cello': 'a cello
          'kit70': 'a drum kit', 'rusty': 'a real drum kit', 'strat70_rhythm': 'a rhythm guitar',
          'strat70_clean': 'an electric guitar', 'emily': 'a clean electric guitar', 'pbass70': 'a bass guitar',
          'sub_bass': 'a deep sub bass', 'growl': 'a growling synth bass', 'rhodes': 'a Rhodes electric piano',
-         'crackle': 'record crackle', 'clarinet': 'a clarinet', 'bassoon': 'a bassoon', 'horn': 'a French horn'}
+         'crackle': 'record crackle', 'clarinet': 'a clarinet', 'bassoon': 'a bassoon', 'horn': 'a French horn',
+         'toms': 'a set of toms'}
 PLAIN_ROLE = {'melody': 'the tune', 'keys': 'the chords', 'harmony': 'the chords', 'chords': 'the chords',
               'counter': 'a second line', 'pad': 'the long notes', 'bass': 'the bass', 'sub': 'the low end',
-              'drums': 'the drums', 'fx': 'the texture'}
+              'drums': 'the drums', 'toms': 'the toms', 'fx': 'the texture'}
 # brief words read as a wish for a sound that no voice or setting models yet: said, not silently dropped
 UNMODELLED = r'gritty|lush|airy|punchy|glitch\w*|distorted|fuzz\w*|swirl\w*|shimmer\w*|wobbl\w*|tape[- ]?saturat\w*|' \
              r'chopped|vocal chops|sidechain\w*|reverse\w*|stutter\w*|bitcrush\w*|lo[- ]?fi tape'
@@ -182,7 +185,7 @@ def contrast(a, b, plainw=False):
     return out
 
 
-ROLE_ORDER = ['drums', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody', 'fx']
+ROLE_ORDER = ['drums', 'toms', 'sub', 'bass', 'chords', 'keys', 'harmony', 'pad', 'counter', 'melody', 'fx']
 
 
 # A sketch is a first impression, so it is mastered and placed in a room (moves:M021 exam r1, Nate 10-06: "is this
@@ -192,7 +195,7 @@ MASTER = {   # feel -> (target LUFS, room rt60 s, keys warmth)
     'break': (-12.0, 1.2, True), 'four': (-9.5, 0.9, False), 'jazz': (-14.0, 1.4, True), 'rock': (-11.0, 1.0, True),
     'classical': (-17.0, 2.4, False), None: (-16.0, 1.8, False)}
 ROOM_SEND = {'keys': -12.0, 'chords': -14.0, 'harmony': -12.0, 'pad': -10.0, 'counter': -12.0, 'melody': -13.0,
-             'drums': -24.0}
+             'drums': -24.0, 'toms': -18.0}
 
 
 def production(spec, roles):
@@ -385,7 +388,7 @@ def read_brief(brief):
     return spec
 
 
-FAMILY_WORDS = {'drums': r'drums?|beat|percussion|kit|breakbeats?|hats|ride', 'guitar': r'guitars?',
+FAMILY_WORDS = {'drums': r'drums?|beat|percussion|kit|breakbeats?|hats|ride|toms?', 'guitar': r'guitars?',
                 'bass': r'bass\w*|sub\w*|808s?', 'keys': r'piano|keys|rhodes|organ', 'strings': r'strings?|violin|cello',
                 'winds': r'winds?|woodwinds?|clarinets?|bassoons?', 'brass': r'brass|horns?'}
 
@@ -401,10 +404,17 @@ def _roles_named(word, parts):
 
 
 def ready(voice):
-    """A showcase voice can play here: it needs no samples, or its sample set is on this machine."""
+    """A showcase voice can play here: it needs no samples, or its sample set is on this machine (a voice that needs
+    more of its set than the set's own check, such as toms' tom folders, answers with its samples_ready())."""
     v = next((x for x in showcase()['voices'] if x['name'] == voice), None)
     if not v or not v.get('needs'):
         return True
+    if v.get('ready_check'):
+        from . import voices
+        try:
+            return bool(voices.load(v.get('voice') or v['name'], None).samples_ready())
+        except Exception:
+            return False
     from . import samples
     return samples.path(v['needs']) is not None
 
@@ -417,13 +427,16 @@ def _stand_ins(spec):
         v = sc.get(voice, {})
         if v.get('needs') and not ready(voice):
             st = samples.SETS[v['needs']]
-            spec['parts'][role] = v['standin']
+            if v.get('standin'):
+                spec['parts'][role] = v['standin']
+            else:                                  # nothing here plays it in its place (toms: the note is a pitch)
+                spec['parts'].pop(role)
             line = (f"the {voice} voice plays real samples not on this machine yet ({st['what']}): ask the person, "
-                    f"then samples_fetch('{v['needs']}') (~{st['size_mb']} MB, {st['licence']}); {v['standin']} "
-                    f"plays it for now")
+                    f"then samples_fetch('{v['needs']}') (~{st['size_mb']} MB, {st['licence']}); "
+                    + (f"{v['standin']} plays it for now" if v.get('standin') else "its part is left out for now"))
             if line not in spec['said']:
                 spec['said'].append(line)
-                spec.setdefault('subs', []).append({'asked': voice, 'role': role, 'plays': v['standin'],
+                spec.setdefault('subs', []).append({'asked': voice, 'role': role, 'plays': v.get('standin'),
                                                     'download_mb': st['size_mb']})
 
 
@@ -434,7 +447,8 @@ def say_plain(spec):
         who = plain(s['plays']) if s.get('plays') else None
         if s.get('download_mb'):
             out.append(f"the real {plain(s['asked']).split(' ', 1)[-1]} needs a download of about {s['download_mb']} "
-                       f"MB first; {who} plays its part until you say yes to it")
+                       f"MB first; " + (f"{who} plays its part until you say yes to it" if who else
+                                        "they're left out until you say yes to it"))
         elif s.get('asked') is None:
             out.append(f"you didn't name an instrument for the tune, so {who} plays it")
         elif s['role'] == 'section':
@@ -820,6 +834,33 @@ def drum_bar(feel, bar, sec, rng, spec, fill, crash):
     return [(bar, b, p, d, v) for b, p, d, v in out]
 
 
+def tom_bar(bar, sec, rng, spec, fill, low, alone):
+    """One bar of the toms (pitched: low, a fifth up, an octave up). Alone, a tom groove (intro the low tom on 1
+    and 3, a breakdown one low hit, a short fill closing each 4-bar phrase); with a kit, only the fills: the end of
+    each 4-bar phrase and a fill into the next section."""
+    dense = spec.get('dense', 0)
+    mid, high = low + 7, low + 12
+    out = []
+    if alone and sec == 'intro':
+        out += [(0, low, 1, 82), (2, low, 1, 72)]
+    elif alone and sec == 'breakdown':
+        out += [(0, low, 2, 76)]
+    elif alone:
+        out += [(0, low, 0.5, 104), (1.5, mid, 0.5, 88), (2, low, 0.5, 98), (2.5, high, 0.25, 80),
+                (3.5, mid, 0.5, 90)]
+        if dense >= 0:
+            out += [(0.75, low, 0.25, 72), (2.75, high, 0.25, 70)]
+        if dense > 0:
+            out += [(1, mid, 0.5, 66), (3, low, 0.5, 84)]
+    if fill:
+        out = [n for n in out if n[0] < 2]
+        out += [(2 + i * 0.25, p, 0.25, 78 + i * 3) for i, p in enumerate((high, high, mid, mid, low, low, low, low))]
+    elif bar % 4 == 3 and sec not in ('intro', 'breakdown'):
+        out = [n for n in out if n[0] < 3]
+        out += [(3 + i * 0.25, p, 0.25, 80 + i * 4) for i, p in enumerate((high, mid, mid, low))]
+    return [(bar, b, p, d, max(1, min(127, v + rng.randint(-4, 4)))) for b, p, d, v in out]
+
+
 def note_text(notes, bar):
     """The notes of one bar as notes_write text."""
     L = []
@@ -914,6 +955,14 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
             notes = stabs(chords, reg, rng)
         elif role == 'fx':
             notes = [(0, 0, 60, bars * 4, 72)]
+        elif role == 'toms':
+            low = 33 + (tonic - 9) % 12                    # the key's tonic as the low tom: A1 .. G#2
+            notes = []
+            for b in range(bars):
+                nxt = secs[b + 1] if b + 1 < bars else None
+                fill = (nxt is not None and nxt != secs[b] and nxt in ('groove', 'outro')
+                        and secs[b] not in ('breakdown', 'intro')) or (not form and b == bars - 2)
+                notes += tom_bar(b, secs[b], rng, spec, fill, low, 'drums' not in spec['parts'])
         else:
             notes = []
             for b in range(bars):
@@ -927,7 +976,7 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
         keep = []
         for n in notes:
             b = n[0]
-            if role not in ('drums', 'fx') and role not in ACTIVE[secs[b]]:
+            if role not in ('drums', 'toms', 'fx') and role not in ACTIVE[secs[b]]:
                 continue
             if secs[b] == 'outro':                           # the outro fades: velocity falls across it
                 first = secs.index('outro')
