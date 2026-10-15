@@ -516,7 +516,8 @@ sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 
 Effects run two ways. An effect with a live processor (every built-in type but `autotune`, the guitar rig included) runs
 block by block on the mixer and matches the studio version (held by tests): a wah's `pos`, a rotary's `speed`, a
-univibe's `rate_hz` move with `live_fx` like any filter. An amp or tape with hiss on keeps hissing while its track
+univibe's `rate_hz` move with `live_fx` like any filter. A `spatial` effect's `x`, `y`, `z` and `listener_yaw` move
+the same way; its `trajectory` starts when it is set or the effect is inserted, whichever is later. An amp or tape with hiss on keeps hissing while its track
 plays, as in the studio, and sleeps with the track when its notes stop. An effect that exists only in the studio
 (a new type nobody has written a live twin for) is **baked**: the render workers run it on each note or phrase
 before the mix. `live_status` marks it `(baked)`. A baked effect cannot be moved with `live_fx`, restarts its LFOs

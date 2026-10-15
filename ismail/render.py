@@ -422,7 +422,7 @@ def _code_hash():
     # any change to the synthesis/effect code invalidates cached track renders
     h = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py'):
+    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py'):
         with open(os.path.join(here, f), 'rb') as fh:
             h.update(fh.read())
     return h.hexdigest()[:12]

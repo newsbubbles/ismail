@@ -47,7 +47,9 @@ FX_DEFAULTS = {
                  "formant": 0.0, "lo_hz": 70.0, "hi_hz": 1000.0, "mix": 1.0},
 }
 from . import rig as _rig
+from . import spatial as _spatial
 FX_DEFAULTS.update(_rig.DEFAULTS)
+FX_DEFAULTS.update(_spatial.DEFAULTS)
 VOWEL_FORMANTS = {'i': (280, 2250, 2900), 'e': (400, 2000, 2600), 'E': (550, 1770, 2500), 'a': (750, 1250, 2600),
                   'A': (650, 1050, 2500), 'o': (450, 850, 2400), 'u': (320, 800, 2300), '@': (500, 1450, 2500)}
 FX_TYPES = tuple(FX_DEFAULTS)
@@ -61,6 +63,7 @@ AUTOMATABLE = {
     "duck": ("depth_db",), "gate": ("depth",), "vocoder": ("mix",), "bitcrush": ("mix",), "autotune": ("mix",),
 }
 AUTOMATABLE.update(_rig.AUTOMATABLE)
+AUTOMATABLE.update(_spatial.AUTOMATABLE)
 
 
 class FxError(ValueError):
@@ -84,6 +87,11 @@ def normalize(fx):
         for b in full['bands']:
             if b.get('type', 'peak') not in EQ_BAND_TYPES:
                 raise FxError(f"eq band type {b.get('type')!r}: use {', '.join(EQ_BAND_TYPES)}")
+    if fx['type'] == 'spatial':
+        try:
+            _spatial.validate(full)
+        except _spatial.SpatialError as e:
+            raise FxError(str(e))
     return full
 
 
@@ -184,6 +192,8 @@ def apply_fx(x, fx, ctx, idx):
         return x
     if t in _rig.APPLY:
         return _rig.APPLY[t](x, fx, sr, P)
+    if t == 'spatial':
+        return _spatial.spatial(x, fx, sr, P, ctx.offset_samples)
     if t == 'gain':
         g = dsp.undb(P('gain_db'))
         gl, gr = dsp.pan_gains(P('pan'))

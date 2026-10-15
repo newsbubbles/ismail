@@ -631,6 +631,8 @@ class Engine:
         retired = lambda ch: (lambda i: G.LiveBlock(self, 'retired', ch, i, p0, n, post, onsets))  # noqa: E731
         dormant_after = int(DORMANT_S * SR) + G.LAT_BUDGET
         noisy_after = int(DORMANT_NOISY_S * SR) + G.LAT_BUDGET
+        sleep_after = lambda ch: max(noisy_after if ch.noise else dormant_after,   # noqa: E731
+                                     int(ch.hold_s * SR) + G.LAT_BUDGET)        # a far source's sound is still on its way
         for name in order:
             t = tracks.get(name)
             if t is None:
@@ -638,7 +640,7 @@ class Engine:
             path = t['path']
             x = bufs.get(name)
             if x is None:
-                if t.get('quiet', 0) > (noisy_after if path.chain.noise else dormant_after) and not path.retiring \
+                if t.get('quiet', 0) > sleep_after(path.chain) and not path.retiring \
                         and t['cur'] == (t['gl'], t['gr']):
                     t['ms'] *= a               # dormant: no notes, tails died away; costs nothing until a note
                     self._hold(t, p0)
@@ -692,7 +694,7 @@ class Engine:
                 deck_fed.add(t['deck'])
         for bname, b in buses:
             path = b['path']
-            if bname not in bus_fed and b.get('quiet', 0) > (noisy_after if path.chain.noise else dormant_after) \
+            if bname not in bus_fed and b.get('quiet', 0) > sleep_after(path.chain) \
                     and not path.retiring:
                 b['ms'] *= a
                 self._hold(b, p0)

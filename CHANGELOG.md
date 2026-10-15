@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### spatial: move a sound in 3D, for stereo speakers or headphones, in the studio and live
+
+- A new effect type, `spatial` (`ismail/spatial.py`, live twin `ismail/live/spatial_blocks.py`, one numba kernel
+  for both). Position in metres around the listener (`x` right, `y` front, `z` up), automatable, or a `trajectory`:
+  keyframes (linear or smooth, written as x/y/z or az/el/dist), an analytic orbit, a line or a flyby, with loop and
+  start time; errors say how to write it. Studio trajectories run on song time; live ones start when set or inserted.
+- The chain: mono sum, air absorption, `occlusion` (direct path only), one fractional delay line for Doppler and
+  the interaural delay, clamped 1/r gain and a ground reflection (`ground` soft or hard), a spherical head model
+  (head shadow, pinna echoes for elevation, a rear cue), then `out='headphones'` (binaural) or `out='speakers'`
+  with `ctc` 0 to 1 (0 plain equal-power panning; above 0 a recursive crosstalk canceller for speakers at
+  +-30 degrees, experimental). The effect carries its own early reflections and diffuse tail (`room`, `size`),
+  which fall slower with distance than the direct sound. `spread`, `listener_yaw` (automatable), `doppler` 1 or 0.
+- Optional measured head: `hrtf='sadie_d2'` (SADIE II KU100, Apache 2.0) after `samples_fetch('sadie_d2')` on the
+  person's yes; converted once into `~/.ismail/hrtf` (reading the SOFA file needs h5py). Without it the built-in
+  head is used and needs no data. `samples_list` shows it as a set the spatial effect plays. The download link and
+  size are not yet checked against the York site: the first fetch, after the person's yes, confirms them.
+- Live, a far source is not cut: its sound takes up to 1 s to arrive, so a track or bus holding `spatial` waits
+  1.25 s of quiet (not the usual 0.5 s) before it goes dormant. Each live processor can now ask for such a hold
+  (`Proc.hold_s`, summed per chain, next to `noise`).
+- Fix: a change to `rig.py` (and now `spatial.py`) invalidates cached track renders; before, a rig change could
+  serve a stale render.
+
 ### feedback_page: a page the person answers by voice or typing, kept on this computer
 
 - `feedback_page(project, round, items, questions, voice=True, title=None, open=True, port=None)` writes a page
