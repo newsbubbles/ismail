@@ -593,6 +593,7 @@ PROCS = {'gain': _Gain, 'eq': _Eq, 'filter': _Filter, 'distortion': _Distortion,
          'limiter': _Limiter, 'formant': _Formant, 'vocoder': _Vocoder}
 
 from . import rig_blocks  # noqa: E402,F401  the rig's processors (they build on the classes above) join PROCS
+from . import spatial_blocks  # noqa: E402,F401  the spatial effect joins PROCS
 
 
 def make(fx, env):

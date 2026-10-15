@@ -58,6 +58,22 @@ and an echo or a reverb tail in front of it gives it two pitches at once, so the
 harmonised voice is a second track with its own `autotune`, not a second one in the same chain. In a live set the
 take is tuned as a file first, with `sound_autotune` (`live.md`, "Sung takes, tuned").
 
+## Moving a sound in 3D
+
+`spatial` places a track in space and moves it: `fx_add(track, {'type': 'spatial', 'x': 3, 'y': 8})` (metres from
+the listener: x right, y front, z up), automation on `fx.<i>.x` / `y` / `z`, or a `trajectory` it follows by itself
+(`fx_help(type='spatial')` has the forms: orbit, line, flyby, keys). It sums its input to mono and does the placing,
+so leave the track's pan at centre. Put it late in the chain (after tone and dynamics), and keep the shared reverb
+send small: the effect carries its own room, which grows as the sound goes further away.
+
+- `out='speakers'` (default) for stereo speakers, `'headphones'` for binaural. On speakers, `ctc` (0 to 1,
+  experimental) trades plain panning for crosstalk cancellation: sounds can go outside the speakers for a listener
+  centred between them, but it colours the sound off-centre. Let the person's ear set it.
+- Far and hidden (across a river, behind trees): a large distance plus `occlusion` 0.5 to 1. The direct sound gets
+  darker and quieter while the room does not, so the far sound turns reverb-heavy.
+- `doppler=0` on pitched parts that must stay in key; leave it on for things that fly by.
+- Cues need broadband sound. A pure sine cannot be placed in front or behind, up or down.
+
 ## Guitars and other played strings
 
 Learned matching a 1970 guitar record until 20 of 22 single notes passed a blind exam (`references/blind-tests.md`).

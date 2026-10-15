@@ -831,7 +831,7 @@ def samples_fetch(name: str, path: str = None) -> str:
     except samples.SampleError as e:
         raise OpError(str(e))
     s = samples.SETS[name]
-    return (f"{name} {'registered' if path else 'fetched'}: {p}\nthe {s['voice']} voice plays it now. Credit: "
+    return (f"{name} {'registered' if path else 'fetched'}: {p}\n{samples.user(s)} plays it now. Credit: "
             f"{s['credit']} ({s['licence']})")
 
 
@@ -1702,6 +1702,8 @@ def fx_help(project: str = None, type: str = None) -> str:
         out.append(f"{t}: {json.dumps(fxmod.FX_DEFAULTS[t])}  automatable: {list(fxmod.AUTOMATABLE.get(t, ()))}")
         if t in rigmod.DOCS:
             out.append(f"    {rigmod.DOCS[t]}")
+        if t in fxmod._spatial.DOCS:
+            out.append(f"    {fxmod._spatial.DOCS[t]}")
     out.append("notes: compressor.sidechain = track name; duck.source = track name (ducks on its note-ons) or every_beats;"
                " gate.pattern uses step chars; vocoder.modulator = track name or 'sound:<name>'; "
                "autotune: on a vocal track, pitch onto key + scale (major, minor, chromatic, dorian, blues ...), or "

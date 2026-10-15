@@ -41,7 +41,21 @@ SETS = {
         'size_mb': 98,
         'licence': 'CC0 1.0', 'credit': 'Emilyguitar by D. Smolken, Karoryfer Samples, https://github.com/sfzinstruments/karoryfer.emilyguitar',
     },
+    'sadie_d2': {   # URL and size not yet checked against the live site: the first fetch confirms them
+        'fx': 'spatial', 'env': 'SADIE_D2_HRTF', 'sub': 'sofa', 'check': '*.sofa', 'min_files': 1,
+        'what': 'SADIE II D2 head-related impulse responses: a Neumann KU100 dummy head measured from every direction '
+                '(University of York), for spatial hrtf="sadie_d2"',
+        'zip': 'https://www.york.ac.uk/sadie-project/Resources/SADIEIIDatabase/D2/D2_HRIR_SOFA.zip',
+        'zip_keep': ['D2_44K'],
+        'size_mb': 60,
+        'licence': 'Apache 2.0', 'credit': 'SADIE II database, University of York, https://www.york.ac.uk/sadie-project/',
+    },
 }
+
+
+def user(s):
+    """Who plays a set: 'the rhodes voice' or 'the spatial effect'."""
+    return f"the {s['fx']} effect" if 'fx' in s else f"the {s['voice']} voice"
 
 
 class SampleError(RuntimeError):
@@ -94,7 +108,7 @@ def need(name):
         return p
     s = SETS[name]
     raise FileNotFoundError(
-        f"the {s['voice']} voice plays the {name} samples ({s['what']}), which are not on this machine. Ask the person, "
+        f"{user(s)} plays the {name} samples ({s['what']}), which are not on this machine. Ask the person, "
         f"then samples_fetch('{name}'): about {s['size_mb']} MB, {s['licence']}. A folder they already have: "
         f"samples_fetch('{name}', path=<its {s['sub']} folder>) or ${s['env']}.")
 
@@ -103,7 +117,7 @@ def status():
     L = []
     for name, s in SETS.items():
         p = path(name)
-        L.append(f"{name:<12} {'ready' if p else 'not fetched':<12} voice {s['voice']:<7} ~{s['size_mb']} MB, "
+        L.append(f"{name:<12} {'ready' if p else 'not fetched':<12} {user(s)[4:]:<14} ~{s['size_mb']} MB, "
                  f"{s['licence']}" + (f"  ({p})" if p else ''))
     return '\n'.join(L)
 

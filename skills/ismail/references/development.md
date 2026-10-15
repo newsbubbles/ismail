@@ -140,7 +140,7 @@ Every engine change answers three questions in its commit and pull request:
 1. **Which side does it touch?** Studio only, live only, or both. A change to an effect, an instrument type, a voice,
    automation, buses or the render order is a studio change that live must follow.
 2. **How does live follow?** Every built-in effect has a live twin (`ismail/live/fx_blocks.py`, the guitar rig in
-   `rig_blocks.py`) running the studio kernel block by block; a change to the effect changes its twin. A new effect
+   `rig_blocks.py`, spatial in `spatial_blocks.py`) running the studio kernel block by block; a change to the effect changes its twin. A new effect
    type without a twin is baked (the workers run the studio code on each event). Instruments and voices render in
    the workers through the studio code, per note, per mono phrase, or for a performer per bar with a second of
    context, so anything that depends on more than that needs checking: a mono synth's glide from the last phrase,

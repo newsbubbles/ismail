@@ -190,7 +190,7 @@ Measured or sampled voices come from these sets. The audio itself stays out of t
 - **Time**: bars are 1-indexed; note times are beats relative to the bar you write at. `offset_sec` is the time of bar 1, so a project can sit exactly on a reference recording's grid.
 - **Notes**: `'<beat> <pitch> <dur> [vel] [@offset]'`, one per line or `;`-separated; `@-40ms` nudges a sound off its beat so a late attack lands on it (`track_set(offset_ms=)` for a whole part). Drum and step patterns: `pattern_write` with strings like `X...x...X...x...` (X 127, x 100, o 70, - 45, `_` ties).
 - **Instruments**: two synth engines. **sprite** (`"type": "synth"` or `"sprite"`: saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide) is right for synth sounds. **mimic** (`"type": "mimic"`) plays instruments measured from recordings (see below). Plus `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
-- **Effects**: gain, eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, hall, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, autotune, and a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah. Tracks, buses and the master fader can be automated. A chain can be saved and reused by name (`fx_stack_*`, `stack:<name>`).
+- **Effects**: gain, eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, hall, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, autotune, a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah, and spatial (a sound moved in 3D for stereo speakers or headphones, with distance, Doppler, occlusion and its own room; its path can be coded as a trajectory). Tracks, buses and the master fader can be automated. A chain can be saved and reused by name (`fx_stack_*`, `stack:<name>`).
 - **Voices**: engineered instruments kept as Python modules, so a project stores a name instead of code (see below).
 - **Sound bank**: sounds made from any instrument and effect chain (`sound_make`), speech (`sound_speak`), imported files, and averaged events cut from a recording (`sound_extract`). Bank sounds work as sampler sources, wavetables, vocoder modulators and audio clips.
 - **Undo and batch**: every edit snapshots the project (`undo`); `batch` applies a list of ops atomically.
@@ -382,6 +382,7 @@ ismail/
   dsp.py         oscillators, filters, dynamics, delay lines, reverb (numba)
   instruments.py synth, sampler, drums, kit, code
   fx.py          effects; rig.py the guitar rig (fuzz, univibe, amp, cab, rotary, tape, wah)
+  spatial.py     the spatial effect: 3D position, trajectories, head model, crosstalk cancellation, distance reverb
   render.py      project to audio, dependency ordering, per-track cache, wav/mp3 writers
   analysis.py    audio to text (grid, bars, chords, melody, drums, timbre, formants, compare)
   features.py    16th-step feature grid shared by structure and comparisons
