@@ -184,7 +184,7 @@ def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
     sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
     sf.write(str(b), 0.1 * np.sin(2 * np.pi * 230 * t), 44100)
     ans = tmp_path / 'exam' / 'answers.jsonl'
-    P.phone_exam('round 35', [{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
+    P.phone_exam('round 35', unmeasured='a test of the page', clips=[{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
                    question='which is the record?', chips=['harsh', 'thin'], choices=['A', 'B', "can't tell"],
                    answers_path=str(ans), exam_id='r35')
     p = get(base, '/api/state?since=0&wait=0')['panels'][-1]
@@ -732,7 +732,7 @@ def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_pat
             clips.append({'label': f'{i}{ab}', 'path': str(f)})
             key[f'{i}{ab}'] = cls
     ans = tmp_path / 'exam' / 'answers.jsonl'
-    out = P.phone_exam('floor round', clips, question='which is real?', answers_path=str(ans), exam_id='fl1',
+    out = P.phone_exam('floor round', unmeasured='a test of the page', clips=clips, question='which is real?', answers_path=str(ans), exam_id='fl1',
                        key=key, secrets=['take_r45'], floor='auto')
     rec = json.loads((tmp_path / 'exam' / 'answers.jsonl.floor.json').read_text(encoding='utf8'))
     assert sorted(r['rate'] for r in rec['floors']) == ['128k', '64k', 'same']        # the full set the first time
@@ -744,11 +744,11 @@ def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_pat
     same = next(r['pair'] for r in rec['floors'] if r['rate'] == 'same')
     a, b = (urllib.request.urlopen(base + c['url'], timeout=5).read() for c in p['clips'] if c['label'][:-1] == str(same))
     assert a == b                                                              # identical: the floor of floors
-    out = P.phone_exam('floor round 2', clips, answers_path=str(tmp_path / 'e2' / 'a.jsonl'), exam_id='fl2',
+    out = P.phone_exam('floor round 2', unmeasured='a test of the page', clips=clips, answers_path=str(tmp_path / 'e2' / 'a.jsonl'), exam_id='fl2',
                        key=key, secrets=['take_r45'], floor='auto')
     assert out.count('pair ') == 1 and '128k' in out                           # then one rotating pair
     with pytest.raises(Exception, match='labelled by pair'):
-        P.phone_exam('bad', [{'label': 'A', 'path': clips[0]['path']}], floor='auto')
+        P.phone_exam('bad', unmeasured='a test of the page', clips=[{'label': 'A', 'path': clips[0]['path']}], floor='auto')
 
 
 @pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
@@ -774,10 +774,10 @@ def test_floor_pairs_pass_beside_mp3_clips_and_a_refused_exam_uses_up_nothing(ph
     shutil.copyfile(clips[0]['path'], tmp_path / 'take_r45.mp3')             # a file name that gives the source away
     leaky = [dict(c, path=str(tmp_path / 'take_r45.mp3')) if c['label'] == '1A' else c for c in clips]
     with pytest.raises(Exception, match='pre-flight failed'):
-        P.phone_exam('leaky', leaky, answers_path=str(tmp_path / 'e0' / 'a.jsonl'), exam_id='fx0', key=key,
+        P.phone_exam('leaky', unmeasured='a test of the page', clips=leaky, answers_path=str(tmp_path / 'e0' / 'a.jsonl'), exam_id='fx0', key=key,
                      secrets=['take_r45'], floor='auto')
     assert not hist.exists()                                                   # refused: nothing used up
-    out = P.phone_exam('mp3 round', clips, answers_path=str(tmp_path / 'e1' / 'a.jsonl'), exam_id='fx1', key=key,
+    out = P.phone_exam('mp3 round', unmeasured='a test of the page', clips=clips, answers_path=str(tmp_path / 'e1' / 'a.jsonl'), exam_id='fx1', key=key,
                        secrets=['take_r45'], floor='auto')
     assert out.count('pair ') == 3                                             # the full set, on the round shown
     assert len(json.loads(hist.read_text(encoding='utf8'))) == 1
@@ -1111,7 +1111,7 @@ def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(pho
     sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
     sf.write(str(b), 0.1 * np.sin(2 * np.pi * 230 * t), 44100)
     ans = tmp_path / 'exam' / 'answers.jsonl'
-    out = P.phone_exam('round 50', [{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
+    out = P.phone_exam('round 50', unmeasured='a test of the page', clips=[{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
                        choices=['A', 'B'], answers_path=str(ans), exam_id='r50')
     assert 'clips:' in out and f'{a.resolve()}  0.5 s' in out and "kind 'voice_note'" in out   # the manifest
     assert json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))['answer_files']['r50'] == str(ans.resolve())
@@ -1335,6 +1335,52 @@ def test_phone_presence_shows_agents_and_devices_many_to_many(phone):
     st = P.phone_status()
     assert 'agents listening: ' in st and 'watcher b' in st and 'devices open: phone (Safari, stream), Quest' in st
     t.join(10)
+
+
+def _alarms(ph, what='watcher_down'):
+    return [r for r in ph.read_inbox(0) if r.get('kind') == 'alarm' and r.get('what') == what]
+
+
+def test_a_watcher_that_stops_while_the_person_is_in_vr_raises_one_alarm(phone):
+    """ledger:M211 (qa intent_rules 10-16 cluster 3): a DJ whose watcher died left the person asking "you watching
+    phone?" while live. In VR, an agent that watched and went quiet for 2 min is named once to the lead and on the
+    page, and its return is said once."""
+    ph, base, _ = phone
+    P.phone_listen('lead a', wait=0, lead=True)
+    P.phone_listen('dj', wait=0)
+    assert _state(base, 'quest1', QUEST_UA)['deaf'] == [] and _alarms(ph) == []
+    ph.listened['dj'] = time.time() - 200                                   # its phone_watch stopped polling
+    ph.listened['lead a'] = time.time()
+    st = _state(base, 'quest1', QUEST_UA)
+    assert st['deaf'] == [{'who': 'dj', 'min': 3}]
+    a = _alarms(ph)
+    assert len(a) == 1 and a[0]['agent'] == 'dj' and a[0]['for'] == 'lead a' and 'in VR' in a[0]['text']
+    _state(base, 'quest1', QUEST_UA)
+    P.phone_listen('lead a', wait=0, lead=True)
+    assert len(_alarms(ph)) == 1                                            # one per stretch down
+    assert 'WATCHER DOWN: dj, stopped 3 min ago' in P.phone_status() and 'lead: lead a' in P.phone_presence()
+    P.phone_listen('dj', wait=0)
+    assert [r['agent'] for r in _alarms(ph, 'watcher_back')] == ['dj'] and _state(base, 'quest1', QUEST_UA)['deaf'] == []
+
+
+def test_signoff_and_not_live_raise_nothing_and_expect_holds_without_vr(phone):
+    ph, base, _ = phone
+    P.phone_listen('dj', wait=0)
+    P.phone_listen('voice', wait=0)
+    ph.listened['dj'] = ph.listened['voice'] = time.time() - 200
+    assert ph.heartbeat() == []                                             # nobody in VR or on the stream
+    assert 'NOT watching now' in P.phone_expect('dj', why='a set', minutes=60)
+    assert [d['who'] for d in ph.heartbeat()] == ['dj'] and _alarms(ph)[0]['for'] is None   # no lead: everyone's
+    assert 'expected: dj until' in P.phone_presence() and 'a set' in P.phone_presence()
+    _state(base, 'quest1', QUEST_UA)
+    assert 'phone_expect (a set) ended' in P.phone_signoff('dj', why='set over')
+    assert [d['who'] for d in ph.heartbeat()] == ['voice']                  # in VR now: voice watched lately
+    ph.listened['voice'] = time.time() - S.RECENT_S - 5
+    assert ph.heartbeat() == []                                             # too long ago to be expected
+    with pytest.raises(api.OpError, match='1 to 1440'):
+        P.phone_expect('dj', why='a set', minutes=0)
+    with pytest.raises(api.OpError, match='why'):
+        P.phone_expect('dj', why=' ')
 
 
 def test_a_listen_with_lines_names_the_other_watchers(phone):
