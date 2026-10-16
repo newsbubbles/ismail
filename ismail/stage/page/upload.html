@@ -34,6 +34,8 @@ function send(file) {
     const bar = row.querySelector('i'), meta = row.querySelector('.meta');
     const x = new XMLHttpRequest();
     x.open('POST', 'upload/file?name=' + encodeURIComponent(file.name) + '&mtime=' + file.lastModified);
+    let key = ''; try { key = localStorage.getItem('ismail_stage_key') || ''; } catch (_) {}
+    if (key) x.setRequestHeader('X-Stage-Key', key);   // the key the stage page stored when this browser paired
     const t0 = performance.now();
     x.upload.onprogress = (ev) => {
       const k = ev.total ? ev.loaded / ev.total : 0, s = (performance.now() - t0) / 1000;

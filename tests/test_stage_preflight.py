@@ -26,7 +26,10 @@ def pf(stage, monkeypatch, tmp_path):
     pages = []
 
     def launch(url):
-        assert url.endswith('?scene=_preflight')
+        base, _, code = url.partition('#pair=')            # a temporary key, claimed by the link (security floor B2)
+        assert base.endswith('?scene=_preflight') and len(code) == 6 and code.isdigit(), url
+        got = _post(stage['port'], 'pair/claim', {'code': code})
+        assert got['temp'] and got['device'].startswith('preflight '), got
         pg = FakePage(stage['port'], '_preflight', answers={'reload': {'selftest': 'PASS'}})
         _post(stage['port'], 'live/event?scene=_preflight',
               {'type': 'page_load', 'page': 'fake', 'objects': 1, 'selftest': 'PASS', 'checked': 1})
@@ -76,6 +79,7 @@ def test_every_check_passes_with_a_page(pf):
                           'live_insert', 'say', 'listen'], out
     assert set(rows.values()) == {'PASS'}, out
     assert 'Preflight: pass.' in out.splitlines()[-1]
+    assert pf['srv'].auth.health()['temp_keys'] == 0           # its key is unpaired when the test page closes
     seen = [c['type'] for c in pf['pages'][0].seen]
     assert seen == ['reload', 'world_reload', 'load_set', 'load_set', 'say'], seen
     verdict = [c for c in room.seen if c['type'] == 'say']
