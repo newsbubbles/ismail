@@ -226,6 +226,21 @@ the grant: act on it, then post a caption saying what you did. When the grant re
 `override_grant='<why it does not fit>'`: the question goes out and the reason is appended to
 `grant_overrides.jsonl` beside the grants file (never a tracked file). No grants file: no check.
 
+**Whose step it is.** An entry with an `owner` belongs to that agent. A grant (`kind: "grant"`, the default) means
+the person already said yes to this kind of step: its owner acts on it, and anyone else's ask is refused with
+"this is <owner>'s: send it to them", so a merge question goes to the agent that merges and not to the person. A
+route (`kind: "route"`) means a kind of question is the owner's to answer ("how many views did it get?" goes to
+the agent that reads the numbers); any question with its keyword is sent there, and the owner may still ask the
+person. Pass `sender=` (your name as the team knows you) on every ask, or the check cannot tell you are the owner.
+**Always asked:** a grant never covers an ask that names anything public (post, publish, upload), money (pay, buy,
+price), accounts and passwords, or deleting; those go to the person every time.
+
+**Before a NEEDS NATE line, or any ask no op sees:** `grant_check(ask, sender)` answers `act:` (yours: do it and
+say what you did), `send:` (another agent's) or `ask:`. The file is kept by ops only: `grant_add(says, keywords,
+source, owner, kind)` needs the person's own words as `source` (a decision id, a phone note `n<id>`, a VR note,
+`chat: <their words>` or `memory: <file>`) and refuses keywords that would match any ask; `grant_list()` and
+`grant_drop(id, why)` (the entry is kept in `grants_dropped.jsonl`).
+
 ## The page's sounds: make them, attach them
 
 Every sound the page makes is crafted (the person, 10-06: "the same thing applies to everything as like a design
