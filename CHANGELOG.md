@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### analyze_melody: a quick octave jump reads in its own octave
+
+- An eighth-note octave bounce (E2 E3 at 124 bpm) read its E3s as E2. pYIN's smoothing held the lower pitch through
+  the jump: the lower note's period is also a period of the upper one, and the path may move only about two
+  semitones per frame, so it stayed low for every frame of the upper note, and the pitch refinement searches only
+  one semitone either side. Held (legato) notes read low every time, on a plain sine and on a harmonic tone alike.
+- Each note's octave is now checked against its own spectrum: a note read at f whose odd partials (f, 3f, 5f) are
+  20 dB or more under its even ones (2f, 4f, 6f) is at 2f, and moves up (never above fmax). A true low note keeps
+  its octave, a missing fundamental included, since its 3f still sounds (ledger:M220).
+- Tests: `tests/test_melody_octave.py` reads an A2 A2 A3 A2 eighth-note line on a sine and on a six-partial tone,
+  and checks the octave check on a low saw, a saw without its fundamental, and a sine an octave up.
+
 ### analyze: pitch in cents per note, and a pitch contour (ledger:M225)
 
 - `analyze_melody(cents=True)` gives every note's measured pitch as numbers, for scoring maqam steps (quarter
