@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### composition: a melody that travels through instruments
+
+- A method in `references/composition.md` (ledger:S50, from the Live DJ's set): one 8-bar line handed to a new
+  instrument at each section while the groove stays fixed, each pass fitted into the voice's measured range by one
+  helper (whole octaves, a lead kept a few semitones under the measured top), each hand-off checked as a new row in
+  `analyze_structure(source='render')`.
+
 ### Standing grants know whose step it is: grant_check, grant_add, routes and the still-ask list
 
 - Grants gain `owner` and `kind` (ledger:M209-M210, the 10-16 intent-rules review, clusters 1 and 2). A grant with
