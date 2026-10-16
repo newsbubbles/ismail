@@ -14,6 +14,14 @@ COOL = {'temp': 60.0, 'clock': 139.0, 'max_clock': 1911.0, 'util': 0.0, 'reasons
         'mem_total_gb': 8.0}
 
 
+class NoGpuPids:
+    def tree(self, pids):
+        return None
+
+    def close(self):
+        pass
+
+
 @pytest.fixture
 def board(tmp_path, monkeypatch):
     monkeypatch.setenv('ISMAIL_MACHINE_DIR', str(tmp_path / 'board'))
@@ -22,6 +30,9 @@ def board(tmp_path, monkeypatch):
     monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
     monkeypatch.setattr(machine, 'disks', lambda *a: [('D:', 100.0)])
     monkeypatch.setattr(machine, 'pagefiles', lambda: [])
+    monkeypatch.setattr(machine, 'disk_roots', lambda: [])      # never walk the real drive beyond songs/
+    monkeypatch.setattr(machine, 'orphan_age', lambda pid: None)
+    monkeypatch.setattr(machine, '_GpuPids', NoGpuPids)          # no per-process GPU reading: no MISDECLARED, no HUNG
     depth = getattr(machine._held, 'depth', 0)
     machine._held.depth = 0                  # the suite's own slot (conftest) would make every slot pass through
     yield tmp_path / 'board'

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### machine: MISDECLARED, HUNG, ORPHAN, the pagefile's drive, and `machine disk` beyond songs/ (ledger:M122-M126)
+
+- MISDECLARED (M122): a job's meter reads its process tree's share of the GPU's 3D engine every 5 s (Windows' own
+  per-process counter through PDH; nvidia-smi gives none on a GeForce). A `--cpu` job whose tree averages 30 % or
+  more over a minute is MISDECLARED on the board, told once in its own output, and counts against the GPU slot.
+- HUNG (M124): a job past 2x its `--est` whose tree used under 2 % of the CPU and no GPU over the last 5 min is HUNG
+  on the board and told once in its output; it is never stopped, and the flag leaves when it works again. With no
+  per-process GPU reading the whole GPU's load decides, and with no reading at all there is no flag.
+- ORPHAN (M123): a top CPU user whose parent process is gone (or whose parent pid was reused) shows as ORPHAN with
+  how long it has run, on the board and in a refusal that names the top processes.
+- The pagefile's drive (M126): the disk line shows the free space of a pagefile drive no job writes to (C: since
+  10-05) and warns PAGEFILE DRIVE LOW under 10 GB free; a warning, not a gate. live_status shows it too.
+- `machine disk` beyond songs/ (M125): the folders beside the checkout that holds songs/ (the top-level folders of
+  D: here), or `$ISMAIL_DISK_ROOTS`, or `<board>/roots.txt`, each with its size and its growth since the last day's
+  snapshot. A call walks for 20 s at most (`DISK_ROOTS_BUDGET_S`, `--budget N`, 0 for no limit), the cut walk
+  first, then the cached biggest, then the rest; a root it did not reach says "not walked yet", one it cut says
+  "at least", and the next call carries on from the folders left. Each root keeps its own last whole size and time
+  in `latest.json` and is walked again after 30 min (`--fresh` now, `--songs-only` skips it). Growth shows only for a
+  root walked whole both today and on the snapshot's day.
+- Every new probe fails soft (no reading, no flag), and a watch that breaks says so once and leaves the job alone.
+- Tests: `tests/test_machine_flags.py` (made-up samples and processes; no real GPU, orphans or drive walks).
+
 ### composition: a melody that travels through instruments
 
 - A method in `references/composition.md` (ledger:S50, from the Live DJ's set): one 8-bar line handed to a new
