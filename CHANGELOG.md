@@ -15,6 +15,19 @@
   its source; keywords that match any ask and still-ask words refused; a broken file is never overwritten) and
   `grant_drop(id, why)` (kept in `grants_dropped.jsonl`). Tests: `tests/test_guards.py`.
 
+### master_cue: a finished cue mastered for delivery, measured
+
+- `master_cue(source, start_s, end_s, lufs=-16, tp=-1, sr=48000, out, fade_in_s, fade_out_s=0.4)` (ledger:M207):
+  cuts the cue, fades its ends (cos^2), resamples, then applies one fixed gain to the loudness target (BS.1770
+  integrated). Only when that gain puts the true peak (4x oversampled) over the ceiling does a lookahead peak limiter
+  take the excess; its gain reduction is reported. It never rides the level (ffmpeg loudnorm falls back to a dynamic
+  mode on some files). Writes 24-bit wav, by default `<source>_master.wav`; a file already there moves to `old/`
+  first, and the source is never written. The report (LUFS, true peak, gain, limiting) is the cue's measurement line
+  before anyone listens, with a warning when the target is too loud for the mix.
+- Generalised from `songs/d3_next_teaser/work/master.py`: on the teaser's render it gives the same file, sample for
+  sample (-16.0 LUFS, -1.1 dBTP, 0.2 dB of limiting). Shelved under `render` for `ops_find`. Tests:
+  `tests/test_master_cue.py`.
+
 ### stage: cameras that follow, baked into keys for the render
 
 - `stage_follow(scene, object, target, offset, space, lag, look, look_offset, look_lag, orbit, snap, where)`: a
