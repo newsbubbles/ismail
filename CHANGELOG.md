@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### stage: pages pair and send their key, a content policy, JSON only in enforce (security floor part B2)
+
+- The stage page keeps its key in the browser and sends it on every request (`X-Stage-Key`), images included (they
+  load by fetch now). While a code waits (`stage_pair`), or when the server enforces, an unpaired page asks for it:
+  a code field on a desktop or a phone, a number pad panel in the headset whose digits never go on the live bus.
+  In enforce it asks before the stage loads, since an unpaired page can load nothing. A revoked key is forgotten and
+  the page asks again. A link ending `#pair=<code>` pairs on load and the code leaves the address at once.
+- Temporary keys (`temp_s` on /pair/start, memory only, at most a day) for headless pages this PC starts: preflight
+  pairs its test page with one and unpairs it at the end. Their principal is an agent for the person, never the
+  person.
+- Only guarded requests count as unpaired (the page's own files do not); `stage_devices` lists the last ones, so
+  you see what enforce would refuse before turning it on. `pending_codes` in /health counts only codes a person
+  could type.
+- The stage's pages carry a content policy: scripts from the stage and its inline scripts by hash only, no eval, no
+  frames. Report-only in report mode, enforced in enforce; reports go to /csp and are counted in /health. Markup in a
+  waypoint, a caption or a panel shows as text (the B1 review, F3).
+- In enforce, the JSON endpoints and /live/* take `application/json` only (415 otherwise): a form or a text/plain
+  POST from another site needs no preflight, a JSON one does. The upload page sends the key too.
+- A refusal reads a small unread body before it closes, so the page gets the 401 and its reason instead of a reset.
+- Tests: `tests/test_stage_pairing_b2.py`; the preflight test claims its link and checks the key is gone after.
+
 ### docs: a quick start the melody reader reads right
 
 - The CLI quick start in `docs/reference.md` writes `0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1` on `preset:acid_bass` at
