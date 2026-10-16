@@ -79,7 +79,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     })().catch((e) => { failed = e; }).finally(() => { busy = false; });
     const until = performance.now() + (job.settle_s || 180) * 1000;
     while ((busy || ed.staging() || construct.active) && !failed && performance.now() < until) {
-      place(cam, job, job.t0, W / H, ed, actors);
+      try { place(cam, job, job.t0, W / H, ed, actors); } catch (e) { if (!busy) throw e; }   // a tracked person still loading
       step();
       await new Promise((res) => setTimeout(res, 15));
     }
