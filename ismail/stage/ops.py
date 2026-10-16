@@ -1517,6 +1517,11 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     run once before the first frame, e.g. [{"type": "actor_play", "person": "body_a", "take": "t1", "at_music": 0},
     {"type": "sky", "mode": "night"}] (per-shot overrides; the scene files are not changed). Every load set is in
     the shot unless sets=False (setup can unload one: {"type": "load_set", "name": ..., "loaded": false}).
+    A setup command with "at_song": <song seconds> waits for that frame and runs just before it is drawn, e.g.
+    {"type": "behaviour_run", "object": "light_switch", "at_song": 255.0} (one at or before t0 runs at frame 0).
+    {"type": "screen_key", "material": "screen", "color": "#00ff00"} (captures only) draws a material flat and unlit
+    in a key colour so a comp in post finds what covers it exactly ("object": instead of "material": that object's
+    one material; default material "screen"); "color": "off" puts it back, e.g. timed with at_song.
     audio: the song file, cut to t0..t1 under the video. Out: <scene>/captures/<job>/capture.mp4 (H.264, 4:2:0), frames/f_00000.png with
     keep_frames (or video=False)."""
     import re
@@ -1559,6 +1564,15 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     for c in setup or []:
         if not isinstance(c, dict) or not c.get('type'):
             raise OpError('setup is a list of live commands: {"type": "actor_play", ...}')
+        if c.get('at_song') is not None:
+            if isinstance(c['at_song'], bool) or not isinstance(c['at_song'], (int, float)):
+                raise OpError(f'setup {c["type"]}: at_song is song seconds (got {c["at_song"]!r})')
+            if c['at_song'] >= t1:
+                raise OpError(f'setup {c["type"]}: at_song {c["at_song"]:g} is after the shot ({t0:g} to {t1:g} s), so it would never run')
+        if c['type'] == 'screen_key':
+            col = c.get('color', '#00ff00')
+            if not (col == 'off' or (isinstance(col, str) and re.match(r'^#[0-9A-Fa-f]{6}$', col))):
+                raise OpError(f'screen_key color is "#rrggbb" or "off" (got {col!r})')
     job_id = name or time.strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:4]
     if not re.match(r'^[A-Za-z0-9_\-]+$', job_id):
         raise OpError('name: letters, digits, _ and - only')

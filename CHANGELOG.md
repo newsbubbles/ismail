@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### stage: capture setup at a song time, and a keyed screen for the comp
+
+- `stage_capture` setup commands take `"at_song"`: the command waits for that frame and runs on film time just
+  before it is drawn (one at or before t0 runs at frame 0; one at or after t1 is refused, as it would never run).
+- `{"type": "screen_key", "color": "#rrggbb" | "off", "material": | "object":}` in a capture's setup draws a
+  material (default "screen") flat and unlit in a key colour, with no tone mapping, fog or shadows, so a comp in post
+  finds what covers the screen exactly; "off" restores it. Captures only, nothing is saved.
+
 ### What a fresh clone sees first (QA rehearsal 10-16: F3, F6, F7)
 
 - `ismail --help` no longer says "Installed from PyPI": ismail is not on PyPI yet, so it names the git+ install.
