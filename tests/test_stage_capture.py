@@ -147,3 +147,19 @@ def test_the_op_wants_one_camera_and_a_sane_size(op_scenes, tmp_path):
     with pytest.raises(OpError, match='no shot'):
         O.stage_capture('room', 0, 1, shot='nope', cameras=str(cams), scenes=str(scenes))
     assert not (scenes / 'room' / 'captures').exists()
+
+
+def test_a_setup_command_can_wait_for_a_song_time_and_a_screen_can_be_keyed(op_scenes):
+    scenes, _ = op_scenes
+    setup = [{'type': 'screen_key', 'color': '#00ff00'},
+             {'type': 'behaviour_run', 'object': 'switch', 'at_song': 12.5},
+             {'type': 'screen_key', 'color': 'off', 'at_song': 13}]
+    O.stage_capture('room', 10, 14, camera='cam', setup=setup, scenes=str(scenes), name='keyed')
+    job = json.loads((scenes / 'room' / 'captures' / 'keyed' / 'job.json').read_text())
+    assert job['setup'] == setup
+    with pytest.raises(OpError, match='never run'):
+        O.stage_capture('room', 10, 14, camera='cam', setup=[{'type': 'sky', 'at_song': 14}], scenes=str(scenes))
+    with pytest.raises(OpError, match='song seconds'):
+        O.stage_capture('room', 10, 14, camera='cam', setup=[{'type': 'sky', 'at_song': 'dawn'}], scenes=str(scenes))
+    with pytest.raises(OpError, match='"#rrggbb" or "off"'):
+        O.stage_capture('room', 10, 14, camera='cam', setup=[{'type': 'screen_key', 'color': 'green'}], scenes=str(scenes))
