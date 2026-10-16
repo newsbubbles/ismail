@@ -12,6 +12,53 @@
   inbox back after one no longer skips its first line when the whole file fits).
   Docs: `phone.md`, "Watching the phone" step 2. Test in `tests/test_phone.py`.
 
+### Standing grants: the person's sources first, routes stop at what is always asked, a number on watcher_down
+
+- An entry with a `source` now matches before one without, so an old unsourced grant with a wide keyword ("merge")
+  no longer shadows a sourced one that names an owner. `grant_list` marks an unsourced entry and says how to give it
+  a source (`grant_drop`, then `grant_add` with one).
+- A route no longer carries an ask away from the person when it names something always asked (public, money,
+  accounts, deleting) or something only their senses answer (an exam, a listen, a headset test): `grant_check`
+  answers `ask:` and the phone asks them.
+- The heartbeat's `watcher_down` alarm carries `down_since` (epoch seconds of the watcher's last poll), so a lead's
+  alarm reads a number instead of the time in the text.
+
+### sketch: feeling words in the first brief, the tune level held (M181 F2, M213)
+
+- A first brief's feeling words now shape the sketch, not only a next round's: "happy and bouncy" came back at 72
+  and 70 BPM, called "slow and bright", and was offered "faster and bouncier". A lift word sets the lowest tempo
+  (happy 92, bouncy 106, upbeat or exciting 112 BPM), a calm one the highest (calm 76, dreamy 80, sad 84), unless a
+  tempo word or a named BPM says otherwise ("a slow happy tune"); a genre's own range moves only as far as the word
+  needs ("dark techno" stays at 120-126). A feeling with a mode (happy, sad, spooky) picks it when no key is named.
+  This also holds for the three styles a vague brief gets and for `styles=`, which now also takes the brief's gentle
+  words. The feeling words also cover their plain forms (spooky, moody, gloomy, peppy, playful, sunny ...).
+- The everyday-word choices never offer a feeling the person already asked for, in the brief or any round since
+  (no "faster and bouncier" after "bouncy", no "sunnier" after "happy").
+- The tune balance holds the 4-6 LU the `sketch` docstring promises. A tune 5.5 LU under the parts rose 8 dB and
+  stopped at +2.5 LU; now the tune rises at most 8 dB (and never past its -1 dB peak) and the other parts come down
+  the rest of the way, which is clean, where raising the tune further only drives it into the limiter. The reply
+  adds the level measured in the final mix ("in the final mix it sits +5.0 LU"), and says so when it is outside
+  4-6 LU (a gap over 20 LU is a part gone wrong and is not chased); `sketch_ready.json` carries it as `tune_lu`.
+- Tests: six more in `tests/test_sketch.py`.
+
+### stage: capture setup at a song time, and a keyed screen for the comp
+
+- `stage_capture` setup commands take `"at_song"`: the command waits for that frame and runs on film time just
+  before it is drawn (one at or before t0 runs at frame 0; one at or after t1 is refused, as it would never run).
+- `{"type": "screen_key", "color": "#rrggbb" | "off", "material": | "object":}` in a capture's setup draws a
+  material (default "screen") flat and unlit in a key colour, with no tone mapping, fog or shadows, so a comp in post
+  finds what covers the screen exactly; "off" restores it. Captures only, nothing is saved.
+
+### What a fresh clone sees first (QA rehearsal 10-16: F3, F6, F7)
+
+- `ismail --help` no longer says "Installed from PyPI": ismail is not on PyPI yet, so it names the git+ install.
+- The MCP handshake reports ismail's version (0.3.0) instead of FastMCP's own (4.1.0 on a fresh install), and the
+  dependency is `fastmcp>=3.1,<5`, the range that has been run (3.1 here, 4.1 on a fresh install).
+- The guide's plain-words steps no longer forbid what the first sketch's SAY block says ("It's a first try ... What
+  would you change? Or name a song you love", Nate 10-08), and they are numbered once, in order (3p to 9p; "6p" was
+  there twice).
+- `import ismail.guards` on its own works again: api_guards read guards' word sets while guards was half-loaded.
+
 ### live: headroom against the real deadline, cutting a section over, the room speaker off and on
 
 - `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since

@@ -489,3 +489,25 @@ def test_grant_add_needs_the_persons_words_and_narrow_keywords(tmp_path, monkeyp
     with pytest.raises(api.OpError, match='not overwritten'):
         add(says='x y', keywords=['stage restart'], source='D-2')
     assert p.read_text() == '{broken'
+
+
+def test_an_entry_with_a_source_matches_before_one_without(grants):
+    # an older entry with no source and a wide keyword must not shadow the sourced one that names an owner
+    grants.write_text(json.dumps([
+        {'id': 'G1', 'date': '2026-01-01', 'keywords': ['merge'], 'says': 'merge anything'},
+        {'id': 'G7', 'date': '2026-01-02', 'keywords': ['business main'], 'says': 'merges into business main',
+         'kind': 'grant', 'source': 'D-9', 'owner': 'Lead Agent'}]), encoding='utf8')
+    assert api.OPS['grant_check'](ask='merge into business main?', sender='Song Agent').startswith(
+        "send: this is Lead Agent's")
+    assert api.OPS['grant_check'](ask='merge #4?', sender='Song Agent').startswith('act:')
+    assert 'G1 (2026-01-01, grant, no source' in api.OPS['grant_list']()
+
+
+def test_a_route_still_stops_at_the_still_ask_list_and_his_senses(grants):
+    _entries(grants, {'id': 'G2', 'date': '2026-01-02', 'keywords': ['the teaser'], 'kind': 'route',
+                      'says': 'the teaser is the clips agent\'s', 'owner': 'Clips Agent', 'source': 'D-3'})
+    gc = api.OPS['grant_check']
+    assert gc(ask='when does the teaser go out?', sender='Song Agent').startswith("send: this is Clips Agent's")
+    assert gc(ask='should I publish the teaser?', sender='Song Agent').startswith('ask: G2 matched')
+    assert gc(ask='can you listen to the teaser mix?', sender='Song Agent').startswith('ask: G2 matched')
+    assert gc(ask='is the teaser exam ready for you?', sender='Song Agent').startswith('ask: G2 matched')

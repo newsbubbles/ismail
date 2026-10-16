@@ -794,13 +794,14 @@ class Phone:
                 why = ' and '.join(live)
             else:
                 continue
-            down.append({'who': who, 'down_s': round(now - at), 'why': why})
+            down.append({'who': who, 'down_s': round(now - at), 'down_since': round(at, 1), 'why': why})
         if post:
             for d in down:
                 if self.alarmed.get(d['who'], 0) < self.listened[d['who']]:
                     self.alarmed[d['who']] = now
                     lead = self.lead_who()
                     self.post({'kind': 'alarm', 'what': 'watcher_down', 'agent': d['who'], 'for': lead,
+                               'down_since': d['down_since'],                  # epoch s of its last poll
                                'text': f"{d['who']}'s phone watcher stopped {_ago(d['down_s'])} while the person is "
                                        f"{d['why']}: the person is not heard. Wake {d['who']} (a message to its "
                                        f"session) so it re-arms phone_watch"})
