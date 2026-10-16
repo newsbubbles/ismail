@@ -648,13 +648,17 @@ def stage_behaviours(scene: str, reload: bool = False) -> str:
     pinches or triggers the object in VR (or picks a menu item), so the room answers with no agent in the loop: turn
     anything you did by hand (lights, moves, visibility, music, any page command through s.do) into such a function.
     `s` is the object's handle: get, set, state, send (wire to another object's input), light, show, move, sound,
-    emit (a message to agents: object_message), do, after, every. apply(s) runs at load and after every state change:
+    emit (a message to agents: object_message), do, after, every, clock, where (an object, 'person' or a body's joint
+    '<person>:<bone>': location, rotation, forward), place (a pose at once) and follow (soft-follow a target every
+    frame: a chase or drone camera; stage_follow tries one without code, and its options are the same). A `frame(s,
+    dt)` in an object's definition runs every frame. apply(s) runs at load and after every state change:
     put the state-to-room mapping there, so a reload or a scene switch shows the right room. Every interaction needs
     its own sound (`sound`: a file under the scene folder, rendered with ismail); without one the page clicks and
     warns. Every error, at load or at run time, also goes out as behaviour_error {object, phase (load, apply, press,
-    menu, input, after, every), action, error, line}; listen for it. In VR a press that fails buzzes and shows a short
+    menu, input, after, every, frame, follow), action, error, line}; listen for it. In VR a press that fails buzzes and shows a short
     note at the object, and an object whose code did not load (`broken`) does the same instead of opening the edit
-    menu. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings, broken: {object: why}}.
+    menu. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings, broken: {object: why},
+    following: [{object, target, by, waiting?}]}.
     Emits: behaviours_loaded, behaviour_error, behaviour_warning."""
     return page_cmd(scene, 'behaviours', {'reload': reload or None}, timeout=60)
 
@@ -676,6 +680,39 @@ def stage_behaviour_state(scene: str, object: str, state: dict = None) -> str:
     object's apply(s), so the room follows, and is saved with the scene (behaviour_state.json), so it is the same
     after a reload. Page replies the state. Emits: behaviour_state."""
     return page_cmd(scene, 'behaviour_state', {'object': object, 'state': state}, timeout=30)
+
+
+@op(mutates=True)
+def stage_follow(scene: str, object: str = None, target: str = None, offset: list = None, space: str = 'target',
+                 lag: float = 0.5, look=None, look_offset: list = None, look_lag: float = 0.25, orbit: float = 0,
+                 snap: bool = False, where: str = None) -> str:
+    """Make an object (a camera, a light, a drone) soft-follow a target every frame, live on the page, with no code
+    (page command: follow); the same follow a behaviour starts with s.follow. target: an object's name, 'person' (the
+    user's eyes: the headset in VR, the view on a desktop) or '<person>:<bone>' (a joint of a body the scene shows,
+    e.g. dell:head, dell:pelvis, dell:hand_r; a wrong bone lists some). offset: [right, forward, up] metres from the
+    target, turning with where it faces (space 'target'; a body faces where its hips face), or [x, y, z] Blender
+    metres (space 'world'). lag: seconds to close most of the gap (0 = locked on; 0.3 to 1 reads as a camera
+    operator). look: True aims at the target (the default for cameras and lights), False keeps its turn, a target
+    name or an [x, y, z] point aims there; look_offset [x, y, z] moves the aim point (aim at the chest, not the
+    hips); look_lag smooths the turn. orbit: degrees a second around the target (a drone circling). snap: start on
+    the spot. target=None stops the object's follow. While it follows, its keys on the clock wait. Live only, never
+    saved: bake it into keys for the render with stage_camera_record(source='follow'), then keep.
+    object=None lists what follows what; where=<target> reads a target's pose {location, rotation, quaternion,
+    forward, facing} (Blender metres and degrees) and changes nothing. A reload of behaviours.js ends agent follows.
+    Page replies {object, target, following, waiting?}. Emits: follow {object, target, following, by?, why?}."""
+    if where:
+        return page_cmd(scene, 'follow', {'where': where}, timeout=30)
+    if not object:
+        return page_cmd(scene, 'follow', {}, timeout=30)
+    if space not in ('target', 'world'):
+        raise OpError("space is 'target' or 'world'")
+    for name, v in (('offset', offset), ('look_offset', look_offset)):
+        if v is not None and (not isinstance(v, (list, tuple)) or len(v) != 3):
+            raise OpError(f'{name} must be [x, y, z]')
+    opts = {'offset': offset, 'space': space, 'lag': lag, 'look': look, 'look_offset': look_offset,
+            'look_lag': look_lag, 'orbit': orbit or None, 'snap': snap or None}
+    return page_cmd(scene, 'follow', {'object': object, 'target': target,
+                                      'options': {k: v for k, v in opts.items() if v is not None}}, timeout=30)
 
 
 @op(mutates=True)
@@ -819,21 +856,25 @@ def stage_trail(scene: str, object: str | list = None, show: bool = True) -> str
 
 
 @op(mutates=True)
-def stage_camera_record(scene: str, camera: str, action: str = 'start', source: str = 'head', t0: float = None,
+def stage_camera_record(scene: str, camera: str, action: str = 'start', source: str = None, t0: float = None,
                         t1: float = None, countdown: float = 3) -> str:
     """Record a camera move like a take (page command: cam_record). action 'start': a countdown, then the clock
     plays from t0 (default: where it is) to t1 (default: the span's end) and the camera's pose is sampled every frame;
     source 'head' puts the camera at the user's eyes (hidden while it records), 'hold' samples it wherever it is
-    carried (the camera unlocked with Move). The take ends at t1, at a loop back or with action 'stop'; the samples
+    carried (the camera unlocked with Move), 'follow' bakes a running follow (stage_follow, or s.follow in a
+    behaviour): snapped onto its target at t0, stopped at the end so the new keys play (Undo and Redo start it again,
+    Keep leaves it off), so a chase or drone move reaches the Blender render through anim.json. The take ends at t1, at a loop back or with action 'stop'; the samples
     are thinned into smooth keys (every sample within 2 cm and 2 degrees of what the keys play back) that replace the
     camera's keys inside the recorded window, the path is drawn (stage_trail) and a panel asks Keep / Redo / Undo.
     action 'keep' saves anim.json, 'redo' puts the old keys back and records again, 'undo' puts the old keys back,
     'state' reports. Page replies {state, name, keys?, err_m?, err_deg?, window?}."""
     if action not in ('start', 'stop', 'keep', 'redo', 'undo', 'state'):
         raise OpError("action is start, stop, keep, redo, undo or state")
-    if source not in ('head', 'hold'):
-        raise OpError("source is 'head' or 'hold'")
-    c = {'action': action, 'name': camera, 'source': source, 'countdown': countdown}
+    if source not in (None, 'head', 'hold', 'follow'):
+        raise OpError("source is 'head', 'hold' or 'follow'")
+    c = {'action': action, 'name': camera, 'countdown': countdown}
+    if source:
+        c['source'] = source
     if t0 is not None:
         c['t0'] = t0
     if t1 is not None:
@@ -907,4 +948,4 @@ def stage_actor_part(scene: str, person: str, part: str = None, show: bool = Tru
     return page_cmd(scene, 'actor_part', {'person': person, 'part': part, 'show': show, 'move': move,
                                           'seconds': seconds, 'reset': reset or None}, timeout=30)
 
-TYPED = {'replay_input': 'stage_take_replay', 'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'take_keep_recent': 'stage_take_keep_recent', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'follow': 'stage_follow', 'replay_input': 'stage_take_replay', 'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'take_keep_recent': 'stage_take_keep_recent', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

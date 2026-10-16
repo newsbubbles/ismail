@@ -50,14 +50,16 @@ def test_trail_and_camera_record_reach_the_page(stage):
         assert (page.seen[-1]['type'], page.seen[-1]['names'], page.seen[-1]['show']) == ('trail', ['hall_wide_cam'], True)
         OPS['stage_trail'](scene='room', show=False)
         assert page.seen[-1].get('names') is None and page.seen[-1]['show'] is False
-        OPS['stage_camera_record'](scene='room', camera='hall_wide_cam', t0=2, t1=8, countdown=0)
+        OPS['stage_camera_record'](scene='room', camera='hall_wide_cam', source='head', t0=2, t1=8, countdown=0)
         c = page.seen[-1]
         assert (c['type'], c['action'], c['name'], c['source'], c['t0'], c['t1']) == ('cam_record', 'start', 'hall_wide_cam', 'head', 2, 8)
         OPS['stage_camera_record'](scene='room', camera='hall_wide_cam', action='keep')
         assert page.seen[-1]['action'] == 'keep' and 't0' not in page.seen[-1]
         with pytest.raises(OpError, match='start, stop'):
             OPS['stage_camera_record'](scene='room', camera='x', action='rewind')
-        with pytest.raises(OpError, match="'head' or 'hold'"):
+        OPS['stage_camera_record'](scene='room', camera='hall_wide_cam')
+        assert 'source' not in page.seen[-1]                            # the page picks: follow, else head
+        with pytest.raises(OpError, match="'head', 'hold' or 'follow'"):
             OPS['stage_camera_record'](scene='room', camera='x', source='drone')
         with pytest.raises(OpError, match='stage_camera_record'):
             OPS['stage_cmd'](scene='room', type='cam_record')

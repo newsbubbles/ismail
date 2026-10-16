@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### stage: cameras that follow, baked into keys for the render
+
+- `stage_follow(scene, object, target, offset, space, lag, look, look_offset, look_lag, orbit, snap, where)`: a
+  camera (or any object) soft-follows an object, a body's joint (`"<person>:<bone>"`) or the person (`"person"`).
+  The offset is in the target's facing by default (`[right, forward, up]`), or Blender world with `space="world"`;
+  a camera looks at its target with a level horizon; `orbit` circles it. The smoothing is time-exact at any frame
+  rate (a step is capped at 1 s after a stall). No object lists the follows; `target=None` stops one; `where` reads a
+  target. A follow waits while its body is not shown, and an error stops it with `behaviour_error` phase `follow`.
+- Behaviours: `s.clock()`, `s.where(target)`, `s.place(name, o)`, `s.follow(target, o)`, and a per-frame hook
+  `frame(s, dt)` (its first error stops it, phase `frame`). Reloading behaviours stops their follows.
+- `stage_camera_record` gains `source="follow"`, the default on a following camera (otherwise `head` for a camera
+  and `hold` for anything else, as before): the follow is snapped at t0, sampled while the clock plays and stopped
+  at the end, so the keys play; Redo and Undo start it again, Keep saves the keys to anim.json for the Blender
+  render. The camera menu's Record move picks it too.
+- Tests: `tests/test_stage_follow.py`; a headless run on a scene copy checked an object follow (settle, aim, level,
+  a 2 m jump at 69 % after one lag), a body's head, an orbit at 90.3 degrees a second, a bake of 19 keys within
+  1.8 cm, Keep into anim.json, and a behaviour with `s.follow`, `frame` and a Stop menu.
+
 ### phone_presence and phone_claim: who is listening, and who passes a note on
 
 - `phone_presence()`: both sides, many to many. The agents calling the phone server in the last 90 s, each marked
