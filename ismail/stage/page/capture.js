@@ -180,7 +180,12 @@ function place(cam, job, t, aspect, ed, actors) {
       const at = (rig.bones[k.bone || 'spine_03'] || rig.bones.pelvis).getWorldPosition(new THREE.Vector3());
       const tr = cam.userData.track;
       if (!tr || t <= job.t0) {                              // frame 0 (and the settle before it): the bearing is set
-        const dir = rig.fwd.clone().applyQuaternion(yaw).setY(0).normalize()
+        // their front: where their toes point now (the feet are what the body faces; a turned head or a stale facing
+        // put the first study shots behind a seated man)
+        const toes = new THREE.Vector3();
+        for (const sd of ['l', 'r']) if (rig.bones[`ball_${sd}`] && rig.bones[`foot_${sd}`]) toes.add(rig.bones[`ball_${sd}`].getWorldPosition(new THREE.Vector3()).sub(rig.bones[`foot_${sd}`].getWorldPosition(new THREE.Vector3())));
+        toes.setY(0);
+        const dir = (toes.lengthSq() > 1e-6 ? toes : rig.fwd.clone().applyQuaternion(yaw).setY(0)).normalize()
           .applyAxisAngle(Y, THREE.MathUtils.degToRad(k.angle ?? 0));
         cam.userData.track = { dir, at: at.clone() };
       } else tr.at.lerp(at, 1 - Math.exp(-1 / (job.fps * Math.max(1e-3, k.smooth ?? 0.4))));
