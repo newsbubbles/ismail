@@ -6,6 +6,9 @@ run(...) -> (ready, lines). Lines start with FAIL (never show the page), WARN (a
 cannot be) or ok. The checks:
 - clips: each exists, decodes, is not silent, and how near full scale it peaks;
 - loudness: integrated loudness within lufs_tol of each other, and no class louder on average than another;
+- the same audio: two clips of a pair (1A and 1B; every two clips when the labels name no pairs) that differ by less
+  than SAME_DB once aligned and level-matched are one sound twice, and the ear cannot tell them (ledger:M212). A
+  deliberate same-against-same control is a floor pair (phone_exam floor=), not a pair of the round;
 - blind leaks, given the key ({clip label, file name or path: its class}) and any secret strings: the key's classes
   or the secrets in clip file names and URLs, in their metadata tags, in the page source (and the scripts and styles
   it loads) next to a clip or in a label-to-class mapping, a key/answer file the page loads, formats (sample rate,
@@ -25,6 +28,8 @@ import urllib.request
 import numpy as np
 
 AUDIO = r'(?:wav|mp3|ogg|oga|flac|m4a|aac|webm|opus)'
+SAME_DB = -40.0        # a residual under this, against the clip's own level, is the same sound to the ear
+PAIR = re.compile(r'^(\d+)\s*([A-Za-z])$')
 KEYISH = re.compile(r'(key|answer|truth|solution|reveal)[\w.-]*\.(json|txt|csv|js)', re.I)
 
 
@@ -95,6 +100,53 @@ def _lead(y, sr):
     a = np.abs(y).max(axis=1)
     i = np.argmax(a > 10 ** (-50 / 20))
     return i / sr if a.max() > 10 ** (-50 / 20) else None
+
+
+def _mono(y):
+    return y.mean(axis=1) if y.ndim > 1 else y
+
+
+def _difference(y1, sr1, y2, sr2, max_s=30.0, lag_s=0.25):
+    """How far apart two clips are as sound: (residual dB against the first, lag ms, gain dB) after the best
+    alignment within lag_s and one least-squares gain. None when they share under 0.2 s."""
+    from scipy.signal import resample_poly
+    a, b = _mono(np.asarray(y1, float)), _mono(np.asarray(y2, float))
+    if sr1 != sr2:
+        sr = min(sr1, sr2)
+        a = resample_poly(a, sr, sr1) if sr1 != sr else a
+        b = resample_poly(b, sr, sr2) if sr2 != sr else b
+    else:
+        sr = sr1
+    a, b = a[:int(max_s * sr)], b[:int(max_s * sr)]
+    n = min(len(a), len(b))
+    if n < 0.2 * sr:
+        return None
+    m = int(lag_s * sr)
+    size = 1 << int(np.ceil(np.log2(len(a) + len(b))))
+    xc = np.fft.irfft(np.fft.rfft(a, size) * np.conj(np.fft.rfft(b, size)), size)
+    xc = np.concatenate([xc[-m:], xc[:m + 1]])                      # lags -m .. m
+    lag = int(np.argmax(np.abs(xc))) - m
+    a2, b2 = (a[lag:], b) if lag >= 0 else (a, b[-lag:])
+    k = min(len(a2), len(b2))
+    a2, b2 = a2[:k], b2[:k]
+    eb, ea = float(b2 @ b2), float(a2 @ a2)
+    if eb <= 0 or ea <= 0:
+        return None
+    g = float(a2 @ b2) / eb
+    res = float(np.sum((a2 - g * b2) ** 2)) / ea
+    return 10 * np.log10(res + 1e-20), 1000.0 * lag / sr, 20 * np.log10(abs(g) + 1e-12)
+
+
+def _pairs(cl):
+    """The pairs a round compares: by label (1A with 1B), else every two clips (up to 8 clips)."""
+    groups = {}
+    for c in cl:
+        m = PAIR.match(str(c['label']))
+        if m:
+            groups.setdefault(m.group(1), []).append(c)
+    if groups:
+        return [(g[i], g[j]) for g in groups.values() for i in range(len(g)) for j in range(i + 1, len(g))]
+    return [(cl[i], cl[j]) for i in range(len(cl)) for j in range(i + 1, len(cl))] if len(cl) <= 8 else []
 
 
 def _words(terms):
@@ -191,6 +243,7 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
                 fails.append(f"{c['label']}: does not decode ({type(e).__name__}: {str(e)[:120]})")
                 continue
             peak = float(np.abs(y).max()) if len(y) else 0.0
+            c['_y'], c['_sr'] = y, sr
             c.update(dur=len(y) / sr, fmt=fmt, peak_db=20 * np.log10(peak + 1e-12), lead=_lead(y, sr),
                      tags=_tags(p))
             c['air'], c['hf'] = _air(y, sr)
@@ -215,6 +268,24 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
             (fails if spread > lufs_tol else oks).append(
                 f"loudness spread {spread:.1f} {'over' if spread > lufs_tol else 'within'} {lufs_tol:g}: {line}"
                 + (": normalise every clip to one loudness" if spread > lufs_tol else ''))
+
+        # ---- one sound twice: the ear cannot tell a pair that is the same audio
+        same, apart = [], []
+        for c1, c2 in _pairs(good):
+            d = _difference(c1['_y'], c1['_sr'], c2['_y'], c2['_sr'])
+            if d is None:
+                continue
+            (same if d[0] < SAME_DB else apart).append((c1['label'], c2['label'], d))
+        for l1, l2, (res, lag, gain) in same:
+            fails.append(f"{l1} and {l2} are the same audio: {l2} is {l1} {-lag:+.0f} ms later and {-gain:+.1f} dB "
+                         f"louder, and past that they differ by {res:.0f} dB, under {SAME_DB:.0f}, so the ear cannot tell them and the pair "
+                         f"spends a slot of the person's ear on nothing: check the render or the file you meant to put "
+                         f"there (a same-against-same control is a floor pair: phone_exam floor='auto')")
+        if apart:
+            oks.append("every pair differs as sound (" + ', '.join(f"{a}/{b} {round(d[0]) + 0:.0f} dB" for a, b, d in apart[:6])
+                       + (' ...' if len(apart) > 6 else '') + f" residual; the same audio is under {SAME_DB:.0f})")
+        for c in cl:
+            c.pop('_y', None)
 
         # ---- the key and what could leak it
         key = {str(k): str(v) for k, v in (key or {}).items()}

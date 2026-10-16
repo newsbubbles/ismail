@@ -106,9 +106,9 @@ def test_the_op_reports_and_the_phone_refuses_a_leaky_exam(tmp_path, monkeypatch
     assert out.startswith('NOT READY') and "says 'real'" in out
     monkeypatch.setattr(P, '_call', lambda *a, **k: 'shown')
     with pytest.raises(OpError, match='NOT READY'):
-        P.phone_exam('round 1', [{'label': 'A', 'path': a}, {'label': 'B', 'path': b}],
+        P.phone_exam('round 1', unmeasured='a test of the page', clips=[{'label': 'A', 'path': a}, {'label': 'B', 'path': b}],
                      key={'A': 'real', 'B': 'fake'})
-    assert P.phone_exam('round 1', [{'label': 'A', 'path': a}, {'label': 'B', 'path': b}], key={'A': 'real', 'B': 'fake'},
+    assert P.phone_exam('round 1', unmeasured='a test of the page', clips=[{'label': 'A', 'path': a}, {'label': 'B', 'path': b}], key={'A': 'real', 'B': 'fake'},
                         check=False) == 'shown'
 
 
@@ -182,3 +182,52 @@ def test_the_blind_crop_check_hides_the_key_and_says_when_the_picture_gives_it_a
     from ismail.api import OpError
     with pytest.raises(OpError, match='no answers'):
         X.exam_eye_score(out, {99: '1'})
+
+
+def test_a_pair_that_is_the_same_audio_is_not_ready(tmp_path):
+    """ledger:M212: a pair the ear cannot tell (one render twice, quieter and a little late) wastes a slot of the
+    person's ear; level and a short offset do not make it a different sound."""
+    rng = np.random.default_rng(7)
+    y = 0.1 * rng.standard_normal(SR)
+    sf.write(str(tmp_path / 'p1.wav'), y, SR)
+    sf.write(str(tmp_path / 'p2.wav'), np.concatenate([np.zeros(441), 0.5 * y]), SR)          # -6 dB, 10 ms late
+    sf.write(str(tmp_path / 'p3.wav'), 0.1 * rng.standard_normal(SR), SR)
+    sf.write(str(tmp_path / 'p4.wav'), 0.1 * rng.standard_normal(SR), SR)
+    clips = [{'label': '1A', 'path': str(tmp_path / 'p1.wav')}, {'label': '1B', 'path': str(tmp_path / 'p2.wav')},
+             {'label': '2A', 'path': str(tmp_path / 'p3.wav')}, {'label': '2B', 'path': str(tmp_path / 'p4.wav')}]
+    ok, lines = EC.run(clips=clips, lufs_tol=10)
+    out = text(lines)
+    assert not ok and '1A and 1B are the same audio: 1B is 1A +10 ms later and -6.0 dB louder' in out, out
+    assert '2A and 2B' not in out and 'every pair differs as sound (2A/2B' in out
+    ok, lines = EC.run(clips=clips[2:], lufs_tol=10)
+    assert ok, text(lines)
+
+
+def test_phone_exam_asks_for_the_measurement_or_why_only_the_ear_can_tell(tmp_path, monkeypatch):
+    """ledger:M212 (qa intent_rules 10-16 cluster 5, "measure first, then spend my ear"): the lines are kept beside
+    the answers for the exam ledger; an exam without them says why, and that is logged."""
+    import pytest
+    from ismail.api import OpError
+    from ismail.phone import ops as P
+    from ismail.phone import server as S
+    monkeypatch.setattr(S, 'HOME', tmp_path / 'home')
+    monkeypatch.setattr(P, '_call', lambda *a, **k: 'shown')
+    a, b = tone(tmp_path / 'a.wav', 220), tone(tmp_path / 'b.wav', 230)
+    clips = [{'label': '1A', 'path': a}, {'label': '1B', 'path': b}]
+    ans = str(tmp_path / 'answers.jsonl')
+    for kw, match in [({}, 'measure before'), ({'unmeasured': 'ear'}, 'says no reason'),
+                      ({'measured': {'all': 'sounds close'}}, 'no measurement in it'),
+                      ({'measured': {'3': 'LUFS -16.0'}}, 'name no clip'),
+                      ({'measured': {'all': 'x 1'}, 'unmeasured': 'a b c'}, 'not both')]:
+        with pytest.raises(OpError, match=match):
+            P.phone_exam('round 1', clips, answers_path=ans, check=False, **kw)
+    out = P.phone_exam('round 1', clips, answers_path=ans, exam_id='e1', check=False,
+                       measured={'1': ['sound_compare: 1A/1B mel distance 0.42', 'LUFS -16.1 / -16.0']})
+    assert out.startswith('shown') and 'measured lines kept in' in out
+    kept = json.loads(open(ans + '.measured.json', encoding='utf8').read())
+    assert kept['measured'] == {'1': ['sound_compare: 1A/1B mel distance 0.42', 'LUFS -16.1 / -16.0']}
+    assert kept['exam_id'] == 'e1'
+    P.phone_exam('round 2', clips, exam_id='e2', check=False, sender='voice',
+                 unmeasured='a breath texture no meter reads')
+    log = [json.loads(l) for l in (tmp_path / 'home' / 'ear_first.jsonl').read_text(encoding='utf8').splitlines()]
+    assert [(r['exam_id'], r['who'], r['why']) for r in log] == [('e2', 'voice', 'a breath texture no meter reads')]

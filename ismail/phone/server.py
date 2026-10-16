@@ -113,6 +113,13 @@ CLAIM_GRACE_S = 180.0       # an untagged note nobody claimed this long after it
 # every watcher guessed what the others would do. A list of who is listening alone is still a race, so the first agent
 # to call phone_claim on a note owns it (decided here, under one lock) and every other watcher sees "claimed".
 NOTE_KINDS = ('voice_text', 'text')     # what the person says or types: the lines an agent passes on
+# The watcher heartbeat (ledger:M211; qa intent_rules 10-16 cluster 3, "be reachable": a DJ whose watcher died left the
+# person asking "you watching phone?" while live, four times in five days). While the person is live (the Quest page
+# open, a phone on the stream, or an agent's phone_expect), an agent that watched and went quiet is DOWN: one alarm
+# line goes to the lead's watcher, the page names it, phone_status and phone_presence show it. A server cannot wake a
+# session; the lead can (a message to it). phone_signoff is the clean stop that raises nothing.
+DOWN_S = 120.0              # a watcher that has not polled this long is down (phone_watch polls every 25 s, re-arms in seconds)
+RECENT_S = 1800.0           # it watched within this long, so while the person is live it is expected to still be there
 VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
               (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
               (r'louder', 'louder'), (r'quieter|softer', 'quieter'), (r'pause the set', 'pause'),
@@ -375,6 +382,10 @@ class Phone:
         self.waiting = collections.Counter()       # who -> phone_listen calls waiting right now
         self.devices = {}                          # page id -> {kind, browser, first, at, stream}: the person's side
         self.claims = self._load_claims()          # inbox n -> {by, at, ts, why}: who passes a note on
+        self.expect = {}                           # who -> {until, why, by}: phone_expect, a watcher that must stay up
+        self.signed_off = {}                       # who -> when it called phone_signoff (a clean stop raises nothing)
+        self.alarmed = {}                          # who -> when its down alarm went out (one per stretch down)
+        self.lead = None                           # (who, at): the watcher that gets the alarms (phone_watch lead=true)
         self.encoders = {}
         self.fed = 0                               # frames fed since the server started
         self.timeline = collections.deque()        # (pcm_s, wall, beat or None, bpm, bpb, ahead)
@@ -712,6 +723,7 @@ class Phone:
         self.devices[dev] = d
         for k in [k for k, v in self.devices.items() if now - v['at'] > 86400]:
             del self.devices[k]
+        self.heartbeat()                           # the page polls every 20 s: a down watcher is seen within a poll
 
     def presence(self):
         """Both sides, many to many: the agents listening and the person's devices with the page open."""
@@ -725,6 +737,59 @@ class Phone:
                     'open': now - v['at'] < PAGE_OPEN_S, 'last_s': round(now - v['at']), 'first': now_iso(v['first'])}
                    for k, v in sorted(self.devices.items(), key=lambda x: -x[1]['at'])]
         return agents, devices
+
+    # ---- the watcher heartbeat (phone_expect, phone_signoff, the alarm line)
+    def live_reasons(self):
+        """Why the person counts as live now: in VR (the Quest page open) or on the stream."""
+        now, out = time.time(), []
+        if any(v['kind'] == 'Quest' and now - v['at'] < PAGE_OPEN_S for v in self.devices.values()):
+            out.append('in VR (the Quest page is open)')
+        if sum(x.listeners for x in self.encoders.values()):
+            out.append('on the stream')
+        return out
+
+    def lead_who(self):
+        """The lead's name while its watcher is up, else None (then an alarm is for everyone)."""
+        if self.lead and time.time() - self.listened.get(self.lead[0], 0) < DOWN_S:
+            return self.lead[0]
+        return None
+
+    def heartbeat(self, post=True):
+        """The expected watchers that are down: [{who, down_s, why}]. Posts one alarm per agent per stretch down, and
+        a 'back' line for the lead when one that was alarmed watches again."""
+        now = time.time()
+        live = self.live_reasons()
+        for w, e in list(self.expect.items()):
+            if e['until'] < now:
+                del self.expect[w]
+        down = []
+        for who, at in list(self.listened.items()):         # page and agent threads add to it
+            if self.waiting.get(who) or now - at < DOWN_S:
+                continue
+            e = self.expect.get(who)
+            if e:
+                why = e['why']
+            elif live and now - at < RECENT_S and self.signed_off.get(who, 0) < at:
+                why = ' and '.join(live)
+            else:
+                continue
+            down.append({'who': who, 'down_s': round(now - at), 'why': why})
+        if post:
+            for d in down:
+                if self.alarmed.get(d['who'], 0) < self.listened[d['who']]:
+                    self.alarmed[d['who']] = now
+                    lead = self.lead_who()
+                    self.post({'kind': 'alarm', 'what': 'watcher_down', 'agent': d['who'], 'for': lead,
+                               'text': f"{d['who']}'s phone watcher stopped {_ago(d['down_s'])} while the person is "
+                                       f"{d['why']}: the person is not heard. Wake {d['who']} (a message to its "
+                                       f"session) so it re-arms phone_watch"})
+        return down
+
+    def watch_back(self, who):
+        """An alarmed watcher polled again: say so once, to the lead."""
+        if self.alarmed.pop(who, None):
+            self.post({'kind': 'alarm', 'what': 'watcher_back', 'agent': who, 'for': self.lead_who(),
+                       'text': f"{who}'s phone watcher is back"})
 
     def unclaimed(self, minutes=60):
         """The person's untagged notes in the last `minutes` that nobody claimed, oldest first."""
@@ -1216,6 +1281,7 @@ class Phone:
         agents = sorted(w for w, at in self.agents.items() if now - at < AGENT_SEEN_S)
         devices = [{'kind': d['kind'], 'browser': d['browser'], 'stream': d['stream']}
                    for d in self.devices.values() if now - d['at'] < PAGE_OPEN_S]
+        deaf = [{'who': d['who'], 'min': round(d['down_s'] / 60)} for d in self.heartbeat(post=False)]
         rec = {'on': bool(e and e.get('recording')), 'file': e.get('recording') if e else None,
                'why': self.view['rec_why']}
         now_t, next_t = self.now_text(), self.view['next'] or (e['next'] if e else None)
@@ -1230,7 +1296,7 @@ class Phone:
                 'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
-                'offers': self.view['offers'][-4:], 'listening': agents, 'devices': devices,
+                'offers': self.view['offers'][-4:], 'listening': agents, 'devices': devices, 'deaf': deaf,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
@@ -1283,6 +1349,10 @@ class Agent:
                  '; devices open: ' + (', '.join(f"{d['kind']} ({d['browser']}{', stream' if d['stream'] else ''})"
                                                 for d in devices if d['open']) or 'none') +
                  ' (phone_presence has both sides and the unclaimed notes)')
+        down = ph.heartbeat()
+        if down:
+            L.append('WATCHER DOWN: ' + '; '.join(f"{d['who']}, stopped {_ago(d['down_s'])} (the person is {d['why']})"
+                                                  for d in down) + ': wake it')
         ago = time.time() - ph.page_seen
         listening = sum(x.listeners for x in ph.encoders.values())
         L.append('page: ' + ('never opened since the server started' if not ph.page_seen else
@@ -1671,9 +1741,13 @@ class Agent:
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])
         return 'buzzed (if the page is open)'
 
-    def op_listen(self, who, since=None, wait=25, page=False):
+    def op_listen(self, who, since=None, wait=25, page=False, lead=False):
         ph = self.ph
         ph.agents[who] = ph.listened[who] = time.time()
+        if lead:
+            ph.lead = (who, time.time())
+        ph.watch_back(who)
+        ph.heartbeat()                                       # anyone else gone quiet: the alarm goes out now
         since = ph.seq if since is None else int(since)
         end = time.time() + float(wait or 0)
         keep = (lambda r: True) if page else (lambda r: r.get('kind') != 'page')
@@ -1720,6 +1794,28 @@ class Agent:
         return (f"taken: {c['by']} claimed note {n} at {when}: leave it to them"
                 + (f" ({c['why']})" if c.get('why') else ''))
 
+    def op_expect(self, who, why, minutes=180, by=None):
+        if not who or not str(why or '').strip():
+            raise ValueError("who: the agent whose watcher must stay up; why: 'a set', 'VR session', 'a jam' ...")
+        m = float(minutes)
+        if not 0 < m <= 24 * 60:
+            raise ValueError(f"minutes is 1 to 1440 (got {minutes}); phone_signoff ends it sooner")
+        ph = self.ph
+        ph.expect[who] = {'until': time.time() + m * 60, 'why': str(why).strip(), 'by': by or who}
+        ph.signed_off.pop(who, None)
+        up = time.time() - ph.listened.get(who, 0) < DOWN_S or bool(ph.waiting.get(who))
+        return (f"expecting {who}'s watcher for {m:.0f} min ({why}): if it stops polling for {DOWN_S:.0f} s an alarm "
+                f"goes to the lead" + ('' if up else f"; it is NOT watching now: arm python -m ismail phone_watch "
+                                                      f"\"who={who}\""))
+
+    def op_signoff(self, who, why=None):
+        ph = self.ph
+        ph.signed_off[who] = time.time()
+        gone = ph.expect.pop(who, None)
+        ph.alarmed.pop(who, None)
+        return (f"{who} signed off" + (f" ({why})" if why else '') + ": no alarm when its watcher stops"
+                + (f"; its phone_expect ({gone['why']}) ended" if gone else ''))
+
     def op_presence(self, minutes=60):
         ph = self.ph
         agents, devices = ph.presence()
@@ -1735,6 +1831,13 @@ class Agent:
                  f"{CLAIM_GRACE_S / 60:.0f} min, the team lead's by default):")
         L += [f"  {u['n']} at {u['ts'][11:16]} ({_ago(u['age_s'])}){' LEAD' if u['age_s'] >= CLAIM_GRACE_S else ''}: "
               f"{u['text']!r}" for u in un] or ['  none']
+        live = ph.live_reasons()
+        L.append('the person is ' + (' and '.join(live) if live else 'not live (not in VR, not on the stream)')
+                 + '; lead: ' + (ph.lead_who() or 'none watching (alarms go to every watcher)'))
+        for w, e in list(ph.expect.items()):
+            L.append(f"  expected: {w} until {now_iso(e['until'])[11:16]} ({e['why']}, set by {e['by']})")
+        L += [f"  WATCHER DOWN: {d['who']}, stopped {_ago(d['down_s'])} (the person is {d['why']}): wake it"
+              for d in ph.heartbeat()]
         recent = sorted((k, v) for k, v in ph.claims.items() if time.time() - v['at'] < float(minutes) * 60)[-10:]
         if recent:
             L.append('claims: ' + '; '.join(f"{k} by {v['by']} at {v['ts'][11:16]}" for k, v in recent))

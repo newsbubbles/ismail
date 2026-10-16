@@ -9,6 +9,30 @@
   helper (whole octaves, a lead kept a few semitones under the measured top), each hand-off checked as a new row in
   `analyze_structure(source='render')`.
 
+### exams: measure first, then spend the person's ear
+
+- `phone_exam(..., measured=, unmeasured=)` (ledger:M212; qa intent_rules 10-16 cluster 5): an exam goes to the
+  phone with the lines the instruments gave (`{'all' or a clip label or pair number: lines with their numbers}`) or
+  the reason only the ear can tell (logged in the phone's `ear_first.jsonl`); with neither it is refused, saying
+  which to pass. Either one is kept in `<answers_path>.measured.json` for the exam ledger.
+- `exam_check` refuses a pair that is the same audio: aligned within 250 ms and level-matched, a difference under
+  -40 dB is one sound twice (pairs by label, 1A with 1B; every two clips when the labels name no pairs). The line
+  names the offset and the level, so a wrong file or a render that did not change shows at once.
+- Docs: `blind-tests.md` "Measure first", `phone.md`. Tests in `tests/test_exam_check.py`; the phone tests pass
+  `unmeasured`.
+
+### phone: a watcher that stops while the person is live is named, once
+
+- The watcher heartbeat (ledger:M211; qa intent_rules 10-16 cluster 3, "be reachable"). While the person is live
+  (the Quest page open, a phone on the stream, or a `phone_expect` for a set, VR or a jam), an agent that watched
+  in the last 30 min and has not polled for 2 min is down. One `alarm` line (`watcher_down`) goes to the lead's
+  watcher (`phone_watch lead=true`), or to every watcher when no lead is up. The page shows "not hearing you: <who>",
+  and `phone_status` and `phone_presence` name it; `watcher_back` follows when it polls again. A watcher skips an
+  alarm addressed to someone else, and its own.
+- `phone_expect(who, why, minutes=180)` and `phone_signoff(who, why)`: a watcher that must stay up, and a clean stop
+  that raises nothing. `phone_presence` also says whether the person is live, who the lead is and who is expected.
+  Docs: `phone.md`, "Watching the phone" step 6. Tests in `tests/test_phone.py` and `tests/test_phone_watch.py`.
+
 ### Standing grants know whose step it is: grant_check, grant_add, routes and the still-ask list
 
 - Grants gain `owner` and `kind` (ledger:M209-M210, the 10-16 intent-rules review, clusters 1 and 2). A grant with
