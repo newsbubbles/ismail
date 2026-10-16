@@ -48,7 +48,14 @@ def ffmpeg():
 def write_json(path, obj):
     tmp = Path(str(path) + '.tmp')
     tmp.write_text(json.dumps(obj, indent=1), encoding='utf-8')
-    tmp.replace(path)
+    for i in range(20):                       # Windows: a reader (stage_capture_status) holding it open refuses the swap
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if i == 19:
+                raise
+            time.sleep(0.05)
 
 
 class Capture:
