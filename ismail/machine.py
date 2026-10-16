@@ -1069,6 +1069,7 @@ class _Meter:
 
     def __init__(self, job, gpu_sampler=True, path=None):
         self.job, self.cpu, self.rss_peak, self.stop_ = job, {}, 0, threading.Event()
+        self._sampling = threading.Lock()   # stop() samples once more, and the loop may still be in one after join(5)
         self.path, self.priv_peak, self.wrote, self.noted = path, 0, {}, 0.0
         self.resumed, self.pinned = False, set()
         me = psutil.Process()
@@ -1083,6 +1084,10 @@ class _Meter:
         self.t.start()
 
     def _sample(self):
+        with self._sampling:
+            self._sample_once()
+
+    def _sample_once(self):
         try:
             me = psutil.Process()
             procs = [me] + me.children(recursive=True)
