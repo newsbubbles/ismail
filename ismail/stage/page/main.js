@@ -189,13 +189,13 @@ live.onEmit((type, d) => {
 live.handlers.take_keep_last = (c) => keepLast(c.name || null);
 live.handlers.take_keep_recent = (c) => (c.info ? hands.recentInfo() : hands.keepRecent(c.seconds, c.name || ''));   // hands.js: the last 2 min in VR
 // things that do things: a scene's own small functions, run on a press, a menu item or a wire (behaviours.js)
-window.VR_behaviours = initBehaviours(ed, live, panels, hands);
+window.VR_behaviours = initBehaviours(ed, live, panels, hands, { clock: stageClock, actors });
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,
   get actors() { return actors; }, get embody() { return embody; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; }, trails, get camrec() { return camrec; } });   // defined below; used on a menu press
 // a camera move recorded like a take: the user's head or a carried camera while the clock plays (camrec.js)
-const camrec = initCamRec(ed, live, stageClock, panels, { countdown: actions.countdown, trails });
+const camrec = initCamRec(ed, live, stageClock, panels, { countdown: actions.countdown, trails, follows: window.VR_behaviours.follows });
 window.VR_camrec = camrec;
 live.handlers.take_stop = () => stopTake();
 const sayText = live.handlers.say;                 // in VR there is no caption to read: speak it (or with --voice)

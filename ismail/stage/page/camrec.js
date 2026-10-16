@@ -4,7 +4,10 @@
 // sample, its keys outside that window kept. Then Keep (saved to anim.json), Redo (the old keys back, record again)
 // or Undo (the old keys back). Unsaved until Keep, like any key.
 //   source 'head': the camera sits at the user's eyes and looks where they look (hidden while it does, so it never
-//     blocks the view); 'hold': the camera is wherever it is put (carried on the ray, grabbed, or moved by an agent).
+//     blocks the view); 'hold': the camera is wherever it is put (carried on the ray, grabbed, or moved by an agent);
+//     'follow': a camera that follows something (behaviours.js s.follow, or stage_follow) bakes that follow. The
+//     follow is snapped onto its target at t0, and stopped when the take ends so the new keys play; Undo and Redo
+//     start it again, Keep leaves it off (the default source for a following camera).
 //   The clock plays from t0 (default: where it is) to t1 (default: the end of its span); a stop, the span's end or a
 //   loop back ends the take. A countdown (default 3 s) first, the clock held at t0.
 //   live: cam_record {action: start|stop|keep|redo|undo|state, name, source?, t0?, t1?, countdown?, wait?}
@@ -15,7 +18,7 @@ import { thinKeys } from './interp.js';
 
 const r6 = (a) => a.map((v) => +v.toFixed(6));
 
-export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) {
+export function initCamRec(ed, live, clock, panels, { countdown, trails, follows = null } = {}) {
   let rec = null;            // { name, it, source, t0, t1, prev, prevMode, samples, phase, lastT, hid }
   const REVIEW = 'cam_record_review', STOP = 'cam_record_stop';
 
@@ -37,15 +40,17 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
     if (rec && rec.phase === 'review') { panels.close(REVIEW, 'replaced'); rec = null; }
     const it = ed.byName.get(c.name);
     if (!it) throw new Error('no object ' + c.name);
-    const source = c.source || (it.type === 'CAMERA' ? 'head' : 'hold');
-    if (!['head', 'hold'].includes(source)) throw new Error("source is 'head' or 'hold'");
+    const following = follows ? follows.of(it.name) : null;
+    const source = c.source || (following ? 'follow' : it.type === 'CAMERA' ? 'head' : 'hold');
+    if (!['head', 'hold', 'follow'].includes(source)) throw new Error("source is 'head', 'hold' or 'follow'");
+    if (source === 'follow' && !following) throw new Error(`nothing makes ${it.name} follow: start one first (s.follow in its behaviour, or stage_follow)`);
     const span = clock.anim.span;
     const t0 = c.t0 != null ? +c.t0 : clock.st.t, t1 = c.t1 != null ? +c.t1 : span[1];
     if (!(t1 > t0 + 0.2)) throw new Error(`t1 (${t1}) must be after t0 (${t0})`);
     const ks = clock.anim.objects[it.name];
     rec = { name: it.name, it, source, t0, t1, prev: ks ? ks.map((k) => ({ ...k })) : null,
       prevMode: (clock.anim.interp || {})[it.name] || null, samples: [], phase: 'counting', lastT: null, hid: null,
-      opts: { source, t0, t1, countdown: c.countdown } };
+      opts: { source, t0, t1, countdown: c.countdown }, follow: source === 'follow' ? following : null };
     clock.hold(it.name);
     clock.st.playing = false;
     clock.seek(t0);
@@ -56,6 +61,7 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
     if (!rec || rec.phase !== 'counting') return state();          // stopped during the countdown
     rec.phase = 'recording';
     clock.seek(t0);
+    if (rec.follow) follows.snap(rec.name);   // on its mark at t0, not easing in from wherever the countdown left it
     sampleNow(t0);                    // the take starts at t0 exactly: an old key just before the first frame would whip
     clock.st.playing = true;
     stopPanel();
@@ -89,6 +95,7 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
     clock.st.playing = false;
     panels.close(STOP, 'done');
     if (rec.hid != null) { rec.it.obj.visible = rec.hid; rec.hid = null; }
+    if (rec.follow) follows.stop(rec.name, 'baked');                 // the keys play now, not the follow
     const ss = rec.samples;
     if (ss.length < 2) {                                            // nothing to keep: as it was
       restore();
@@ -104,7 +111,8 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
     clock.unhold(rec.name);
     clock.seek(a);
     rec.phase = 'review';
-    rec.result = { keys: mine.length, err_m: +err_m.toFixed(3), err_deg: +err_deg.toFixed(2), window: [+a.toFixed(2), +b.toFixed(2)], why };
+    rec.result = { keys: mine.length, err_m: +err_m.toFixed(3), err_deg: +err_deg.toFixed(2), window: [+a.toFixed(2), +b.toFixed(2)], why,
+      ...(rec.follow ? { baked: rec.follow.target } : {}) };
     if (trails) trails.show(true, [rec.name]);
     review();
     return tell();
@@ -112,7 +120,8 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
   async function review() {
     const name = rec.name, res = rec.result;
     const r = await panels.show({ panel_id: REVIEW, title: `Keep this move for ${ed.label(rec.it)}?`,
-      text: `${res.keys} keys, ${res.window[0]} s to ${res.window[1]} s. The path is drawn; play the clock to watch it.`,
+      text: `${res.keys} keys, ${res.window[0]} s to ${res.window[1]} s. The path is drawn; play the clock to watch it.` +
+        (rec.follow ? ' The follow is off so the keys play; Undo turns it back on.' : ''),
       buttons: ['👍 Keep', '↻ Redo', '↶ Undo'], width: 0.5 });
     if (!rec || rec.name !== name || rec.phase !== 'review' || !r) return;
     if (r.answer === '👍 Keep') await keep();
@@ -122,6 +131,9 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
   function restore() {
     clock.setKeys(rec.name, rec.prev, rec.prevMode || null);
     clock.unhold(rec.name);
+    if (rec.follow && follows) {                                     // following again, as before the take
+      try { follows.start(rec.name, rec.follow); } catch (e) { live.emit('cam_record', { state: 'follow_lost', name: rec.name, error: String(e.message || e) }); }
+    }
   }
   async function keep() {
     if (!rec || rec.phase !== 'review') throw new Error('no recorded move to keep');
@@ -129,8 +141,9 @@ export function initCamRec(ed, live, clock, panels, { countdown, trails } = {}) 
     panels.close(REVIEW, 'kept');
     rec = null;
     await clock.save();
-    live.emit('cam_record', { state: 'kept', name, ...res });
-    return { state: 'kept', name, ...res };
+    const extra = res.baked ? { follow: 'off: the keys play now' } : {};
+    live.emit('cam_record', { state: 'kept', name, ...res, ...extra });
+    return { state: 'kept', name, ...res, ...extra };
   }
   function undo() {
     if (!rec) throw new Error('nothing recorded to undo');

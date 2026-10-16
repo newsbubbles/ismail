@@ -301,10 +301,21 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   VR a key picked on the ray scrubs the clock there, and carried, it moves (its time stays; `stage_anim_save` keeps
   it). The camera's menu has the same: Path, and Record move. `stage_camera_record(camera, t0, t1)` records a move
   like a take: a countdown, then the clock plays and the camera is the person's eyes (`source="head"`, hidden while
-  it records) or wherever it is carried (`source="hold"`: unlocked with Move first). The samples are smoothed and
+  it records), wherever it is carried (`source="hold"`: unlocked with Move first) or wherever its follow takes it
+  (`source="follow"`, the default on a following camera: the follow is baked and stops, so the keys play). The samples are smoothed and
   thinned to a few smooth keys (within 2 cm and 2 degrees) that replace the camera's keys between t0 and the last
   sample; keys outside that window stay. A Keep / Redo / Undo panel follows; nothing is saved before Keep. Watch
   the `cam_record` events, and do not talk over a take.
+- **A camera can follow something by itself.** `stage_follow(scene, object=<camera>, target=...)` keeps it on an
+  object, a body's joint (`"<person>:head"`, `"<person>:pelvis"`, `"<person>:hand_r"`; a wrong bone lists them) or
+  the person (`"person"`: the headset, or the desktop view). `offset` is `[right, forward, up]` in the target's
+  facing (`[0, -3, 1.5]`: 3 m behind and 1.5 m up; a body faces where its hips face), or Blender `[x, y, z]` with
+  `space="world"`. `lag` (seconds, 0.5) is how soft it trails; a camera looks at the target (`look_offset` moves the
+  aim point, `look_lag` softens the turn) and keeps the horizon level; `orbit` circles it in degrees a second (a
+  lagged orbit runs a little inside its circle). `target=None` stops it; no object lists the follows; `where=<target>`
+  reads where a target is. A follow is live, not saved: to keep the shot, Record move bakes it into keys
+  (`stage_camera_record`, `source="follow"`), and Keep writes them to anim.json, which the Blender render reads.
+  A thing that should always follow says so in its behaviour (`s.follow`, below).
 - **A Follow is a performance: be quick and quiet in it.** From the moment someone follows the person, the mic
   records in clips and their gestures do nothing. Watch the `perform_*` events; when a part is worth reading,
   `stage_perform(action="next_clip")` cuts the clip there (its words come back as `perform_clip`, on the Follow
@@ -425,6 +436,13 @@ needs a model to listen spends tokens on work that could have been saved as dete
   switch to a lamp), `light` (watts and colour, with `seconds` to fade; `energy: null` puts a light back as built),
   `show`, `move` (`by`, `to`, `turn` in degrees, `seconds`), `sound`, `emit` (a message to agents: `object_message`),
   `do` (any page command, the same ones you send), `after`, `every`. Names take a list or a glob (`cf_floor_*`).
+  For things that track others: `clock()` (`{t, playing}`), `where(target)` (location, rotation, forward and facing
+  of an object, `"<person>:<bone>"` or `"person"`; `{shown: false}` while that body is not shown), `place(name,
+  {location, look})` (set a thing now, aiming it at a point or a target) and `follow(target, options)` (the same
+  options as `stage_follow`; `null` stops it). A chase camera: `apply(s) { s.follow(s.get('on') ? 'runner:pelvis' :
+  null, { offset: [0, -4, 1.6], lag: 0.4 }); }`.
+- **Every frame.** `frame(s, dt)` in a thing's definition runs every frame after the clock and the bodies have moved
+  (dt in seconds). Keep it small; its first error stops it and goes out as `behaviour_error` with phase `frame`.
 - **Every interaction sounds.** Give each thing a `sound`: a file under the scene folder, rendered with ismail (a
   switch should sound like a switch). Without one the page plays a plain click and warns you. The same goes for
   anything else you build that the person touches: no silent controls.

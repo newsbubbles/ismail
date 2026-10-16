@@ -25,14 +25,36 @@
 //   };
 // s: me, get(key?), set(key, value | {..}), state(object, key?), send(object, input, value), light(names, {energy,
 // color, seconds}), show(names, on), move(name, {by, to, turn, seconds}), sound(file, {at, volume}), emit(type, data),
-// do(command, fields), after(seconds, fn), every(seconds, fn). Names take a list or a glob (accent_*). Positions are
-// Blender metres, z up; turn is [x, y, z] degrees about the object's own origin.
+// do(command, fields), after(seconds, fn), every(seconds, fn), clock() -> {t, playing}, where(target), place(name,
+// {location, rotation, look}), follow(target, {...}). Names take a list or a glob (accent_*). Positions are Blender
+// metres, z up; turn and rotation are [x, y, z] degrees (Blender's XYZ Euler; turn is about the object's own origin).
+//
+// Following (the user, 2026-10-16: a camera that soft-follows an object, a person's joint or the user, for a chase,
+// a drone shot, fast action, its path baked into keys for the Blender render). A target is an object's name,
+// 'person' (the user's eyes: the headset in VR, the view on a desktop) or '<person>:<bone>' (a joint of a body the
+// scene shows: runner:head, runner:hand_r, runner:pelvis; the error lists the bones).
+//   s.where(target) -> {location, rotation, quaternion, forward, facing}: forward is where it looks, facing the same
+//     on the floor (a body: where its hips face).
+//   s.place(name, {location, rotation | quaternion, look}) sets a pose at once, no tween (for per-frame code).
+//   s.follow(target, {offset: [right, forward, up] metres from the target (space 'target', the default: it turns with
+//     where the target faces) or [x, y, z] (space 'world'), lag: seconds to close most of the gap (0.5; 0 = locked
+//     on), look: true (at the target; the default for cameras and lights) | false | a target | [x, y, z],
+//     look_offset: [x, y, z] added to the aim point, look_lag (0.25), orbit: degrees a second around the target (a
+//     drone circling), object: who follows (default s.me), snap: start on the spot}) moves the object every frame
+//     until s.follow(null). While it follows, its keys on the clock wait. Live only: bake it with cam_record source
+//     'follow' (stage_camera_record, or ⏺ Record move on a following camera), which plays the clock, samples the
+//     path into keys and stops the follow so the keys play; Keep saves them to anim.json, which the render reads.
+//   frame(s, dt) in an object's definition runs every frame (dt in seconds); its first error stops it and reports.
+//   A chase cam: chase_cam: { sound: 'sounds/beep.wav', state: { on: true },
+//     apply(s) { s.follow(s.get('on') ? 'runner:pelvis' : null, { offset: [0, -3, 1.4], lag: 0.6, look_offset: [0, 0, 0.5] }); },
+//     menu: { 'Follow': (s) => s.set('on', true), 'Stop': (s) => s.set('on', false) } }
 //
 // Errors (the user, 2026-10-08, after a touch did nothing: "you should have an event hook on object functionality
 // errors"): every one goes to the agents as behaviour_error {object, phase, action, error, line}, load errors too, and
 // a person's press that fails buzzes and says so at the object, so a broken switch never passes for one that is off.
 import * as THREE from 'three';
 import { listenerOf } from './stream.js';
+import { t2bPos, t2bQuat, b2tQuat } from './editor.js';
 
 const PRESS_GAP_MS = 350;              // one press per object at most this often (a held pinch re-presses)
 // a thing with both a press and a menu: a quick pinch presses, a pinch held this long opens its menu instead (the user,
@@ -40,7 +62,7 @@ const PRESS_GAP_MS = 350;              // one press per object at most this ofte
 const HOLD_FOR_MENU_MS = 450;
 const ACTIONS = ['press', 'apply'];
 
-export function initBehaviours(ed, live, panels, hands = null) {
+export function initBehaviours(ed, live, panels, hands = null, { clock = null, actors = null } = {}) {
   let defs = {}, states = {}, report = { file: false, objects: [], errors: [], warnings: [] };
   let timers = [], anims = [], saveTimer = null, gen = 0;
   const lastPress = new Map(), buffers = new Map(), broken = new Map();   // broken: object -> why its code is not running
@@ -166,6 +188,175 @@ export function initBehaviours(ed, live, panels, hands = null) {
     return it.name;
   }
 
+  // ---- where things are, placing them, following them (see the top: s.where, s.place, s.follow)
+  const UP = new THREE.Vector3(0, 1, 0), RAD = Math.PI / 180;
+  const vec3 = (v, what) => {
+    if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => Number.isFinite(+x))) throw new Error(`${what} must be [x, y, z]`);
+    return v.map(Number);
+  };
+  // a target's pose in three's space: p, q, look (where it looks), facing (that on the floor), aimed (a camera's
+  // frame); null while the body a target names is not shown (a take not playing yet): a follow waits where it is
+  function poseOf(target) {
+    const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    let look, aimed = false;
+    if (target === 'person') {
+      ed.camera.updateMatrixWorld(true); ed.camera.matrixWorld.decompose(p, q, sc);
+      look = new THREE.Vector3(0, 0, -1).applyQuaternion(q); aimed = true;
+    } else if (typeof target === 'string' && target.includes(':') && !ed.byName.has(target)) {
+      const [who, bone] = target.split(':');
+      if (!ed.byName.has(who)) throw new Error(`no person "${who}" in ${scn()}`);
+      if (!actors) throw new Error('no bodies on this page');
+      const rig = actors.shownRig(who);
+      if (!rig) return null;
+      const b = rig.bones[bone];
+      if (!b) throw new Error(`${who} has no bone "${bone}"; some: ${Object.keys(rig.bones).filter((n) => !/_0\d_|twist|ik_/.test(n)).sort().join(', ')}`);
+      b.updateWorldMatrix(true, false); b.matrixWorld.decompose(p, q, sc);
+      const pel = rig.bones.pelvis, rest = rig.rest && rig.rest.pelvis;   // a body faces where its hips face
+      look = pel && rest && rig.fwd ? rig.fwd.clone().applyQuaternion(pel.getWorldQuaternion(new THREE.Quaternion()).multiply(rest.q.clone().invert()))
+        : new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    } else {
+      if (typeof target !== 'string' || target.includes('*')) throw new Error(`a target is one name, 'person' or '<person>:<bone>', not ${JSON.stringify(target)}`);
+      const it = items(target)[0];
+      it.obj.updateWorldMatrix(true, false); it.obj.matrixWorld.decompose(p, q, sc);
+      aimed = !!it.aimed;
+      look = new THREE.Vector3(0, 0, aimed ? -1 : 1).applyQuaternion(q);   // cameras and lights look down -Z, things face +Z
+    }
+    const facing = look.clone().setY(0);
+    if (facing.lengthSq() < 1e-8) facing.set(0, 0, -1);
+    return { p, q, look: look.normalize(), facing: facing.normalize(), aimed };
+  }
+  const r4 = (a) => a.map((v) => +(+v).toFixed(4));
+  function where(target) {
+    const w = poseOf(target);
+    if (!w) return { target, shown: false };
+    const bq = t2bQuat(w.q, w.aimed), e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(bq[1], bq[2], bq[3], bq[0]), 'ZYX');
+    return { target, location: r4(t2bPos(w.p)), rotation: r4([e.x / RAD, e.y / RAD, e.z / RAD]), quaternion: r4(bq),
+      forward: r4(t2bPos(w.look)), facing: r4(t2bPos(w.facing)) };
+  }
+  // a world pose (three's space) onto an object, whatever its parent
+  function setWorld(it, p, q) {
+    const sc = new THREE.Vector3(), m = new THREE.Matrix4();
+    it.obj.getWorldScale(sc);
+    m.compose(p, q, sc);
+    if (it.obj.parent) { it.obj.parent.updateWorldMatrix(true, false); m.premultiply(new THREE.Matrix4().copy(it.obj.parent.matrixWorld).invert()); }
+    m.decompose(it.obj.position, it.obj.quaternion, it.obj.scale);
+    it.obj.updateMatrixWorld(true);
+  }
+  // the turn that points it from `from` at `to` (three's space), the horizon level
+  function aimAt(it, from, to) {
+    if (from.distanceToSquared(to) < 1e-8) return null;
+    const m = it.aimed ? new THREE.Matrix4().lookAt(from, to, UP) : new THREE.Matrix4().lookAt(to, from, UP);
+    return new THREE.Quaternion().setFromRotationMatrix(m);
+  }
+  function aimPoint(look, w) {
+    if (look === true) return w ? w.p.clone() : null;
+    if (Array.isArray(look)) return b2t(vec3(look, 'look'));
+    const lw = poseOf(look);
+    return lw ? lw.p : null;
+  }
+  function place(name, o = {}) {
+    const it = items(name)[0];
+    ed.runHome(it);
+    anims = anims.filter((a) => a.key !== 'move:' + it.name);
+    const p = o.location ? b2t(vec3(o.location, 'location')) : it.obj.getWorldPosition(new THREE.Vector3());
+    let q = it.obj.getWorldQuaternion(new THREE.Quaternion());
+    if (o.quaternion) q = b2tQuat(o.quaternion, it.aimed);
+    else if (o.rotation) {
+      const r = vec3(o.rotation, 'rotation'), bq = new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0] * RAD, r[1] * RAD, r[2] * RAD, 'ZYX'));
+      q = b2tQuat([bq.w, bq.x, bq.y, bq.z], it.aimed);
+    } else if (o.look != null && o.look !== false) {
+      const to = aimPoint(o.look, null);
+      if (!to) throw new Error(`place ${it.name}: ${JSON.stringify(o.look)} is not shown now`);
+      q = aimAt(it, p, to) || q;
+    }
+    setWorld(it, p, q);
+    ed.emit('change');
+    return it.name;
+  }
+
+  // follows: object name -> {it, owner, spec, p, q, start, last, waiting}; one per object, the newest wins
+  const follows = new Map();
+  function follow(owner, target, o = {}) {
+    const name = o.object || owner, it = items(name)[0];
+    if (target == null || target === false) return unfollow(it.name, 'stopped by ' + owner);
+    const w = poseOf(target);                                   // a bad target fails here, in the caller's phase
+    if (o.offset != null) vec3(o.offset, 'offset');
+    if (o.look_offset != null) vec3(o.look_offset, 'look_offset');
+    if (o.space && !['target', 'world'].includes(o.space)) throw new Error("space is 'target' or 'world'");
+    if (Array.isArray(o.look)) vec3(o.look, 'look');
+    else if (typeof o.look === 'string') poseOf(o.look);
+    const old = follows.get(it.name);
+    const spec = { offset: o.offset || [0, 0, 0], space: o.space || 'target', lag: o.lag != null ? Math.max(0, +o.lag) : 0.5,
+      look: o.look != null ? o.look : !!it.aimed, look_offset: o.look_offset || [0, 0, 0],
+      look_lag: o.look_lag != null ? Math.max(0, +o.look_lag) : 0.25, orbit: +o.orbit || 0, snap: !!o.snap, target };
+    ed.runHome(it);
+    anims = anims.filter((a) => a.key !== 'move:' + it.name);
+    if (clock) clock.hold(it.name);
+    const f = { it, owner, spec, p: old ? old.p : null, q: old ? old.q : null, start: old ? old.start : performance.now(), last: old ? old.last : null, waiting: !w };
+    follows.set(it.name, f);
+    if (spec.snap && !old) followStep(it.name, f, performance.now(), true);
+    if (!old || old.spec.target !== target) live.emit('follow', { object: it.name, target, by: owner, following: true });
+    return { object: it.name, target, following: true, ...(w ? {} : { waiting: 'the body is not shown yet' }) };
+  }
+  function unfollow(name, why = 'stopped') {
+    const f = follows.get(name);
+    if (!f) return { object: name, following: false };
+    follows.delete(name);
+    if (clock) clock.unhold(name);
+    live.emit('follow', { object: name, target: f.spec.target, following: false, why });
+    return { object: name, following: false, why };
+  }
+  function followStep(name, f, now, snap = false) {
+    const { it, spec } = f;
+    if (ed.editing && ed.selected === it) { f.last = now; f.p = null; f.q = null; return; }   // a hand that holds it wins
+    const w = poseOf(spec.target);
+    if (!w) { f.waiting = true; f.last = now; return; }
+    f.waiting = false;
+    // the smoothing is exact for any step, so a slow frame moves it as far as the time says (capped at 1 s after a stall)
+    const dt = f.last == null ? 0 : Math.min(1, (now - f.last) / 1000);
+    f.last = now;
+    let off;
+    if (spec.space === 'world') off = b2t(spec.offset);
+    else {
+      const fw = w.facing.clone(), right = fw.clone().cross(UP).normalize();
+      off = right.multiplyScalar(spec.offset[0]).addScaledVector(fw, spec.offset[1]).addScaledVector(UP, spec.offset[2]);
+    }
+    if (spec.orbit) off.applyAxisAngle(UP, spec.orbit * RAD * (now - f.start) / 1000);   // counterclockwise seen from above
+    const goal = w.p.clone().add(off);
+    if (!f.p || snap) f.p = snap ? goal.clone() : it.obj.getWorldPosition(new THREE.Vector3());
+    if (!f.q) f.q = it.obj.getWorldQuaternion(new THREE.Quaternion());
+    f.p.lerp(goal, snap || spec.lag <= 0 ? 1 : 1 - Math.exp(-dt / spec.lag));
+    if (spec.look !== false) {
+      const to = aimPoint(spec.look, w);
+      if (to) {
+        to.add(b2t(spec.look_offset));
+        const q1 = aimAt(it, f.p, to);
+        if (q1) f.q.slerp(q1, snap || spec.look_lag <= 0 ? 1 : 1 - Math.exp(-dt / spec.look_lag));
+      }
+    }
+    setWorld(it, f.p, f.q);
+  }
+
+  // every frame: the objects' own frame(s, dt), then the follows (this runs after the clock and the bodies have moved;
+  // performance.now is the capture's clock in stage_capture, so a follow renders frame by frame there too)
+  let lastTick = null;
+  const frameOwners = new Set(), handles = new Map();
+  const handleOf = (name) => { if (!handles.has(name)) handles.set(name, handle(name)); return handles.get(name); };
+  function tick() {
+    const now = performance.now(), dt = lastTick == null ? 0 : Math.min(0.1, (now - lastTick) / 1000);
+    lastTick = now;
+    for (const name of [...frameOwners]) {
+      const stop = (e) => { if (frameOwners.delete(name)) fail(name, 'frame', e); };
+      try { const r = defs[name].frame(handleOf(name), dt); if (r && r.catch) r.catch(stop); } catch (e) { stop(e); }
+    }
+    for (const [name, f] of [...follows]) {
+      try { followStep(name, f, now); } catch (e) { unfollow(name, 'error'); fail(f.owner, 'follow', e); }
+    }
+    if (follows.size || frameOwners.size) ed.emit('change');
+  }
+  ed.preRender.push(tick);
+  const followsOf = () => [...follows].map(([object, f]) => ({ object, target: f.spec.target, by: f.owner, ...(f.waiting ? { waiting: true } : {}) }));
+
   // ---- state: per object, saved with the scene (behaviour_state.json beside it)
   function save() {
     clearTimeout(saveTimer);
@@ -209,6 +400,10 @@ export function initBehaviours(ed, live, panels, hands = null) {
       },
       after: (sec, fn) => { const g = gen, id = setTimeout(() => { if (g === gen) guard(me, 'after', () => fn(h)); }, sec * 1000); timers.push(() => clearTimeout(id)); return id; },
       every: (sec, fn) => { const g = gen, id = setInterval(() => { if (g === gen) guard(me, 'every', () => fn(h)); }, Math.max(50, sec * 1000)); timers.push(() => clearInterval(id)); return id; },
+      clock: () => (clock ? { t: clock.st.t, playing: !!clock.st.playing } : { t: 0, playing: false }),
+      where: (target) => where(target),
+      place: (name, o) => place(name, o),
+      follow: (target, o) => follow(me, target, o),
     });
     return h;
   }
@@ -220,7 +415,7 @@ export function initBehaviours(ed, live, panels, hands = null) {
     } catch (e) { fail(name, action, e); return undefined; }
   }
   function phaseOf(name, action) {
-    if (['load', 'apply', 'press', 'after', 'every'].includes(action)) return action;
+    if (['load', 'apply', 'press', 'after', 'every', 'frame', 'follow'].includes(action)) return action;
     const d = defs[name] || {};
     return d.menu && d.menu[action] ? 'menu' : d.inputs && d.inputs[action] ? 'input' : action;
   }
@@ -297,6 +492,8 @@ export function initBehaviours(ed, live, panels, hands = null) {
     gen++;
     for (const t of timers) t();
     timers = []; anims = []; defs = {}; warned.clear(); broken.clear();
+    for (const name of [...follows.keys()]) unfollow(name, 'reload');
+    frameOwners.clear(); handles.clear();
     report = { file: false, objects: [], errors: [], warnings: [], why };
     const scene = scn();
     const r = await fetch(base() + 'behaviours.js', { cache: 'no-store' }).catch(() => null);
@@ -324,6 +521,7 @@ export function initBehaviours(ed, live, panels, hands = null) {
       report.objects.push({ object: name, actions: actionsOf(name), state: states[name], sound: d.sound || null });
     }
     for (const name of Object.keys(defs)) if (defs[name].apply) call(name, 'apply', undefined, 'load');
+    for (const name of Object.keys(defs)) if (typeof defs[name].frame === 'function') frameOwners.add(name);
     live.emit('behaviours_loaded', { ...report, objects: report.objects.map((o) => o.object), broken: [...broken.keys()] });
     return report;
   }
@@ -410,9 +608,22 @@ export function initBehaviours(ed, live, panels, hands = null) {
   if (ed.items.length) fresh();                                // the room came before this module did
   live.handlers.behaviours = async (c) => {
     const r = c.reload ? await load('reload') : report;
-    return { file: r.file, objects: report.objects.map((o) => ({ ...o, state: states[o.object] || {} })), errors: r.errors.slice(-20), warnings: r.warnings, broken: Object.fromEntries(broken) };
+    return { file: r.file, objects: report.objects.map((o) => ({ ...o, state: states[o.object] || {} })), errors: r.errors.slice(-20), warnings: r.warnings, broken: Object.fromEntries(broken), following: followsOf() };
   };
   live.handlers.behaviour_run = (c) => run(c.object, c.action || 'press', c.value, c.via || 'agent', c.sound !== false);
   live.handlers.behaviour_state = (c) => (c.state ? setState(c.object, c.state, 'agent') : (defs[c.object] ? { ...(states[c.object] || {}) } : (() => { throw new Error(`"${c.object}" has no behaviour in ${scn()}`); })()));
-  return { load, run, onSelect, ownerOf, state: () => ({ objects: Object.keys(defs), errors: report.errors.length, broken: [...broken.keys()] }) };
+  // an agent's follow, on trial (no code): the same follow a behaviour starts; a reload of behaviours.js ends it
+  live.handlers.follow = (c) => {
+    if (c.where) return where(c.where);
+    if (!c.object) return { following: followsOf() };
+    return follow('agent', c.target == null ? null : c.target, { ...(c.options || {}), object: c.object });
+  };
+  // for cam_record (camrec.js): bake a follow into keys, stop it so the keys play, start it again on Undo or Redo
+  const followApi = {
+    of: (name) => { const f = follows.get(name); return f ? { owner: f.owner, target: f.spec.target, spec: { ...f.spec } } : null; },
+    stop: (name, why) => unfollow(name, why),
+    start: (name, saved) => follow(saved.owner, saved.target, { ...saved.spec, object: name }),
+    snap: (name) => { const f = follows.get(name); if (f) followStep(name, f, performance.now(), true); },
+  };
+  return { load, run, onSelect, ownerOf, follows: followApi, where, state: () => ({ objects: Object.keys(defs), errors: report.errors.length, broken: [...broken.keys()], following: followsOf() }) };
 }

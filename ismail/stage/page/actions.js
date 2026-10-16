@@ -305,8 +305,10 @@ export function initActions(ed, hands, panels, live, takes) {
       else if (a === '◆ Key' && takes.clock) { takes.clock.show(true); takes.clock.key(it.name); }   // clock.js: a key at the playhead
       else if (a === '〰 Path' || a === '〰 Hide path') takes.trails.show(a === '〰 Path', [it.name]);   // trails.js
       else if (a === '⏺ Record move') {
-        // camrec.js: unlocked (✋ Move) the camera is carried while the clock plays; otherwise it is the user's eyes
-        const source = ed.unlocked === it ? 'hold' : 'head';
+        // camrec.js: a camera that follows something bakes its follow; unlocked (✋ Move) it is carried while the clock
+        // plays; otherwise it is the user's eyes
+        const fol = window.VR_behaviours && window.VR_behaviours.follows;
+        const source = fol && fol.of(it.name) ? 'follow' : ed.unlocked === it ? 'hold' : 'head';
         if (source === 'head') ed.select(null, 'menu');          // a deselect would lock a carried camera again
         takes.clock.show(true);
         takes.camrec.start({ name: it.name, source }).catch((e) => ed.setStatus('record move: ' + (e.message || e)));
