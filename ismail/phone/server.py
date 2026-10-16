@@ -21,6 +21,7 @@ import argparse
 import bisect
 import collections
 import datetime
+import hashlib
 import http.client
 import io
 import json
@@ -106,6 +107,12 @@ MOODS = ('calm', 'steady', 'lift', 'peak')
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
 MARKS = ('loved', 'replay', 'new')   # a piece they loved before, one the DJ plays again, one just made
 PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
+AGENT_SEEN_S = 90.0         # an agent that called this recently is listening (phone_watch calls every 25 s)
+CLAIM_GRACE_S = 180.0       # an untagged note nobody claimed this long after it came is the lead's by default
+# Who has a phone note (Nate 10-16, n5737 and n5776): untagged notes went to nobody, or to six agents at once, because
+# every watcher guessed what the others would do. A list of who is listening alone is still a race, so the first agent
+# to call phone_claim on a note owns it (decided here, under one lock) and every other watcher sees "claimed".
+NOTE_KINDS = ('voice_text', 'text')     # what the person says or types: the lines an agent passes on
 VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
               (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
               (r'louder', 'louder'), (r'quieter|softer', 'quieter'), (r'pause the set', 'pause'),
@@ -153,6 +160,21 @@ def clip_seconds(path):
         return float(sf.info(path).duration)
     except Exception:
         return None
+
+
+def _ago(s):
+    return f"{s:.0f} s ago" if s < 120 else f"{s / 60:.0f} min ago" if s < 7200 else f"{s / 3600:.0f} h ago"
+
+
+def device_kind(ua):
+    """(kind, browser) from a User-Agent: the person's phone, a computer, a tablet or the Quest."""
+    kind = ('Quest' if re.search(r'OculusBrowser|Quest', ua) else
+            'phone' if re.search(r'iPhone|Android.*Mobile|Mobile.*Android', ua) else
+            'tablet' if re.search(r'iPad|Android', ua) else 'computer')
+    browser = next((name for pat, name in ((r'OculusBrowser', 'Quest Browser'), (r'Edg/', 'Edge'),
+                                           (r'Firefox/', 'Firefox'), (r'Chrome/', 'Chrome'), (r'Safari/', 'Safari'))
+                    if re.search(pat, ua)), 'a browser')
+    return kind, browser
 
 
 def now_iso(at=None):
@@ -349,6 +371,10 @@ class Phone:
         self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
         self.agents = {}                           # who -> last time an agent called
+        self.listened = {}                         # who -> last time it called phone_listen (phone_watch loops it)
+        self.waiting = collections.Counter()       # who -> phone_listen calls waiting right now
+        self.devices = {}                          # page id -> {kind, browser, first, at, stream}: the person's side
+        self.claims = self._load_claims()          # inbox n -> {by, at, ts, why}: who passes a note on
         self.encoders = {}
         self.fed = 0                               # frames fed since the server started
         self.timeline = collections.deque()        # (pcm_s, wall, beat or None, bpm, bpb, ahead)
@@ -649,6 +675,71 @@ class Phone:
                                      creationflags=0x08000000 if os.name == 'nt' else 0)
             except OSError as e:
                 print(f'[phone] hook {cmd!r}: {e}', flush=True)
+
+    # ---- who passes a note on (phone_claim), and who is here (phone_presence)
+    def _load_claims(self):
+        try:
+            return {int(k): v for k, v in json.loads((HOME / 'claims.json').read_text(encoding='utf8')).items()}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def _save_claims(self):
+        keep = dict(sorted(self.claims.items())[-500:])
+        tmp = HOME / f'claims.json.{os.getpid()}.tmp'
+        try:
+            tmp.write_text(json.dumps(keep), encoding='utf8')
+            os.replace(tmp, HOME / 'claims.json')
+        except OSError as e:
+            print(f'[phone] claims: {e}', flush=True)
+
+    def claimed(self, rows):
+        """The lines with their claim on them (phone_listen and phone_watch carry it)."""
+        out = []
+        for r in rows:
+            c = self.claims.get(r.get('n'))
+            out.append({**r, 'claimed': {'by': c['by'], 'at': c['ts']}} if c else r)
+        return out
+
+    def seen_page(self, dev, ua, sid):
+        """An open page asked for its state: remember which of the person's devices it is."""
+        now = time.time()
+        self.page_seen = now
+        ua = ua or ''
+        dev = re.sub(r'[^A-Za-z0-9_-]', '', dev or '')[:24] or 'ua-' + hashlib.sha1(ua.encode()).hexdigest()[:6]
+        kind, browser = device_kind(ua)
+        d = self.devices.get(dev) or {'first': now}
+        d.update(kind=kind, browser=browser, at=now, stream=bool(sid))
+        self.devices[dev] = d
+        for k in [k for k, v in self.devices.items() if now - v['at'] > 86400]:
+            del self.devices[k]
+
+    def presence(self):
+        """Both sides, many to many: the agents listening and the person's devices with the page open."""
+        now = time.time()
+        agents = []
+        for who, at in sorted(self.agents.items(), key=lambda x: -x[1]):
+            if now - at < AGENT_SEEN_S:
+                agents.append({'who': who, 'last_s': round(now - at),
+                               'watching': bool(self.waiting.get(who)) or now - self.listened.get(who, 0) < 40})
+        devices = [{'id': k, 'kind': v['kind'], 'browser': v['browser'], 'stream': v['stream'],
+                    'open': now - v['at'] < PAGE_OPEN_S, 'last_s': round(now - v['at']), 'first': now_iso(v['first'])}
+                   for k, v in sorted(self.devices.items(), key=lambda x: -x[1]['at'])]
+        return agents, devices
+
+    def unclaimed(self, minutes=60):
+        """The person's untagged notes in the last `minutes` that nobody claimed, oldest first."""
+        now = time.time()
+        out = []
+        for r in self.read_inbox(max(0, self.seq - 400)):
+            if r.get('kind') not in NOTE_KINDS or r.get('for') or r.get('n') in self.claims:
+                continue
+            try:
+                age = now - datetime.datetime.fromisoformat(r['ts']).timestamp()
+            except (KeyError, ValueError, TypeError):
+                continue
+            if age <= minutes * 60:
+                out.append({'n': r['n'], 'ts': r['ts'], 'age_s': round(age), 'text': (r.get('text') or '')[:80]})
+        return out
 
     def read_inbox(self, since):
         out = []
@@ -1122,7 +1213,9 @@ class Phone:
     def state(self, sid=None, t=None):
         e = self.engine
         now = time.time()
-        agents = sorted(w for w, at in self.agents.items() if now - at < 90)
+        agents = sorted(w for w, at in self.agents.items() if now - at < AGENT_SEEN_S)
+        devices = [{'kind': d['kind'], 'browser': d['browser'], 'stream': d['stream']}
+                   for d in self.devices.values() if now - d['at'] < PAGE_OPEN_S]
         rec = {'on': bool(e and e.get('recording')), 'file': e.get('recording') if e else None,
                'why': self.view['rec_why']}
         now_t, next_t = self.now_text(), self.view['next'] or (e['next'] if e else None)
@@ -1137,7 +1230,7 @@ class Phone:
                 'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
-                'offers': self.view['offers'][-4:], 'listening': agents,
+                'offers': self.view['offers'][-4:], 'listening': agents, 'devices': devices,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
@@ -1184,6 +1277,12 @@ class Agent:
             if time.time() - s.get('at', 0) < 60:
                 h = ph.heard(sid, s.get('t'))
                 L.append(f"  a phone hears {h.get('of', 'a gap')}, {h.get('behind_s', '?')} s behind the room")
+        agents, devices = ph.presence()
+        L.append('agents listening: ' + (', '.join(a['who'] + ('' if a['watching'] else ' (not watching)')
+                                                   for a in agents) or 'nobody') +
+                 '; devices open: ' + (', '.join(f"{d['kind']} ({d['browser']}{', stream' if d['stream'] else ''})"
+                                                for d in devices if d['open']) or 'none') +
+                 ' (phone_presence has both sides and the unclaimed notes)')
         ago = time.time() - ph.page_seen
         listening = sum(x.listeners for x in ph.encoders.values())
         L.append('page: ' + ('never opened since the server started' if not ph.page_seen else
@@ -1574,19 +1673,72 @@ class Agent:
 
     def op_listen(self, who, since=None, wait=25, page=False):
         ph = self.ph
-        ph.agents[who] = time.time()
+        ph.agents[who] = ph.listened[who] = time.time()
         since = ph.seq if since is None else int(since)
         end = time.time() + float(wait or 0)
         keep = (lambda r: True) if page else (lambda r: r.get('kind') != 'page')
         rows = [r for r in ph.read_inbox(since) if keep(r)]
-        while not rows and time.time() < end:          # the page's own actions (scrolls, opens) do not wake you
-            seen = ph.seq
-            with ph.cond:
-                while ph.seq <= seen and time.time() < end:
-                    ph.cond.wait(min(5.0, end - time.time()))
-                    ph.agents[who] = time.time()
-            rows = [r for r in ph.read_inbox(since) if keep(r)]
-        return json.dumps({'since': ph.seq, 'lines': rows}, ensure_ascii=False)
+        ph.waiting[who] += 1
+        try:
+            while not rows and time.time() < end:          # the page's own actions (scrolls, opens) do not wake you
+                seen = ph.seq
+                with ph.cond:
+                    while ph.seq <= seen and time.time() < end:
+                        ph.cond.wait(min(5.0, end - time.time()))
+                        ph.agents[who] = ph.listened[who] = time.time()
+                rows = [r for r in ph.read_inbox(since) if keep(r)]
+        finally:
+            ph.waiting[who] -= 1
+            if ph.waiting[who] <= 0:
+                del ph.waiting[who]
+        out = {'since': ph.seq, 'lines': ph.claimed(rows)}
+        if rows:                                             # who else got these lines: they are not only yours
+            out['watching'] = [a['who'] for a in ph.presence()[0] if a['watching'] and a['who'] != who]
+        return json.dumps(out, ensure_ascii=False)
+
+    def op_claim(self, n, by, why=None):
+        """First caller wins, under the server's one lock: two agents claiming at once cannot both get "yours"."""
+        ph = self.ph
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            raise ValueError(f"n is the note's inbox line number (its 'n'), got {n!r}")
+        if not by:
+            raise ValueError("by: your name, the same `who` your phone_watch uses")
+        with ph.cond:
+            if not 1 <= n <= ph.seq:
+                raise ValueError(f"no inbox line {n} (the inbox has {ph.seq}): pass the 'n' of the line phone_watch "
+                                 f"returned")
+            c = ph.claims.get(n)
+            if c is None:
+                ph.claims[n] = {'by': by, 'at': time.time(), 'ts': now_iso(), 'why': why}
+                ph._save_claims()
+                return f"yours: note {n} is yours to pass on; every other watcher now sees it claimed by {by}"
+        when = f"{c['ts'][11:16]} ({time.time() - c['at']:.0f} s ago)"
+        if c['by'] == by:
+            return f"yours: you claimed note {n} at {when}"
+        return (f"taken: {c['by']} claimed note {n} at {when}: leave it to them"
+                + (f" ({c['why']})" if c.get('why') else ''))
+
+    def op_presence(self, minutes=60):
+        ph = self.ph
+        agents, devices = ph.presence()
+        L = ['agents (each one calling the phone server; watching = its phone_watch is waiting now):']
+        L += [f"  {a['who']}: {'watching' if a['watching'] else 'not watching'}, last call {a['last_s']} s ago"
+              for a in agents] or ['  nobody: notes wait in the inbox until an agent reads them']
+        L.append(f"the person's devices (one per page; open = asked for its state in the last {PAGE_OPEN_S:.0f} s):")
+        L += [f"  {d['kind']} ({d['browser']}): {'open' if d['open'] else 'closed or asleep'}, last seen "
+              f"{_ago(d['last_s'])}, {'on the stream' if d['stream'] else 'not on the stream'}"
+              for d in devices] or ['  none since the server started']
+        un = ph.unclaimed(float(minutes))
+        L.append(f"untagged notes nobody claimed (last {float(minutes):.0f} min; LEAD = past "
+                 f"{CLAIM_GRACE_S / 60:.0f} min, the team lead's by default):")
+        L += [f"  {u['n']} at {u['ts'][11:16]} ({_ago(u['age_s'])}){' LEAD' if u['age_s'] >= CLAIM_GRACE_S else ''}: "
+              f"{u['text']!r}" for u in un] or ['  none']
+        recent = sorted((k, v) for k, v in ph.claims.items() if time.time() - v['at'] < float(minutes) * 60)[-10:]
+        if recent:
+            L.append('claims: ' + '; '.join(f"{k} by {v['by']} at {v['ts'][11:16]}" for k, v in recent))
+        return '\n'.join(L)
 
     def op_timeline(self, minutes=15, kinds=None, limit=200):
         """Everything from the phone in the last `minutes` on one clock, oldest first, one line each: time, the bar
@@ -1809,7 +1961,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/health':
             return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
         if path == '/api/state':
-            self.ph.page_seen = time.time()
+            self.ph.seen_page(g('dev'), self.headers.get('User-Agent'), g('sid'))
             since, wait = int(g('since', '0') or 0), min(25.0, float(g('wait', '0') or 0))
             end = time.time() + wait
             with self.ph.cond:

@@ -1276,3 +1276,73 @@ def test_the_keys_page_is_served_and_its_keys_reach_the_playing_engine(phone, mo
         time.sleep(0.1)
     assert post(base, '/api/keys', {'sid': 'k1', 'events': []}) == {'ok': True, 'result': {'connected': False}}
     assert not any(r.get('kind') == 'keys' for r in ph.read_inbox(0))     # keys are not messages for an agent
+
+
+def _state(base, dev, ua, sid=''):
+    req = urllib.request.Request(base + f'/api/state?since=0&wait=0&dev={dev}&sid={sid}', headers={'User-Agent': ua})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 OculusBrowser/35.0 Chrome/126.0 Safari/537.36'
+IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile Safari/604.1'
+
+
+def test_phone_claim_the_first_caller_wins_and_every_line_carries_it(phone):
+    """The person, 10-16 (n5737, n5776): untagged notes reached nobody or six agents at once; the first agent to say
+    it passes a note on owns it, decided by the server, and the others see it taken."""
+    ph, base, _ = phone
+    n = ph.post({'kind': 'voice_text', 'id': 'v1', 'text': 'for whoever is listening'})['n']
+    got, start = {}, threading.Barrier(8)
+
+    def claim(who):
+        start.wait()
+        got[who] = P.phone_claim(n, by=who)
+    ts = [threading.Thread(target=claim, args=(f'agent {i}',)) for i in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(10)
+    won = [w for w, r in got.items() if r.startswith('yours:')]
+    assert len(won) == 1 and len(got) == 8
+    assert all(r.startswith(f'taken: {won[0]} claimed note {n} at ') for w, r in got.items() if w != won[0])
+    assert P.phone_claim(n, by=won[0]).startswith('yours: you claimed')
+    line = [x for x in json.loads(P.phone_listen('agent 9', since=n - 1, wait=0))['lines'] if x['n'] == n][0]
+    assert line['claimed']['by'] == won[0]
+    assert S.Phone().claims[n]['by'] == won[0]          # a restarted server keeps it
+    with pytest.raises(api.OpError, match='no inbox line'):
+        P.phone_claim(n + 50, by='x')
+
+
+def test_phone_presence_shows_agents_and_devices_many_to_many(phone):
+    ph, base, _ = phone
+    t = threading.Thread(target=P.phone_listen, args=('watcher b',), kwargs={'wait': 3})
+    t.start()
+    P.phone_say('hello', sender='busy agent')
+    _state(base, 'quest1', QUEST_UA)
+    st = _state(base, 'phone1', IPHONE_UA, sid='s1')
+    assert {d['kind'] for d in st['devices']} == {'Quest', 'phone'}
+    ph.post({'kind': 'voice_text', 'text': 'old untagged', '_age': 400})
+    ph.post({'kind': 'voice_text', 'text': 'new untagged'})
+    ph.post({'kind': 'voice_text', 'text': 'tagged one', 'for': 'dj'})
+    time.sleep(0.3)
+    pr = P.phone_presence()
+    assert 'watcher b: watching' in pr and 'busy agent: not watching' in pr
+    assert 'Quest (Quest Browser): open' in pr and 'not on the stream' in pr
+    assert 'phone (Safari): open' in pr and 'on the stream' in pr
+    assert "LEAD: 'old untagged'" in pr and "'new untagged'" in pr and 'tagged one' not in pr
+    assert ' LEAD' not in pr.split("'old untagged'")[1]
+    st = P.phone_status()
+    assert 'agents listening: ' in st and 'watcher b' in st and 'devices open: phone (Safari, stream), Quest' in st
+    t.join(10)
+
+
+def test_a_listen_with_lines_names_the_other_watchers(phone):
+    ph, base, _ = phone
+    t = threading.Thread(target=P.phone_listen, args=('watcher b',), kwargs={'wait': 3, 'since': 10 ** 6})
+    t.start()
+    time.sleep(0.3)
+    ph.post({'kind': 'voice_text', 'text': 'hi'})
+    out = json.loads(P.phone_listen('watcher a', since=ph.seq - 1, wait=0))
+    assert out['watching'] == ['watcher b']
+    t.join(10)

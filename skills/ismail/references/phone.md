@@ -157,19 +157,30 @@ listening exams and two notes).
    owner, or leave it. Handle a burst of lines in one turn. `round=<card id prefix>` holds the lines of a round of
    someone else's cards that you chose to let run, and wakes you on anything else or 90 s after the round's last
    line.
-2. **Passing on.** A note with no `for` that is plainly about another agent's work goes to that agent at once, word
-   for word, with its inbox number, id and time. When the owner is unclear, keep it and ask the team's lead (or the
-   person, when there is no lead).
-3. **Listening exams mean silence.** From the first exam card, or an `exam_round` started line, silence the music:
+2. **Passing on: claim it first.** Every watcher sees every note, so a note with no `for` used to reach nobody (each
+   agent thought another had it) or everybody (six agents passed one note to the same lead). Before you pass on or
+   answer an untagged note, call `phone_claim(n, by=<your who>)`. "yours" means go ahead; "taken: X claimed it" means
+   leave it, even if you would have done it differently. The server decides who was first, so two agents claiming
+   at once cannot both win, and every later `phone_listen` or `phone_watch` line of that note carries
+   `claimed {by, at}`. A note with a `for` is already that agent's: no claim. Claim only what you will act on now.
+   Then pass it on at once, word for word, with its inbox number, id and time. When the owner is unclear, keep it
+   and ask the team's lead (or the person, when there is no lead). An untagged note nobody claims for 3 minutes is
+   the lead's by default: `phone_presence` lists it with LEAD, so the lead's watcher picks it up.
+3. **Who else is here.** `phone_presence()` shows both sides, many to many: each agent calling the phone server and
+   whether its watcher is waiting now, and each of the person's devices with the page open (phone, computer,
+   tablet, Quest; its browser, last seen, on the stream or not), then the unclaimed notes and the recent claims.
+   `phone_watch` returns `also_watching` with every wake. Use it to decide: if you are the only one watching, a note
+   for someone who is not here waits on you to pass it on; if its owner is watching, leave the note to them.
+4. **Listening exams mean silence. From the first exam card, or an `exam_round` started line, silence the music:
    stop every track at the next bar and stop anything that queues new passes. Moving the laptop's output to no
    device is not silence, because the phone's stream keeps playing. The round ends on the person's "done", on
    `exam_round` finished, or after 90 s with no activity from them (clip plays and notes count as activity). Then
    bring the output back and start a fresh pass.
-4. **Stay alive.** A watcher run in the background may be stopped by its host after a time limit. Give it a shorter
+5. **Stay alive. A watcher run in the background may be stopped by its host after a time limit. Give it a shorter
    life of its own (`phone_watch` returns `alive: true` after `wait_min`, 100 minutes by default, where the limit
    is 2 hours), and when it ends, start it again and read `phone_status`, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
    hours ... you can still get the voice notes").
-5. **Their clock.** The machine's clock may not be the person's. Any clock time shown or said to them is in their
+6. **Their clock. The machine's clock may not be the person's. Any clock time shown or said to them is in their
    own time zone.
 
 ## Pause means stop, now
@@ -309,6 +320,8 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
 - `phone_buttons([...])`: your own buttons, as data, for this moment of the set ("darker", "drop it now"). Clear
   them when the moment passes.
 - `phone_buzz()`, `phone_status()` (who listens, the bar they hear, how far behind the room), `phone_stop()`.
+- `phone_presence()` (the agents watching and the person's open devices, the unclaimed notes) and
+  `phone_claim(n, by=)` (you pass on note n: the first caller wins). "Watching the phone" says when.
 - `live_keys_page(project, phone=True)`: optional, for someone in the room with no MIDI instrument who wants to
   play a part. It posts a panel whose button opens on-screen keys (`/keys` on the page's address) that play into the
   set from the computer's speakers, not into the stream; opening them leaves the page, so the stream stops until
