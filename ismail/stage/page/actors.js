@@ -97,6 +97,13 @@ const FINGER_JOINTS = {
   pinky: ['pinky-finger-phalanx-proximal', 'pinky-finger-phalanx-intermediate', 'pinky-finger-phalanx-distal'],
 };
 const SPINE = [['spine_01', 0.15], ['spine_02', 0.3], ['spine_03', 0.5], ['neck_01', 0.75], ['head', 1.0]];
+// how a look spreads down the body (the user, 2026-10-16: "turning his head moves the whole upper body instead of the
+// head and neck"): a look aside is the neck's (a person turns the head about 70 deg on the neck alone), the chest takes
+// a little of it; a nod or a tilt is mostly the neck and head too. Per bone, the share of the look's turn about the
+// vertical (YAW) and of the rest of it (SWING), as fractions of the whole look in world space. The head takes it all,
+// so it still looks exactly where the user looked. The hands can turn the chest a little more (CHEST_BY_HANDS).
+const LOOK = { spine_01: [0.03, 0.05], spine_02: [0.06, 0.1], spine_03: [0.12, 0.2], neck_01: [0.55, 0.6], head: [1, 1] };
+const CHEST_BY_HANDS = 0.35, CHEST_HANDS_MAX = THREE.MathUtils.degToRad(25), CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 };
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
 // a standing body from a headset (the user, 2026-10-08: "when I move my head ... sometimes the rest of my body moves,
 // but that's not actually what's going on"): the hips stay put while the head moves within HIP_SLACK of above them (a
@@ -226,6 +233,37 @@ export function initActors(ed, live) {
     if (st.start) poseRelative(st, f); else poseBase(st, f);
     control.apply(st, f, raw);
   }
+  // a look (delta: the head's world turn from rest) over the spine: the body's own facing (base) for the hips, then per
+  // bone its LOOK share of the turn about the vertical and of the rest (swing-twist), and the lean from the hips on top.
+  // Both hands in front of the chest turn the chest toward them a little (CHEST_BY_HANDS of their bearing, at most
+  // CHEST_HANDS_MAX); the neck and head take that back, so the head's own turn is unchanged
+  function spreadLook(st, f, base, delta, lean, P, hipAt) {
+    const { rig } = st;
+    const rel = base.clone().invert().multiply(delta);
+    const tw = new THREE.Quaternion(0, rel.y, 0, rel.w).normalize();
+    const swing = rel.clone().multiply(tw.clone().invert());
+    const look = 2 * Math.atan2(tw.y, tw.w);
+    let hands = 0;
+    const l = f.left && f.left.j && f.left.j[0], r = f.right && f.right.j && f.right.j[0];
+    if (l && r) {
+      const mid = P(l).add(P(r)).multiplyScalar(0.5).sub(hipAt).setY(0).applyQuaternion(base.clone().invert());
+      const fw = rig.fwd.clone();
+      if (mid.lengthSq() > 0.01 && mid.clone().normalize().dot(fw) > 0.2) {
+        const a = Math.atan2(fw.clone().cross(mid).y, fw.dot(mid));
+        hands = THREE.MathUtils.clamp(a * CHEST_BY_HANDS, -CHEST_HANDS_MAX, CHEST_HANDS_MAX);
+      }
+    }
+    st.chestHands = st.chestHands === undefined ? hands : st.chestHands + (hands - st.chestHands) * 0.15;   // no snapping
+    const I = new THREE.Quaternion();
+    for (const [n, k] of SPINE) {
+      const [ky, ks] = LOOK[n];
+      const chest = st.chestHands * (CHEST[n] !== undefined ? CHEST[n] : n === 'neck_01' ? 0.5 : 0);
+      const yaw = n === 'head' ? look : look * ky + chest;
+      const q = base.clone().multiply(new THREE.Quaternion().slerpQuaternions(I, swing, ks)).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaw));
+      if (lean) q.premultiply(new THREE.Quaternion().slerp(lean, Math.min(1, k * 1.25)));
+      setWorldQ(rig.bones[n], q.multiply(rig.rest[n].q));
+    }
+  }
   function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
@@ -268,11 +306,7 @@ export function initActors(ed, live) {
       const ang = 2 * Math.acos(Math.min(1, Math.abs(lean.w)));
       if (ang > LEAN_MAX) lean = new THREE.Quaternion().slerp(lean, LEAN_MAX / ang);
     }
-    for (const [n, k] of SPINE) {
-      const q = new THREE.Quaternion().slerpQuaternions(base, delta, k);
-      if (lean) q.premultiply(new THREE.Quaternion().slerp(lean, Math.min(1, k * 1.25)));
-      setWorldQ(rig.bones[n], q.multiply(rig.rest[n].q));
-    }
+    spreadLook(st, f, base, delta, lean, P, hipAt);
     // arms and hands, fingers
     const side = (sd, h) => {
       const hd = f[h];
@@ -286,6 +320,9 @@ export function initActors(ed, live) {
       }
       const lateral = rig.left.clone().applyQuaternion(base).multiplyScalar(sgn);
       const back = rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1);
+      // the shoulder takes a share of the arm's swing away from hanging relaxed (a raised arm lifts it), as poseRelative does
+      const sh0 = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
+      shoulderFollow(rig, sd, P(hd.j[0]), sh0.clone().add(new THREE.Vector3(0, -0.55, 0)).addScaledVector(back, -0.12));
       const sh = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
       twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), sh.clone().add(new THREE.Vector3(0, -1, 0)).addScaledVector(lateral, 0.5).addScaledVector(back, 0.4));
       const jq = (i) => { const a = hd.j[i]; return a ? new THREE.Quaternion(a[3], a[4], a[5], a[6]) : null; };
@@ -874,8 +911,11 @@ export function initActors(ed, live) {
     const B = moveStartBody(st, f, r, D);
     const Drel = D.clone().multiply(B.yaw.clone().invert());       // what the body's turn left for the spine and head
     const held = Object.fromEntries(SPINE.map(([n]) => [n, rig.bones[n].getWorldQuaternion(new THREE.Quaternion())]));
-    for (const [n, k] of SPINE) {
-      const q = new THREE.Quaternion().slerpQuaternions(I, Drel, k);
+    const tw = new THREE.Quaternion(0, Drel.y, 0, Drel.w).normalize(), swing = Drel.clone().multiply(tw.clone().invert());
+    const look = 2 * Math.atan2(tw.y, tw.w);
+    for (const [n, k] of SPINE) {                           // the look over the spine as in poseBase (LOOK)
+      const [ky, ks] = LOOK[n];
+      const q = new THREE.Quaternion().slerpQuaternions(I, swing, ks).multiply(new THREE.Quaternion().setFromAxisAngle(Y, look * ky));
       if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
       setWorldQ(rig.bones[n], q.multiply(held[n]));
     }
