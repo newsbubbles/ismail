@@ -50,7 +50,8 @@ def _write(p, data):
 def _line(g):
     kind = g.get('kind') or 'grant'
     who = f", {g['owner']}'s" if g.get('owner') else ''
-    src = f", from {g['source']}" if g.get('source') else ''
+    src = (f", from {g['source']}" if g.get('source') else
+           ", no source: matched after the sourced ones; grant_drop it and grant_add it with its source")
     return (f"{g.get('id')} ({g.get('date')}, {kind}{who}{src}): {g.get('says')}; keywords: "
             f"{', '.join(map(str, g.get('keywords') or []))}")
 
@@ -61,7 +62,8 @@ def grant_check(ask: str, sender: str = None) -> str:
     their standing grants and routes. Returns one of:
     'act: ...'   a grant covers it and it is yours: do it, then say what you did; leave it off NEEDS NATE;
     'send: ...'  it belongs to another agent (it acts on it, or answers that kind of question): send it there;
-    'ask: ...'   nothing covers it, or it names something always asked (public, money, accounts, deleting).
+    'ask: ...'   nothing covers it, or it names something always asked (public, money, accounts, deleting, or
+                 what only their senses answer: an exam, a listen, a headset test).
     sender: your name as the team knows you (an entry with an owner is yours or someone else's). Phone and stage
     asks run the same test themselves."""
     if not str(ask or '').strip():
@@ -78,8 +80,8 @@ def grant_check(ask: str, sender: str = None) -> str:
         return (f"send: this is {g['owner']}'s ({g.get('id')}: {g.get('says')}); {g['owner']} {what}. Send it to "
                 f"{g['owner']}, not to the person" + ('' if sender else f" (if you are {g['owner']}, pass sender)"))
     if a['verdict'] == 'still':
-        return (f"ask: {g.get('id')} matched, but '{a['word']}' is always asked (public, money, accounts, deleting): "
-                f"ask the person, in plain words, with your suggestion")
+        return (f"ask: {g.get('id')} matched, but '{a['word']}' is always asked (public, money, accounts, deleting, "
+                f"exams and listening): ask the person, in plain words, with your suggestion")
     return (f"ask: no standing grant or route covers it ({a['checked']} checked in {guards.grants_path()}): ask "
             f"the person, in plain words, with your suggestion")
 
@@ -91,7 +93,8 @@ def grant_list() -> str:
     rows = [g for g in data if isinstance(g, dict)]
     head = f"{len(rows)} in {p}" if rows else f"none yet ({p} is missing or empty): grant_add writes one"
     return '\n'.join([head] + ['  ' + _line(g) for g in rows] +
-                     ["always asked, whatever a grant says: anything public, money, accounts and passwords, deleting"])
+                     ["always asked, whatever a grant or route says: anything public, money, accounts and passwords, "
+                      "deleting, and what only their senses answer (exams, listening, headset tests)"])
 
 
 @op(mutates=True)
