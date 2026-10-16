@@ -154,6 +154,17 @@ signed in to the same account: install it on both (the person signs in; say what
 `phone_start` gives the address. Phones allow the microphone only on https pages, which Tailscale's address is.
 Nothing is public.
 
+### Optional: VR (the stage)
+
+In the headset the person talks to you by voice. Their words reach you as a tool's output, not as their typed turn,
+so a step outside ismail's own commands asks for permission on a screen nobody is looking at, or is refused. Before
+the first VR session, run `stage_preflight`. Its `allow_rule` and `guard_hook` lines read their settings (they never
+write them) and, for anything missing, print the exact lines to add: the allow rule for `python -m ismail`
+(`Bash(...)`, and on Windows `PowerShell(...)` too) and the named-ops guard (`skills/ismail/hooks/README.md`). A
+settings file is the person's: show them the lines and where they go, and let them paste the lines themselves. Then
+run `stage_preflight` again. Do every VR step through an op; if a spoken request fails twice outside one, it needs
+an op (`development.md`).
+
 ## 6. Then the first session
 
 `guide`'s FIRST SESSION block is the one opening: follow it, and ask nothing of your own before their first sound

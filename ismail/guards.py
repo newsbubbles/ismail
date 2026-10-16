@@ -9,8 +9,14 @@ Three refusals, each saying why and what the next call is:
    says how to turn the rest on.
 2. Do not ask for what is already granted. A yes/no question whose words a standing grant covers is refused. Grants
    live in a local file: $ISMAIL_STANDING_GRANTS, else ~/.ismail/standing_grants.json, a JSON list of
-   {"id", "date", "topic", "keywords": [...], "says"}. With no file there is no check. override_grant='<why it does
-   not fit>' lets the question through and appends the reason to grant_overrides.jsonl beside the grants file.
+   {"id", "date", "topic", "keywords": [...], "says", "owner", "kind", "source"}. With no file there is no check.
+   An entry with an `owner` belongs to that agent: kind "grant" (the default) means the person already said yes to
+   this kind of step, so its owner acts and anyone else sends it to the owner; kind "route" means this kind of
+   question is the owner's to answer, so it goes to them and not to the person. Some asks no grant covers: anything
+   public, money, accounts and passwords, deleting (STILL_ASK); those are always asked. override_grant='<why it
+   does not fit>' lets the question through and appends the reason to grant_overrides.jsonl beside the grants
+   file. grant_check(ask, sender) tests any ask (a NEEDS NATE line too) before it goes out; grant_add (with the
+   person's words as its source), grant_list and grant_drop keep the file (ismail/api_guards.py, ledger:M209-M210).
 3. A mic opens only on the person's own yes. listen_start (and any recorder that opens an input device) takes the
    id of a note the person sent from the phone page (a voice note, or words typed in a panel's text field) or a VR
    voice note (vr:<scene>:<event id>), sent within MIC_NOTE_MAX_H hours, that names the mic or recording and does not
@@ -159,6 +165,18 @@ _ASKS = re.compile(r"\b(should i|shall i|can i|may i|could i|do you want|want me
                    r"are you ok(ay)? with|good to go|mind if i|go ahead)\b", re.IGNORECASE)
 
 
+# asks a standing grant never covers, whatever its keywords: the person says yes to each one (CLUSTERS.md cluster 1:
+# "keep the still-ask list: public, money, accounts, deleting")
+STILL_ASK = re.compile(r"\b(public|publish\w*|post|posts|posting|upload\w*|money|pay|paid|payment\w*|purchase\w*|buy|"
+                       r"price|prices|spend\w*|account|accounts|password\w*|sign(ing)? (in|up)|log(ging)? in|"
+                       r"delete\w*|deleting|erase\w*|wipe\w*|remove (the |his |her |their )?files)\b", re.IGNORECASE)
+GRANT_KINDS = ('grant', 'route')
+
+
+def _who(s):
+    return re.sub(r'[^a-z0-9]+', ' ', str(s or '').lower()).strip()
+
+
 def grants_path():
     return Path(os.environ.get(GRANTS_ENV) or _local_dir() / 'standing_grants.json').expanduser()
 
@@ -237,25 +255,71 @@ def grant_for(*values):
     return None
 
 
-def check_grant(question, yes_no, override_grant=None, op_name=''):
-    """Refuse a yes/no question a standing grant covers, unless override_grant gives a reason (then it is logged).
-    question: the words asked (title, text). Returns a line for the reply, or ''."""
-    if not yes_no:
-        return ''
+def assess(question, yes_no=True, sender=None):
+    """What a standing grant says about an ask: {verdict, entry, word, problem, checked}. verdict:
+    'act'   a grant covers it and it is yours (or nobody's in particular): do it, then say what you did;
+    'send'  another agent owns it (a grant or a route with `owner`): it goes to them, not to the person;
+    'still' a grant matched, but the ask names something always asked (STILL_ASK: `word`);
+    'ask'   nothing covers it: ask the person.
+    Grants answer yes/no asks only; a route answers any question (a '?')."""
     grants, problem = load_grants()
-    if problem:
-        return problem
-    if not grants:
-        return ''
-    g = grant_for(*([question] if isinstance(question, str) else question))
+    texts = _flat([question] if isinstance(question, str) else question)
+    joined = ' '.join(texts)
+    out = {'verdict': 'ask', 'entry': None, 'word': None, 'problem': problem, 'checked': len(grants)}
+    asked = yes_no or '?' in joined
+    for g in grants:
+        kind = g.get('kind') or 'grant'
+        if not (yes_no if kind == 'grant' else asked):
+            continue
+        if any(_word_re(str(k).strip()).search(s) for k in g['keywords'] if str(k).strip() for s in texts):
+            out['entry'] = g
+            break
+    g = out['entry']
     if g is None:
+        return out
+    m = STILL_ASK.search(joined) if (g.get('kind') or 'grant') == 'grant' else None   # a route approves nothing
+    if m:
+        out.update(verdict='still', word=m.group(0))
+        return out
+    owner = g.get('owner')
+    mine = not owner or (sender and _who(sender) == _who(owner))
+    if (g.get('kind') or 'grant') == 'route':
+        out['verdict'] = 'ask' if mine else 'send'          # the owner may ask the person its own questions
+    else:
+        out['verdict'] = 'act' if mine else 'send'
+    return out
+
+
+def _grant_ref(g):
+    return f"{g.get('id')}, {g.get('date')}: {g.get('says')}"
+
+
+def check_grant(question, yes_no, override_grant=None, op_name='', sender=None):
+    """Refuse a question a standing grant or route covers, unless override_grant gives a reason (then it is logged).
+    question: the words asked (title, text). sender: who asks (an entry with an owner is theirs or someone else's).
+    Returns a line for the reply, or ''."""
+    if not yes_no and '?' not in ' '.join(_flat([question])):
+        return ''
+    a = assess(question, yes_no, sender)
+    if a['problem']:
+        return a['problem']
+    g = a['entry']
+    if a['verdict'] == 'still':
+        return f"(standing grant {g.get('id')} matched, but a grant never covers '{a['word']}': asked)"
+    if a['verdict'] == 'ask':
         return ''
     why = str(override_grant or '').strip()
     if not why:
         if override_grant is not None:
             raise OpError("override_grant needs the reason the standing grant does not fit, in words (it is logged); "
                           "an empty one is no reason")
-        raise OpError(f"a standing grant covers this ({g.get('id')}, {g.get('date')}: {g.get('says')}); act on it, "
+        if a['verdict'] == 'send':
+            what = 'answers this kind of question' if g.get('kind') == 'route' else 'acts on this'
+            raise OpError(f"this is {g['owner']}'s, not the person's: {g['owner']} {what} ({_grant_ref(g)}). Send it "
+                          f"to {g['owner']} (the news feed, or a message when it blocks you) and carry on. If you are "
+                          f"{g['owner']}, pass sender='{g['owner']}'. If it really is the person's, pass "
+                          f"override_grant='<why>' and the reason is logged.")
+        raise OpError(f"a standing grant covers this ({_grant_ref(g)}); act on it, "
                       f"then post a caption saying what you did. If the grant really doesn't fit, pass "
                       f"override_grant='<why it doesn't fit>' and the reason is logged.")
     log = overrides_log()
@@ -263,7 +327,8 @@ def check_grant(question, yes_no, override_grant=None, op_name=''):
     q = ' | '.join(_flat([question]))[:300]
     with open(log, 'a', encoding='utf8') as f:
         f.write(json.dumps({'ts': datetime.datetime.now().isoformat(timespec='seconds'), 'op': op_name,
-                            'grant': g.get('id'), 'question': q, 'why': why}, ensure_ascii=False) + '\n')
+                            'grant': g.get('id'), 'verdict': a['verdict'], 'sender': sender, 'question': q,
+                            'why': why}, ensure_ascii=False) + '\n')
     return f"(standing grant {g.get('id')} set aside: {why}; logged in {log})"
 
 

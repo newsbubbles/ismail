@@ -24,6 +24,63 @@
 - Every new probe fails soft (no reading, no flag), and a watch that breaks says so once and leaves the job alone.
 - Tests: `tests/test_machine_flags.py` (made-up samples and processes; no real GPU, orphans or drive walks).
 
+### composition: a melody that travels through instruments
+
+- A method in `references/composition.md` (ledger:S50, from the Live DJ's set): one 8-bar line handed to a new
+  instrument at each section while the groove stays fixed, each pass fitted into the voice's measured range by one
+  helper (whole octaves, a lead kept a few semitones under the measured top), each hand-off checked as a new row in
+  `analyze_structure(source='render')`.
+
+### exams: measure first, then spend the person's ear
+
+- `phone_exam(..., measured=, unmeasured=)` (ledger:M212; qa intent_rules 10-16 cluster 5): an exam goes to the
+  phone with the lines the instruments gave (`{'all' or a clip label or pair number: lines with their numbers}`) or
+  the reason only the ear can tell (logged in the phone's `ear_first.jsonl`); with neither it is refused, saying
+  which to pass. Either one is kept in `<answers_path>.measured.json` for the exam ledger.
+- `exam_check` refuses a pair that is the same audio: aligned within 250 ms and level-matched, a difference under
+  -40 dB is one sound twice (pairs by label, 1A with 1B; every two clips when the labels name no pairs). The line
+  names the offset and the level, so a wrong file or a render that did not change shows at once.
+- Docs: `blind-tests.md` "Measure first", `phone.md`. Tests in `tests/test_exam_check.py`; the phone tests pass
+  `unmeasured`.
+
+### phone: a watcher that stops while the person is live is named, once
+
+- The watcher heartbeat (ledger:M211; qa intent_rules 10-16 cluster 3, "be reachable"). While the person is live
+  (the Quest page open, a phone on the stream, or a `phone_expect` for a set, VR or a jam), an agent that watched
+  in the last 30 min and has not polled for 2 min is down. One `alarm` line (`watcher_down`) goes to the lead's
+  watcher (`phone_watch lead=true`), or to every watcher when no lead is up. The page shows "not hearing you: <who>",
+  and `phone_status` and `phone_presence` name it; `watcher_back` follows when it polls again. A watcher skips an
+  alarm addressed to someone else, and its own.
+- `phone_expect(who, why, minutes=180)` and `phone_signoff(who, why)`: a watcher that must stay up, and a clean stop
+  that raises nothing. `phone_presence` also says whether the person is live, who the lead is and who is expected.
+  Docs: `phone.md`, "Watching the phone" step 6. Tests in `tests/test_phone.py` and `tests/test_phone_watch.py`.
+
+### Standing grants know whose step it is: grant_check, grant_add, routes and the still-ask list
+
+- Grants gain `owner` and `kind` (ledger:M209-M210, the 10-16 intent-rules review, clusters 1 and 2). A grant with
+  an owner is that agent's: its own ask is refused with "act on it", anyone else's with "this is <owner>'s: send it
+  to them". A route (`kind: "route"`) sends any question with its keyword to the owner instead of the person.
+  Phone and stage asks pass `sender` to the check, and overrides log the verdict and the sender.
+- A still-ask list no grant covers: anything public, money, accounts and passwords, deleting. A matching grant then
+  only adds a note, and the question goes to the person.
+- New ops on a new `asks` shelf: `grant_check(ask, sender)` (`act:` / `send:` / `ask:`, for a NEEDS NATE line or
+  any ask no op sees), `grant_list()`, `grant_add(says, keywords, source, owner, kind)` (the person's own words as
+  its source; keywords that match any ask and still-ask words refused; a broken file is never overwritten) and
+  `grant_drop(id, why)` (kept in `grants_dropped.jsonl`). Tests: `tests/test_guards.py`.
+
+### master_cue: a finished cue mastered for delivery, measured
+
+- `master_cue(source, start_s, end_s, lufs=-16, tp=-1, sr=48000, out, fade_in_s, fade_out_s=0.4)` (ledger:M207):
+  cuts the cue, fades its ends (cos^2), resamples, then applies one fixed gain to the loudness target (BS.1770
+  integrated). Only when that gain puts the true peak (4x oversampled) over the ceiling does a lookahead peak limiter
+  take the excess; its gain reduction is reported. It never rides the level (ffmpeg loudnorm falls back to a dynamic
+  mode on some files). Writes 24-bit wav, by default `<source>_master.wav`; a file already there moves to `old/`
+  first, and the source is never written. The report (LUFS, true peak, gain, limiting) is the cue's measurement line
+  before anyone listens, with a warning when the target is too loud for the mix.
+- Generalised from `songs/d3_next_teaser/work/master.py`: on the teaser's render it gives the same file, sample for
+  sample (-16.0 LUFS, -1.1 dBTP, 0.2 dB of limiting). Shelved under `render` for `ops_find`. Tests:
+  `tests/test_master_cue.py`.
+
 ### stage: cameras that follow, baked into keys for the render
 
 - `stage_follow(scene, object, target, offset, space, lag, look, look_offset, look_lag, orbit, snap, where)`: a

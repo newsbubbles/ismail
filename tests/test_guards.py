@@ -412,3 +412,80 @@ def test_the_recorder_checks_the_note_again_before_any_device(phone, tmp_path, m
     LI.record(d)
     st = LI.read_json(d / 'status.json')
     assert st['state'] == 'failed' and st['error'].startswith("mic refused: mic_ok needs the person's yes")
+
+
+# ------------------------------------------------------------------ owners, routes and the still-ask list (M209-M210)
+
+def _entries(path, *rows):
+    path.write_text(json.dumps([GRANT, *rows]), encoding='utf8')
+
+
+def test_a_grant_with_an_owner_is_acted_on_by_it_and_sent_to_it_by_anyone_else(phone, grants):
+    _entries(grants, {'id': 'G2', 'date': '2026-01-02', 'keywords': ['room restart'], 'says': 'restart the room when '
+                      'the person is out of it', 'owner': 'Room Dev'})
+    with pytest.raises(api.OpError, match="this is Room Dev's, not the person's"):
+        P.phone_ask('ok to do a room restart?', sender='Song Agent')
+    with pytest.raises(api.OpError, match='a standing grant covers this'):
+        P.phone_ask('ok to do a room restart?', sender='room dev')
+    out = P.phone_ask('ok to do a room restart?', sender='Song Agent', override_grant='the person asked to choose')
+    assert 'set aside' in out
+    row = json.loads((grants.parent / 'grant_overrides.jsonl').read_text().splitlines()[-1])
+    assert row['verdict'] == 'send' and row['sender'] == 'Song Agent'
+
+
+def test_a_route_sends_any_question_to_its_owner_but_lets_the_owner_ask(phone, grants):
+    _entries(grants, {'id': 'G2', 'date': '2026-01-02', 'keywords': ['views', 'how many plays'], 'kind': 'route',
+                      'says': 'numbers on the posts', 'owner': 'Numbers Agent'})
+    with pytest.raises(api.OpError, match='answers this kind of question'):
+        P.phone_say('how many plays did the teaser get?', sender='Song Agent')
+    assert P.phone_say('how many plays did the teaser get?', sender='Numbers Agent') == 'shown on the phone'
+    assert P.phone_say('the teaser has 40 views') == 'shown on the phone'        # no question: nothing to route
+
+
+def test_public_money_accounts_and_deleting_are_always_asked(phone, grants):
+    out = P.phone_ask('merge #12 and delete the old branch?')
+    assert out.startswith('shown on the phone') and "never covers 'delete'" in out
+    assert api.OPS['grant_check'](ask='should I merge and publish the release?').startswith('ask:')
+
+
+def test_grant_check_answers_act_send_or_ask(grants):
+    _entries(grants, {'id': 'G2', 'date': '2026-01-02', 'keywords': ['room restart'], 'says': 'restart the room',
+                      'owner': 'Room Dev'})
+    gc = api.OPS['grant_check']
+    assert gc(ask='NEEDS NATE: merge #12?').startswith('act:')
+    assert gc(ask='room restart now?', sender='Song Agent').startswith("send: this is Room Dev's")
+    assert gc(ask='room restart now?', sender='Room Dev').startswith('act:')
+    assert gc(ask='which take do you like?').startswith('ask: no standing grant')
+    with pytest.raises(api.OpError, match='the words'):
+        gc(ask=' ')
+
+
+def test_grant_add_needs_the_persons_words_and_narrow_keywords(tmp_path, monkeypatch):
+    p = tmp_path / 'local' / 'standing_grants.json'
+    monkeypatch.setenv(guards.GRANTS_ENV, str(p))
+    add = api.OPS['grant_add']
+    assert 'none yet' in api.OPS['grant_list']()
+    with pytest.raises(api.OpError, match='source'):
+        add(says='merge on green', keywords=['merge'], source='the lead said so')
+    with pytest.raises(api.OpError, match='match almost any ask'):
+        add(says='merge on green', keywords=['merge', 'yes'], source='D-1')
+    with pytest.raises(api.OpError, match='always asked'):
+        add(says='post the clips', keywords=['clips'], source='n12')
+    with pytest.raises(api.OpError, match='owner'):
+        add(says='numbers', keywords=['views'], source='n12', kind='route')
+    out = add(says='merge reviewed pull requests on green', keywords=['merge', 'merging'], source='hq:D-7',
+              owner='Maintainer')
+    assert out.startswith("added G1 (") and "Maintainer's, from hq:D-7" in out
+    assert add(says='numbers on posts', keywords=['views'], source='chat: ask the numbers agent', kind='route',
+               owner='Numbers Agent').startswith('added G2')
+    assert [g['id'] for g in json.loads(p.read_text())] == ['G1', 'G2']
+    assert api.OPS['grant_check'](ask='merge #3?', sender='Maintainer').startswith('act:')
+    with pytest.raises(api.OpError, match='why'):
+        api.OPS['grant_drop'](id='G1', why='')
+    assert 'dropped G1' in api.OPS['grant_drop'](id='G1', why='the person took it back')
+    assert [g['id'] for g in json.loads(p.read_text())] == ['G2']
+    assert 'G1' in (p.parent / 'grants_dropped.jsonl').read_text()
+    p.write_text('{broken', encoding='utf8')
+    with pytest.raises(api.OpError, match='not overwritten'):
+        add(says='x y', keywords=['stage restart'], source='D-2')
+    assert p.read_text() == '{broken'

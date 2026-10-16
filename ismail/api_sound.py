@@ -566,3 +566,59 @@ def sound_autotune(path: str, key: str = 'C', scale: str = 'chromatic', notes: l
             f"{r['max_cents_moved']:.0f} at most ({'notes given' if nl else f'{key} {scale}'}, speed {speed_ms:g} ms)\n"
             "next: listen against the music it was sung over; a phone note keeps that music beside it "
             "(<id>_ref.wav, beats in <id>_ref.json) so the take can be placed on the beat it was sung to")
+
+
+@op(mutates=True)
+def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: float = -16.0, tp: float = -1.0,
+               sr: int = 48000, out: str = None, fade_in_s: float = 0.0, fade_out_s: float = 0.4) -> str:
+    """Master a finished cue (a teaser, a stinger, a song for posting) for delivery: cut source to start_s..end_s
+    (seconds; end_s=None keeps the rest), fade the ends (cos^2; 0.4 s out by default), resample to sr, then ONE fixed
+    gain to `lufs` integrated (BS.1770). Only if that gain puts the true peak (4x oversampled) over `tp` dBTP does a
+    lookahead peak limiter take the excess, and its gain reduction is reported. Never a dynamic loudness ride (ffmpeg
+    loudnorm falls back to one on some files). Writes 24-bit wav to out= (default <source>_master.wav beside it); a
+    file already there is moved to old/ beside it first, never overwritten. -16 LUFS / -1 dBTP suits most platforms;
+    -14 / -1 for a louder stream. Read the report before anyone listens: it is the measurement line for the round."""
+    import shutil
+    import time
+    from . import master as M
+    if not os.path.exists(source):
+        raise OpError(f"no such file {source!r}: give the full path of the rendered cue (a wav or flac)")
+    try:
+        y, in_sr = sf.read(source, dtype='float64', always_2d=True)
+    except RuntimeError as e:
+        raise OpError(f"cannot read {source!r} ({e}): render or convert it to wav first")
+    if not -40 <= lufs <= -5:
+        raise OpError(f"lufs={lufs} is outside -40..-5: delivery targets are about -16 (posts) or -14 (streams)")
+    if tp > 0:
+        raise OpError(f"tp={tp} dBTP would allow clipping: keep the ceiling at or under 0, -1 is usual")
+    try:
+        y, out_sr, r = M.master(y, in_sr, start_s, end_s, lufs, tp, int(sr), fade_in_s, fade_out_s)
+    except ValueError as e:
+        raise OpError(str(e))
+    if out is None:
+        out = os.path.splitext(source)[0] + '_master.wav'
+    if os.path.abspath(out) == os.path.abspath(source):
+        raise OpError("out= is the source itself: give a new name (the source is never overwritten)")
+    moved = None
+    if os.path.exists(out):
+        old = os.path.join(os.path.dirname(os.path.abspath(out)), 'old')
+        os.makedirs(old, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(out))[0]
+        moved = os.path.join(old, f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
+        shutil.move(out, moved)
+    sf.write(out, y, out_sr, subtype='PCM_24')
+    lim = (f"limiter took {-r['limiter_gr_db']:.1f} dB at most (the gain alone would peak at "
+           f"{r['peak_after_gain_dbtp']:.1f} dBTP)" if r['limiter_gr_db'] < 0 else
+           f"no limiting (peak {r['peak_after_gain_dbtp']:.1f} dBTP after the gain)")
+    lines = [f"mastered -> {out}" + (f" (the old one is now {moved})" if moved else ''),
+             f"{r['length_s']:.2f} s, {r['sr']} Hz, {r['channels']} ch, 24-bit; cut {r['trimmed'][0]:.2f}-"
+             f"{r['trimmed'][1]:.2f} s of the source",
+             f"measured: {r['lufs']:.1f} LUFS integrated, true peak {r['true_peak_dbtp']:.1f} dBTP (target {lufs:g} / "
+             f"{tp:g}); source was {r['source_lufs']:.1f} LUFS, gain {r['gain_db']:+.1f} dB; {lim}"]
+    if r['over_ceiling']:
+        lines.append(f"WARNING: still {r['true_peak_dbtp'] - tp:.1f} dB over the ceiling after {M.ROUNDS} rounds: "
+                     f"the target is too loud for this mix; try lufs={lufs - 2:g}")
+    elif r['limiter_gr_db'] < -3:
+        lines.append(f"note: over 3 dB of limiting can be heard on transients; lufs={lufs - 2:g} keeps them")
+    lines.append("next: these lines are the cue's measurement; then the person listens to the file")
+    return '\n'.join(lines)

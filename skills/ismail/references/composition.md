@@ -51,6 +51,22 @@ For parts meant to sound played (guitar, bass, live drums), placement matters mo
 - **Each chord its own scale.** One mode over the whole song put a G natural under Ebm9. A double-stop under a held melody note moves by scale steps, as a pair.
 - Vibrato on held lead notes: 28-42 cents peak to peak at 4.5-5 Hz, wandering in rate and depth, starting after the note settles.
 
+### A melody that travels through instruments
+
+A long chapter with a fixed groove (focus music, a long build) gets a thread the ear can follow when one line moves
+from instrument to instrument instead of new material arriving each section (ledger:S50; asked live: "we should hear
+a movement through melody but different instrument too").
+- Write one 8-bar line over the chapter's chords. Hand it on at each section: piano, bell, piano, strings, flute, a
+  mono synth with glide, strings, bell. Come back to an earlier voice before the end, so it reads as one line.
+- Fit each pass with one helper, never by hand: `line(shift, vel, legato, lo, hi)` moves the whole line by octaves
+  (whole octaves keep the tune) until it sits inside the voice's range, folds a stray note by an octave, and sets
+  velocity and note length for that voice (a bell short, strings legato, glide on the mono synth).
+- The range is the measured one, checked before writing: a mimic profile's range is the notes it was measured on
+  (`notes[].midi` in its `.mimic.json`), and a sampler's is its lowest and highest sample. Keep a lead three or four
+  semitones under the measured top: the top notes come out loud and synthetic.
+- Keep everything else the same while the line moves (chords, drums, bass), so the change of colour is the event.
+  Check with `analyze_structure(source='render')`: each hand-off should show as a new row in the map.
+
 ## Arrangement
 
 - Write the form map in the Session Sheet with an energy number per section. Energy comes from: number of parts, filter cutoff, drum density, register spread.

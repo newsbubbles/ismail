@@ -26,7 +26,7 @@ CATEGORIES = [
     ('fit', 'matching a sound or a level to a recording, measured',
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
       'levels_from_ref', 'ref_retune')),
-    ('render', 'rendering and playing', ('render', 'play_file')),
+    ('render', 'rendering, mastering a finished cue for delivery, and playing', ('render', 'play_file', 'master_cue')),
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
                'and where two takes differ',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
@@ -40,18 +40,19 @@ CATEGORIES = [
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
     ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
+    ('asks', "before you ask the person: their standing grants, and which agent owns which questions", ('grant_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]
 
 # a role -> its shelves, the ones to reach for first first
 ROLES = {
     'song': ['start', 'sketch', 'write', 'sounds', 'render', 'listen', 'compare', 'transcribe', 'fit', 'exam',
-             'lexicon', 'together'],
-    'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon'],
-    'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render'],
-    'dj': ['live', 'phone', 'listen', 'together', 'sounds', 'exam', 'lexicon'],
-    'stage': ['stage', 'phone', 'exam', 'listen'],
-    'film': ['stage', 'render', 'listen', 'exam'],
+             'lexicon', 'together', 'asks'],
+    'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon', 'asks'],
+    'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render', 'asks'],
+    'dj': ['live', 'phone', 'listen', 'together', 'sounds', 'exam', 'lexicon', 'asks'],
+    'stage': ['stage', 'phone', 'exam', 'listen', 'asks'],
+    'film': ['stage', 'render', 'listen', 'exam', 'asks'],
     'dev': [c[0] for c in CATEGORIES],
 }
 
