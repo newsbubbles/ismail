@@ -40,18 +40,19 @@ CATEGORIES = [
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
     ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
+    ('asks', "before you ask the person: their standing grants, and which agent owns which questions", ('grant_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]
 
 # a role -> its shelves, the ones to reach for first first
 ROLES = {
     'song': ['start', 'sketch', 'write', 'sounds', 'render', 'listen', 'compare', 'transcribe', 'fit', 'exam',
-             'lexicon', 'together'],
-    'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon'],
-    'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render'],
-    'dj': ['live', 'phone', 'listen', 'together', 'sounds', 'exam', 'lexicon'],
-    'stage': ['stage', 'phone', 'exam', 'listen'],
-    'film': ['stage', 'render', 'listen', 'exam'],
+             'lexicon', 'together', 'asks'],
+    'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon', 'asks'],
+    'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render', 'asks'],
+    'dj': ['live', 'phone', 'listen', 'together', 'sounds', 'exam', 'lexicon', 'asks'],
+    'stage': ['stage', 'phone', 'exam', 'listen', 'asks'],
+    'film': ['stage', 'render', 'listen', 'exam', 'asks'],
     'dev': [c[0] for c in CATEGORIES],
 }
 

@@ -14,6 +14,31 @@
 - Docs: `blind-tests.md` "Measure first", `phone.md`. Tests in `tests/test_exam_check.py`; the phone tests pass
   `unmeasured`.
 
+### phone: a watcher that stops while the person is live is named, once
+
+- The watcher heartbeat (ledger:M211; qa intent_rules 10-16 cluster 3, "be reachable"). While the person is live
+  (the Quest page open, a phone on the stream, or a `phone_expect` for a set, VR or a jam), an agent that watched
+  in the last 30 min and has not polled for 2 min is down. One `alarm` line (`watcher_down`) goes to the lead's
+  watcher (`phone_watch lead=true`), or to every watcher when no lead is up. The page shows "not hearing you: <who>",
+  and `phone_status` and `phone_presence` name it; `watcher_back` follows when it polls again. A watcher skips an
+  alarm addressed to someone else, and its own.
+- `phone_expect(who, why, minutes=180)` and `phone_signoff(who, why)`: a watcher that must stay up, and a clean stop
+  that raises nothing. `phone_presence` also says whether the person is live, who the lead is and who is expected.
+  Docs: `phone.md`, "Watching the phone" step 6. Tests in `tests/test_phone.py` and `tests/test_phone_watch.py`.
+
+### Standing grants know whose step it is: grant_check, grant_add, routes and the still-ask list
+
+- Grants gain `owner` and `kind` (ledger:M209-M210, the 10-16 intent-rules review, clusters 1 and 2). A grant with
+  an owner is that agent's: its own ask is refused with "act on it", anyone else's with "this is <owner>'s: send it
+  to them". A route (`kind: "route"`) sends any question with its keyword to the owner instead of the person.
+  Phone and stage asks pass `sender` to the check, and overrides log the verdict and the sender.
+- A still-ask list no grant covers: anything public, money, accounts and passwords, deleting. A matching grant then
+  only adds a note, and the question goes to the person.
+- New ops on a new `asks` shelf: `grant_check(ask, sender)` (`act:` / `send:` / `ask:`, for a NEEDS NATE line or
+  any ask no op sees), `grant_list()`, `grant_add(says, keywords, source, owner, kind)` (the person's own words as
+  its source; keywords that match any ask and still-ask words refused; a broken file is never overwritten) and
+  `grant_drop(id, why)` (kept in `grants_dropped.jsonl`). Tests: `tests/test_guards.py`.
+
 ### master_cue: a finished cue mastered for delivery, measured
 
 - `master_cue(source, start_s, end_s, lufs=-16, tp=-1, sr=48000, out, fade_in_s, fade_out_s=0.4)` (ledger:M207):

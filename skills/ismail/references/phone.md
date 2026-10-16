@@ -180,7 +180,17 @@ listening exams and two notes).
    life of its own (`phone_watch` returns `alive: true` after `wait_min`, 100 minutes by default, where the limit
    is 2 hours), and when it ends, start it again and read `phone_status`, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
    hours ... you can still get the voice notes").
-6. **Their clock. The machine's clock may not be the person's. Any clock time shown or said to them is in their
+6. **Down while they are live: the heartbeat.** A watcher that died left the person asking "you watching phone?"
+   during a set, four times in five days (ledger:M211). While the person is live (the Quest page open, a phone on
+   the stream), an agent that watched in the last 30 minutes and has not polled for 2 minutes is down. The server
+   posts one `alarm` line (`what: watcher_down`, `agent`), the page tells the person who is not hearing them, and
+   `phone_status` and `phone_presence` show it. A `watcher_back` line follows when it polls again. The server
+   cannot wake a session; the lead can. So the lead runs `phone_watch "who=<role>" lead=true`, and the alarms are
+   addressed to it (to every watcher while no lead is watching); its `next` line says to wake the agent named,
+   with a message to its session, so that agent re-arms. At the start of a set, a VR session or a jam, an agent
+   that must stay up calls `phone_expect(who, why, minutes)`; that holds even when the person is not in VR or on
+   the stream. When your work is done, `phone_signoff(who, why)` stops on purpose, and nothing is raised.
+7. **Their clock. The machine's clock may not be the person's. Any clock time shown or said to them is in their
    own time zone.
 
 ## Pause means stop, now
@@ -215,6 +225,21 @@ or a yes/no `stage_panel_show` whose title or text holds a grant's keyword (whol
 the grant: act on it, then post a caption saying what you did. When the grant really does not fit, pass
 `override_grant='<why it does not fit>'`: the question goes out and the reason is appended to
 `grant_overrides.jsonl` beside the grants file (never a tracked file). No grants file: no check.
+
+**Whose step it is.** An entry with an `owner` belongs to that agent. A grant (`kind: "grant"`, the default) means
+the person already said yes to this kind of step: its owner acts on it, and anyone else's ask is refused with
+"this is <owner>'s: send it to them", so a merge question goes to the agent that merges and not to the person. A
+route (`kind: "route"`) means a kind of question is the owner's to answer ("how many views did it get?" goes to
+the agent that reads the numbers); any question with its keyword is sent there, and the owner may still ask the
+person. Pass `sender=` (your name as the team knows you) on every ask, or the check cannot tell you are the owner.
+**Always asked:** a grant never covers an ask that names anything public (post, publish, upload), money (pay, buy,
+price), accounts and passwords, or deleting; those go to the person every time.
+
+**Before a NEEDS NATE line, or any ask no op sees:** `grant_check(ask, sender)` answers `act:` (yours: do it and
+say what you did), `send:` (another agent's) or `ask:`. The file is kept by ops only: `grant_add(says, keywords,
+source, owner, kind)` needs the person's own words as `source` (a decision id, a phone note `n<id>`, a VR note,
+`chat: <their words>` or `memory: <file>`) and refuses keywords that would match any ask; `grant_list()` and
+`grant_drop(id, why)` (the entry is kept in `grants_dropped.jsonl`).
 
 ## The page's sounds: make them, attach them
 
