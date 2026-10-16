@@ -174,7 +174,7 @@ def stage_ask(scene: str, text: str, seconds: float = 60, sender: str = None, ov
     Refused when a standing grant already answers it (~/.ismail/standing_grants.json): act on the grant and say what
     you did; override_grant='<why it does not fit>' asks anyway and logs the reason."""
     guards.check_private(text, where='the stage')     # first, so an override is never logged for text that cannot go
-    g = guards.check_grant(text, True, override_grant, 'stage_ask')
+    g = guards.check_grant(text, True, override_grant, 'stage_ask', sender)
     return guards.with_note(page_cmd(scene, 'ask', {'text': text, 'seconds': seconds, 'from': sender},
                                      timeout=((60 if seconds is None else seconds) + 30)), g)
 
@@ -223,7 +223,7 @@ def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: st
         raise OpError(f"anchor is 'world' or 'body' and side 'right' or 'left' (got {anchor!r}, {side!r})")
     guards.check_private(title, text, buttons, where='the stage')
     g = guards.check_grant([title, text], guards.is_yes_no(buttons, None, f'{title} {text}'), override_grant,
-                           'stage_panel_show')
+                           'stage_panel_show', sender)
     if wait is None:
         wait = anchor == 'world'
     return guards.with_note(page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side, 'from': sender}, timeout=((60 if seconds is None else seconds) + 120)), g)
