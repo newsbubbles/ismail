@@ -105,6 +105,11 @@ const SPINE = [['spine_01', 0.15], ['spine_02', 0.3], ['spine_03', 0.5], ['neck_
 const LOOK = { spine_01: [0.03, 0.05], spine_02: [0.06, 0.1], spine_03: [0.12, 0.2], neck_01: [0.55, 0.6], head: [1, 1] };
 const CHEST_BY_HANDS = 0.35, CHEST_HANDS_MAX = THREE.MathUtils.degToRad(25), CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 };
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
+// steps lead the body (VRIK's velocityFactor): a foot steps to where the hips will be STEP_LEAD s on (at most
+// STEP_LEAD_MAX m), so it lands as the body arrives instead of trailing it; a planted foot keeps its own facing (it no
+// longer spins with the body) and steps once the body turns STEP_TURN past it; a step eases in and out (smootherstep)
+const STEP_LEAD = 0.25, STEP_LEAD_MAX = 0.3, STEP_TURN = THREE.MathUtils.degToRad(35);
+const ease = (k) => k * k * k * (k * (k * 6 - 15) + 10);
 // a standing body from a headset (the user, 2026-10-08: "when I move my head ... sometimes the rest of my body moves,
 // but that's not actually what's going on"): the hips stay put while the head moves within HIP_SLACK of above them (a
 // lean, a nod: the spine bends toward the head instead) and trail it beyond; the body turns only when the head is
@@ -355,23 +360,37 @@ export function initActors(ed, live) {
       }
       return;
     }
+    // the hips' velocity, smoothed: where they will be a moment on
+    const mv = st.move || (st.move = { at: hipAt.clone(), t: now, v: new THREE.Vector3() });
+    const dt = now - mv.t;
+    if (dt > 1e-3 && dt < GAP_S) mv.v.lerp(hipAt.clone().sub(mv.at).setY(0).divideScalar(dt), Math.min(1, dt / 0.15));
+    else if (dt >= GAP_S || dt < 0) mv.v.set(0, 0, 0);
+    mv.at.copy(hipAt); mv.t = now;
+    const lead = mv.v.clone().multiplyScalar(STEP_LEAD);
+    if (lead.length() > STEP_LEAD_MAX) lead.setLength(STEP_LEAD_MAX);
     for (const sd of ['l', 'r']) {
       const ft = st.feet[sd];
       const want = hipAt.clone().add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base));
       want.y = st.floor + rig.rest[`foot_${sd}`].p.y;
+      const pinned = !!(st.pins && st.pins['foot_' + sd]);
       pinFoot(st, sd, want);
-      if (!ft.at) ft.at = want.clone();
+      if (!ft.at) { ft.at = want.clone(); ft.q = base.clone(); }
+      if (!ft.q) ft.q = base.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
-      if (!ft.step && !other.step && ft.at.distanceTo(want) > STEP_AT) ft.step = { from: ft.at.clone(), to: want.clone(), t0: now };
-      let at = ft.at;
-      if (ft.step) {
-        const k = Math.min(1, (now - ft.step.t0) / STEP_S);
-        at = ft.step.from.clone().lerp(ft.step.to, k); at.y += Math.sin(Math.PI * k) * LIFT;
-        if (k >= 1) { ft.at = ft.step.to; ft.step = null; }
+      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
+        const to = pinned ? want.clone() : want.clone().add(lead);
+        ft.step = { from: ft.at.clone(), to, q0: ft.q.clone(), q1: base.clone(), t0: now };
       }
-      const knee = rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()).addScaledVector(rig.fwd.clone().applyQuaternion(base), 1.0);
+      let at = ft.at, fq = ft.q;
+      if (ft.step) {
+        const k = Math.min(1, (now - ft.step.t0) / STEP_S), e = ease(k);
+        at = ft.step.from.clone().lerp(ft.step.to, e); at.y += Math.sin(Math.PI * k) * LIFT;
+        fq = ft.step.q0.clone().slerp(ft.step.q1, e);
+        if (k >= 1) { ft.at = ft.step.to; ft.q = ft.step.q1; ft.step = null; }
+      }
+      const knee = rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()).addScaledVector(rig.fwd.clone().applyQuaternion(fq).add(rig.fwd.clone().applyQuaternion(base)), 0.5);
       twoBone(rig, `thigh_${sd}`, `calf_${sd}`, `foot_${sd}`, at, knee);
-      setWorldQ(rig.bones[`foot_${sd}`], base.clone().multiply(rig.rest[`foot_${sd}`].q));
+      setWorldQ(rig.bones[`foot_${sd}`], fq.clone().multiply(rig.rest[`foot_${sd}`].q));
     }
   }
 
