@@ -9,6 +9,8 @@ const store = {
 let kbps = store.get('kbps', 64), buzzOn = store.get('buzz', true);
 let sid = null, want = false, lastT = 0, lastAdvance = Date.now(), retry = 0, state = {}, since = 0, first = true;
 let outbox = store.get('outbox', []);
+// this page's own id, so the agents can tell the person's phone from the laptop or the Quest (Nate 10-16)
+const dev = store.get('dev', '') || (() => { const d = Math.random().toString(36).slice(2, 12); store.set('dev', d); return d; })();
 
 function toast(text) {
   const t = $('toast'); t.textContent = text; t.classList.add('show');
@@ -1111,7 +1113,9 @@ function render() {
   $('agentbtns').querySelectorAll('[data-btn]').forEach((b) => { b.onclick = () => tap('button:' + b.dataset.btn); });
   $('agentwrap').hidden = !(state.buttons || []).length;
   const ls = state.listening || [];
-  $('listening').innerHTML = ls.length ? 'listening: ' + esc(ls.join(', ')) : '<span class="warn">nobody listening: notes wait in the inbox</span>';
+  const ds = state.devices || [];
+  $('listening').innerHTML = (ls.length ? 'listening: ' + esc(ls.join(', ')) : '<span class="warn">nobody listening: notes wait in the inbox</span>')
+    + (ds.length > 1 ? ' · open on ' + esc(ds.map((d) => d.kind).join(', ')) : '');
   (state.voice || []).forEach((v) => { const it = feedItems.find((x) => x.id === v.id); if (it && v.state.startsWith('waiting')) it.text = 'voice note: ' + v.state; });
   renderFeed(); renderPanel(); renderOffers(); mediaSession();
 }
@@ -1156,7 +1160,7 @@ async function poll() {
   for (;;) {
     try {
       const t = heardNow();
-      const r = await fetch(`api/state?since=${since}&wait=${first ? 0 : 20}&sid=${sid || ''}&t=${t == null ? '' : t}`, { cache: 'no-store' });
+      const r = await fetch(`api/state?since=${since}&wait=${first ? 0 : 20}&sid=${sid || ''}&t=${t == null ? '' : t}&dev=${dev}`, { cache: 'no-store' });
       const j = await r.json();
       if (boot && j.boot !== boot) {             // the server restarted: its commands count from 0 again
         since = 0; first = true; boot = j.boot; restarting = 0;

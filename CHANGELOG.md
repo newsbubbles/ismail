@@ -20,6 +20,20 @@
   a 2 m jump at 69 % after one lag), a body's head, an orbit at 90.3 degrees a second, a bake of 19 keys within
   1.8 cm, Keep into anim.json, and a behaviour with `s.follow`, `frame` and a Stop menu.
 
+### phone_presence and phone_claim: who is listening, and who passes a note on
+
+- `phone_presence()`: both sides, many to many. The agents calling the phone server in the last 90 s, each marked
+  watching (its `phone_watch` is waiting now) or not; the person's devices with the page open (phone, computer,
+  tablet, Quest, from the browser, each page with its own id), with the browser, last seen and whether it is on the
+  stream; the untagged notes nobody claimed in the last hour (LEAD past 3 minutes: the team lead's by default); and
+  the recent claims. `phone_status` gives one line of it, and the page names the devices when more than one is open.
+- `phone_claim(n, by)`: the agent passing on (or answering) note `n` says so first. The first caller wins, decided
+  under the server's one lock, and gets "yours"; everyone after gets "taken: X claimed note n at HH:MM". Claims are
+  kept in `~/.ismail/phone/claims.json`, survive a restart, and every `phone_listen` and `phone_watch` line of a
+  claimed note carries `claimed {by, at}`. `phone_watch` returns `also_watching` and, for untagged notes, says to
+  claim before passing on. The person's ask (10-16): untagged notes reached nobody, or six agents passed one note to
+  the same lead, because every watcher guessed what the others would do.
+
 ### sound_zoom, sound_zoom_diff and region_measure: zoom into a sound, and find where it differs from the real takes
 
 - `sound_zoom`: one time x frequency box of a sound at two resolutions, stacked in one PNG: time-sharp on top
