@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### exams: measure first, then spend the person's ear
+
+- `phone_exam(..., measured=, unmeasured=)` (ledger:M212; qa intent_rules 10-16 cluster 5): an exam goes to the
+  phone with the lines the instruments gave (`{'all' or a clip label or pair number: lines with their numbers}`) or
+  the reason only the ear can tell (logged in the phone's `ear_first.jsonl`); with neither it is refused, saying
+  which to pass. Either one is kept in `<answers_path>.measured.json` for the exam ledger.
+- `exam_check` refuses a pair that is the same audio: aligned within 250 ms and level-matched, a difference under
+  -40 dB is one sound twice (pairs by label, 1A with 1B; every two clips when the labels name no pairs). The line
+  names the offset and the level, so a wrong file or a render that did not change shows at once.
+- Docs: `blind-tests.md` "Measure first", `phone.md`. Tests in `tests/test_exam_check.py`; the phone tests pass
+  `unmeasured`.
+
 ### master_cue: a finished cue mastered for delivery, measured
 
 - `master_cue(source, start_s, end_s, lufs=-16, tp=-1, sr=48000, out, fade_in_s, fade_out_s=0.4)` (ledger:M207):

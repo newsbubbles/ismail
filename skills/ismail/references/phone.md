@@ -304,8 +304,9 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   stage_panel_show shape). Either one with `wait=N` blocks for the answer. A tap on the panel's image opens it full
   screen (pinch or double-tap zooms, a finger moves it, the cross or Back closes it), so a detailed picture can be
   sent as it is; the page's events say `image_open` and `image_close` (with the most it was zoomed).
-- `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
-  live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed. That one file holds
+- `phone_exam(title, clips, question, chips, choices, answers_path, measured= or unmeasured=)`: a blind exam. Label
+  the clips blind (A, B). `measured` holds your instruments' lines, or `unmeasured` says why only the ear can tell
+  (blind-tests.md, "Measure first"); one of them is required. The live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed. That one file holds
   everything about the exam: the answer (kind 'answer'), and every voice note said on the card (kind 'voice_note',
   with `text`, `audio_path` and `field`, the box it was said into, or 'card'), before or after the answer. An answer
   row with `voice_notes_pending` has more rows coming. The answer's note says whether it was typed or said

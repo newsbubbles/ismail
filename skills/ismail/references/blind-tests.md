@@ -52,6 +52,14 @@ exam on the phone page: it runs `exam_check` first and refuses one that is not R
 to two or three: they answer standing, walking, or between other things. Clips of the record go to the phone like
 any other: the phone page reaches only the person, over their private network.
 
+**Measure first, then spend their ear.** `phone_exam` takes `measured={'all', a clip label or a pair number: the
+lines your instruments gave}` (exam_check, sound_compare, analyze_*, pasted with their numbers), or
+`unmeasured='<why only the ear can tell>'`, which is logged in the phone's `ear_first.jsonl`. It refuses an exam with
+neither. Either one is kept in `<answers_path>.measured.json` beside the answers, so the exam ledger reads what the
+numbers said next to what the person heard (ledger:M212). The pre-flight also refuses a pair that is the same audio:
+once aligned and level-matched, under -40 dB of difference, the ear cannot tell it (a deliberate same-against-same
+control is a floor pair, below).
+
 **A floor under every phone round.** A "can't tell" on a phone means nothing until you know what that phone and
 ear can tell apart at all. `phone_exam(..., floor='auto')` adds floor pairs: the real clip against a 64 or 128 kb/s
 MP3 copy of itself, or against itself, at seeded places (never first). The full set (64k, 128k, identical) goes out
