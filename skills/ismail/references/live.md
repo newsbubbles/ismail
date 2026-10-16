@@ -309,6 +309,13 @@ songs/<slug>/
   lists the old tracks it stops. To reuse a name, `live_fx(track, clear=True)` first: scheduled moves outlive
   clip changes.
 - Temp files go to your scratchpad, not `set/`. Measurements are saved as files, not only printed.
+- **Read the code before you describe a past set.** What a section did is in its module and `setlog.md`, not in
+  memory. A set was once described to another agent as cutting the player's beatbox into a kit; its script had only
+  read the pattern and played it on a stock kit, and the other agent caught it from the code.
+- **A page that plays the set's files** (takes, highlights, two placings to compare) is served over http from a
+  local server, never opened as a file. A browser pane shows a file page as a `data:` snapshot, so its relative
+  audio fails to load (MEDIA_ERR 4). `feedback_page` serves clips with questions; for a page of your own, see
+  `blind-tests.md`, "Page mechanics".
 
 ### A new piece while the engine runs
 
@@ -494,12 +501,17 @@ straight to the speakers.
      free offset, and says the offset, the rms error in ms, the drift per bar and the rhythm's shape in 16ths
      (3-3-2). It prints the snapped notes twice, ready for `live_queue` (beats from the clip start, bar 1 = the
      take's first bar, or `from_bar=`): **A as played**, and **B with the shape's groups from beat 1**. When they
-     are the same it prints one.
+     are the same it prints one. Say a take fits only after reading these numbers. Three takes once went back off
+     the beat because each was rounded to the log's clock, which sat about half a beat off what the player heard.
   3. **Offer both by ear.** Where the take sits against the kick is a musical choice the data cannot make. Say each
      in words ("A: as you played it; B: the groups start on the beat") and play them so the answer is one word.
      A snare on 2 and 4 gives the player something to hear the placement against.
   4. **Keep the choice for the run.** Once the player says a take is right, later takes in the same run usually need
      the same placement (same keys, same engine): use the same letter first.
+- **A take recorded as audio** (an instrument on the mic) has no key log. Take its onset times in beats, unrounded
+  (an op that snaps to `quant` has already rounded them), then do the same: onsets within 0.15 beat are one hit,
+  fit a 16th grid with a free offset (`fit_grid` in `ismail/live/midi_play.py` is the fit `live_played` uses, drift
+  included), read the offset and rms, snap, and offer A and B by ear.
 - **Flat velocities.** A cheap keyboard sends every key at one velocity (often 80); `live_played` says so. The lines
   keep it. When looping it, write an accent shape and say you did: the bar's downbeat loudest, then the beats, then
   pushed 16ths, offbeat 8ths softest; in a chord the top note leads and the lower notes sit well under it (about 30
