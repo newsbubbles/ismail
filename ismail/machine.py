@@ -1530,10 +1530,13 @@ def _tree_walk(stack, deadline=None, total=0):
         with it:
             for e in it:
                 try:
+                    st = e.stat(follow_symlinks=False)
+                    if getattr(st, 'st_file_attributes', 0) & 0x400:     # a junction or link: its target is counted
+                        continue                                         # where it lives, and it can loop
                     if e.is_dir(follow_symlinks=False):
                         stack.append(e.path)
                     else:
-                        total += e.stat(follow_symlinks=False).st_size
+                        total += st.st_size
                 except OSError:
                     pass
     return total, []
