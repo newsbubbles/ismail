@@ -211,6 +211,25 @@ def test_a_voice_note_is_stamped_and_transcribed(phone, monkeypatch):
     assert os.path.exists(v[0]['file'])
 
 
+
+def test_under_each_note_the_page_says_who_took_it(phone):
+    """ledger:M219 (hq:D-179): two agents each left an untagged note, sure the other had it, and the person could not
+    see from the phone whether it landed with anyone. Each note gets "taken by X" or "nobody has it yet"."""
+    ph, base, _ = phone
+    n1 = ph.post({'kind': 'voice_text', 'id': 'v1', 'text': 'more bass'})['n']
+    n2 = ph.post({'kind': 'voice_text', 'id': 'v2', 'text': 'said on a card', 'for': 'agent a'})['n']
+    st = get(base, '/api/state')
+    assert st['taken'] == {'v1': [], 'v2': ['agent a']}             # nobody has v1 yet; v2 was said to agent a
+    assert P.phone_claim(n1, by='agent b').startswith('yours')
+    later = get(base, f"/api/state?since={st['cmd']}&wait=5")         # a claim that comes later wakes the page
+    assert later['taken']['v1'] == ['agent b'] and [c['type'] for c in later['cmds']] == ['view']
+    assert P.phone_claim(n1, by='agent c').startswith('taken')         # a second claimer does not change it
+    P.phone_claim(n2, by='agent c')
+    assert get(base, '/api/state')['taken'] == {'v1': ['agent b'], 'v2': ['agent a', 'agent c']}
+    assert S.Phone().taken() == {'v1': ['agent b'], 'v2': ['agent a', 'agent c']}     # and after a restart
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "'taken by ' + esc(tk[c.id].join(', ')) : 'nobody has it yet'" in js and '${took(c)}' in js
+
 @pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
 def test_the_stream_plays_and_knows_the_bar_heard(phone):
     ph, base, _ = phone
