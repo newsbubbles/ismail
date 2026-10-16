@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### phone: one beatbox classifier (ledger:M222)
+
+- `ismail.phone.beatbox` reads a beatbox voice note into drum hits: `read(y, sr, ref=None)` finds the hits (flux
+  from 100 Hz to 10 kHz, the music under the take taken off when `ref` is given) and classes each one kick, snare
+  or hat; `classify(hits)` is the rule alone, for hits found another way. The hits are ranked against each other
+  on the take: two-means on the log spectral centroid splits dark (kick) from bright when they sit an octave
+  apart, and among the bright ones two-means on onset strength splits the snares (hardest) from the hats. Each hit
+  carries a `margin` (how far it sits from the cut that decided it), so a script picking its clearest hits does
+  not need a band rule of its own. The take is scaled to a -3 dBFS peak first, so a quiet take keeps its quiet
+  hits.
+- Why: three copies of the rule in a live set's scripts drifted apart. The absolute one (more than 30% above 4 kHz
+  a hat, more than 35% under 250 Hz a kick) read 5 of 50 kicks on a real earbud take, where the mouth kick is a
+  dark thump with little under 250 Hz; the relative rule matches the kicks the person played there, and reads the
+  same classes at any take level.
+- Tests: `tests/test_beatbox.py` on a generic stand-in (dark thumps over 18 dB of level, hard bright bursts, quiet
+  airy ticks, a speaker beat under the take). Docs: `jam-runner.md`, step 5.
+
 ### docs: the Live DJ's lessons in the live and phone references
 
 - `references/live.md`, "Played keys": say a take fits only after reading the grid fit's numbers, and a recorded
