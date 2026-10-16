@@ -8,7 +8,12 @@
 //   clock   the stage clock (keyed objects, tree growth) is seeked every frame: clock_at + (song t - t0)
 //   camera  {object} a camera in the scene (keyed or not), {path: {keys, seconds, at}} a story path (cameras.json:
 //           pos and look in Blender metres, lens in mm, keys evenly spaced over t 0..1, eased in and out), or
-//           {pos, fwd, up, vfov} fixed, all in Blender coordinates; vfov overrides the lens
+//           {pos, fwd, up, vfov} fixed, all in Blender coordinates; vfov overrides the lens;
+//           {track: {person, bone, dist, height, angle, smooth, vfov}} follows a person playing a take: it looks at
+//           their bone (default spine_03) from dist metres (3), height metres above it (0.1), angle degrees round from
+//           their front at frame 0 (0 = in front, 90 = their left side), the bearing then held in the room so their
+//           turns show; it trails their moves by smooth seconds (0.4). {eyes: {person, vfov}}: through their eyes as
+//           the head turns, their head hidden (the embodied view: their own body when they look down)
 //   sets    every load set is loaded (the headset unloads some to stay light; the film wants everyone), unless
 //           sets: false; setup can unload one ({type: load_set, name, loaded: false})
 //   setup   live commands run once before the first frame (actor_play, sky, light, load_set, behaviour presses), the
@@ -74,7 +79,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     })().catch((e) => { failed = e; }).finally(() => { busy = false; });
     const until = performance.now() + (job.settle_s || 180) * 1000;
     while ((busy || ed.staging() || construct.active) && !failed && performance.now() < until) {
-      place(cam, job, job.t0, W / H, ed);
+      place(cam, job, job.t0, W / H, ed, actors);
       step();
       await new Promise((res) => setTimeout(res, 15));
     }
@@ -100,7 +105,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
         const c = timed.shift();
         try { await run(c); } catch (e) { throw new Error(`setup ${c.type} at_song ${c.at_song}: ${e.message || e}`); }
       }
-      place(cam, job, songT, W / H, ed);
+      place(cam, job, songT, W / H, ed, actors);
       step();
       const blob = await new Promise((res) => r.domElement.toBlob(res, 'image/png'));   // in the task that drew it
       const res = await post(`capture/frame?n=${n}`, blob);
@@ -153,10 +158,39 @@ function screenKey(ed) {
 }
 
 // the capture camera at song time t
-function place(cam, job, t, aspect, ed) {
+const Y = new THREE.Vector3(0, 1, 0);
+function place(cam, job, t, aspect, ed, actors) {
   const c = job.camera;
   cam.aspect = aspect;
-  if (c.object) {
+  if (c.track || c.eyes) {
+    const k = c.track || c.eyes, st = actors && actors.playing.get(k.person), rig = st && st.rig;
+    if (!rig) throw new Error(`${c.track ? 'track' : 'eyes'}: ${k.person} is not playing a take (setup: actor_play)`);
+    rig.root.updateMatrixWorld(true);
+    const yaw = st.lastYaw || new THREE.Quaternion();
+    if (c.eyes) {
+      const hb = rig.bones.head;
+      hb.scale.setScalar(1e-3);                              // their head folds away, as from the inside (embody.js)
+      const q = hb.getWorldQuaternion(new THREE.Quaternion()).multiply(rig.rest.head.q.clone().invert());
+      const fwd = rig.fwd.clone().applyQuaternion(q);
+      cam.position.copy(hb.getWorldPosition(new THREE.Vector3())).addScaledVector(Y, 0.08).addScaledVector(fwd, 0.09);
+      cam.quaternion.copy(q).multiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd));
+      cam.near = 0.03;
+      cam.fov = k.vfov || 90;
+    } else {
+      const at = (rig.bones[k.bone || 'spine_03'] || rig.bones.pelvis).getWorldPosition(new THREE.Vector3());
+      const tr = cam.userData.track;
+      if (!tr || t <= job.t0) {                              // frame 0 (and the settle before it): the bearing is set
+        const dir = rig.fwd.clone().applyQuaternion(yaw).setY(0).normalize()
+          .applyAxisAngle(Y, THREE.MathUtils.degToRad(k.angle ?? 0));
+        cam.userData.track = { dir, at: at.clone() };
+      } else tr.at.lerp(at, 1 - Math.exp(-1 / (job.fps * Math.max(1e-3, k.smooth ?? 0.4))));
+      const { dir, at: a } = cam.userData.track;
+      cam.position.copy(a).addScaledVector(dir, k.dist ?? 3).addScaledVector(Y, k.height ?? 0.1);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(a);
+      cam.fov = k.vfov || 40;
+    }
+  } else if (c.object) {
     const it = ed.byName.get(c.object);
     if (!it) throw new Error(`no camera "${c.object}"`);
     it.obj.updateMatrixWorld(true);

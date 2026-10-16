@@ -1499,7 +1499,7 @@ def _batch_index(line):
 
 @op(mutates=True)
 def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: str = None, cameras: str = None,
-                  path: dict = None, view: dict = None, fps: int = 30, size: list = None, clock_at: float = None,
+                  path: dict = None, view: dict = None, track: dict = None, eyes: dict = None, fps: int = 30, size: list = None, clock_at: float = None,
                   clock: bool = True, setup: list = None, audio: str = None, video: bool = True,
                   keep_frames: bool = False, sets: bool = True, scenes: str = None, name: str = None) -> str:
     """Capture the stage on the PC, frame-locked: frame n shows the song at t0 + n / fps (takes and loops, keyed
@@ -1511,7 +1511,11 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     shot= a story path from cameras.json (cameras= its file; keys evenly spaced, eased in and out over the shot's
     seconds from t0); path= {"keys": [{"pos", "look", "lens"}], "seconds", "at"} the same inline; view= {"pos",
     "fwd", "up", "vfov"} fixed. All in Blender coordinates (metres, Z up), lens in mm on a 36 mm sensor; "vfov"
-    (degrees) in path or view overrides the lens.
+    (degrees) in path or view overrides the lens. Two follow a person playing a take (setup: actor_play), for studying
+    bodies: track= {"person", "bone": "spine_03", "dist": 3, "height": 0.1, "angle": 0, "smooth": 0.4, "vfov": 40}
+    looks at their bone from dist metres, angle degrees round from their front at the first frame (90: their left),
+    that bearing then held so their turns show, trailing their moves by smooth seconds; eyes= {"person", "vfov": 90}
+    looks out of their eyes as their head turns, the head hidden (what an embodied person sees of their own body).
     t0, t1: song seconds. size [w, h] (default [1920, 1080]; [1440, 1080] for 4:3). The stage clock is set to
     clock_at + (song t - t0) every frame (clock_at defaults to t0; clock=False leaves it alone). setup: live commands
     run once before the first frame, e.g. [{"type": "actor_play", "person": "body_a", "take": "t1", "at_music": 0},
@@ -1536,10 +1540,20 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
         raise OpError('size is [width, height] in even pixels, 16 to 4096')
     if not 1 <= int(fps) <= 120:
         raise OpError('fps is 1 to 120')
-    given = [k for k, v in (('camera', camera), ('shot', shot), ('path', path), ('view', view)) if v]
+    given = [k for k, v in (('camera', camera), ('shot', shot), ('path', path), ('view', view), ('track', track),
+                            ('eyes', eyes)) if v]
     if len(given) != 1:
-        raise OpError('give one camera: camera=, shot= (with cameras=), path= or view=' + (f' (got {given})' if given else ''))
-    if camera:
+        raise OpError('give one camera: camera=, shot= (with cameras=), path=, view=, track= or eyes='
+                      + (f' (got {given})' if given else ''))
+    if track or eyes:
+        k = track or eyes
+        if not isinstance(k, dict) or not k.get('person'):
+            raise OpError(f'{given[0]} is {{"person": <a person playing a take in setup>, ...}}')
+        if not any(c.get('type') == 'actor_play' and c.get('person') == k['person'] for c in setup or [] if isinstance(c, dict)):
+            raise OpError(f'{given[0]}: {k["person"]} plays nothing; add {{"type": "actor_play", "person": "{k["person"]}", '
+                          f'"take": ...}} to setup')
+        cam = {given[0]: k}
+    elif camera:
         cam = {'object': camera}
     elif shot:
         if not cameras or not Path(cameras).is_file():
