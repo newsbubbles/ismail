@@ -170,7 +170,7 @@ def phone_status() -> str:
 
 
 @op()
-def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False) -> str:
+def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False, lead: bool = False) -> str:
     """The watcher: every inbox line after the cursor, never filtered by owner; the agent decides what is its own,
     and exam_round lines (state started / finished, with the panel id, `for` and title) say when to keep quiet.
     What the person sent from the phone, oldest first, as JSON {since, lines}: taps (love = cut a highlight,
@@ -181,8 +181,11 @@ def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = Fal
     since: the last call's `since` (default: only new lines); wait: seconds to wait for one. Every line also
     carries room {bar, of} (the engine's bar then, there even when the page is off the stream) and now (the piece).
     page=True also returns the page's own actions (kind 'page': open with the device, listen, stop, hidden/visible,
-    scroll to a section, download, clip play, panel open/close, note start/end); phone_timeline reads them best."""
-    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page)
+    scroll to a section, download, clip play, panel open/close, note start/end); phone_timeline reads them best.
+    lead=True: you are the team lead, so the heartbeat's alarms (an agent's watcher down while the person is live)
+    are addressed to you."""
+    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page,
+                 lead=lead or None)
 
 
 @op()
@@ -204,6 +207,23 @@ def phone_presence(minutes: float = 60) -> str:
     Then the person's untagged notes in the last `minutes` that nobody has claimed (LEAD marks one past 3 minutes:
     the team lead's by default) and the recent claims. Read it before deciding whether a note is yours to pass on."""
     return _call('presence', minutes=minutes)
+
+
+@op()
+def phone_expect(who: str, why: str, minutes: float = 180, by: str = None) -> str:
+    """Say that `who`'s phone watcher must stay up for the next `minutes` (a set, a VR session, a jam): if it stops
+    polling for 2 minutes, one alarm line goes to the lead's watcher (phone_watch lead=true) and the page tells the
+    person who is not hearing them. Without it, an agent that watched in the last 30 min is expected anyway while the
+    person is in VR (the Quest page open) or on the stream. Call it at the start of the set or session; by: who set
+    it. phone_signoff(who) ends it."""
+    return _call('expect', who=who, why=why, minutes=minutes, by=by)
+
+
+@op()
+def phone_signoff(who: str, why: str = None) -> str:
+    """You stop watching on purpose (your work is done, the set is over): no alarm when your watcher stops, and your
+    phone_expect ends. Watching again later counts as before."""
+    return _call('signoff', who=who, why=why)
 
 
 # phone_watch: the standing watcher every agent runs. It used to live in one song folder and in the Live DJ's memory;
@@ -260,7 +280,7 @@ def _clip(d, limit=_LINE_CHARS):
 
 
 @op()
-def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str = None) -> str:
+def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str = None, lead: bool = False) -> str:
     """The standing phone watcher: blocks until the person sends something, returns it, and remembers its place. Run
     it in the background (`python -m ismail phone_watch "who=<your role>"`), act on what it returns, and re-arm it
     FIRST after every wake, before any other work. Never write your own watcher.
@@ -273,7 +293,9 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
     wait_min: after this many minutes with nothing it returns {alive: true} so you re-arm and read phone_status (a
     background task may be stopped at 2 hours). round=<card id prefix>: you let a round of someone else's cards run:
     its lines are held (counted, not returned) and the watcher wakes on anything else, or 90 s after the round's last
-    line. A phone server restart is waited out (it looks again every 10 s)."""
+    line. A phone server restart is waited out (it looks again every 10 s).
+    lead=true: you are the team lead: the heartbeat's alarms (an agent's watcher down while the person is live) come
+    to you, and you wake that agent. An alarm addressed to another watcher does not wake you."""
     notes = []
     if since is None:
         since = _cursor_load(who)
@@ -282,7 +304,7 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
 
     def look(wait):
         nonlocal since, last
-        res = json.loads(phone_listen(who, since=since, wait=wait, page=True))
+        res = json.loads(phone_listen(who, since=since, wait=wait, page=True, lead=lead))
         got = int(res.get('since', since or 0))
         if since is not None and got < since:              # the inbox is shorter than the cursor: never replay
             notes.append(f"the saved cursor ({since}) was past the inbox's end ({got}): now from {got}")
@@ -298,12 +320,14 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
             if _of_round(d, round):
                 held.append(d)
                 last = time.time()
-            elif _wanted(d):
+            elif _wanted(d) and not (d.get('kind') == 'alarm'                # another's alarm, or about you
+                                     and (d.get('agent') == who or d.get('for') not in (None, who))):
                 hits.append(_clip(d))
 
     def done(**extra):
         _cursor_save(who, since)
-        arm = f'python -m ismail phone_watch "who={who}"' + (f' round={round}' if extra.pop('_keep_round', False) else '')
+        arm = (f'python -m ismail phone_watch "who={who}"' + (' lead=true' if lead else '')
+               + (f' round={round}' if extra.pop('_keep_round', False) else ''))
         out = {'who': who, 'since': since, 'lines': hits, **extra}
         if hits:
             out['also_watching'] = others
@@ -313,7 +337,9 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
             out['note'] = '; '.join(notes)
         open_notes = [d['n'] for d in hits if d.get('kind') in S.NOTE_KINDS and not d.get('for')
                       and not d.get('claimed')]
-        then = (('act on these lines' + (f"; untagged notes {open_notes}: phone_claim(n, by='{who}') before you pass "
+        downs = [d['agent'] for d in hits if d.get('kind') == 'alarm' and d.get('what') == 'watcher_down']
+        then = (('act on these lines' + (f"; WATCHER DOWN {downs}: wake each (a message to its session) so it "
+                                         f"re-arms phone_watch" if downs else '') + (f"; untagged notes {open_notes}: phone_claim(n, by='{who}') before you pass "
                                          f"one on or answer it, and leave it if the answer is taken"
                                          if open_notes else '')) if hits else 'read phone_status (is the server up, is anyone listening?)'
                 if extra.get('alive') else 'the round is over: bring the sound back and start a fresh pass')
