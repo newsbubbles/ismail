@@ -502,6 +502,11 @@ class Handler(SimpleHTTPRequestHandler):
         auth = self.server.auth
         if self.command == 'GET' and u.path != '/pair/devices':
             return self._json(405, {'error': 'POST'})
+        # a web page open on this PC can send a text/plain POST here without a preflight (it could unpair the headset):
+        # pairing takes JSON only, and never a cross-site request (pr:#275 review, E2)
+        if self.command == 'POST' and ((self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json'
+                                       or self.headers.get('Sec-Fetch-Site', '').lower() == 'cross-site'):
+            return self._refused(415, 'pairing not JSON', 'pairing takes application/json from this site only')
         if u.path == '/pair/claim':
             body = self._body() or {}
             # the proxy on this PC appends the address it saw: the LAST entry is its own, the first may be the client's

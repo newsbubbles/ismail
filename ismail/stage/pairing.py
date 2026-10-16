@@ -26,6 +26,7 @@ from pathlib import Path
 CODE_S = 120                                   # a pairing code is good for two minutes, once
 WRONG_MAX, WRONG_WINDOW_S, BLOCK_S = 5, 60, 60  # five wrong codes in a minute from one address: a minute's pause
 WRONG_ALL = 20                                  # over twenty a minute from everyone: every claim pauses a minute
+LIVE_CODES = 3                                  # at most three codes waiting at once; a new one drops the oldest
 KINDS = ('headset', 'phone', 'desktop')
 
 
@@ -132,6 +133,8 @@ class Auth:
         with self.lock:
             now = time.time()
             self.codes = {c: v for c, v in self.codes.items() if v['until'] > now}
+            while len(self.codes) >= LIVE_CODES:
+                self.codes.pop(next(iter(self.codes)))      # the oldest (codes are kept in the order they started)
             code = f'{secrets.randbelow(10 ** 6):06d}'
             while code in self.codes:
                 code = f'{secrets.randbelow(10 ** 6):06d}'

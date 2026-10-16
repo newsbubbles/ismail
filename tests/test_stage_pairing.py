@@ -233,3 +233,24 @@ def test_the_rate_limit_counts_the_proxys_own_address(stage):
     st, got = _req(p, 'pair/claim', {'code': good}, {'X-Forwarded-For': '1.1.1.1, 100.64.0.7'})
     assert st == 429 and 'wait a minute' in got['error']
     assert _req(p, 'pair/claim', {'code': good}, {'X-Forwarded-For': '100.64.0.8'})[0] == 200   # another device: fine
+
+
+def test_pairing_takes_json_from_this_site_only(stage):
+    key, _ = _paired(stage)
+    p = stage['port']
+    for headers in ({'Content-Type': 'text/plain'}, {'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site'}):
+        r = urllib.request.Request(f'http://127.0.0.1:{p}/pair/unpair', data=json.dumps({'device': 'Quest 3'}).encode(),
+                                   method='POST', headers=headers)
+        try:
+            urllib.request.urlopen(r, timeout=15)
+            raise AssertionError('a pairing POST that is not same-site JSON went through')
+        except urllib.error.HTTPError as e:
+            assert e.code == 415 and json.loads(e.read())['refused'] == 'pairing not JSON'
+    assert 'Quest 3 (headset)' in OPS['stage_devices']()                          # nothing unpaired
+    assert _req(p, 'live/event?scene=room', {'type': 'gesture'}, {'X-Stage-Key': key})[0] == 200
+
+
+def test_only_the_newest_three_codes_claim(stage):
+    p = stage['port']
+    codes = [_req(p, 'pair/start', {'name': f'device {i}', 'kind': 'phone'})[1]['code'] for i in range(5)]
+    assert [_req(p, 'pair/claim', {'code': c})[0] for c in codes] == [403, 403, 200, 200, 200]

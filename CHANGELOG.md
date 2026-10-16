@@ -79,6 +79,7 @@
   the server, or unpaired; a client's own `principal` is kept only as `said_by`. ~/.ismail/stage.json `"auth"`:
   `report` (the default: everyone accepted, the unpaired counted in /health) or `enforce` (the unpaired refused, and
   only a person's paired device sends their voice to /voice/in and /voice/perf). Wrong codes are rate-limited.
+- Pairing POSTs take same-site JSON only, so a web page on this PC cannot unpair the headset; at most three codes wait at once, a new one drops the oldest. The stage guide says to trust the principal, never a client's own who/from/by.
 - Part A (Host and Origin checks) is not in this slice.
 
 ### live: headroom against the real deadline, cutting a section over, the room speaker off and on
