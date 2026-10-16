@@ -6,7 +6,8 @@ jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user st
     python -m ismail.machine run --gpu -- <command ...>   # run a command in the GPU slot (Blender, whisper, demucs)
     python -m ismail.machine run --cpu --mem 6 -- <cmd>   # a CPU-heavy command expected to need ~6 GB
     python -m ismail.machine run --cpu --disk 3 -- <cmd>  # ... that writes ~3 GB
-    python -m ismail.machine disk                         # where the disk went: songs, _reclaim, the pagefile
+    python -m ismail.machine disk                         # where the disk went: songs, _reclaim, the pagefile, and
+                                                          # the folders beyond songs/ (disk_roots(), daily growth)
     with machine.slot('cpu', 'render song bars 1-64', mem_gb=3): ...     # from Python
 
 Rules (the slots): one GPU-heavy job machine-wide, two CPU-heavy jobs (a live engine on air holds one). No new heavy
@@ -19,7 +20,11 @@ commit is free (on Windows a job past its memory grows the pagefile, and the pag
 job that declared 7 GB took 10.7 GB and D: went from 9 GB to 0.2 GB in nine minutes). A running job past its
 declared memory by MEM_OVER is flagged on the board and in its own output; one at MEM_SUSPEND times its declared
 memory while commit runs low (under SUSPEND_COMMIT_GB) has its processes paused, never killed, until someone runs
-`python -m ismail.machine resume <job>` (2026-10-06: an ffmpeg declared 3 GB and took 37 GB during a live set). A
+`python -m ismail.machine resume <job>` (2026-10-06: an ffmpeg declared 3 GB and took 37 GB during a live set). The
+board also names what a job does not say about itself: a --cpu job whose processes hold the GPU is MISDECLARED and
+takes the GPU slot too (ledger:M122), a job far past its estimate that uses no CPU and no GPU is HUNG (M124; never
+stopped), a top CPU user whose parent is gone is an ORPHAN (M123), and a pagefile drive no job writes to warns when
+it runs low (M126). A
 `run` command is held to its threads by its environment and by CPU affinity (the libraries that ignore the thread
 variables, CTranslate2 among them, still get only that many cores). A refused job says what is running, whose it is and when to retry; force=True (only when
 the user says so) runs it anyway. Jobs of processes that died are cleared on the next look.
@@ -74,6 +79,24 @@ SUSPEND_COMMIT_GB = 10.0           # ... while less commit than this is free is 
 SUSPEND_COMMIT_FRAC = 0.15         # ... or than this share of the commit limit, if smaller (an 8 GB laptop is always
                                    # under 10 GB free, and a job there is not in trouble for that alone)
 JOB_NOTE_S = 15.0                  # a running job writes its memory to its board file this often
+# A --cpu job whose processes hold the GPU (ledger:M122; 2026-10-05 a Blender registered --cpu held 89% of the GPU and
+# 6.6 GB of VRAM, the GPU reached 87 C and the heat gate held the queue): its tree's 3D engine share, averaged over
+# MISDECLARED_S, at MISDECLARED_GPU % or more marks it MISDECLARED, and it then counts against the GPU slot.
+MISDECLARED_GPU = 30.0
+MISDECLARED_S = 60.0
+GPU_PID_S = 5.0                    # a job's meter reads its tree's GPU share this often (one PDH collect, ~2 ms)
+# A job that stopped working (ledger:M124): past HUNG_EST_X times its --est, its tree used under HUNG_CPU % of the
+# machine and no GPU (under HUNG_GPU %) over the last HUNG_S. Shown on the board and told once in its own output;
+# never stopped (it may be waiting on something that comes back).
+HUNG_EST_X = 2.0
+HUNG_CPU = 2.0                     # % of all cores, as the board's CPU line counts (8 threads: 0.16 of a core)
+HUNG_GPU = 5.0                     # % of the GPU: the job's own share, or the whole GPU's when no share can be read
+HUNG_S = 300.0
+# The pagefile's drive (ledger:M126): since 2026-10-05 the pagefile is on C:, which no job writes to, so the disk
+# floor never looked at it; commit pressure grows the pagefile into it. The board warns below this.
+PAGEFILE_DRIVE_WARN_GB = 10.0
+DISK_ROOTS_FRESH_S = 1800.0        # `machine disk` reuses its walk of the roots for this long (a whole D: is minutes)
+DISK_SKIP = re.compile(r'^\$|^System Volume Information$', re.I)   # a drive's own folders, never walked
 # What wins when a live set is on air and a render wants the machine (ledger:M127, hq:D-11). Nate, 2026-10-05, after
 # two real dropouts in a set: GPU jobs and Blender renders wait while a set plays, "only for now during sets". It is a
 # temporary rule: revisit when the laptop is repasted (the GPU heat) or a faster engine lands.
@@ -180,7 +203,66 @@ def cpu_load():
 
 
 def _top_text(top):
-    return ', '.join(f"{name} {c:.0f}%" for c, name, _ in top) or 'no single process stands out'
+    out = []
+    for c, name, pid in top:
+        age = orphan_age(pid)
+        out.append(f"{name} {c:.0f}%" + (f" ORPHAN (parent gone, running {_span(age)})" if age is not None else ''))
+    return ', '.join(out) or 'no single process stands out'
+
+
+# Windows starts these from a parent that exits by design (userinit, smss): a gone parent says nothing about them
+BORN_ORPHAN = {'explorer.exe', 'csrss.exe', 'wininit.exe', 'winlogon.exe', 'smss.exe', 'system', 'registry',
+               'memory compression'}
+
+
+def orphan_age(pid):
+    """Seconds a process has run when its parent is gone (a leftover of a closed shell or session), else None
+    (ledger:M123: an orphaned find.exe took 50 CPU-minutes on 10-05 and held the CPU over the gate; a grep left by a
+    closed session ran 75 min on 10-01). A parent pid now held by a process started later is a reused pid: the parent
+    is gone. Fails soft: a process (or a parent) that cannot be read is not called an orphan."""
+    try:
+        p = psutil.Process(pid)
+        pp, born = p.ppid(), p.create_time()
+        if not pp or (p.name() or '').lower() in BORN_ORPHAN:
+            return None
+    except (psutil.Error, OSError, ValueError):
+        return None
+    try:
+        if psutil.Process(pp).create_time() <= born:
+            return None                                # the parent lives
+    except psutil.NoSuchProcess:
+        pass
+    except (psutil.Error, OSError, ValueError):
+        return None
+    start = _desktop_start()
+    if start is not None and start - 60 <= born <= start + STARTUP_S:
+        return None                                    # a startup app: the launcher that ran it exits by design
+    return max(0.0, time.time() - born)
+
+
+STARTUP_S = 300.0      # the apps Windows starts at sign-in, within this long of the desktop (explorer.exe)
+_desktop = []
+
+
+def _desktop_start():
+    """When the desktop started (the oldest explorer.exe), once per process, or None. The apps started at sign-in
+    (a browser, game launchers, tray tools) have no parent left, and are not leftovers of a session."""
+    if not _desktop:
+        t = None
+        try:
+            for p in psutil.process_iter(['name', 'create_time']):
+                if (p.info.get('name') or '').lower() == 'explorer.exe' and p.info.get('create_time'):
+                    t = p.info['create_time'] if t is None else min(t, p.info['create_time'])
+        except (psutil.Error, OSError):
+            t = None
+        _desktop.append(t)
+    return _desktop[0]
+
+
+def _span(s):
+    """A running time, readable: '50 min', '2.1 h', '3.0 d'."""
+    m = s / 60
+    return f"{m:.0f} min" if m < 90 else f"{m / 60:.1f} h" if m < 48 * 60 else f"{m / 1440:.1f} d"
 
 
 def memory():
@@ -237,6 +319,29 @@ def pagefiles():
             out.append((_label(f), os.stat(f).st_size / 2 ** 30))
         except OSError:
             pass
+    return out
+
+
+def free_gb(drive):
+    """Free GB on a drive ('C:') or under a path, or None when it cannot be read."""
+    p = drive + os.sep if re.fullmatch(r'[A-Za-z]:', drive or '') else drive
+    try:
+        return shutil.disk_usage(p).free / 2 ** 30
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def pagefile_low(ds=None):
+    """-> [(drive, free GB, pagefile GB)] for each pagefile drive under PAGEFILE_DRIVE_WARN_GB free that the disk
+    floor does not already watch (ledger:M126: the pagefile moved to C: on 10-05, and only D: was gated)."""
+    watched = {d.upper() for d, _ in (disks() if ds is None else ds)}
+    out = []
+    for d, gb in pagefiles():
+        if d.upper() in watched:
+            continue
+        f = free_gb(d)
+        if f is not None and f < PAGEFILE_DRIVE_WARN_GB:
+            out.append((d, f, gb))
     return out
 
 
@@ -514,6 +619,13 @@ def _describe(job):
                 f"python -m ismail.machine resume {job['id']})")
     if job.get('cores'):
         thr += f" on cores {','.join(map(str, job['cores']))}"
+    if job.get('misdeclared'):
+        mem += (f", MISDECLARED: registered --cpu but its processes held {job['misdeclared']['gpu']:.0f}% of the GPU "
+                f"for a minute, so it holds the GPU slot too (next time: run --gpu)")
+    if job.get('hung'):
+        mem += (f", HUNG: past {HUNG_EST_X:g}x its estimate and idle (under {HUNG_CPU:g}% CPU, no GPU) for "
+                f"{_ago(job['hung']['at'] - HUNG_S)}; it holds its slot: its owner looks at it and ends it if it is "
+                f"stuck (pid {job['pid']})")
     return f"{job['kind']} '{what}' ({job['who']}, pid {job['pid']}, {_ago(job['started'])}{thr}{eta}{mem})"
 
 
@@ -617,7 +729,9 @@ def check(kind, mem_gb=0.0, _jobs=None, who=None, since=None, me=None, disk_gb=0
             why.append(f"the CPU is {busy:.0f}% busy (limit {CPU_BUSY:.0f}%), mostly load that is not on the board "
                        f"({_top_text(top)}): wait for it to settle; a user who runs other work on this machine can be "
                        f"asked whether something can close, but " + NOVICE)
-    same = [j for j in js if j['kind'] == kind or (kind == 'cpu' and j['kind'] == 'live')]
+    # a --cpu job found holding the GPU (MISDECLARED, ledger:M122) takes the GPU slot too, besides its CPU slot
+    same = [j for j in js if j['kind'] == kind or (kind == 'cpu' and j['kind'] == 'live')
+            or (kind == 'gpu' and j.get('misdeclared'))]
     if len(same) >= SLOTS[kind]:
         why.append(f"the {kind} slots are full ({SLOTS[kind]}): " + '; '.join(_describe(j) for j in same))
     else:
@@ -753,7 +867,7 @@ class _GpuSampler:
     sample). The GPU is shared: these are the whole GPU's numbers while the job held its slot."""
 
     def __init__(self):
-        self.busy_s, self.mem_peak_gb, self.n = 0.0, 0.0, 0
+        self.busy_s, self.mem_peak_gb, self.n, self.util = 0.0, 0.0, 0, None
         try:
             self.p = subprocess.Popen(['nvidia-smi', '--query-gpu=utilization.gpu,memory.used',
                                        '--format=csv,noheader,nounits', f'--loop-ms={int(METER_S * 1000)}'],
@@ -773,6 +887,11 @@ class _GpuSampler:
             self.busy_s += util / 100 * METER_S
             self.mem_peak_gb = max(self.mem_peak_gb, mem / 1024)
             self.n += 1
+            self.util = util
+
+    def last(self):
+        """The whole GPU's load at the latest sample (%), or None before the first one."""
+        return self.util
 
     def stop(self):
         if self.p is not None:
@@ -784,6 +903,163 @@ class _GpuSampler:
             return {'gpu_busy_s': round(self.busy_s, 1), 'gpu_mem_peak_gb': round(self.mem_peak_gb, 2),
                     'gpu_samples': self.n}
         return {}
+
+
+class _GpuPids:
+    """Each process's share of the GPU's 3D engine, from Windows' own counter (what Task Manager shows):
+    \\GPU Engine(pid_<n>_..._engtype_3D)\\Utilization Percentage, read through PDH. nvidia-smi gives no per-process
+    load on a GeForce. One query for a job's life; each read is one collect (about 2 ms) and the rate is between this
+    collect and the last, so the first read is None. The wildcard picks up processes started after the query opened.
+    Anything that fails (not Windows, no counter, an old driver) gives None: no reading, no flag."""
+
+    PDH_FMT_DOUBLE_NOCAP = 0x200 | 0x8000          # a process on several 3D engines can pass 100: the sum is capped
+    PDH_MORE_DATA = 0x800007D2
+
+    def __init__(self):
+        self.q = self.c = None
+        self.primed = False
+        if sys.platform != 'win32':
+            return
+        try:
+            self.pdh = ctypes.windll.pdh
+            q, c = ctypes.c_void_p(), ctypes.c_void_p()
+            if self.pdh.PdhOpenQueryW(None, 0, ctypes.byref(q)):
+                return
+            if self.pdh.PdhAddEnglishCounterW(q, r"\GPU Engine(*)\Utilization Percentage", 0, ctypes.byref(c)):
+                self.pdh.PdhCloseQuery(q)
+                return
+            self.q, self.c = q, c
+        except (OSError, AttributeError):
+            self.q = self.c = None
+
+    def by_pid(self):
+        """-> {pid: % of the 3D engine} since the last read, or None."""
+        if self.q is None:
+            return None
+        try:
+            from ctypes import wintypes
+
+            class Value(ctypes.Structure):
+                _fields_ = [('CStatus', wintypes.DWORD), ('doubleValue', ctypes.c_double)]
+
+            class Item(ctypes.Structure):
+                _fields_ = [('szName', ctypes.c_wchar_p), ('FmtValue', Value)]
+
+            if self.pdh.PdhCollectQueryData(self.q):
+                return None
+            if not self.primed:                        # a rate needs two collects
+                self.primed = True
+                return None
+            size, n = wintypes.DWORD(0), wintypes.DWORD(0)
+            r = self.pdh.PdhGetFormattedCounterArrayW(self.c, self.PDH_FMT_DOUBLE_NOCAP, ctypes.byref(size),
+                                                      ctypes.byref(n), None) & 0xFFFFFFFF
+            if r != self.PDH_MORE_DATA or not size.value:
+                return None
+            buf = (ctypes.c_byte * size.value)()
+            if self.pdh.PdhGetFormattedCounterArrayW(self.c, self.PDH_FMT_DOUBLE_NOCAP, ctypes.byref(size),
+                                                     ctypes.byref(n), buf):
+                return None
+            items = ctypes.cast(buf, ctypes.POINTER(Item))
+            out = {}
+            for i in range(n.value):
+                it = items[i]
+                m = re.match(r'pid_(\d+)_.*engtype_3D$', it.szName or '')
+                if m and it.FmtValue.CStatus in (0, 1):   # PDH_CSTATUS_VALID_DATA, PDH_CSTATUS_NEW_DATA
+                    pid = int(m.group(1))
+                    out[pid] = out.get(pid, 0.0) + it.FmtValue.doubleValue
+            return out
+        except (OSError, AttributeError, ValueError):
+            return None
+
+    def tree(self, pids):
+        """-> % of the GPU's 3D engine used by these processes together (capped at 100), or None."""
+        got = self.by_pid()
+        if got is None:
+            return None
+        return min(100.0, sum(v for p, v in got.items() if p in pids))
+
+    def close(self):
+        if self.q is not None:
+            try:
+                self.pdh.PdhCloseQuery(self.q)
+            except OSError:
+                pass
+            self.q = None
+
+
+class _Watch:
+    """What a running job's numbers say about it, from the meter's samples (no probes of its own, so it is tested with
+    made-up samples): MISDECLARED, a --cpu job whose processes hold the GPU (ledger:M122), and HUNG, a job far past
+    its estimate that does nothing (ledger:M124). Each is told once in the job's own output and kept on its board
+    file; HUNG leaves the board when the job works again, MISDECLARED stays (it counts against the GPU slot)."""
+
+    def __init__(self, job, has_gpu=True, write=None, ncpu=None):
+        self.job, self.has_gpu, self.write = job, has_gpu, write or (lambda: None)
+        self.ncpu = ncpu or psutil.cpu_count() or 1
+        self.trail = []        # (t, the tree's CPU seconds, its GPU share % or None, the whole GPU's % or None)
+
+    def see(self, t, cpu_s, gpu_pct=None, whole_gpu=None):
+        self.trail.append((t, cpu_s, gpu_pct, whole_gpu))
+        keep = t - max(HUNG_S, MISDECLARED_S)
+        while len(self.trail) > 1 and self.trail[1][0] <= keep:   # one sample at or before the longest window stays
+            self.trail.pop(0)
+        self._misdeclared(t)
+        self._hung(t, cpu_s)
+
+    def _window(self, t, span):
+        """The samples of the last `span` seconds, or None until the trail reaches that far back."""
+        if not self.trail or t - self.trail[0][0] < span * 0.95:
+            return None
+        return [s for s in self.trail if s[0] >= t - span * 1.05]
+
+    def _misdeclared(self, t):
+        if self.job.get('kind') != 'cpu' or self.job.get('misdeclared'):
+            return
+        w = self._window(t, MISDECLARED_S)
+        shares = [s[2] for s in w or [] if s[2] is not None]
+        if len(shares) < 3:                            # under a minute of readings, or no reading at all: no flag
+            return
+        mean = sum(shares) / len(shares)
+        if mean < MISDECLARED_GPU:
+            return
+        self.job['misdeclared'] = {'at': t, 'gpu': round(mean)}
+        print(f"[ismail.machine] MISDECLARED: '{str(self.job['what'])[:60]}' was registered --cpu but its processes "
+              f"held {mean:.0f}% of the GPU for a minute; it now counts against the GPU slot (one GPU job "
+              f"machine-wide, and a hot GPU holds every job). Next time run it with --gpu.", file=sys.stderr, flush=True)
+        self.write()
+
+    def _gpu_quiet(self, w):
+        """True when the job left the GPU alone over the window, False when it did not, None when no reading says."""
+        shares = [s[2] for s in w if s[2] is not None]
+        if shares:
+            return max(shares) < HUNG_GPU
+        whole = [s[3] for s in w if s[3] is not None]
+        if whole:                                      # the whole GPU idle means this job too
+            return max(whole) < HUNG_GPU
+        return None if self.has_gpu else True
+
+    def _hung(self, t, cpu_s):
+        est, started = self.job.get('est_s'), self.job.get('started')
+        if not est or started is None or self.job.get('kind') == 'live' or t - started < HUNG_EST_X * est:
+            return
+        w = self._window(t, HUNG_S)
+        if not w:
+            return
+        t0, c0 = w[0][0], w[0][1]
+        cpu = (cpu_s - c0) / max(1e-6, (t - t0) * self.ncpu) * 100
+        quiet = cpu < HUNG_CPU and self._gpu_quiet(w)
+        if quiet and not self.job.get('hung'):
+            self.job['hung'] = {'at': t, 'cpu': round(cpu, 2)}
+            if not self.job.get('hung_told'):
+                self.job['hung_told'] = True
+                print(f"[ismail.machine] HUNG: '{str(self.job['what'])[:60]}' is {(t - started) / 60:.0f} min in, past "
+                      f"{HUNG_EST_X:g}x its estimate ({est / 60:.0f} min), and its processes used {cpu:.1f}% of the CPU "
+                      f"and no GPU for {HUNG_S / 60:.0f} min: it looks stuck, not slow. It holds its slot: look at it "
+                      f"and end it if it is stuck (the governor never stops it).", file=sys.stderr, flush=True)
+            self.write()
+        elif quiet is False and self.job.get('hung'):  # it works again
+            self.job['hung'] = None
+            self.write()
 
 
 class _Meter:
@@ -800,6 +1076,8 @@ class _Meter:
         self.base_w = _write_bytes(me)
         self.base_priv = _mem_of(me)[1]               # the holder's memory before the slot is not the job's
         self.gpu = _GpuSampler() if gpu_sampler else None
+        self.gpu_pids, self.gpu_t = (_GpuPids() if gpu_sampler else None), 0.0
+        self.watch = _Watch(job, has_gpu=gpu_sampler, write=lambda: self.path and _write_job(self.path, self.job))
         self.t = threading.Thread(target=self._loop, daemon=True)
         self.t.start()
 
@@ -830,6 +1108,19 @@ class _Meter:
         self.rss_peak = max(self.rss_peak, rss)
         self.priv_peak = max(self.priv_peak, priv)
         self._note(priv / 2 ** 30)
+        now, share = time.time(), None
+        if self.gpu_pids is not None and now - self.gpu_t >= GPU_PID_S:
+            self.gpu_t = now
+            share = self.gpu_pids.tree({p.pid for p in procs})
+        whole = self.gpu.last() if hasattr(self.gpu, 'last') else None
+        try:
+            self.watch.see(now, sum(self.cpu.values()), share, whole)   # the CPU seconds only grow: windows subtract
+        except Exception as e:                         # a flag is never worth a job: say it once and stop watching
+            if not getattr(self, 'watch_failed', False):
+                self.watch_failed = True
+                print(f"[ismail.machine] the job watch stopped ({type(e).__name__}: {e}); the job runs on",
+                      file=sys.stderr, flush=True)
+            self.watch.see = lambda *a, **k: None
 
     def _note(self, now_gb):
         """Past its declared memory by MEM_OVER: say so once in the job's own output and on the board. Every
@@ -931,6 +1222,12 @@ class _Meter:
             out['over_gb'] = self.job['over']
         if self.job.get('suspended') or self.job.get('resumed'):
             out['suspended'] = True
+        if self.job.get('misdeclared'):
+            out['misdeclared_gpu'] = self.job['misdeclared']['gpu']
+        if self.job.get('hung_told'):
+            out['hung'] = True
+        if self.gpu_pids is not None:
+            self.gpu_pids.close()
         if self.gpu is not None:
             out.update(self.gpu.stop())
         return out
@@ -1190,8 +1487,18 @@ def disk_line():
         flag = f"  LOW (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB; `machine disk` shows where it went)"
     elif worst is not None and worst < DISK_WARN_GB:
         flag = f"  getting low (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB)"
+    watched = {d.upper() for d, _ in ds}
+    pf_text = []
+    for d, gb in pf:           # a pagefile on a drive no job writes to: its free space too (ledger:M126)
+        f = None if d.upper() in watched else free_gb(d)
+        pf_text.append(f"{d} {gb:.1f} GB" + (f" ({f:.1f} GB free)" if f is not None else ''))
+    low = pagefile_low(ds)
+    if low:                    # a warning, not a gate: the commit floor already holds jobs when commit runs short
+        flag += ''.join(f"  PAGEFILE DRIVE LOW: {d} has {f:.1f} GB free (warns below {PAGEFILE_DRIVE_WARN_GB:.0f} GB); "
+                        f"the {gb:.1f} GB pagefile grows into {d} when commit runs short: keep memory-hungry jobs "
+                        f"small and tell the user" for d, f, gb in low)
     return ("disk: " + ', '.join(f"{d} {f:.1f} GB free" for d, f in ds)
-            + (f"; pagefile " + ', '.join(f"{d} {gb:.1f} GB" for d, gb in pf) if pf else '') + flag)
+            + (f"; pagefile " + ', '.join(pf_text) if pf else '') + flag)
 
 
 def pressure_line():
@@ -1247,15 +1554,12 @@ def disk_sizes(root=None):
     return sizes, reclaim
 
 
-def disk_text(top=12, root=None):
-    """Where the disk went: each drive's free space and pagefile, the biggest folders under songs/ with their growth
-    since the last day a snapshot was kept (<board>/disk/<date>.json), and every _reclaim folder."""
-    sizes, reclaim = disk_sizes(root)
-    sd = os.path.join(board_dir(), 'disk')
+def _day_snapshot(sd, sizes):
+    """-> (the last snapshot before today, its day or None), keeping today's first one (<sd>/<date>.json)."""
     today = time.strftime('%Y-%m-%d')
     before, day = {}, None
     try:
-        days = sorted(f[:-5] for f in os.listdir(sd) if f.endswith('.json') and f[:-5] < today)
+        days = sorted(f[:-5] for f in os.listdir(sd) if re.fullmatch(r'\d{4}-\d\d-\d\d\.json', f) and f[:-5] < today)
     except OSError:
         days = []
     if days:
@@ -1264,7 +1568,7 @@ def disk_text(top=12, root=None):
             with open(os.path.join(sd, day + '.json'), encoding='utf8') as f:
                 before = json.load(f)
         except (OSError, ValueError):
-            day = None
+            before, day = {}, None
     snap = os.path.join(sd, today + '.json')
     if not os.path.exists(snap):
         try:
@@ -1273,6 +1577,84 @@ def disk_text(top=12, root=None):
                 json.dump(sizes, f)
         except OSError:
             pass
+    return before, day
+
+
+def disk_roots():
+    """The folders `machine disk` measures beyond songs/ (ledger:M125: on 10-04 the biggest growers were outside it,
+    28.8 GB of launch-video intermediates and an 11 GB game unpack): $ISMAIL_DISK_ROOTS (paths split by os.pathsep),
+    else <board>/roots.txt (one path a line, # for a note), else every folder beside the checkout that holds songs/
+    (on this machine: the top-level folders of D:)."""
+    env = os.environ.get('ISMAIL_DISK_ROOTS')
+    txt = None if env else _read(os.path.join(board_dir(), 'roots.txt'))
+    if env or txt is not None:
+        paths = env.split(os.pathsep) if env else [ln.split('#')[0] for ln in txt.splitlines()]
+        return [os.path.abspath(p.strip()) for p in paths if p.strip() and os.path.isdir(p.strip())]
+    beside = os.path.dirname(os.path.dirname(os.path.abspath(SONGS)))
+    try:
+        return sorted(e.path for e in os.scandir(beside)
+                      if e.is_dir(follow_symlinks=False) and not DISK_SKIP.search(e.name))
+    except OSError:
+        return []
+
+
+def _roots_measured(roots, fresh=False):
+    """-> ({root: bytes}, seconds ago it was walked). A walk of a whole drive takes minutes, so one is reused for
+    DISK_ROOTS_FRESH_S (<board>/disk/roots/latest.json) unless fresh."""
+    cache = os.path.join(board_dir(), 'disk', 'roots', 'latest.json')
+    if not fresh:
+        try:
+            with open(cache, encoding='utf8') as f:
+                got = json.load(f)
+            if time.time() - got['t'] < DISK_ROOTS_FRESH_S and sorted(got['sizes']) == sorted(roots):
+                return got['sizes'], time.time() - got['t']
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    sizes = {r: _tree_bytes(r) for r in roots}
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        tmp = cache + f".{os.getpid()}.tmp"
+        with open(tmp, 'w', encoding='utf8') as f:
+            json.dump({'t': time.time(), 'sizes': sizes}, f)
+        os.replace(tmp, cache)
+    except OSError:
+        pass
+    return sizes, 0.0
+
+
+def _roots_text(roots, top, fresh=False):
+    """The lines for the folders beyond songs/: each root's size and its growth since the last day's snapshot."""
+    if not roots:
+        return []
+    sizes, ago = _roots_measured(roots, fresh)
+    before, day = _day_snapshot(os.path.join(board_dir(), 'disk', 'roots'), sizes)
+    G = 2 ** 30
+    songs = os.path.normcase(os.path.abspath(SONGS))
+    L = [f"beyond songs/ ({len(sizes)} folders: {sum(sizes.values()) / G:.1f} GB"
+         + (f", walked {_ago(time.time() - ago)} ago; --fresh walks again" if ago >= 60 else '') + ")"
+         + (f"; growth since {day}" if day else "; first snapshot kept today, growth shows from tomorrow")]
+    for path, b in sorted(sizes.items(), key=lambda kv: -kv[1])[:top]:
+        grow = ''
+        if day:
+            d = b - before.get(path, 0)
+            grow = f"  {'+' if d >= 0 else '-'}{abs(d) / G:.2f} GB" if abs(d) >= 0.01 * G else '  same'
+        holds = '  (holds songs/)' if songs.startswith(os.path.normcase(path) + os.sep) else ''
+        L.append(f"  {b / G:7.2f} GB  {path}{grow}{holds}")
+    if day:
+        grown = sorted(((b - before.get(p, 0), p) for p, b in sizes.items()), reverse=True)
+        fast = [f"{p} +{d / G:.1f} GB" for d, p in grown[:5] if d >= 0.5 * G]
+        if fast:
+            L.append("beyond songs/, grew most since " + day + ": " + ', '.join(fast))
+    return L
+
+
+def disk_text(top=12, root=None, roots=None, fresh=False):
+    """Where the disk went: each drive's free space and pagefile, the biggest folders under songs/ with their growth
+    since the last day a snapshot was kept (<board>/disk/<date>.json), every _reclaim folder, and the folders beyond
+    songs/ (disk_roots(), or roots: a list; [] for none) with their growth (<board>/disk/roots/<date>.json)."""
+    sizes, reclaim = disk_sizes(root)
+    sd = os.path.join(board_dir(), 'disk')
+    before, day = _day_snapshot(sd, sizes)
     G = 2 ** 30
     L = [disk_line(), f"songs/ ({root or SONGS}): {sum(sizes.values()) / G:.1f} GB in {len(sizes)} folders"
          + (f"; growth since {day}" if day else "; first snapshot kept today, growth shows from tomorrow")]
@@ -1292,6 +1674,7 @@ def disk_text(top=12, root=None):
         L += [f"  {b / G:7.2f} GB  {p}" for p, b in sorted(reclaim.items(), key=lambda kv: -kv[1])]
     else:
         L.append("_reclaim: none")
+    L += _roots_text(disk_roots() if roots is None else roots, top, fresh)
     return '\n'.join(L)
 
 
@@ -1395,7 +1778,10 @@ def main(argv=None):
     oa.add_argument('--by', default=None, help='who decided (the user)')
     oa.add_argument('--why', default='')
     dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, _reclaim, the pagefile')
-    dk.add_argument('--top', type=int, default=12, help='how many songs folders to list')
+    dk.add_argument('--top', type=int, default=12, help='how many songs folders (and folders beyond songs/) to list')
+    dk.add_argument('--fresh', action='store_true', help='walk the folders beyond songs/ again (a walk is reused '
+                    f'for {DISK_ROOTS_FRESH_S / 60:.0f} min)')
+    dk.add_argument('--songs-only', action='store_true', help='only songs/ (no walk beyond it)')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(errors='replace')
@@ -1429,7 +1815,7 @@ def main(argv=None):
         print(resume(a.job))
         return 0
     if a.cmd == 'disk':
-        print(disk_text(a.top))
+        print(disk_text(a.top, roots=[] if a.songs_only else None, fresh=a.fresh))
         return 0
     if a.cmd == 'on-air':
         if a.policy:
