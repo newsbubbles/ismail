@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### composition: a melody that travels through instruments
+
+- A method in `references/composition.md` (ledger:S50, from the Live DJ's set): one 8-bar line handed to a new
+  instrument at each section while the groove stays fixed, each pass fitted into the voice's measured range by one
+  helper (whole octaves, a lead kept a few semitones under the measured top), each hand-off checked as a new row in
+  `analyze_structure(source='render')`.
+
 ### exams: measure first, then spend the person's ear
 
 - `phone_exam(..., measured=, unmeasured=)` (ledger:M212; qa intent_rules 10-16 cluster 5): an exam goes to the
