@@ -180,7 +180,17 @@ listening exams and two notes).
    life of its own (`phone_watch` returns `alive: true` after `wait_min`, 100 minutes by default, where the limit
    is 2 hours), and when it ends, start it again and read `phone_status`, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
    hours ... you can still get the voice notes").
-6. **Their clock. The machine's clock may not be the person's. Any clock time shown or said to them is in their
+6. **Down while they are live: the heartbeat.** A watcher that died left the person asking "you watching phone?"
+   during a set, four times in five days (ledger:M211). While the person is live (the Quest page open, a phone on
+   the stream), an agent that watched in the last 30 minutes and has not polled for 2 minutes is down. The server
+   posts one `alarm` line (`what: watcher_down`, `agent`), the page tells the person who is not hearing them, and
+   `phone_status` and `phone_presence` show it. A `watcher_back` line follows when it polls again. The server
+   cannot wake a session; the lead can. So the lead runs `phone_watch "who=<role>" lead=true`, and the alarms are
+   addressed to it (to every watcher while no lead is watching); its `next` line says to wake the agent named,
+   with a message to its session, so that agent re-arms. At the start of a set, a VR session or a jam, an agent
+   that must stay up calls `phone_expect(who, why, minutes)`; that holds even when the person is not in VR or on
+   the stream. When your work is done, `phone_signoff(who, why)` stops on purpose, and nothing is raised.
+7. **Their clock. The machine's clock may not be the person's. Any clock time shown or said to them is in their
    own time zone.
 
 ## Pause means stop, now

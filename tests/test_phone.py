@@ -1337,6 +1337,52 @@ def test_phone_presence_shows_agents_and_devices_many_to_many(phone):
     t.join(10)
 
 
+def _alarms(ph, what='watcher_down'):
+    return [r for r in ph.read_inbox(0) if r.get('kind') == 'alarm' and r.get('what') == what]
+
+
+def test_a_watcher_that_stops_while_the_person_is_in_vr_raises_one_alarm(phone):
+    """ledger:M211 (qa intent_rules 10-16 cluster 3): a DJ whose watcher died left the person asking "you watching
+    phone?" while live. In VR, an agent that watched and went quiet for 2 min is named once to the lead and on the
+    page, and its return is said once."""
+    ph, base, _ = phone
+    P.phone_listen('lead a', wait=0, lead=True)
+    P.phone_listen('dj', wait=0)
+    assert _state(base, 'quest1', QUEST_UA)['deaf'] == [] and _alarms(ph) == []
+    ph.listened['dj'] = time.time() - 200                                   # its phone_watch stopped polling
+    ph.listened['lead a'] = time.time()
+    st = _state(base, 'quest1', QUEST_UA)
+    assert st['deaf'] == [{'who': 'dj', 'min': 3}]
+    a = _alarms(ph)
+    assert len(a) == 1 and a[0]['agent'] == 'dj' and a[0]['for'] == 'lead a' and 'in VR' in a[0]['text']
+    _state(base, 'quest1', QUEST_UA)
+    P.phone_listen('lead a', wait=0, lead=True)
+    assert len(_alarms(ph)) == 1                                            # one per stretch down
+    assert 'WATCHER DOWN: dj, stopped 3 min ago' in P.phone_status() and 'lead: lead a' in P.phone_presence()
+    P.phone_listen('dj', wait=0)
+    assert [r['agent'] for r in _alarms(ph, 'watcher_back')] == ['dj'] and _state(base, 'quest1', QUEST_UA)['deaf'] == []
+
+
+def test_signoff_and_not_live_raise_nothing_and_expect_holds_without_vr(phone):
+    ph, base, _ = phone
+    P.phone_listen('dj', wait=0)
+    P.phone_listen('voice', wait=0)
+    ph.listened['dj'] = ph.listened['voice'] = time.time() - 200
+    assert ph.heartbeat() == []                                             # nobody in VR or on the stream
+    assert 'NOT watching now' in P.phone_expect('dj', why='a set', minutes=60)
+    assert [d['who'] for d in ph.heartbeat()] == ['dj'] and _alarms(ph)[0]['for'] is None   # no lead: everyone's
+    assert 'expected: dj until' in P.phone_presence() and 'a set' in P.phone_presence()
+    _state(base, 'quest1', QUEST_UA)
+    assert 'phone_expect (a set) ended' in P.phone_signoff('dj', why='set over')
+    assert [d['who'] for d in ph.heartbeat()] == ['voice']                  # in VR now: voice watched lately
+    ph.listened['voice'] = time.time() - S.RECENT_S - 5
+    assert ph.heartbeat() == []                                             # too long ago to be expected
+    with pytest.raises(api.OpError, match='1 to 1440'):
+        P.phone_expect('dj', why='a set', minutes=0)
+    with pytest.raises(api.OpError, match='why'):
+        P.phone_expect('dj', why=' ')
+
+
 def test_a_listen_with_lines_names_the_other_watchers(phone):
     ph, base, _ = phone
     t = threading.Thread(target=P.phone_listen, args=('watcher b',), kwargs={'wait': 3, 'since': 10 ** 6})
