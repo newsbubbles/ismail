@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### live: headroom against the real deadline, cutting a section over, the room speaker off and on
+
+- `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since
+  the last status, out of the 500 ms kept ahead (`headroom: 430 ms of 500 ... clean`; THIN under 125 ms, DROPOUT at
+  0), and the slowest block in ms against its 23 ms. The `mixer: N%` line keeps its start (guards parse it) and no
+  longer calls a high % a dropout risk by itself: it is wall time per block and climbs with other programs' CPU while
+  the sound stays clean. Measured with the device's own pulls, so it holds for a speaker and for `device='none'`.
+- `live_queue(clips, section=, cancel_section=, cancel_at=)`: clips and stops carry a set section's name (also a
+  clip's own `section` key), and `cancel_section` takes back what that section still has to do from where the
+  batch's first clip lands (or `cancel_at`, or the next bar with no clips): its later clips are removed, its playing
+  ones cut there, its stops after it dropped, and its effect moves sent with `live_fx(section=)` (or `section` in a
+  move) dropped, a glide in progress holding where it is. The batch's own clips are kept; untagged clips are never
+  touched. `live_status` lists the sections ahead. djkit: `Set.q(clips, section=, cut=)` tags the clips, `Set.cut`,
+  `Set.moves(moves, section=)`; against an engine started before sections it queues untagged, as before.
+- `live_device(device='none')` and back mid-set, without a restart (it existed since M34; the gaps are closed): any
+  spelling of none, a reply and an `output off:` status line that say the room is silent while the clock, streams,
+  recording and `live_listen` go on, a set started silent still follows the default and catches a stall once moved
+  to a speaker, and a quick none, speaker, none no longer leaves two silent clocks pulling audio.
+- The 489% mixer peak while rigging tracks into a running set: no single cause in the engine. Rigging nine tracks
+  holds the engine lock about 1 ms each, chains build outside it, and an emulated rig on a quiet machine peaked at
+  63%. The peak is the machine: each new track sends a warm-up render to every worker, and on a machine already at
+  86-100% CPU one block took about 113 ms of wall time while the cushion covered it (no underruns); the headroom line
+  now shows that. One stall that was the engine's is fixed: `live_track` resolved the instrument under the lock (a
+  first mimic instrument imports its module, 39 ms; a `track:` spec reads project.json), and a bad instrument left a
+  half-made track.
+- Tests: `tests/test_live_headroom.py`, `tests/test_live_sections.py`, two more in `tests/test_live_device.py`.
+  (ledger M128, M129, M130)
+
 ### machine: MISDECLARED, HUNG, ORPHAN, the pagefile's drive, and `machine disk` beyond songs/ (ledger:M122-M126)
 
 - MISDECLARED (M122): a job's meter reads its process tree's share of the GPU's 3D engine every 5 s (Windows' own

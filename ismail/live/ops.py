@@ -224,9 +224,12 @@ def live_status(project: str, deck: str = None) -> str:
     not on a deck (instrument, fader, level now and the loudest over the last 10 s, playing/next clip, render
     cost, errors), the safety chain's gain reduction since the last status, runway (the last scheduled change and
     what loops after it) and render health (backlog, late events, underruns). A STALLED line means the audio
-    device stopped asking for audio. deck='B' lists that deck's tracks and buses instead. Problems that arrive
-    between calls (a dropped note, a stall) are added to the next reply of any live op. The last line is the
-    machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
+    device stopped asking for audio. `mixer:` is the time a block takes to mix against its length (it climbs when
+    other programs load the machine); `headroom:` is the real risk: the mixed audio still waiting when the device
+    pulled, at its thinnest since the previous status, out of the 500 ms kept ahead (0 = a dropout, THIN under
+    125 ms). Judge a pause by headroom, not by the mixer %. deck='B' lists that deck's tracks and buses instead.
+    Problems that arrive between calls (a dropped note, a stall) are added to the next reply of any live op. The
+    last line is the machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
     out = _call(project, 'status', deck=deck)
     try:
         from .. import machine
@@ -396,9 +399,20 @@ def live_bus(project: str, bus: str, fx=None, volume_db: float = None, remove: b
     return _call(project, 'bus', bus=bus, fx=fx, volume_db=volume_db, remove=remove, at=at)
 
 
+def _older_engine(call):
+    """A running engine started before section= and cancel_section= refuses them: say what to do."""
+    try:
+        return call()
+    except OpError as e:
+        if 'unexpected keyword' not in str(e):
+            raise
+        raise OpError(f"{e}. This engine was started before section= and cancel_section=: live_stop and live_start "
+                      f"again to use them (a plain live_queue or live_fx still works on it)") from None
+
+
 @op()
 def live_fx(project: str, target: str = None, index=None, params: dict = None, ramp_beats: float = 0,
-            at: str = 'now', clear: bool = False, moves: list = None) -> str:
+            at: str = 'now', clear: bool = False, moves: list = None, section: str = None) -> str:
     """Change params of one effect in a live chain. target: a track, or 'bus:<name>'; index: 0-based position in
     its chain (live_status lists chains), or the effect's type ('filter'; 'filter:2' = the second filter), which
     survives edits to the chain. Automatable params (fx_help lists them: cutoff, mix, gain_db, depth ...)
@@ -411,19 +425,26 @@ def live_fx(project: str, target: str = None, index=None, params: dict = None, r
     the volume without it): each param holds where it is. Use it before a section reuses a track whose old
     choreography is still scheduled.
     moves: a list of these calls as dicts, [{target, index, params, ramp_beats, at}, ...], scheduled in one call
-    (a whole cycle of throws, sweeps and gaps; ismail.live.djkit builds them)."""
+    (a whole cycle of throws, sweeps and gaps; ismail.live.djkit builds them).
+    section: a set section's name on the glides (or 'section' in each move): live_queue(cancel_section=) then
+    takes them back with that section's clips."""
     if moves is not None:
+        if section:
+            moves = [dict(m, section=section) if isinstance(m, dict) and 'section' not in m else m for m in moves]
         return _call(project, 'moves', moves=moves)
     if target is None:
         raise OpError("live_fx needs a target (or moves=[...])")
     if not clear and (index is None or not params):
         raise OpError("live_fx needs index and params (or clear=True to cancel scheduled moves)")
-    return _call(project, 'fx', target=target, index=index, params=params, ramp_beats=ramp_beats, at=at,
-                 clear=clear)
+    # section is sent only when given: an engine started before it existed still takes every other call
+    return _older_engine(lambda: _call(project, 'fx', target=target, index=index, params=params,
+                                       ramp_beats=ramp_beats, at=at, clear=clear,
+                                       **({'section': section} if section else {})))
 
 
 @op()
-def live_queue(project: str, clips: list) -> str:
+def live_queue(project: str, clips: list = None, section: str = None, cancel_section: str = None,
+               cancel_at: str = None) -> str:
     """Queue clips (a batch; all or nothing). Each clip: {track, notes and/or lanes, bars, loop, at}.
       notes: '<beat> <pitch> <dur_beats> [vel]; ...' with beats from the clip start (same as notes_write).
       lanes: {pitch: 'x...x...'} step strings (same as pattern_write), step = beats per char (0.25).
@@ -437,8 +458,18 @@ def live_queue(project: str, clips: list) -> str:
     A clip on a track replaces whatever that track would play from its start (a playing clip is cut there; its
     last notes ring out). {track, stop: true, at} silences a track. The reply gives each clip's id and the exact
     bar it lands on (moved later when its first notes cannot render in time) and the runway: how long until the
-    queue stops changing. Before a long job (sound design, fitting), queue enough that the runway covers it."""
-    return _call(project, 'queue', clips=clips)
+    queue stops changing. Before a long job (sound design, fitting), queue enough that the runway covers it.
+    section: a name for the set section (chapter) these clips and stops belong to; a clip's own 'section' key wins.
+    cancel_section: cut over mid-chapter. Takes back what that section still has to do from cancel_at (a live_queue
+    `at` value; default where this batch's first clip lands, or the next bar when clips is empty): its clips that
+    start then or later are removed, the ones still playing are cut there (last notes ring out), its stops after
+    it and its effect moves sent with section= are dropped (a glide in progress holds where it is). The batch's own
+    clips are kept even when they reuse the name. Clips queued without a section are never touched."""
+    args = {'clips': clips if clips is not None else []}
+    # the new arguments go only when given: an engine started before them still takes a plain queue
+    args.update({k: v for k, v in (('section', section), ('cancel_section', cancel_section),
+                                   ('cancel_at', cancel_at)) if v is not None})
+    return _older_engine(lambda: _call(project, 'queue', **args))
 
 
 @op()
@@ -532,7 +563,9 @@ def live_device(project: str, device: str = 'default', follow: bool = None, reop
     connecting a Bluetooth speaker), a name or part of one ('JBL'), an index, or 'none'. With device 'default' the
     engine also follows the system default by itself (checked every few seconds; follow=False stops that), and a
     device that stops taking audio (a speaker switched off) falls back to the default. reopen=False only sets
-    follow and stays on the output it has (no gap); the phone page's Output switch does the same."""
+    follow and stays on the output it has (no gap); the phone page's Output switch does the same.
+    device='none' turns the room speaker off mid-set (listening on the phone instead): the clock, the queue, streams,
+    recording and live_listen carry on, and device='default' (or a name) turns it back on, no restart."""
     if not reopen:
         return _call(project, 'device', follow=follow, reopen=False, timeout=20)
     return _call(project, 'device', device=device, follow=follow, timeout=20)

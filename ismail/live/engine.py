@@ -69,10 +69,17 @@ MARGIN_S = 0.5          # render estimate safety margin (quantized launches make
 DEFAULT_RATE = {'mimic': 0.6, 'code': 0.1, 'synth': 0.15, 'sampler': 0.05}   # render s per audio s, until measured
 DRUM_RATE = 0.03
 DUCK_LOOKBACK = 4 * SR  # onsets this far back still shape a duck's release
+ROOM_OFF = ("nothing plays in the room; the clock, streams (the phone), recording and live_listen carry on. "
+            "live_device(device='default') turns the speaker back on")
 
 
 class LiveError(ValueError):
     pass
+
+
+def is_none_device(device):
+    """'none' in any spelling (None, 'None', 'null'): no speaker, the engine keeps its clock by itself."""
+    return device is None or str(device).strip().lower() in ('none', 'null')
 
 
 class Seg:
@@ -144,6 +151,7 @@ class Engine:
         self.out_name = None            # the device the stream opened on, by name
         self.stream = None
         self._null_on = False
+        self._null_gen = 0              # each silent clock gets a number: an older one still asleep then quits
         self._out_lock = threading.Lock()
         self._out_tried = 0.0
         self.hub = O.StreamHub(SR)
@@ -185,6 +193,10 @@ class Engine:
         self.last_late = None
         self.mix_load = None            # mixer time / audio time, smoothed
         self.mix_peak = 0.0
+        # the real deadline: audio still waiting in the fifo after each device pull (the device plays from it, so a
+        # slow block only eats into this cushion; 0 is a dropout). The least since the last status, in samples.
+        self.head_min = None
+        self._primed = False            # the fifo has been full once (the first pulls after start drain a filling one)
         self.last_underrun = None
         self.last_cmd = time.time()
         self.running = True
@@ -799,6 +811,7 @@ class Engine:
                     self._fifo.append(y.T.copy())
                     self._fifo_n += y.shape[1]
             else:
+                self._primed = True
                 time.sleep(0.003)
             if self.fade is not None and self.fade[0] == 0 and self._fifo_n == 0:
                 self.running = False
@@ -829,6 +842,9 @@ class Engine:
                     self._fifo.popleft()
                     self._head = 0
             self._fifo_n -= got
+            if self._primed and self.fade is None:
+                left = self._fifo_n if got == frames else 0
+                self.head_min = left if self.head_min is None else min(self.head_min, left)
         keys = self.midi.mix(out)
         if keys is not None:            # live_listen hears the keys where the device played them
             i = (self.played - self.safety.la - G.LAT_BUDGET) % self.air.shape[1]
@@ -842,10 +858,11 @@ class Engine:
         self.played += got
         return out
 
-    def _null_loop(self):
+    def _null_loop(self, gen):
         t0 = time.time()
         done = 0
-        while self.running and self._null_on:
+        # a quick none -> speaker -> none could wake the old loop beside the new one: two clocks would pull double
+        while self.running and self._null_on and gen == self._null_gen:
             want = int((time.time() - t0) * SR) - done
             if want >= BLOCK:
                 self._pull(want)
@@ -880,18 +897,20 @@ class Engine:
             threading.Thread(target=fn, daemon=True).start()
         with self._out_lock:
             self._open_output(self.device, rescan=False)
-        if self.device not in (None, 'none', 'null'):
-            threading.Thread(target=self._watch_output, daemon=True).start()
+        # always: a set started silent and moved to a speaker later still follows the default and survives a stall
+        threading.Thread(target=self._watch_output, daemon=True).start()
 
     # ------------------------------------------------------------------ output device
     def _open_output(self, device, rescan=True):
         """Open the output on `device` ('default', a name or index, or 'none'). rescan re-reads the system's device
         list first (a speaker that connected after this process started is not in it)."""
-        if device in (None, 'none', 'null'):
+        if is_none_device(device):
             self.stream, self.out_name = None, 'none'
             if not self._null_on:
                 self._null_on = True
-                threading.Thread(target=self._null_loop, daemon=True).start()
+                self._null_gen += 1
+                threading.Thread(target=self._null_loop, args=(self._null_gen,), daemon=True,
+                                 name='live-null-clock').start()
             return
         import sounddevice as sd
         self._null_on = False
@@ -934,6 +953,8 @@ class Engine:
         index, or 'none'. reopen=False only sets follow and stays on the output it has (no gap)."""
         if follow is not None:
             self.follow = bool(follow)
+        if is_none_device(device):
+            device = 'none'
         if not reopen:
             return f"output: {self.out_name or self.device}" + (
                 "; follows the system default" if self.device == 'default' and self.follow else
@@ -954,6 +975,8 @@ class Engine:
                 names = _output_names()
                 raise LiveError(f"could not open {device!r}: {e}{back}. Outputs now: {', '.join(names) or 'none'}")
             self.device = device
+        if device == 'none':
+            return f"output: none (was {old}): {ROOM_OFF}"
         return f"output: {self.out_name} (was {old})" + (
             "; follows the system default" if device == 'default' and self.follow else '')
 
@@ -1230,6 +1253,10 @@ class Engine:
         new_chain = None
         if fx is not None:
             new_chain = self._chain(fx, f"track {track!r}", 1.0, own=track)      # built outside the lock
+        # outside the lock too: 'track:' reads project.json and a first mimic instrument imports its module (39 ms
+        # measured, a block at ~270% of real time while the mixer waited); a bad instrument now also fails before a
+        # new track is half made
+        inst = self._resolve_instrument(instrument) if instrument is not None and not remove else None
         with self.lock:
             now = self.beat(self.pos)
             if remove:
@@ -1313,8 +1340,7 @@ class Engine:
                 tr['sends'] = sends
                 self._send_lags(tr)
                 msg.append("sends " + (', '.join(f"{b} {v:+g} dB" for b, v in sends.items()) or 'none'))
-            if instrument is not None:
-                inst = self._resolve_instrument(instrument)
+            if inst is not None:
                 old = tr['inst']
                 tr['inst'] = inst
                 tr['errors'] = []
@@ -1396,7 +1422,7 @@ class Engine:
             msg.append(f"vol {b['volume_db']:g} dB")
             return f"bus {bus}: " + ', '.join(msg)
 
-    def cmd_fx(self, target, index=None, params=None, ramp_beats=0, at='now', clear=False):
+    def cmd_fx(self, target, index=None, params=None, ramp_beats=0, at='now', clear=False, section=None):
         with self.lock:
             node = self._target(target)
             key = ('bus:' + target[4:]) if target.startswith('bus:') else 'track:' + target
@@ -1445,9 +1471,10 @@ class Engine:
                 # where this chain's param is at s0: its last move so far, else held before its first move
                 v0 = before[-1].value(s0) if before else own[0].v0 if own else float(f[name])
                 log = any(k in name for k in G.LOG_PARAMS)
-                sch.add(G.Ramp(s0, v0, s1, v, log, chain.gen))
+                sch.add(G.Ramp(s0, v0, s1, v, log, chain.gen, section=section or None))
                 f[name] = v
-                msg.append(f"{name} {v0:g} -> {v:g}" + (f" over {float(ramp_beats):g} beats" if ramp_beats else ''))
+                msg.append(f"{name} {v0:g} -> {v:g}" + (f" over {float(ramp_beats):g} beats" if ramp_beats else '')
+                           + (f" [{section}]" if section else ''))
             rebuild = {k: v for k, v in params.items() if k not in auto}
         if rebuild:
             new = copy.deepcopy(fxs)
@@ -1475,7 +1502,7 @@ class Engine:
             if not isinstance(m, dict) or 'target' not in m:
                 raise LiveError(f"move [{i}]: a dict with target, index, params (ramp_beats, at, clear optional); "
                                 f"{len(out)} moves before it were scheduled")
-            bad = set(m) - {'target', 'index', 'params', 'ramp_beats', 'at', 'clear'}
+            bad = set(m) - {'target', 'index', 'params', 'ramp_beats', 'at', 'clear', 'section'}
             if bad:
                 raise LiveError(f"move [{i}]: unknown keys {sorted(bad)}; {len(out)} moves before it were scheduled")
             try:
@@ -1853,7 +1880,8 @@ class Engine:
         if track not in self.tracks:
             raise LiveError(f"clip [{i}]: no live track {track!r}; create it with live_track(project, track="
                             f"'{track}', instrument=...). Live tracks: {list(self.tracks) or 'none'}")
-        known = {'track', 'notes', 'lanes', 'step', 'bars', 'beats', 'loop', 'at', 'stop', 'expr', 'beat0', 'context'}
+        known = {'track', 'notes', 'lanes', 'step', 'bars', 'beats', 'loop', 'at', 'stop', 'expr', 'beat0', 'context',
+                 'section'}
         extra = set(it) - known
         if extra:
             raise LiveError(f"clip [{i}]: unknown keys {sorted(extra)}; valid: {sorted(known)}")
@@ -1906,12 +1934,21 @@ class Engine:
                 raise LiveError(f"clip [{i}]: loop={it.get('loop')!r}; use a count >= 1 or 'forever'")
         return track, notes, length, loop, expr
 
-    def cmd_queue(self, clips):
-        if not isinstance(clips, list) or not clips:
-            raise LiveError("clips: a list of {track, notes | lanes, bars, loop, at} (or {track, stop: true, at})")
+    def cmd_queue(self, clips=None, section=None, cancel_section=None, cancel_at=None):
+        """section: the name the batch's clips and stops carry (a clip's own 'section' key wins). cancel_section
+        takes back what that section still has to do from cancel_at on (default: where the batch's first clip lands,
+        or the next bar without clips): a set cutting over mid-chapter."""
+        if clips is None and cancel_section:
+            clips = []
+        if not isinstance(clips, list) or not (clips or cancel_section):
+            raise LiveError("clips: a list of {track, notes | lanes, bars, loop, at} (or {track, stop: true, at}); "
+                            "or cancel_section='<name>' alone to take a section back")
+        if cancel_at is not None and not cancel_section:
+            raise LiveError("cancel_at goes with cancel_section='<name>' (the section to take back from there)")
         parsed = [self._parse_clip(i, it) + (it.get('at') or 'next_bar', float(it.get('beat0') or 0.0),
                                              [tuple(float(x) for x in n) for n in it.get('context') or []])
                   for i, it in enumerate(clips)]
+        secs = [(it['section'] if 'section' in it else section) or None for it in clips]
         # the slow part of planning a batch (render estimates, event groups) runs before the engine lock is taken:
         # the mixer takes that lock every block, and a 4000-note batch once held it for 150 ms
         plans = []
@@ -1929,6 +1966,7 @@ class Engine:
             queued = sum(j['est_s'] for j in self.jobs.values())
             tl = self.tl.copy()
             claims, lines, added = [], [], []
+            lands, own_stops = [], set()      # where the batch's clips land; its own stops (a cancel leaves them)
             extra = 0.0                      # render seconds of earlier clips in this batch
             batch_ids = {}                   # batch index -> clip id, for at='after:#<index>'
             for i, (track, notes, length, loop, expr, at, beat0, context) in enumerate(parsed):
@@ -1950,17 +1988,22 @@ class Engine:
                     raise LiveError(f"clip [{i}] ({track}): {e}. Nothing was queued.")
                 removed, cut = tl.claim(track, beat)
                 claims.append((track, beat, set(removed) | set(cut)))
+                lands.append(beat)
+                sec = secs[i]
+                tag = f" [{sec}]" if sec else ''
                 what = []
                 if cut:
                     what.append(f"cuts {', '.join(cut)} there")
                 if removed:
                     what.append(f"replaces queued {', '.join(removed)}")
                 if notes is None:
-                    tl.stop(track, beat)
-                    lines.append(f"stop {track} at {fmt_bar(beat, self.bpb)}" + (f"; {'; '.join(what)}" if what else '')
-                                 + (f"\n  note: {note}" if note else ''))
+                    tl.stop(track, beat, sec)
+                    own_stops.add((track, beat))
+                    lines.append(f"stop {track} at {fmt_bar(beat, self.bpb)}{tag}" +
+                                 (f"; {'; '.join(what)}" if what else '') + (f"\n  note: {note}" if note else ''))
                     continue
                 c = tl.add(track, notes, length, loop, beat, at)
+                c.section = sec
                 c._groups = plans[i][2]
                 c.expr = expr
                 c.beat0 = beat0
@@ -1969,9 +2012,20 @@ class Engine:
                 added.append(c)
                 bars = length / self.bpb
                 lines.append(f"{c.id} {track}: {fmt_bar(beat, self.bpb)} ({at}), {fmt_num(bars)} bars x "
-                             f"{'forever' if loop is None else loop}, {len(notes)} notes"
+                             f"{'forever' if loop is None else loop}, {len(notes)} notes{tag}"
                              + (f"; ends {fmt_bar(c.end, self.bpb)}" if c.end is not None else '')
                              + (f"; {'; '.join(what)}" if what else '') + (f"\n  note: {note}" if note else ''))
+            if cancel_section:
+                if cancel_at is not None:
+                    try:
+                        cbeat, _ = tl.resolve_at(cancel_at, now, now)
+                    except QueueError as e:
+                        raise LiveError(f"cancel_at={cancel_at!r}: {e}. Nothing was queued.")
+                else:
+                    cbeat = min(lands) if lands else tl.resolve_at('next_bar', now, now)[0]
+                gone, cut, stops = tl.cancel_section(cancel_section, cbeat, keep={c.id for c in added} | own_stops)
+                claims.append((None, cbeat, set(gone) | set(cut)))
+                lines.append(self._cancel_section_moves(cancel_section, cbeat, gone, cut, stops, tl))
             self.tl = tl
             for track, beat, ids in claims:
                 for s in self.active + [p[2] for p in self.pending]:
@@ -1986,6 +2040,43 @@ class Engine:
                     self.meta.pop(cid)
         self.tick()
         return '\n'.join(lines) + '\n' + self._runway()
+
+    def _cancel_section_moves(self, section, beat, gone, cut, stops, tl):
+        """The second half of cancel_section: the section's effect moves from `beat` on are dropped (one gliding
+        then stops where it is). Returns the reply line for the whole cancel."""
+        s0 = self.sample(beat)
+        dropped, held = 0, []
+        for k, sch in list(self.ramps.items()):
+            n, h = sch.drop_section(section, s0)
+            dropped += n
+            if h:
+                held.append(f"{k[0].split(':', 1)[1]} {'' if k[1] < 0 else f'fx[{k[1]}].'}{k[2]} holds "
+                            f"{sch.value(s0):g}")
+            if n or h:
+                node = self.buses.get(k[0][4:]) if k[0].startswith('bus:') else self.tracks.get(k[0][6:])
+                if node is not None and k[1] >= 0:      # the chain's own record of the param: where it now ends up
+                    ch = self._chain_at(node, s0)
+                    if k[1] < len(ch.fx) and k[2] in ch.fx[k[1]] and sch.target.gen == ch.gen:
+                        ch.fx[k[1]][k[2]] = sch.target.v1
+        parts = []
+        if gone:
+            parts.append(f"removed {', '.join(gone)}")
+        if cut:
+            parts.append(f"cut {', '.join(cut)} there (last notes ring out; the track is silent after unless "
+                         f"something else is queued on it)")
+        if stops:
+            parts.append(f"dropped stops {', '.join(f'{t} at {fmt_bar(b, self.bpb)}' for t, b in stops)} (a dropped "
+                         f"stop does not bring back a clip it had already ended)")
+        if dropped:
+            parts.append(f"dropped {dropped} effect moves")
+        if held:
+            parts.append("held " + '; '.join(held))
+        when = fmt_bar(beat, self.bpb)
+        if not parts:
+            left = tl.sections(self.beat(self.pos))
+            return (f"cancel section {section}: nothing of it left from {when} (sections with clips or stops ahead: "
+                    f"{', '.join(left) or 'none'}; effect moves count only when sent with section=)")
+        return f"cancel section {section} from {when}: " + '; '.join(parts)
 
     def cmd_cancel(self, clips):
         out = []
@@ -2244,6 +2335,8 @@ class Engine:
                      f"({self.played / SR:.0f} s) | mixed ahead {max(0.0, (self.pos - self.played) / SR):.2f} s | "
                      f"output {self.out_name or self.device}" + (" (follows the default)" if self.device == 'default' and self.follow and self.stream is not None else '')
                      + (f" | recording {os.path.basename(self.rec_path)}" if self.rec else '')]
+            if self.out_name == 'none':
+                lines.append(f"output off: {ROOM_OFF}")
             sn = self.hub.names()
             if sn:
                 lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
@@ -2322,12 +2415,18 @@ class Engine:
                 lines.append("ramps: " + '; '.join(moving))
             if self.swaps:
                 lines.append("pending fx changes at: " + ', '.join(fmt_bar(self.beat(s[0]), self.bpb) for s in sorted(self.swaps)))
+            secs = self.tl.sections(now)
+            if secs:
+                lines.append(f"sections ahead: {', '.join(secs)} (live_queue(cancel_section=...) takes one back)")
             lines.append(self._runway())
             backlog = sum(1 for j in self.jobs.values() if not j['warm'])
             if self.mix_load is not None:
                 lines.append(f"mixer: {self.mix_load * 100:.0f}% of real time (peak {self.mix_peak * 100:.0f}% since the "
-                             f"last status; above ~70% risks dropouts: fewer tracks or effects)")
+                             f"last status; the time a block takes, other programs' CPU included: headroom below says "
+                             f"how near a dropout that is)")
+                lines.append(self._headroom_line())
                 self.mix_peak = 0.0
+                self.head_min = None
             if self.n_workers and len(self.ready) < self.n_workers:
                 lines.append(f"workers warming up: {len(self.ready)}/{self.n_workers} ready")
             starving = self._starving()
@@ -2339,6 +2438,21 @@ class Engine:
                          f", rejected {self.stats['rejected']}, underruns {self.stats['underruns']}" +
                          (f" (last at {self.last_underrun})" if self.last_underrun else ''))
             return '\n'.join(lines)
+
+    def _headroom_line(self):
+        """How near the mixer came to a real dropout since the last status. The device plays from AHEAD_S of mixed
+        audio, so one slow block (a busy machine, a queue being parsed) only eats into that cushion: the mixer %
+        climbs with other programs' CPU while the sound stays clean. This is the cushion at its thinnest."""
+        cap = AHEAD_S * 1000
+        blk = BLOCK / SR * 1000
+        slow = f"the slowest block took {self.mix_peak * blk:.0f} ms for its {blk:.0f} ms of audio"
+        if self.head_min is None:
+            return f"headroom: not measured yet (the device has not pulled since the last status); {slow}"
+        ms = self.head_min / SR * 1000
+        verdict = ("a DROPOUT: the device found the mix empty (fewer tracks or effects, or less else running)"
+                   if ms <= 0 else "THIN: a slower spell would drop out (fewer tracks or effects)" if ms < 0.25 * cap
+                   else "clean")
+        return f"headroom: {ms:.0f} ms of {cap:.0f} at the tightest since the last status, {verdict}; {slow}"
 
     def _starving(self):
         """STARVING when the render line, earliest-needed first, cannot finish a render before its notes sound:
