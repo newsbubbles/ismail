@@ -1115,7 +1115,8 @@ function render() {
   const ls = state.listening || [];
   const ds = state.devices || [];
   $('listening').innerHTML = (ls.length ? 'listening: ' + esc(ls.join(', ')) : '<span class="warn">nobody listening: notes wait in the inbox</span>')
-    + (ds.length > 1 ? ' · open on ' + esc(ds.map((d) => d.kind).join(', ')) : '');
+    + (ds.length > 1 ? ' · open on ' + esc(ds.map((d) => d.kind).join(', ')) : '')
+    + ((state.deaf || []).length ? ' · <span class="warn">not hearing you: ' + esc(state.deaf.map((d) => d.who + ' (' + d.min + ' min)').join(', ')) + '</span>' : '');
   (state.voice || []).forEach((v) => { const it = feedItems.find((x) => x.id === v.id); if (it && v.state.startsWith('waiting')) it.text = 'voice note: ' + v.state; });
   renderFeed(); renderPanel(); renderOffers(); mediaSession();
 }

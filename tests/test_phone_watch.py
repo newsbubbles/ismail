@@ -22,8 +22,8 @@ class FakeInbox:
     def add(self, r):
         self.rows.append({'n': len(self.rows) + 1, **r})
 
-    def __call__(self, who, since=None, wait=25, page=False):
-        self.calls.append({'who': who, 'since': since, 'wait': wait, 'page': page})
+    def __call__(self, who, since=None, wait=25, page=False, lead=False):
+        self.calls.append({'who': who, 'since': since, 'wait': wait, 'page': page, 'lead': lead})
         if self.fail:
             self.fail -= 1
             raise OpError('the phone server does not answer')
@@ -89,6 +89,18 @@ def test_filter_drops_only_telemetry_and_the_transcribing_line(inbox):
     assert kinds == [('page', 'panel_close'), ('voice_text', None), ('exam', None), ('exam_round', None),
                      ('answer', None)]
     assert inbox.calls[0]['page'] is True
+
+
+def test_a_down_alarm_wakes_the_lead_only_and_says_wake_it(inbox):
+    """ledger:M211: the heartbeat's alarm goes to the lead's watcher; another watcher and the agent it names skip it."""
+    down = {'kind': 'alarm', 'what': 'watcher_down', 'agent': 'Live DJ', 'for': 'Director', 'text': 'stopped'}
+    inbox.add(down)
+    inbox.add({'kind': 'alarm', 'what': 'watcher_down', 'agent': 'Voice', 'for': None, 'text': 'no lead up'})
+    lead = watch(who='Director', since=0, lead=True)
+    assert [d['agent'] for d in lead['lines']] == ['Live DJ', 'Voice'] and inbox.calls[-1]['lead'] is True
+    assert "WATCHER DOWN ['Live DJ', 'Voice']: wake each" in lead['next'] and 'lead=true' in lead['next']
+    assert [d['agent'] for d in watch(who='Film', since=0)['lines']] == ['Voice']    # no lead up: everyone's
+    assert watch(who='Voice', since=1, wait_min=0)['lines'] == []                     # its own alarm: skipped
 
 
 def test_burst_is_gathered_with_one_short_look(inbox):
