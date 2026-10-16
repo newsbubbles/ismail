@@ -150,7 +150,11 @@ def test_a_broken_watch_never_stops_the_job(board, monkeypatch, capsys):
     monkeypatch.setattr(machine, '_GpuSampler', lambda: type('G', (), {'stop': lambda self: {}})())
     monkeypatch.setattr(machine, 'METER_S', 0.02)
 
-    def boom(self, *a, **k):
+    see = machine._Watch.see
+
+    def boom(self, *a, **k):            # only this job's watch: the test run's own slot has a meter watching too
+        if self.job.get('what') != 'a job':
+            return see(self, *a, **k)
         raise ZeroDivisionError('made up')
 
     monkeypatch.setattr(machine._Watch, 'see', boom)
