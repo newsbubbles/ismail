@@ -625,11 +625,50 @@ def _floor_remember(record):
     hist_f.write_text(json.dumps(hist, indent=1), encoding='utf8')
 
 
+def _measured(title, clips, measured, unmeasured, exam_id, sender):
+    """phone_exam's measure-first gate (ledger:M212; qa intent_rules 10-16 cluster 5): the lines the instruments gave
+    before the ear is asked, or the reason only the ear can tell, logged. Returns what to keep beside the answers."""
+    why = str(unmeasured or '').strip()
+    if measured and why:
+        raise OpError("measured= or unmeasured=, not both: what you measured, or why only the ear can tell")
+    if not measured and not why:
+        raise OpError("measure before the person's ear: pass measured={'all' or a clip label or pair number: the lines "
+                      "your instruments gave (exam_check, sound_compare, analyze_*, with their numbers)}, or "
+                      "unmeasured='<why only the ear can tell>' (it is logged). The person, 10-16: measure first, "
+                      "then spend my ear")
+    if why:
+        if len(why.split()) < 3:
+            raise OpError(f"unmeasured={why!r} says no reason: in a few words, why no instrument can tell this (it is "
+                          f"logged with the exam)")
+        rec = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'exam_id': exam_id, 'title': title, 'who': sender,
+               'why': why}
+        S.HOME.mkdir(parents=True, exist_ok=True)
+        with open(S.HOME / 'ear_first.jsonl', 'a', encoding='utf8') as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        return {'unmeasured': why}
+    if not isinstance(measured, dict):
+        raise OpError("measured is a dict: {'all' or a clip label or pair number: 'the lines' or ['line', ...]}")
+    labels = {str(c.get('label')) for c in clips or [] if isinstance(c, dict) and c.get('label')}
+    names = labels | {m.group(1) for l in labels for m in [re.match(r'^(\d+)\s*[A-Za-z]$', l)] if m} | {'all'}
+    bad = [k for k in measured if str(k) not in names]
+    if bad:
+        raise OpError(f"measured keys {bad} name no clip: use 'all', a clip label or a pair number "
+                      f"({', '.join(sorted(names))})")
+    out = {}
+    for k, v in measured.items():
+        lines = [str(x).strip() for x in (v if isinstance(v, (list, tuple)) else [v]) if str(x).strip()]
+        if not lines or not any(re.search(r'\d', l) for l in lines):
+            raise OpError(f"measured[{k!r}] has no measurement in it: paste the instrument's lines with their numbers "
+                          f"(LUFS, dB, Hz, a distance), not a summary")
+        out[str(k)] = lines
+    return {'measured': out}
+
+
 @op()
 def phone_exam(title: str, clips: list, question: str = '', chips: list = None, choices: list = None,
                answers_path: str = None, exam_id: str = None, wait: float = 0, key: dict = None,
                secrets: list = None, check: bool = True, sender: str = None, floor: str = None,
-               floor_from: str = None) -> str:
+               floor_from: str = None, measured: dict = None, unmeasured: str = None) -> str:
     """A blind exam on the phone: clips [{label, path, note?}] each with a play button (the live stream pauses while
     one plays, and rejoins live after), word chips to tick per clip, one choice (e.g. ['A is the record', 'B is the
     record', "can't tell"]), a note, and Submit. The answers arrive as kind 'exam' {id, answers}, and are appended
@@ -644,7 +683,12 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
     (default: the first clip keyed real, record or ref). A floor pair told apart more often than chance means the
     phone and the ear separate even an MP3 copy; a floor never told apart means a "can't tell" on a real pair is
     about the voice, not the device. The pre-flight checks your pairs only (a floor pair is one clip against itself,
-    in WAV beside clips of any format), and a refused exam uses up no floor round."""
+    in WAV beside clips of any format), and a refused exam uses up no floor round.
+    measured: what you measured before spending the person's ear, {clip label, pair number or 'all': the lines your
+    instruments gave, with their numbers}; or unmeasured='<why only the ear can tell>' (logged in ear_first.jsonl).
+    One of the two is required (the person, 10-16: measure first, then spend my ear). Either is kept beside the
+    answers (<answers_path>.measured.json) for the exam ledger."""
+    kept = _measured(title, clips, measured, unmeasured, exam_id, sender)
     record = None
     if floor:
         if floor not in ('auto', 'full'):
@@ -668,6 +712,12 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
             raise OpError('the exam was not shown, its pre-flight failed:\n' + '\n'.join(lines))
     out = _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
                 choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
+    if answers_path:
+        os.makedirs(os.path.dirname(os.path.abspath(answers_path)), exist_ok=True)
+        with open(answers_path + '.measured.json', 'w', encoding='utf8') as f:
+            json.dump(dict(kept, exam_id=exam_id, title=title, labels=(record or {}).get('labels')), f, indent=1,
+                      ensure_ascii=False)
+        out += f"\nmeasured lines kept in {answers_path}.measured.json"
     if record:
         _floor_remember(record)
         if answers_path:
