@@ -115,7 +115,7 @@ export function initWaypoints(ed, live, panels, hands, voice) {
     clearTimeout(saveT);
     // the scene and the list as they are now: a switch inside the wait never writes one scene's waypoints into another
     const url = `waypoints?scene=${encodeURIComponent(scn())}`, body = JSON.stringify(list());
-    saveT = setTimeout(() => fetch(url, { method: 'POST', body })
+    saveT = setTimeout(() => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
       .catch((e) => live.emit('voice_error', { where: 'waypoints save', error: String(e.message || e) })), 400);
   }
   async function load() {

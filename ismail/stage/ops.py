@@ -271,23 +271,35 @@ def stage_pair(name: str = None, kind: str = 'headset', person: str = None, port
     """Pair a device with the stage (the security floor part B1): a six-digit code, good once for two minutes, that the
     device's page enters to get its key (kind: headset | phone | desktop; name: what to call it, e.g. "Quest 3";
     person: whose device it is, default ~/.ismail/stage.json "person"). Only this PC or an agent can start a pairing,
-    never someone on the tailnet. Say the code to the person; the page sends it to /pair/claim. stage_devices lists
-    paired devices, stage_unpair revokes one."""
+    never someone on the tailnet. Say the code to the person: while a code waits, an unpaired stage page asks for it
+    (a code field on a desktop or a phone, a number pad panel in the headset) and claims it at the sixth digit. A page
+    opened with a link ending #pair=<code> claims it before it starts. stage_devices lists paired devices,
+    stage_unpair revokes one."""
     rec = link.server_for(port=port)
     r = link.http(rec, 'pair/start', {'name': name or kind, 'kind': kind, 'person': person})
-    return f"code {r['code']} for {r['name']} ({r['kind']}), good for {r['expires_s']} s, once"
+    return (f"code {r['code']} for {r['name']} ({r['kind']}), good for {r['expires_s']} s, once: the open page asks for "
+            f"it, or open the stage with #pair={r['code']} at the end of its address")
 
 
 @op()
 def stage_devices(port: int = None) -> str:
     """The devices paired with the stage (name, kind, whose, when) and the auth mode: report (everyone accepted,
     unpaired requests stamped and counted in /health) or enforce (unpaired requests refused); ~/.ismail/stage.json
-    "auth" sets it, and enforce comes only after the headset and the phone are paired."""
+    "auth" sets it, and enforce comes only after the headset and the phone are paired. The last unpaired requests
+    (time, address, path) show what enforce would refuse now."""
     rec = link.server_for(port=port)
     r = link.http(rec, 'pair/devices')
     devs = r.get('devices') or []
     head = f"auth {r['mode']}, person {r['person']}: " + (f'{len(devs)} paired' if devs else 'nothing paired')
-    return '\n'.join([head] + [f"  {d['device']} ({d['kind']}) for {d['person']}, paired {d['paired']}" for d in devs])
+    out = [head] + [f"  {d['device']} ({d['kind']}) for {d['person']}, paired {d['paired']}"
+                    + (f", temporary until {time.strftime('%H:%M', time.localtime(d['until']))}" if d.get('temp') else '')
+                    for d in devs]
+    recent = r.get('unpaired_recent') or []
+    if recent:                                     # what enforce would refuse now: the devices still to pair
+        out.append(f'last {len(recent)} unpaired request(s):')
+        out += [f"  {x['t']} {x['addr']} {x['method']} {x['path']}"
+                for x in recent[-8:]]
+    return '\n'.join(out)
 
 
 @op(mutates=True)

@@ -7,7 +7,7 @@
 // scenes/<scene>/snapshots/shot_<time>.png beside the full eye view (user_<time>.png), and listed by GET /snapshots.
 import * as THREE from 'three';
 import { GIZMO } from './editor.js';
-import { OVER_WORLD } from './panels.js';
+import { OVER_WORLD, imageFrom } from './panels.js';
 
 export function initGallery(ed, hands, voice, panels, live) {
   const { scene, camera } = ed;
@@ -93,7 +93,9 @@ export function initGallery(ed, hands, voice, panels, live) {
     } catch (e) { live.emit('voice_error', { where: 'shot save', error: String(e.message || e) }); }
   }
   function setThumb(url) {
-    new THREE.TextureLoader().load(url, (t) => {
+    imageFrom(url).then((im) => {                              // by fetch, with the device key (part B2)
+      if (!im) return;
+      const t = new THREE.Texture(im); t.needsUpdate = true;
       t.colorSpace = THREE.SRGBColorSpace;
       thumb.material.map = t; thumb.material.needsUpdate = true;
       thumb.userData.aspect = t.image.width / t.image.height;
