@@ -269,6 +269,16 @@ export function initActors(ed, live) {
       setWorldQ(rig.bones[n], q.multiply(rig.rest[n].q));
     }
   }
+  // where an elbow points (the user, 2026-10-11: arms "clipping ... around the armpits ... into the chest"): down and a
+  // little out and back for a hand at the side; a raised hand swings the elbow out to the side (hands up), a hand
+  // across the body brings it out and forward, so the upper arm clears the chest
+  function elbowPole(rig, sd, sh, hand, lateral, back) {
+    const arm = rig.rest[`upperarm_${sd}`].p.distanceTo(rig.rest[`lowerarm_${sd}`].p) + rig.rest[`lowerarm_${sd}`].p.distanceTo(rig.rest[`hand_${sd}`].p);
+    const d = hand.clone().sub(sh);
+    const up = THREE.MathUtils.clamp(d.y / arm + 0.3, 0, 1), cross = THREE.MathUtils.clamp(-d.dot(lateral) / arm, 0, 1);
+    return sh.clone().add(new THREE.Vector3(0, -(1 - 0.8 * up), 0)).addScaledVector(lateral, 0.5 + 0.6 * up + 0.3 * cross)
+      .addScaledVector(back, 0.4 - 0.6 * cross);
+  }
   function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
@@ -329,7 +339,7 @@ export function initActors(ed, live) {
       const sh0 = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
       shoulderFollow(rig, sd, P(hd.j[0]), sh0.clone().add(new THREE.Vector3(0, -0.55, 0)).addScaledVector(back, -0.12));
       const sh = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
-      twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), sh.clone().add(new THREE.Vector3(0, -1, 0)).addScaledVector(lateral, 0.5).addScaledVector(back, 0.4));
+      twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), elbowPole(rig, sd, sh, P(hd.j[0]), lateral, back));
       const jq = (i) => { const a = hd.j[i]; return a ? new THREE.Quaternion(a[3], a[4], a[5], a[6]) : null; };
       const w = jq(0);
       if (w && rig.cal[`hand_${sd}`]) setWorldQ(rig.bones[`hand_${sd}`], w.multiply(rig.cal[`hand_${sd}`]));
