@@ -20,6 +20,24 @@
   4-6 LU (a gap over 20 LU is a part gone wrong and is not chased); `sketch_ready.json` carries it as `tune_lu`.
 - Tests: six more in `tests/test_sketch.py`.
 
+### stage: capture setup at a song time, and a keyed screen for the comp
+
+- `stage_capture` setup commands take `"at_song"`: the command waits for that frame and runs on film time just
+  before it is drawn (one at or before t0 runs at frame 0; one at or after t1 is refused, as it would never run).
+- `{"type": "screen_key", "color": "#rrggbb" | "off", "material": | "object":}` in a capture's setup draws a
+  material (default "screen") flat and unlit in a key colour, with no tone mapping, fog or shadows, so a comp in post
+  finds what covers the screen exactly; "off" restores it. Captures only, nothing is saved.
+
+### What a fresh clone sees first (QA rehearsal 10-16: F3, F6, F7)
+
+- `ismail --help` no longer says "Installed from PyPI": ismail is not on PyPI yet, so it names the git+ install.
+- The MCP handshake reports ismail's version (0.3.0) instead of FastMCP's own (4.1.0 on a fresh install), and the
+  dependency is `fastmcp>=3.1,<5`, the range that has been run (3.1 here, 4.1 on a fresh install).
+- The guide's plain-words steps no longer forbid what the first sketch's SAY block says ("It's a first try ... What
+  would you change? Or name a song you love", Nate 10-08), and they are numbered once, in order (3p to 9p; "6p" was
+  there twice).
+- `import ismail.guards` on its own works again: api_guards read guards' word sets while guards was half-loaded.
+
 ### live: headroom against the real deadline, cutting a section over, the room speaker off and on
 
 - `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since

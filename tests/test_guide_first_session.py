@@ -125,7 +125,7 @@ def test_the_first_session_has_a_musician_branch_and_a_plain_words_branch():
     for bad in ('closest', 'which one?', 'change just one thing'):
         assert bad not in plain, bad
     assert 'Play version 1 at once with one line of delight' in plain
-    assert 'Never ask them to judge it, to say what is missing, or to compare three' in plain
+    assert 'Never ask them to score' in plain and 'or to compare three' in plain   # the first-try line (Nate 10-08) asks what they'd change
     assert '2 or 3 playful, concrete choices' in plain and 'or tell me anything' in plain
     assert 'new version first' in plain and 'no BPM, key or chord names' in plain
     assert 'Want to keep this as your song?' in plain and 'sketch_keep' in plain

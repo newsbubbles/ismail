@@ -14,7 +14,13 @@
 //   setup   live commands run once before the first frame (actor_play, sky, light, load_set, behaviour presses), the
 //           same ones an agent sends, while the room settles in real time (a set comes in paced by the clock); then
 //           the clock stops and every take playing starts again at frame 0. The capture's server answers every write
-//           "not saved", so nothing reaches the scene files or the live link
+//           "not saved", so nothing reaches the scene files or the live link. A command with at_song (song seconds)
+//           waits for that frame instead and runs on film time before it is drawn (film, 2026-10-16: a light switch at
+//           255.0 s; the house stays club-coloured until then)
+//   screen_key  a setup command for captures only: {type: screen_key, material: 'screen' (default) | object, color:
+//           '#00ff00' | 'off'} draws that material flat and unlit in the key colour (no tone mapping, no fog, no
+//           shadows), so every keyed pixel in a frame is the visible screen and a comp in post finds occluders exactly;
+//           'off' puts the scene's material back
 // The job comes from GET capture/job; frames go to POST capture/frame?n= (PNG) and the end to POST capture/status.
 import * as THREE from 'three';
 import { vec, ease } from './interp.js';
@@ -48,17 +54,23 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     music.now = () => ({ playing: true, url: job.audio || 'capture', t: +songT.toFixed(4), duration: 1e6, loop: false });
     live.handlers.music = () => ({ capture: 'no sound in a capture' });
     if (clock) clock.st.playing = false;
+    const handlers = { ...live.handlers, screen_key: screenKey(ed) };
+    const run = async (c) => {
+      const { at_song, ...cmd } = c;
+      const h = handlers[cmd.type];
+      if (!h) throw new Error(`setup: no command "${cmd.type}"`);
+      await h(cmd);
+    };
+    const first = (job.setup || []).filter((c) => c.at_song == null);
+    const timed = (job.setup || []).filter((c) => c.at_song != null).sort((a, b) => a.at_song - b.at_song);
+    for (const c of timed) if (!handlers[c.type]) throw new Error(`setup: no command "${c.type}"`);
     // the room in, the sets loaded and the setup run, in real time (the reveal paces itself on the clock), drawing
     // all the while: every piece revealed and the construct gone
     let busy = true, failed = null;
     (async () => {
       while (ed.staging() || construct.active) await new Promise((res) => setTimeout(res, 50));
       if (sets && job.sets !== false) for (const [n, s] of Object.entries(sets.state())) if (!s.loaded) await sets.load(n);
-      for (const c of job.setup || []) {
-        const h = live.handlers[c.type];
-        if (!h) throw new Error(`setup: no command "${c.type}"`);
-        await h({ ...c });
-      }
+      for (const c of first) await run(c);
     })().catch((e) => { failed = e; }).finally(() => { busy = false; });
     const until = performance.now() + (job.settle_s || 180) * 1000;
     while ((busy || ed.staging() || construct.active) && !failed && performance.now() < until) {
@@ -84,6 +96,10 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
       songT = job.t0 + n / fps;
       vt = base + (n * 1000) / fps;
       if (clock && job.clock !== false) guard('clock', () => clock.seek((job.clock_at ?? job.t0) + n / fps));
+      while (timed.length && timed[0].at_song <= songT + 1e-6) {
+        const c = timed.shift();
+        try { await run(c); } catch (e) { throw new Error(`setup ${c.type} at_song ${c.at_song}: ${e.message || e}`); }
+      }
       place(cam, job, songT, W / H, ed);
       step();
       const blob = await new Promise((res) => r.domElement.toBlob(res, 'image/png'));   // in the task that drew it
@@ -95,6 +111,45 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
   } catch (e) {
     await post('capture/status', { state: 'failed', error: String((e && e.message) || e), errors }, true).catch(() => {});
   }
+}
+
+// screen_key: a material drawn flat in a key colour for the capture, and back again with 'off'
+function screenKey(ed) {
+  const kept = new Map();    // mesh -> its own material (or array of them)
+  return (c) => {
+    let name = c.material || null;
+    if (!name && c.object) {
+      const it = ed.byName.get(c.object);
+      if (!it) throw new Error(`no object "${c.object}"`);
+      const ms = ed.materialsOf(it);
+      if (ms.length !== 1) throw new Error(`"${c.object}" has ${ms.length} materials (${ms.join(', ') || 'none'}): pass material`);
+      name = ms[0];
+    }
+    name = name || 'screen';
+    if (!ed.materials.has(name)) name = [...ed.materials.keys()].find((n) => n.toLowerCase() === String(name).toLowerCase()) || name;
+    const e = ed.materials.get(name);
+    if (!e) throw new Error(`no material "${name}"`);
+    const mine = new Set(e.mats);
+    if (c.color === 'off') {
+      let n = 0;
+      for (const [mesh, m] of kept) if (mesh.userData.screenKey === name) { mesh.material = m; delete mesh.userData.screenKey; kept.delete(mesh); n++; }
+      return { screen_key: 'off', material: name, meshes: n };
+    }
+    const key = new THREE.MeshBasicMaterial({ color: new THREE.Color(c.color || '#00ff00'), toneMapped: false, fog: false });
+    let n = 0;
+    ed.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const orig = kept.has(o) ? kept.get(o) : o.material;
+      const list = Array.isArray(orig) ? orig : [orig];
+      if (!list.some((m) => mine.has(m))) return;
+      if (!kept.has(o)) kept.set(o, orig);
+      o.material = Array.isArray(orig) ? orig.map((m) => (mine.has(m) ? key : m)) : key;
+      o.userData.screenKey = name;
+      n++;
+    });
+    if (!n) throw new Error(`no mesh draws the material "${name}"`);
+    return { screen_key: c.color || '#00ff00', material: name, meshes: n };
+  };
 }
 
 // the capture camera at song time t
