@@ -569,7 +569,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     The first sketch comes back as soon as it is rendered and the others render in the background (background=
     False waits for all): play the first while they land, and sketch_wait(project) says when they are ready. The
     reply opens with SAY TO THE PERSON, written for them: read it out as it is. Every sketch is mixed (the tune
-    sits 4-6 LU over the rest) and mastered for its style. Versions are numbered across rounds (a next round's
+    sits 4-6 LU over the rest: it rises at most 8 dB and the other parts come down for the rest, and the reply gives
+    the level measured in the final mix) and mastered for its style. Versions are numbered across rounds (a next round's
     first is version 4 after three), so every number names one sketch. A next round (base=) keeps the person's
     tune and chords and changes only what their words name; its reply names the version to play as "before".
     wait: when the machine is busy, stand in line this long ('2m' default, '0' refuses at once). A bare number is
@@ -596,7 +597,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             for st in styles:
                 spec = SK.style_spec(st)
                 got = SK.read_brief(brief)
-                spec.update({'key': key or got['key'], 'bpm': bpm or got['bpm'], 'form': got['form']})
+                spec.update({'key': key or got['key'], 'bpm': bpm or got['bpm'], 'form': got['form'],
+                             **{k: got[k] for k in SK.BRIEF_FEEL}})
                 todo.append((st, spec))
         else:
             base_spec = base_dir = None
@@ -961,12 +963,13 @@ def _ffmpeg_ok():
 
 HOT_DB = -0.5          # a track stem peaking over this is a part at full scale on its own (ledger:M170 S-1)
 TUNE_PEAK_DB = -1.0    # the sketch balance never pushes the tune's own peak over this
+TUNE_RISE_DB = 8.0     # nor raises the tune more than this: the other parts come down for the rest
+TUNE_MOVE_DB = 20.0    # a gap further out than this is a part gone wrong, not a balance to make
 
 
-def _tune_balance(project, target=5.0):
-    """ledger:M150: the tune sat +1 LU over a contrabass in one sketch and 7-13 LU over the others, because the
-    faders are fixed. From a stems render: move the melody's fader so it sits `target` LU (4-6) over the other
-    parts together. -> a line saying where it sits."""
+def _tune_gap(project):
+    """From the last stems render: (the tune's loudness over the other parts together in LU, the tune stem's peak
+    dBFS, the parts' stem files), or a line saying why it cannot be weighed."""
     try:
         import pyloudnorm as pyln
         import soundfile as sf
@@ -987,24 +990,34 @@ def _tune_balance(project, target=5.0):
     lt, lr = m.integrated_loudness(y), m.integrated_loudness(rest)
     if not (np.isfinite(lt) and np.isfinite(lr)):
         return 'balance: a part is silent'
-    gap = lt - lr
+    return lt - lr, float(20 * np.log10(np.max(np.abs(y)) + 1e-12)), others
+
+
+def _tune_balance(project, target=5.0):
+    """ledger:M150: the tune sat +1 LU over a contrabass in one sketch and 7-13 LU over the others, because the
+    faders are fixed. From a stems render: set the faders so the melody sits `target` LU (4-6) over the other parts
+    together. The tune rises at most TUNE_RISE_DB and never past its peak ceiling; the parts come down for the rest
+    (ledger:M213: a tune 5.5 LU under the parts rose 8 dB and stopped at +2.5). -> a line saying where it sits."""
+    got = _tune_gap(project)
+    if isinstance(got, str):
+        return got
+    gap, peak, others = got
     if target - 1.0 <= gap <= target + 1.0:
         return f"the tune sits {gap:+.1f} LU over the parts"
-    move = float(np.clip(target - gap, -8.0, 8.0))
-    room = TUNE_PEAK_DB - 20 * np.log10(np.max(np.abs(y)) + 1e-12)     # how far the tune can rise before full scale
-    rest_down = max(0.0, move - room) if move > 0 else 0.0
-    move -= rest_down
+    need = float(np.clip(target - gap, -TUNE_MOVE_DB, TUNE_MOVE_DB))
+    up = min(need, TUNE_RISE_DB, max(0.0, TUNE_PEAK_DB - peak)) if need > 0 else need
+    rest_down = need - up
     P = _load(project)
-    v = P.track('melody').get('volume_db', 0.0) + move
-    track_set(project, 'melody', volume_db=round(v, 1))
-    if rest_down > 0.05:            # the tune is at its ceiling: the parts come down instead (ledger:M170 S-1)
+    track_set(project, 'melody', volume_db=round(P.track('melody').get('volume_db', 0.0) + up, 1))
+    if rest_down > 0.05:            # the tune at its rise or its ceiling: the parts come down instead (M170 S-1)
         for f in others:
             name = os.path.basename(f)[:-4]
             if name in P.d.get('tracks', {}):
                 track_set(project, name, volume_db=round(P.track(name).get('volume_db', 0.0) - rest_down, 1))
-        return (f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB (its peak stays under "
-                f"{TUNE_PEAK_DB:.0f} dB) and the parts {-rest_down:+.1f} dB, to about {gap + move + rest_down:+.1f}")
-    return f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB to about {gap + move:+.1f}"
+        return (f"the tune sat {gap:+.1f} LU over the parts; moved it {up:+.1f} dB (at most "
+                f"{TUNE_RISE_DB:+.0f} dB, its peak under {TUNE_PEAK_DB:.0f} dB) and the parts {-rest_down:+.1f} dB, "
+                f"to about {gap + need:+.1f}")
+    return f"the tune sat {gap:+.1f} LU over the parts; moved it {up:+.1f} dB to about {gap + need:+.1f}"
 
 
 def _sketch_render(job):
@@ -1028,9 +1041,14 @@ def _sketch_render(job):
             render(sp, out=f"sketch_{letter}", mp3=mp3, stems=True)
         if down < -0.05:
             bal += f"; master {down:+.1f} dB so the tune is not flattened by the limiter"
+        final = _tune_gap(sp)        # ledger:M213: what the person hears, measured, not the plan
+        if not isinstance(final, str) and ('moved it' in bal or down < -0.05 or not 4.0 <= final[0] <= 6.0):
+            bal += f"; in the final mix it sits {final[0]:+.1f} LU" + (
+                '' if 4.0 <= final[0] <= 6.0 else ", outside the 4-6 LU a sketch aims for")
         lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
-        got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time()}
+        got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time(),
+               'tune_lu': None if isinstance(final, str) else round(final[0], 1)}
         if job.get('version') and job.get('root') and os.path.exists(f):      # ledger:M170 U-5
             top = os.path.join(job['root'], f"version {job['version']}{os.path.splitext(f)[1]}")
             shutil.copyfile(f, top)

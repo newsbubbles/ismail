@@ -117,23 +117,24 @@ READING SCORES
 PLAIN_STEPS = """PLAIN WORDS (guide(first_answer=...) said so; these replace the steps marked MUSICIAN in the first session, and
 nothing in them sounds like a test):
 3p. Play version 1 at once with one line of delight, the way you would hand someone a present ("Here's the first
-   one, have a listen"). Never ask them to judge it, to say what is missing, or to compare three. The other
-   sketches are spares, played only when they say they want something different.
+   one, have a listen"), then read the rest of the SAY TO THE PERSON block as it is: on version 1 it says this is a
+   first try, asks what they would change or for a song they love, and gives the choices. Never ask them to score
+   it or to compare three. The other sketches are spares, played only when they say they want something different.
 4p. Every round ends with 2 or 3 playful, concrete choices in everyday words, made from this very sketch (the
    SAY TO THE PERSON block of sketch has them: "Want it different? Try: ..., ..., or ..., or tell me anything"),
-   never a bare "what would you change?". They can pick one, or say anything in their own words.
+   never "what would you change?" on its own without them. They can pick one, or say anything in their own words.
 5p. Each change plays at once, the new version first (it comes back from sketch(project, <the choice or their
    words>, base='<version>')), with one plain line on what changed: no BPM, key or chord names. Do not play the
    old one first and do not make them compare, unless they ask.
-6p. Now and then add one small thing they did not ask for (run one of the choices you did not offer) and name it
+6p. Early on, show that it changes one piece and keeps the rest: offer one small, named change as a choice
+   ("only the bass, warmer"), and after it plays say what stayed the same. A generator cannot do this.
+7p. Now and then add one small thing they did not ask for (run one of the choices you did not offer) and name it
    after it plays: "I slipped in a cello underneath, just because."
-7p. When they say they like it, or have heard it change a few times: "Want to keep this as your song?" A yes is
+8p. When they say they like it, or have heard it change a few times: "Want to keep this as your song?" A yes is
    sketch_keep(project, '<version>').
    Once they like it or keep it, offer live play in one line: "Want me to play it live and change it while it
    plays? Call out more bass, a break, anything." (live tools; one offer, a no holds for the session).
-6p. Early on, show that it changes one piece and keeps the rest: offer one small, named change as a choice
-   ("only the bass, warmer"), and after it plays say what stayed the same. A generator cannot do this.
-8p. At the end: where their files are, in plain words, and one line on what else it can do."""
+9p. At the end: where their files are, in plain words, and one line on what else it can do."""
 
 FIRST_SESSION = """FIRST SESSION: this person has made nothing with ismail yet (no finished render, no {marker}).
 Their first try decides whether they come back. Run it this way, then the normal loop:

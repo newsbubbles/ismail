@@ -346,6 +346,17 @@ def read_brief(brief):
     spec['crisp'] = bool(_find(r'crisp|bright|tight', text))
     spec['blues'] = bool(_find(r'blues\w*|bluesy', text))
     spec['soft'] = bool(SOFT.search(text))
+    # ledger:M181 F2: "happy and bouncy" came back at 72 and 70 BPM, "slow and bright". A first brief's feeling
+    # words set the pace and the mode too: a lift word is a floor, a calm one a ceiling, unless a tempo word says
+    # otherwise ("a slow happy tune")
+    spec['feelings'] = [f[0] for f in feelings(text)]
+    lo = [FIRST_PACE[f][0] for f in spec['feelings'] if FIRST_PACE.get(f, (None,))[0]]
+    hi = [FIRST_PACE[f][1] for f in spec['feelings'] if FIRST_PACE.get(f, (None, None))[1]]
+    lo = max(lo) if lo and not _find(r'slow\w*|chill\w*|laid[- ]back|half[- ]time', text) else None
+    hi = min(hi) if hi and not _find(r'fast\w*|uptempo|up[- ]tempo|driving', text) else None
+    spec['pace'] = None if lo and hi and lo > hi else [lo, hi] if lo or hi else None
+    modes = {m for _, _, m, *_ in feelings(text) if m}
+    spec['mode'] = modes.pop() if len(modes) == 1 else None
     if _find(r'sparse|minimal|sparser|simple|less|quiet', text):
         spec['dense'] = -1
     if _find(r'busy|busier|dense|more energy|driving', text):
@@ -471,16 +482,23 @@ def say_plain(spec):
 # and two slower takes). Each moves the concrete things in its direction: (words, tempo factor, mode, density step,
 # soft, crisp, the name said back). "a bit" halves the move, "much" makes it half again as big.
 FEELINGS = [
-    (r'happier|happy|cheerful|joyful|joyous|uplifting|sunnier|more fun', 1.06, 'major', 1, False, True, 'happier'),
-    (r'sadder|sad|melanchol\w*|gloomier|more mournful|more wistful', 0.9, 'minor', -1, True, False, 'sadder'),
-    (r'calmer|calm|gentler|more relaxed|relaxing|more peaceful|peaceful|quieter|more soothing', 0.9, None, -1, True,
-     False, 'calmer'),
+    (r'happier|happy|cheerful|cheery|joyful|joyous|uplifting|sunnier|sunny|merry|festive|more fun', 1.06, 'major', 1,
+     False, True, 'happier'),
+    (r'sadder|sad|melanchol\w*|gloomier|gloomy|(?:more )?mournful|(?:more )?wistful', 0.9, 'minor', -1, True, False,
+     'sadder'),
+    (r'calmer|calm|gentler|(?:more )?relaxed|relaxing|(?:more )?peaceful|quieter|(?:more )?soothing', 0.9, None, -1,
+     True, False, 'calmer'),
     (r'more exciting|exciting|energetic|more energetic|livelier|more lively|upbeat|more intense|more epic', 1.12, None,
      1, False, True, 'more exciting'),
-    (r'darker|moodier|ominous|spookier|scarier|more mysterious|mysterious', 0.96, 'minor', 0, True, False, 'darker'),
+    (r'darker|dark|moodier|moody|ominous|spookier|spooky|scarier|scary|creepy|eerie|(?:more )?mysterious', 0.96,
+     'minor', 0, True, False, 'darker'),
     (r'dreamier|dreamy|floatier|floaty|spacier|spacey|hazier', 0.92, None, -1, True, False, 'dreamier'),
-    (r'bouncier|bouncy|peppier|perkier|zippier|more playful', 1.08, None, 1, False, True, 'bouncier'),
+    (r'bouncier|bouncy|peppier|peppy|perkier|perky|zippier|zippy|jaunty|(?:more )?playful', 1.08, None, 1, False, True,
+     'bouncier'),
 ]
+# In a first brief there is no tempo to move, so a feeling sets where the tempo may sit: (lowest, highest) BPM
+FIRST_PACE = {'happier': (92, None), 'bouncier': (106, None), 'more exciting': (112, None), 'calmer': (None, 76),
+              'dreamier': (None, 80), 'sadder': (None, 84)}
 _LITTLE = r'a (?:little|bit|touch|tad)(?: bit)?|slightly|somewhat|a little more|just a bit'
 _MUCH = r'much|a lot|way|far|very|really|lots'
 
@@ -520,7 +538,7 @@ def _choice_pool(spec, bpm, key):
 def _moves(spec, words):
     """Does passing these words back through apply_words change the sketch?"""
     new, changed = apply_words(spec, words)
-    skip = ('said', 'subs', 'unmodelled', 'changed')
+    skip = ('said', 'subs', 'unmodelled', 'changed', 'feelings')
     keep = lambda d: {k: v for k, v in d.items() if k not in skip}
     return bool(changed) and keep(new) != keep(spec)
 
@@ -534,8 +552,11 @@ def playful_choices(spec, plan=None, n=3):
     eff['key'] = eff.get('key') or plan.get('key') or (eff.get('tune') or {}).get('key')
     eff['bpm'] = eff.get('bpm') or plan.get('bpm') or (eff.get('tune') or {}).get('bpm')
     first, pace, mood, more_adds, extra = _choice_pool(eff, eff['bpm'], eff['key'])
+    asked = set(eff.get('feelings') or [])       # ledger:M181 F2: "faster and bouncier" after "bouncy" was no choice
     out = []
     for phrase in first + pace + mood + more_adds + extra:
+        if asked & {f[0] for f in feelings(phrase)}:
+            continue
         if phrase not in out and _moves(eff, phrase):
             out.append(phrase)
         if len(out) >= n:
@@ -626,6 +647,7 @@ def apply_words(base, words):
             did.append('brighter')
         if did:
             changed.append(f"{name}: " + ', '.join(did))
+    spec['feelings'] = list(dict.fromkeys((spec.get('feelings') or []) + new['feelings']))   # every one asked so far
     spec['said'] = new['said']
     spec['subs'], spec['unmodelled'] = new.get('subs', []), new.get('unmodelled', [])
     return spec, changed
@@ -892,12 +914,19 @@ def plan_spec(spec, brief='', seed=0, variant=0, bars=None, progression=None, la
     # (tempo, density, mode) never redraws it
     tune = spec.get('tune') or {}
     tonic, mode = parse_key(spec.get('key'), brief)
+    if not spec.get('key') and spec.get('mode') and spec['mode'] != mode:    # a feeling word chose it (spooky: minor)
+        tonic, mode = parse_key('A minor' if spec['mode'] == 'minor' else 'C major')
     if not spec.get('key') and spec.get('key_shift'):        # a reading in another key, the mode the words chose
         tonic = (tonic + spec['key_shift']) % 12
     lo_b, hi_b = spec.get('bpm_range') or (80, 100)
     soft, classical = spec.get('soft'), spec.get('feel') == 'classical'
     if soft:                                                 # gentle, quiet, slow: never a fast reading
         lo_b, hi_b = min(lo_b, 60), min(hi_b, 76)
+    floor, ceil = spec.get('pace') or (None, None)           # the brief's feeling words: bouncy is never slow
+    if floor and lo_b < floor:
+        lo_b, hi_b = floor, floor + hi_b - lo_b
+    if ceil and hi_b > ceil:
+        lo_b, hi_b = max(40, ceil - (hi_b - lo_b)), ceil
     # the readings sit in order inside the range: sparser the slowest, busier the fastest (a cold run had the
     # sparser reading fastest)
     at = {'as asked': 0.5, 'sparser': 0.15, 'busier': 0.85}.get((label or '').split(',')[0])
@@ -1004,12 +1033,13 @@ def plan(brief, style, key=None, bpm=None, bars=None, progression=None, seed=0, 
         raise SketchError(f"style {style!r}: one of {', '.join(STYLES)}")
     spec = style_spec(style)
     got = read_brief(brief)
-    spec.update({k: got[k] for k in ('form', 'blues') if got[k]})
+    spec.update({k: got[k] for k in ('form', 'blues') + BRIEF_FEEL if got[k]})
     spec['key'] = key or got['key']
     spec['bpm'] = bpm or got['bpm']
     return plan_spec(spec, brief, seed, variant, bars, progression)
 
 
+BRIEF_FEEL = ('soft', 'feelings', 'pace', 'mode')     # what a brief's mood words give a fixed style
 VARIANTS = [('as asked', 0), ('sparser, other chords', -1), ('busier, other chords', 1)]
 
 
@@ -1044,7 +1074,7 @@ def specs_for(brief, key=None, bpm=None, n=3, base=None):
             for st in ORDER[:n]:
                 s = style_spec(st)
                 s.update({'key': key or spec['key'], 'bpm': bpm or spec['bpm'], 'form': spec['form'],
-                          'soft': spec['soft']})
+                          **{k: spec[k] for k in BRIEF_FEEL}})
                 out.append((st, s))
             return out, said + ["the brief names no genre or instrument: three contrasting styles (piano, chamber, "
                                 "band); sketch again with what the person wants to hear"]

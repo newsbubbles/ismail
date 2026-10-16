@@ -8,7 +8,8 @@
   python -m ismail -p song batch @edits.json      (file holds {"ops": [...]} or a bare list)
   python -m ismail mcp                       run the MCP server (stdio)
 
-Installed from PyPI, `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
+Installed with pip or uv (`pip install "ismail @ git+https://github.com/newsbubbles/ismail"`; it is not on PyPI
+yet), `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
 """
 import codecs
 import inspect

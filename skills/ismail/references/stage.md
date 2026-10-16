@@ -84,6 +84,12 @@ person and an agent change the same scene.
   sky, a light, a set unloaded) go in `setup` as live commands. Every load set is in the shot unless
   `sets=False`. `stage_capture_status(scene, job)` follows it. Timers inside behaviours (setTimeout) still run on
   the wall clock.
+  - **A change partway through the shot:** give a setup command `"at_song": <song seconds>` and it runs just before
+    that frame is drawn (a light switch at 255.0 s; until then the room stays as it was).
+  - **A screen to comp in post:** `{"type": "screen_key", "color": "#00ff00"}` in `setup` draws the material
+    "screen" (or `"material":`, or `"object":` for that object's one material) flat and unlit in the key colour, so
+    every keyed pixel in a frame is the visible screen and whatever covers it is found exactly. `"color": "off"`
+    puts it back. Captures only; the scene is not changed.
 
 ## Listening while the person is in
 
