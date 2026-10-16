@@ -22,7 +22,21 @@ from fastmcp.exceptions import ToolError  # noqa: E402
 from ismail.api import OPS, OpError  # noqa: E402
 from ismail.guide import GUIDE  # noqa: E402
 
-mcp = FastMCP('ismail', instructions=GUIDE)
+
+
+def _version():
+    """ismail's own version for the MCP handshake; without it FastMCP reports its own (QA F7: 4.1.0)."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version('ismail')
+    except PackageNotFoundError:                       # run from a checkout that was never installed
+        import re
+        from pathlib import Path
+        m = re.search(r'^version = "([^"]+)"', (Path(__file__).parent.parent / 'pyproject.toml').read_text(), re.M)
+        return m.group(1) if m else None
+
+
+mcp = FastMCP('ismail', instructions=GUIDE, version=_version())
 
 
 def _wrap(name, fn):
