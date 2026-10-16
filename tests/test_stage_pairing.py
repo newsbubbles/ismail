@@ -108,8 +108,9 @@ def test_every_event_and_command_is_stamped_with_who_sent_it(stage):
     assert evs[1]['principal'] == {'agent': 'test agent', 'for': 'owner'}
     assert evs[2]['principal'] == {'unpaired': True}
     assert evs[3]['principal'] == {'server': True}
-    st, got = _req(p, 'live/event?scene=room', {'type': 'gesture', 'who': 'server'}, {'X-Stage-Key': key})
-    assert st == 403                                                             # claiming the server: part A refuses it
+    # claiming the server: refused by part A (not in this slice); here the stamp still says who really sent it
+    _req(p, 'live/event?scene=room', {'type': 'gesture', 'who': 'server'}, {'X-Stage-Key': key})
+    assert _req(p, 'live/events?scene=room')[1]['events'][-1]['principal'] == {'person': 'owner', 'device': 'Quest 3'}
 
 
 def test_report_mode_accepts_and_counts_the_unpaired(stage):
