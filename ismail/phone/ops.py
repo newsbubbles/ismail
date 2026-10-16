@@ -193,7 +193,8 @@ def phone_claim(n: int, by: str, why: str = None) -> str:
     """Say you are the one passing on (or answering) the person's note `n`, BEFORE you do it. The first agent to call
     it owns the note; the server decides who was first, so two agents claiming at once cannot both win. Returns
     "yours: ..." (go ahead) or "taken: <agent> claimed note n at HH:MM: leave it to them" (do nothing with it).
-    Every phone_listen and phone_watch line of a claimed note carries claimed {by, at}. Claim the untagged notes
+    Every phone_listen and phone_watch line of a claimed note carries claimed {by, at}, and the person's page says
+    "taken by <by>" under the note ("nobody has it yet" before anyone does). Claim the untagged notes
     (no `for`) you will act on; a note with a `for` is already that agent's. by: your `who`. why: a few words
     (e.g. 'passing to Marketing'). An untagged note nobody claims for 3 minutes is the team lead's by default."""
     return _call('claim', n=n, by=by, why=why)

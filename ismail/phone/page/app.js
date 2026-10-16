@@ -761,7 +761,9 @@ function renderFeed() {
   const caps = (state.captions || []).slice().reverse().map((c) => ({ text: c.text, who: c.who, ts: (c.ts || '').slice(11, 16) }));
   const mine = feedItems.filter((x) => x.me);
   const all = mine.concat(caps).slice(0, 10);
-  $('feed').innerHTML = all.length ? all.map((c) => `<div><time>${esc(c.ts || '')}</time><span class="${c.me ? 'me' : ''}">${c.me ? 'you: ' : ''}${esc(c.text)}</span></div>`).join('')
+  // under each of their notes, who has it (ledger:M219): two agents each left one, sure the other had it
+  const tk = state.taken || {}, took = (c) => c.me && tk[c.id] ? `<small class="taken">${tk[c.id].length ? 'taken by ' + esc(tk[c.id].join(', ')) : 'nobody has it yet'}</small>` : '';
+  $('feed').innerHTML = all.length ? all.map((c) => `<div><time>${esc(c.ts || '')}</time><span class="${c.me ? 'me' : ''}">${c.me ? 'you: ' : ''}${esc(c.text)}${took(c)}</span></div>`).join('')
     : '<div><time></time><span class="me">nothing yet</span></div>';
 }
 const clip = { el: null, resume: false };

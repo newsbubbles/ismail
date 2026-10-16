@@ -382,6 +382,7 @@ class Phone:
         self.waiting = collections.Counter()       # who -> phone_listen calls waiting right now
         self.devices = {}                          # page id -> {kind, browser, first, at, stream}: the person's side
         self.claims = self._load_claims()          # inbox n -> {by, at, ts, why}: who passes a note on
+        self.noted = {}                            # voice id -> (n, for): the person's notes, for "taken by" on the page
         self.expect = {}                           # who -> {until, why, by}: phone_expect, a watcher that must stay up
         self.signed_off = {}                       # who -> when it called phone_signoff (a clean stop raises nothing)
         self.alarmed = {}                          # who -> when its down alarm went out (one per stretch down)
@@ -422,11 +423,13 @@ class Phone:
             return time.time()
 
     def _recent_rounds(self):
-        """After a restart: the exam round and the panel on screen, read back from the last inbox lines."""
+        """After a restart: the exam round, the panel on screen and the person's notes, read back from the last inbox
+        lines."""
         try:
             with open(HOME / 'inbox.jsonl', 'rb') as f:
-                f.seek(max(0, os.path.getsize(f.name) - 200_000))
-                lines = f.read().decode('utf8', 'replace').splitlines()[1:]
+                at = max(0, os.path.getsize(f.name) - 200_000)
+                f.seek(at)
+                lines = f.read().decode('utf8', 'replace').splitlines()[1 if at else 0:]   # only a cut line is dropped
         except OSError:
             return
         open_ids = {x['id'] for x in self.view['panels']}
@@ -447,6 +450,9 @@ class Phone:
                 self.showing = None
             elif r.get('kind') in ('answer', 'exam') and self.showing and self.showing['id'] == r.get('id'):
                 self.showing = None
+            elif r.get('kind') == 'voice_text' and r.get('id'):
+                self.noted[r['id']] = (r.get('n'), r.get('for'))
+        self.noted = dict(list(self.noted.items())[-60:])
         self.rounds = {k: v for k, v in self.rounds.items() if k in open_ids}
         if self.showing and self.showing['id'] not in open_ids:
             self.showing = None
@@ -619,6 +625,10 @@ class Phone:
         with self.cond:
             self.seq += 1
             rec = {'n': self.seq, 'ts': now_iso(time.time() - age), **rec}
+            if rec.get('kind') == 'voice_text' and rec.get('id'):
+                self.noted[rec['id']] = (rec['n'], rec.get('for'))
+                for k in list(self.noted)[:-60]:
+                    del self.noted[k]
             line = json.dumps(rec, ensure_ascii=False) + '\n'
             for p in self.routes():
                 try:
@@ -709,6 +719,17 @@ class Phone:
         for r in rows:
             c = self.claims.get(r.get('n'))
             out.append({**r, 'claimed': {'by': c['by'], 'at': c['ts']}} if c else r)
+        return out
+
+    def taken(self):
+        """Who has each of the person's notes (ledger:M219, hq:D-179): the agent it was said to, then its claimer.
+        voice id -> [names]; [] is nobody yet. The page writes it under the note."""
+        out = {}
+        for vid, (n, to) in self.noted.items():
+            c = self.claims.get(n)
+            out[vid] = [to] if to else []
+            if c and c['by'] not in out[vid]:
+                out[vid].append(c['by'])
         return out
 
     def seen_page(self, dev, ua, sid):
@@ -1303,7 +1324,7 @@ class Phone:
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
                 'onsets': self.onsets if (self.view.get('vibe') or {}).get('react') else [],
                 'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
-                'shape': self.view.get('shape') or {},
+                'shape': self.view.get('shape') or {}, 'taken': self.taken(),
                 'boot': BOOT, 'build': BUILD}
 
 
@@ -1788,6 +1809,7 @@ class Agent:
             if c is None:
                 ph.claims[n] = {'by': by, 'at': time.time(), 'ts': now_iso(), 'why': why}
                 ph._save_claims()
+                ph.cmd('view')                       # the page writes "taken by" under the note now
                 return f"yours: note {n} is yours to pass on; every other watcher now sees it claimed by {by}"
         when = f"{c['ts'][11:16]} ({time.time() - c['at']:.0f} s ago)"
         if c['by'] == by:

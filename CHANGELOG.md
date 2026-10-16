@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### phone: under each note, who took it
+
+- The page writes one small line under each of the person's voice notes: "taken by X" (the agent it was said to,
+  then the agent that claimed it with `phone_claim`; "taken by Voice, Director" for both), or "nobody has it yet".
+  It comes with the page's state from the claims the server keeps, and a claim wakes the page so the line changes
+  at once. The person's ask (ledger:M219, hq:D-179): two agents each skipped an untagged note, sure the other had
+  it, and the phone could not show whether a note landed with anyone. The lines survive a restart (reading the
+  inbox back after one no longer skips its first line when the whole file fits).
+  Docs: `phone.md`, "Watching the phone" step 2. Test in `tests/test_phone.py`.
+
 ### Standing grants: the person's sources first, routes stop at what is always asked, a number on watcher_down
 
 - An entry with a `source` now matches before one without, so an old unsourced grant with a wide keyword ("merge")

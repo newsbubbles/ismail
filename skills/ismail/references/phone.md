@@ -162,7 +162,8 @@ listening exams and two notes).
    answer an untagged note, call `phone_claim(n, by=<your who>)`. "yours" means go ahead; "taken: X claimed it" means
    leave it, even if you would have done it differently. The server decides who was first, so two agents claiming
    at once cannot both win, and every later `phone_listen` or `phone_watch` line of that note carries
-   `claimed {by, at}`. A note with a `for` is already that agent's: no claim. Claim only what you will act on now.
+   `claimed {by, at}`. The person's page says "taken by X" under the note (the agent it was said to, then its
+   claimer), or "nobody has it yet". A note with a `for` is already that agent's: no claim. Claim only what you will act on now.
    Then pass it on at once, word for word, with its inbox number, id and time. When the owner is unclear, keep it
    and ask the team's lead (or the person, when there is no lead). An untagged note nobody claims for 3 minutes is
    the lead's by default: `phone_presence` lists it with LEAD, so the lead's watcher picks it up.
