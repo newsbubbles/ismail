@@ -185,6 +185,27 @@ def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = Fal
     return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page)
 
 
+@op()
+def phone_claim(n: int, by: str, why: str = None) -> str:
+    """Say you are the one passing on (or answering) the person's note `n`, BEFORE you do it. The first agent to call
+    it owns the note; the server decides who was first, so two agents claiming at once cannot both win. Returns
+    "yours: ..." (go ahead) or "taken: <agent> claimed note n at HH:MM: leave it to them" (do nothing with it).
+    Every phone_listen and phone_watch line of a claimed note carries claimed {by, at}. Claim the untagged notes
+    (no `for`) you will act on; a note with a `for` is already that agent's. by: your `who`. why: a few words
+    (e.g. 'passing to Marketing'). An untagged note nobody claims for 3 minutes is the team lead's by default."""
+    return _call('claim', n=n, by=by, why=why)
+
+
+@op()
+def phone_presence(minutes: float = 60) -> str:
+    """Who is here, both sides, many to many. Agents: every agent that called the phone server in the last 90 s, and
+    whether its phone_watch is waiting now (watching) or it is busy between wakes. The person's devices: each page
+    (phone, computer, tablet, Quest) with its browser, open or asleep, last seen, and whether it is on the stream.
+    Then the person's untagged notes in the last `minutes` that nobody has claimed (LEAD marks one past 3 minutes:
+    the team lead's by default) and the recent claims. Read it before deciding whether a note is yours to pass on."""
+    return _call('presence', minutes=minutes)
+
+
 # phone_watch: the standing watcher every agent runs. It used to live in one song folder and in the Live DJ's memory;
 # after a context reset the DJ hand-rolled a script that kept no cursor and missed six of the person's notes in 36
 # minutes. Now the cursor lives on disk per agent, so a reset or a killed watcher resumes where the last return left.
@@ -256,7 +277,7 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
     notes = []
     if since is None:
         since = _cursor_load(who)
-    hits, held, err = [], [], None
+    hits, held, err, others = [], [], None, []
     t0 = last = time.time()
 
     def look(wait):
@@ -269,6 +290,8 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
             notes.append(f"no saved cursor for {who}: started at the end of the inbox (line {got}); history is not "
                          f"replayed (pass since=<n> to read from a line)")
         since = got
+        if res.get('watching') is not None:
+            others[:] = res['watching']
         for d in res.get('lines', []):
             if round and d.get('kind') in ('page', 'voice'):     # clip plays, a note recording: they are still at it
                 last = time.time()
@@ -282,11 +305,17 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
         _cursor_save(who, since)
         arm = f'python -m ismail phone_watch "who={who}"' + (f' round={round}' if extra.pop('_keep_round', False) else '')
         out = {'who': who, 'since': since, 'lines': hits, **extra}
+        if hits:
+            out['also_watching'] = others
         if held:
             out['held'] = {'round': round, 'lines': len(held), 'answered': sum(d.get('kind') == 'exam' for d in held)}
         if notes:
             out['note'] = '; '.join(notes)
-        then = ('act on these lines' if hits else 'read phone_status (is the server up, is anyone listening?)'
+        open_notes = [d['n'] for d in hits if d.get('kind') in S.NOTE_KINDS and not d.get('for')
+                      and not d.get('claimed')]
+        then = (('act on these lines' + (f"; untagged notes {open_notes}: phone_claim(n, by='{who}') before you pass "
+                                         f"one on or answer it, and leave it if the answer is taken"
+                                         if open_notes else '')) if hits else 'read phone_status (is the server up, is anyone listening?)'
                 if extra.get('alive') else 'the round is over: bring the sound back and start a fresh pass')
         out['next'] = (f"re-arm FIRST, in the background, before anything else: {arm} (the cursor is saved at "
                        f"{since}); then {then}")

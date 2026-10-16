@@ -140,3 +140,15 @@ def test_round_lines_are_held_until_something_else_or_quiet(inbox, monkeypatch):
     monkeypatch.setattr(P, '_ROUND_QUIET_S', 999)
     out = watch(who='dj', round='s5p')
     assert [d['kind'] for d in out['lines']] == ['tap'] and 'round=s5p' in out['next']
+
+
+def test_untagged_notes_say_to_claim_first_and_who_else_is_watching(inbox):
+    """The person, 10-16: a list of who listens is still a race; the agent passing a note on says so first."""
+    inbox.arrive = [[{'kind': 'voice_text', 'text': 'for whoever'}, {'kind': 'voice_text', 'text': 'tagged', 'for': 'dj'},
+                     {'kind': 'voice_text', 'text': 'done', 'claimed': {'by': 'lead', 'at': 'x'}}]]
+    out = watch(who='agent a', since=0)
+    assert out['also_watching'] == []
+    assert "untagged notes [1]: phone_claim(n, by='agent a')" in out['next']
+    inbox.arrive = [[{'kind': 'tap', 'what': 'love'}]]
+    out = watch(who='agent a')
+    assert 'phone_claim' not in out['next']
