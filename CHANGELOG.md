@@ -16,7 +16,11 @@
   10-05) and warns PAGEFILE DRIVE LOW under 10 GB free; a warning, not a gate. live_status shows it too.
 - `machine disk` beyond songs/ (M125): the folders beside the checkout that holds songs/ (the top-level folders of
   D: here), or `$ISMAIL_DISK_ROOTS`, or `<board>/roots.txt`, each with its size and its growth since the last day's
-  snapshot. A walk is reused for 30 min (`--fresh` walks again, `--songs-only` skips it).
+  snapshot. A call walks for 20 s at most (`DISK_ROOTS_BUDGET_S`, `--budget N`, 0 for no limit), the cut walk
+  first, then the cached biggest, then the rest; a root it did not reach says "not walked yet", one it cut says
+  "at least", and the next call carries on from the folders left. Each root keeps its own last whole size and time
+  in `latest.json` and is walked again after 30 min (`--fresh` now, `--songs-only` skips it). Growth shows only for a
+  root walked whole both today and on the snapshot's day.
 - Every new probe fails soft (no reading, no flag), and a watch that breaks says so once and leaves the job alone.
 - Tests: `tests/test_machine_flags.py` (made-up samples and processes; no real GPU, orphans or drive walks).
 

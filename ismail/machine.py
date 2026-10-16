@@ -95,7 +95,8 @@ HUNG_S = 300.0
 # The pagefile's drive (ledger:M126): since 2026-10-05 the pagefile is on C:, which no job writes to, so the disk
 # floor never looked at it; commit pressure grows the pagefile into it. The board warns below this.
 PAGEFILE_DRIVE_WARN_GB = 10.0
-DISK_ROOTS_FRESH_S = 1800.0        # `machine disk` reuses its walk of the roots for this long (a whole D: is minutes)
+DISK_ROOTS_FRESH_S = 1800.0        # `machine disk` reuses a root's walk for this long (a whole D: is minutes)
+DISK_ROOTS_BUDGET_S = 20.0         # and walks for this long a call at most; the next call carries on
 DISK_SKIP = re.compile(r'^\$|^System Volume Information$', re.I)   # a drive's own folders, never walked
 # What wins when a live set is on air and a render wants the machine (ledger:M127, hq:D-11). Nate, 2026-10-05, after
 # two real dropouts in a set: GPU jobs and Blender renders wait while a set plays, "only for now during sets". It is a
@@ -1508,10 +1509,19 @@ def pressure_line():
                                                       else '') + "; " + disk_line()[len('disk: '):])
 
 
+_clock = time.monotonic           # the walk budget's clock (a test moves it)
+
+
 def _tree_bytes(path):
-    total = 0
-    stack = [path]
+    return _tree_walk([path])[0]
+
+
+def _tree_walk(stack, deadline=None, total=0):
+    """Add up the file sizes under the folders in stack (a list it takes from), onto total. -> (bytes, the folders
+    still to walk: [] when it finished, the rest when the deadline, a _clock() time, came first)."""
     while stack:
+        if deadline is not None and _clock() >= deadline:
+            return total, stack
         d = stack.pop()
         try:
             it = os.scandir(d)
@@ -1526,7 +1536,7 @@ def _tree_bytes(path):
                         total += e.stat(follow_symlinks=False).st_size
                 except OSError:
                     pass
-    return total
+    return total, []
 
 
 def disk_sizes(root=None):
@@ -1598,57 +1608,140 @@ def disk_roots():
         return []
 
 
-def _roots_measured(roots, fresh=False):
-    """-> ({root: bytes}, seconds ago it was walked). A walk of a whole drive takes minutes, so one is reused for
-    DISK_ROOTS_FRESH_S (<board>/disk/roots/latest.json) unless fresh."""
+def _roots_measured(roots, fresh=False, budget=None):
+    """-> ({root: its entry}, seconds this call walked). A walk of a whole drive takes minutes, so a call walks for
+    budget seconds at most (DISK_ROOTS_BUDGET_S; 0 for no limit) and the next call carries on where it stopped.
+    <board>/disk/roots/latest.json keeps each root's entry: 'bytes' and 't', its last complete size and when that walk
+    began, and 'walk' while a walk is cut short (the bytes so far, the folders left, when it began). A root is walked
+    again once its size is DISK_ROOTS_FRESH_S old (every root with fresh), in a stable order: a cut walk first, then
+    the cached biggest, then the rest by path."""
+    budget = DISK_ROOTS_BUDGET_S if budget is None else budget
     cache = os.path.join(board_dir(), 'disk', 'roots', 'latest.json')
-    if not fresh:
-        try:
-            with open(cache, encoding='utf8') as f:
-                got = json.load(f)
-            if time.time() - got['t'] < DISK_ROOTS_FRESH_S and sorted(got['sizes']) == sorted(roots):
-                return got['sizes'], time.time() - got['t']
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-    sizes = {r: _tree_bytes(r) for r in roots}
+    try:
+        with open(cache, encoding='utf8') as f:
+            got = json.load(f).get('roots') or {}
+    except (OSError, ValueError, AttributeError):
+        got = {}
+    have = {r: got[r] for r in roots if isinstance(got.get(r), dict)}
+    now = time.time()
+
+    def due(r):
+        e = have.get(r, {})
+        return fresh or 'walk' in e or 'bytes' not in e or now - e.get('t', 0) >= DISK_ROOTS_FRESH_S
+
+    def rank(r):
+        e = have.get(r, {})
+        return (0 if 'walk' in e else 1 if 'bytes' in e else 2, -e.get('bytes', 0), r)
+
+    start = _clock()
+    deadline = start + budget if budget else None
+    for r in sorted(filter(due, roots), key=rank):
+        if deadline is not None and _clock() >= deadline:
+            break
+        e = have.setdefault(r, {})
+        w = e.pop('walk', None) or {'bytes': 0, 'left': [r], 'started': time.time()}
+        total, left = _tree_walk(list(w['left']), deadline, w['bytes'])
+        if left:
+            e['walk'] = {'bytes': total, 'left': left, 'started': w['started']}
+        else:
+            e.update(bytes=total, t=w['started'])
+    took = _clock() - start
     try:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         tmp = cache + f".{os.getpid()}.tmp"
         with open(tmp, 'w', encoding='utf8') as f:
-            json.dump({'t': time.time(), 'sizes': sizes}, f)
+            json.dump({'roots': have}, f)
         os.replace(tmp, cache)
     except OSError:
         pass
-    return sizes, 0.0
+    return have, took
 
 
-def _roots_text(roots, top, fresh=False):
-    """The lines for the folders beyond songs/: each root's size and its growth since the last day's snapshot."""
+def _roots_days(sd, whole):
+    """-> ({root: (the last day before today whose snapshot holds it, its bytes then)}, that last day or None).
+    whole: {root: bytes} of the roots walked whole today, added to today's snapshot (<sd>/<date>.json) unless it
+    holds them already, so a snapshot holds complete walks only, and the first one of the day for each root."""
+    today = time.strftime('%Y-%m-%d')
+    try:
+        days = sorted((f[:-5] for f in os.listdir(sd) if re.fullmatch(r'\d{4}-\d\d-\d\d\.json', f)), reverse=True)
+    except OSError:
+        days = []
+
+    def load(day):
+        try:
+            with open(os.path.join(sd, day + '.json'), encoding='utf8') as f:
+                got = json.load(f)
+            return got if isinstance(got, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    before = {}
+    earlier = [d for d in days if d < today][:31]
+    for day in earlier:
+        for r, b in load(day).items():
+            before.setdefault(r, (day, b))
+    snap = load(today) if today in days else {}
+    if any(r not in snap for r in whole):
+        try:
+            os.makedirs(sd, exist_ok=True)
+            tmp = os.path.join(sd, f"{today}.json.{os.getpid()}.tmp")
+            with open(tmp, 'w', encoding='utf8') as f:
+                json.dump({**whole, **snap}, f)
+            os.replace(tmp, os.path.join(sd, today + '.json'))
+        except OSError:
+            pass
+    return before, (earlier[0] if earlier else None)
+
+
+def _roots_text(roots, top, fresh=False, budget=None):
+    """The lines for the folders beyond songs/: each root's size, marked when it is not walked yet or only part
+    walked, and its growth since the last day's snapshot (only for a root walked whole both today and on that day)."""
     if not roots:
         return []
-    sizes, ago = _roots_measured(roots, fresh)
-    before, day = _day_snapshot(os.path.join(board_dir(), 'disk', 'roots'), sizes)
-    G = 2 ** 30
+    budget = DISK_ROOTS_BUDGET_S if budget is None else budget
+    have, took = _roots_measured(roots, fresh, budget)
+    now, today, G = time.time(), time.strftime('%Y-%m-%d'), 2 ** 30
+    done = {r: have[r]['bytes'] for r in roots if 'bytes' in have.get(r, {})}
+    cut = {r: have[r]['walk']['bytes'] for r in roots if 'walk' in have.get(r, {})}
+    unseen = [r for r in roots if r not in done and r not in cut]
+    whole = {r: b for r, b in done.items() if time.strftime('%Y-%m-%d', time.localtime(have[r]['t'])) == today}
+    before, day = _roots_days(os.path.join(board_dir(), 'disk', 'roots'), whole)
+    grew = {r: (b - before[r][1], before[r][0]) for r, b in whole.items() if r in before}
+    left = bool(cut or unseen or any(now - have[r]['t'] >= DISK_ROOTS_FRESH_S for r in done))
+    total = sum(done.values()) + sum(b for r, b in cut.items() if r not in done)
+    L = [f"beyond songs/ ({len(roots)} folders: {'at least ' if cut or unseen else ''}{total / G:.1f} GB; "
+         f"this call walked {took:.1f} s" + (f" of its {budget:g} s budget" if budget else '')
+         + (f", {len(cut)} cut mid-walk" if cut else '') + (f", {len(unseen)} not walked yet" if unseen else '')
+         + ("; run it again to carry on" if left else '') + ")"
+         + (f"; growth since {day} for the folders walked whole today and that day" if day
+            else "; first snapshot kept today, growth shows from tomorrow")]
     songs = os.path.normcase(os.path.abspath(SONGS))
-    L = [f"beyond songs/ ({len(sizes)} folders: {sum(sizes.values()) / G:.1f} GB"
-         + (f", walked {_ago(time.time() - ago)} ago; --fresh walks again" if ago >= 60 else '') + ")"
-         + (f"; growth since {day}" if day else "; first snapshot kept today, growth shows from tomorrow")]
-    for path, b in sorted(sizes.items(), key=lambda kv: -kv[1])[:top]:
-        grow = ''
-        if day:
-            d = b - before.get(path, 0)
-            grow = f"  {'+' if d >= 0 else '-'}{abs(d) / G:.2f} GB" if abs(d) >= 0.01 * G else '  same'
+    sized = sorted(((done.get(r, cut.get(r)), r) for r in roots if r not in unseen), reverse=True)
+    for b, path in sized[:top] + [(b, r) for b, r in sized[top:] if r not in done]:   # a cut walk shows always
+        note = ''
+        if path not in done:
+            note = '  (at least: cut mid-walk, the next call carries on)'
+        else:
+            if now - have[path]['t'] >= DISK_ROOTS_FRESH_S:
+                note = f"  (walked {_span(now - have[path]['t'])} ago"
+                note += f"; walking again, {cut[path] / G:.2f} GB so far)" if path in cut else ')'
+            if path in grew:
+                d, since = grew[path]
+                note = (f"  {'+' if d >= 0 else '-'}{abs(d) / G:.2f} GB" if abs(d) >= 0.01 * G else '  same') + (
+                    f" since {since}" if since != day else '') + note
         holds = '  (holds songs/)' if songs.startswith(os.path.normcase(path) + os.sep) else ''
-        L.append(f"  {b / G:7.2f} GB  {path}{grow}{holds}")
-    if day:
-        grown = sorted(((b - before.get(p, 0), p) for p, b in sizes.items()), reverse=True)
-        fast = [f"{p} +{d / G:.1f} GB" for d, p in grown[:5] if d >= 0.5 * G]
-        if fast:
-            L.append("beyond songs/, grew most since " + day + ": " + ', '.join(fast))
+        L.append(f"  {b / G:7.2f} GB  {path}{note}{holds}")
+    if unseen:
+        L.append(f"  not walked yet ({len(unseen)}): {', '.join(unseen[:8])}"
+                 + (f" and {len(unseen) - 8} more" if len(unseen) > 8 else ''))
+    fast = [f"{p} +{d / G:.1f} GB" for (d, _), p in sorted(((v, p) for p, v in grew.items()), reverse=True)[:5]
+            if d >= 0.5 * G]
+    if fast:
+        L.append("beyond songs/, grew most since " + day + ": " + ', '.join(fast))
     return L
 
 
-def disk_text(top=12, root=None, roots=None, fresh=False):
+def disk_text(top=12, root=None, roots=None, fresh=False, budget=None):
     """Where the disk went: each drive's free space and pagefile, the biggest folders under songs/ with their growth
     since the last day a snapshot was kept (<board>/disk/<date>.json), every _reclaim folder, and the folders beyond
     songs/ (disk_roots(), or roots: a list; [] for none) with their growth (<board>/disk/roots/<date>.json)."""
@@ -1674,7 +1767,7 @@ def disk_text(top=12, root=None, roots=None, fresh=False):
         L += [f"  {b / G:7.2f} GB  {p}" for p, b in sorted(reclaim.items(), key=lambda kv: -kv[1])]
     else:
         L.append("_reclaim: none")
-    L += _roots_text(disk_roots() if roots is None else roots, top, fresh)
+    L += _roots_text(disk_roots() if roots is None else roots, top, fresh, budget)
     return '\n'.join(L)
 
 
@@ -1779,8 +1872,10 @@ def main(argv=None):
     oa.add_argument('--why', default='')
     dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, _reclaim, the pagefile')
     dk.add_argument('--top', type=int, default=12, help='how many songs folders (and folders beyond songs/) to list')
-    dk.add_argument('--fresh', action='store_true', help='walk the folders beyond songs/ again (a walk is reused '
-                    f'for {DISK_ROOTS_FRESH_S / 60:.0f} min)')
+    dk.add_argument('--fresh', action='store_true', help='walk every folder beyond songs/ again, within the budget '
+                    f'(a walk is reused for {DISK_ROOTS_FRESH_S / 60:.0f} min)')
+    dk.add_argument('--budget', type=float, default=DISK_ROOTS_BUDGET_S, help='seconds this call may walk the folders '
+                    f'beyond songs/ (default {DISK_ROOTS_BUDGET_S:g}; 0 for no limit); the next call carries on')
     dk.add_argument('--songs-only', action='store_true', help='only songs/ (no walk beyond it)')
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
@@ -1815,7 +1910,7 @@ def main(argv=None):
         print(resume(a.job))
         return 0
     if a.cmd == 'disk':
-        print(disk_text(a.top, roots=[] if a.songs_only else None, fresh=a.fresh))
+        print(disk_text(a.top, roots=[] if a.songs_only else None, fresh=a.fresh, budget=a.budget))
         return 0
     if a.cmd == 'on-air':
         if a.policy:

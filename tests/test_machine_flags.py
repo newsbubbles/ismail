@@ -256,11 +256,11 @@ def test_machine_disk_lists_the_folders_beyond_songs_with_their_daily_growth(boa
     assert any('unpack' in l and l.rstrip().endswith('same') for l in text.splitlines())
     assert sorted(os.listdir(board / 'disk' / 'roots')) == ['2000-01-01.json', time.strftime('%Y-%m-%d') + '.json',
                                                            'latest.json']
-    # the walk is reused for a while; --fresh walks again
+    # each root's walk is reused for a while, with its own time; --fresh walks again
     (top / 'unpack' / 'y.bin').write_bytes(b'0' * 20 * 2 ** 20)
     again = machine._roots_measured(roots)[0]
-    assert again[roots[1]] == 2 ** 20
-    assert machine._roots_measured(roots, fresh=True)[0][roots[1]] == 21 * 2 ** 20
+    assert again[roots[1]]['bytes'] == 2 ** 20 and again[roots[0]]['t'] <= time.time()
+    assert machine._roots_measured(roots, fresh=True)[0][roots[1]]['bytes'] == 21 * 2 ** 20
     assert 'beyond songs/' not in machine.disk_text(root=str(songs), roots=[])
 
 
@@ -282,3 +282,67 @@ def test_the_roots_come_from_the_environment_a_roots_file_or_beside_the_checkout
     (tmp_path / 'drive' / 'System Volume Information').mkdir()
     monkeypatch.setattr(machine, 'SONGS', str(checkout / 'songs'))
     assert machine.disk_roots() == [str(tmp_path / 'drive' / 'checkout'), str(tmp_path / 'drive' / 'games')]
+
+
+def three_roots(tmp_path):
+    """Three roots of 1, 2 and 4 MB, each in four folders of one file, and the true size of each."""
+    roots = []
+    for name, mb in (('one', 1), ('two', 2), ('three', 4)):
+        for i in range(4):
+            (tmp_path / 'drive' / name / f'part{i}').mkdir(parents=True)
+            (tmp_path / 'drive' / name / f'part{i}' / 'f.bin').write_bytes(b'0' * mb * 2 ** 18)
+        roots.append(str(tmp_path / 'drive' / name))
+    return roots, {r: machine._tree_bytes(r) for r in roots}
+
+
+def ticking(monkeypatch):
+    """The walk's clock moves one second each time it is read: every folder costs a second."""
+    now = [0.0]
+
+    def clock():
+        now[0] += 1
+        return now[0]
+    monkeypatch.setattr(machine, '_clock', clock)
+
+
+def test_a_walk_beyond_songs_stops_at_its_budget_biggest_first(board, tmp_path, monkeypatch):
+    roots, true = three_roots(tmp_path)
+    (board / 'disk' / 'roots').mkdir(parents=True)
+    (board / 'disk' / 'roots' / 'latest.json').write_text(json.dumps({'roots': {
+        roots[0]: {'bytes': 9 * 2 ** 30, 't': time.time() - 2 * machine.DISK_ROOTS_FRESH_S}}}))
+    ticking(monkeypatch)
+    text = machine._roots_text(roots, 12, budget=10)
+    have = json.loads((board / 'disk' / 'roots' / 'latest.json').read_text())['roots']
+    assert 'walk' not in have[roots[0]] and have[roots[0]]['bytes'] == true[roots[0]]   # the cached biggest first
+    assert 0 < have[roots[2]]['walk']['bytes'] < true[roots[2]] and have[roots[2]]['walk']['left']   # cut mid-walk
+    assert roots[1] not in have                                                         # not reached
+    took = float(text[0].split('this call walked ')[1].split(' s')[0])
+    assert took < 10 + 3                     # the budget, and the reads of the clock around it
+    assert 'cut mid-walk' in text[0] and 'not walked yet' in text[0] and 'at least' in text[0]
+    assert any(l.strip().startswith('not walked yet (1)') for l in text)
+    # a call whose budget runs out at once walks nothing, and still shows the cut root past its top
+    again = machine._roots_text(roots, 0, budget=1)
+    assert [l.split('GB  ')[1].split()[0] for l in again[1:] if 'cut mid-walk' in l] == [roots[2]]
+    assert any('at least' in l and l.split()[-1] != 'same' for l in text if 'GB  ' in l)
+
+
+def test_the_next_call_carries_on_and_growth_shows_only_for_whole_walks(board, tmp_path, monkeypatch):
+    roots, true = three_roots(tmp_path)
+    (board / 'disk' / 'roots').mkdir(parents=True)
+    (board / 'disk' / 'roots' / '2000-01-01.json').write_text(json.dumps({r: b - 2 ** 30 for r, b in true.items()}))
+    ticking(monkeypatch)
+    first = machine._roots_text(roots, 12, budget=10)
+    grown = [l for l in first if '+1.00 GB' in l]
+    assert grown and all('cut mid-walk' not in l for l in grown)
+    assert any('cut mid-walk' in l for l in first[1:]) and 'not walked yet' in first[0]
+    calls = 1
+    while 'carry on' in machine._roots_text(roots, 12, budget=10)[0]:
+        calls += 1
+        assert calls < 10
+    have = json.loads((board / 'disk' / 'roots' / 'latest.json').read_text())['roots']
+    assert {r: e['bytes'] for r, e in have.items()} == true and not any('walk' in e for e in have.values())
+    snap = json.loads((board / 'disk' / 'roots' / (time.strftime('%Y-%m-%d') + '.json')).read_text())
+    assert snap == true                       # today's snapshot took each root as its walk finished
+    last = machine._roots_text(roots, 12, budget=10)
+    assert 'carry on' not in last[0] and 'at least' not in last[0]
+    assert sum('+1.00 GB' in l for l in last) == 3 and 'grew most' in last[-1]
