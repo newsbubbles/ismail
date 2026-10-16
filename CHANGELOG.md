@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### sketch: feeling words in the first brief, the tune level held (M181 F2, M213)
+
+- A first brief's feeling words now shape the sketch, not only a next round's: "happy and bouncy" came back at 72
+  and 70 BPM, called "slow and bright", and was offered "faster and bouncier". A lift word sets the lowest tempo
+  (happy 92, bouncy 106, upbeat or exciting 112 BPM), a calm one the highest (calm 76, dreamy 80, sad 84), unless a
+  tempo word or a named BPM says otherwise ("a slow happy tune"); a genre's own range moves only as far as the word
+  needs ("dark techno" stays at 120-126). A feeling with a mode (happy, sad, spooky) picks it when no key is named.
+  This also holds for the three styles a vague brief gets and for `styles=`, which now also takes the brief's gentle
+  words. The feeling words also cover their plain forms (spooky, moody, gloomy, peppy, playful, sunny ...).
+- The everyday-word choices never offer a feeling the person already asked for, in the brief or any round since
+  (no "faster and bouncier" after "bouncy", no "sunnier" after "happy").
+- The tune balance holds the 4-6 LU the `sketch` docstring promises. A tune 5.5 LU under the parts rose 8 dB and
+  stopped at +2.5 LU; now the tune rises at most 8 dB (and never past its -1 dB peak) and the other parts come down
+  the rest of the way, which is clean, where raising the tune further only drives it into the limiter. The reply
+  adds the level measured in the final mix ("in the final mix it sits +5.0 LU"), and says so when it is outside
+  4-6 LU (a gap over 20 LU is a part gone wrong and is not chased); `sketch_ready.json` carries it as `tune_lu`.
+- Tests: six more in `tests/test_sketch.py`.
+
 ### stage: capture setup at a song time, and a keyed screen for the comp
 
 - `stage_capture` setup commands take `"at_song"`: the command waits for that frame and runs on film time just
