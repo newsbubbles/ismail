@@ -17,8 +17,12 @@ from . import guards
 
 SOURCE = re.compile(r'^((hq:)?D-\d+|n\d+|vr:\S+|chat: .{3,}|memory: \S+)$')
 # a yes or no word, or a word every ask has, would cover any question ('merge' and 'restart' name a step: kept)
-_TOO_WIDE = (guards.YES_WORDS - {'merge', 'restart'}) | guards.NO_WORDS | {'it', 'this', 'that', 'thing', 'step',
-                                                                           'ask', 'do', 'make', 'run', 'now'}
+# built on first use: guards imports api, which imports this module, so guards may be half-loaded at import time
+_WIDE = {'it', 'this', 'that', 'thing', 'step', 'ask', 'do', 'make', 'run', 'now'}
+
+
+def _too_wide(word):
+    return word in (guards.YES_WORDS - {'merge', 'restart'}) | guards.NO_WORDS | _WIDE
 
 
 def _read():
@@ -109,7 +113,7 @@ def grant_add(says: str, keywords: list, source: str, owner: str = None, kind: s
     if not isinstance(keywords, (list, tuple)) or not keywords:
         raise OpError("keywords: a list of whole words or phrases, e.g. ['merge', 'merging']")
     kws = [str(k).strip() for k in keywords if str(k).strip()]
-    wide = [k for k in kws if k.lower() in _TOO_WIDE or len(k) < 3]
+    wide = [k for k in kws if _too_wide(k.lower()) or len(k) < 3]
     if wide:
         raise OpError(f"keywords {wide} would match almost any ask: use the words that name the step "
                       f"('merge', 'stage restart')")

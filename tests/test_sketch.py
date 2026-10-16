@@ -441,3 +441,107 @@ def test_play_file_opens_the_persons_player_and_says_to_link_it(tmp_path, monkey
     assert opened == [str(f)] and 'link it in your reply' in out
     with pytest.raises(api.OpError, match='no file at'):
         api.play_file(str(tmp_path / 'nope.mp3'))
+
+
+@pytest.mark.parametrize('brief, lo, hi, mode', [
+    ('happy and bouncy, for a party video', 106, None, 'major'),
+    ('an upbeat tune for a video', 112, None, None),
+    ('calm and dreamy', None, 76, None),
+    ('a spooky piano tune', None, None, 'minor'),
+])
+def test_a_first_briefs_feeling_words_set_the_pace_and_no_choice_repeats_them(brief, lo, hi, mode):
+    """ledger:M181 F2: "happy and bouncy" came back at 72 and 70 BPM, "slow and bright", and was offered "faster
+    and bouncier" as if it were new."""
+    specs, _ = SK.specs_for(brief)
+    for label, spec in specs:
+        pl = SK.plan_spec(spec, brief, 0, 0, None, None, label)
+        assert (lo is None or pl['bpm'] >= lo) and (hi is None or pl['bpm'] <= hi), (label, pl['bpm'])
+        assert mode is None or pl['key'].endswith(mode), (label, pl['key'])
+        if lo:
+            assert not SK.plain_mood(pl).startswith('slow'), SK.plain_mood(pl)
+        asked = set(spec['feelings'])
+        choices = SK.playful_choices(spec, pl)
+        assert 2 <= len(choices) <= 3
+        for c in choices:
+            assert not asked & {f[0] for f in SK.feelings(c)}, (brief, c)
+    if 'bouncy' in brief:
+        assert not {'faster and bouncier', 'a little bouncier', 'sunnier'} & set(choices)
+
+
+def test_a_tempo_word_or_a_genre_keeps_its_own_pace():
+    label, spec = SK.specs_for('a slow happy tune')[0][0]
+    pl = SK.plan_spec(spec, 'a slow happy tune', 0, 0, None, None, label)
+    assert pl['bpm'] < 80 and pl['key'].endswith('major')                 # slow wins the pace, happy the mode
+    for label, spec in SK.specs_for('dark techno')[0]:
+        pl = SK.plan_spec(spec, 'dark techno', 0, 0, None, None, label)
+        assert 120 <= pl['bpm'] <= 126 and pl['key'].endswith('minor')     # a mood word never slows a genre
+    assert SK.plan_spec(SK.specs_for('happy house at 124 bpm')[0][0][1], '')['bpm'] == 124
+
+
+def test_a_next_round_never_offers_a_feeling_already_asked_for():
+    spec = SK.specs_for('a cheerful solo piano tune')[0][0][1]
+    pl = SK.plan_spec(spec, '')
+    spec['tune'], spec['key'], spec['bpm'] = pl['tune'], pl['key'], pl['bpm']
+    new, changed = SK.apply_words(spec, 'a bit bouncier')
+    assert changed and new['feelings'] == ['happier', 'bouncier']
+    got = SK.playful_choices(new, SK.plan_spec(new, ''))
+    assert got and not any(SK.feelings(c) and SK.feelings(c)[0][0] in ('happier', 'bouncier') for c in got), got
+
+
+def test_plain_words_first_sketch_follows_the_feeling_and_holds_the_tune_level(tmp_path):
+    song = str(tmp_path / 'songs' / 'party')
+    api.guide(project=song, first_answer="it's for a party video, I don't play anything")
+    out = api.sketch(song, 'happy and bouncy, for a party video', n=1, bars=4, background=False)
+    say = out.split('SAY TO THE PERSON (read it out as it is):')[1].split('\na)')[0]
+    assert 'slow and' not in say and 'lively and bright' in say, say
+    line = [x for x in say.splitlines() if 'Want it different?' in x][0]
+    assert not any(w in line for w in ('bouncier', 'sunnier', 'happier')), line
+    d = next(x for x in os.listdir(os.path.join(song, 'sketches')) if x != 'round.json')
+    r = json.load(open(os.path.join(song, 'sketches', d, 'sketch_ready.json'), encoding='utf8'))
+    assert 4.0 <= r['tune_lu'] <= 6.0, r['balance']
+
+
+def _stems(p, tune_amp, part_amp):
+    import numpy as np
+    import soundfile as sf
+    sd = os.path.join(p, 'renders', 'stems')
+    os.makedirs(sd, exist_ok=True)
+    t = np.arange(44100 * 2) / 44100
+    for name, a in (('melody', tune_amp), ('pad', part_amp)):
+        sf.write(os.path.join(sd, name + '.wav'), np.stack([a * np.sin(2 * np.pi * 440 * t)] * 2, 1), 44100)
+
+
+def test_a_tune_far_under_the_parts_lands_in_range_by_lowering_the_parts(tmp_path):
+    """ledger:M213: a tune 5.5 LU under the parts rose 8 dB and stopped at +2.5 LU, while the docstring promised
+    4-6 LU. The tune rises at most 8 dB; the parts come down the rest of the way."""
+    p = str(tmp_path / 'low')
+    api.project_new(p, bpm=120, length_bars=1)
+    api.track_add(p, 'melody', instrument={'type': 'synth'})
+    api.track_add(p, 'pad', instrument={'type': 'synth'})
+    _stems(p, 0.1, 0.1 * 10 ** (5.5 / 20))                     # the tune 5.5 LU under the pad, its peak -20 dBFS
+    msg = api._tune_balance(p)
+    d = api._load(p)
+    assert d.track('melody')['volume_db'] == pytest.approx(8.0) and d.track('pad')['volume_db'] == pytest.approx(-2.5)
+    assert 'the parts -2.5 dB' in msg and 'to about +5.0' in msg
+    _stems(p, 0.1 * 10 ** (8 / 20), 0.1 * 10 ** (3 / 20))     # those moves, heard back
+    assert api._tune_balance(p).startswith('the tune sits +5.0 LU')
+
+
+@pytest.mark.parametrize('tune_db, held', [(-4.0, True), (-16.0, False)])
+def test_every_sketch_reports_the_tune_level_measured_in_its_final_mix(tmp_path, tune_db, held):
+    """The contract the sketch docstring states: the tune 4-6 LU over the rest after the trim and the limiter, and
+    a reply that says so when a part gone wrong (the tune about 18 LU under) keeps it out of reach."""
+    p = str(tmp_path / 'mix')
+    api.project_new(p, bpm=120, length_bars=2)
+    api.track_add(p, 'melody', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]}, volume_db=tune_db)
+    api.track_add(p, 'pad', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]}, volume_db=0.0)
+    api.notes_write(p, 'melody', 1, '0 C5 1; 1 E5 1; 2 G5 1; 3 C6 1')
+    api.notes_write(p, 'pad', 1, '0 C3,G3 4')
+    api.notes_write(p, 'pad', 2, '0 F3,C4 4')
+    P = api._load(p)
+    P.d['master']['fx'] = SK.production({'feel': 'rock'}, ['melody', 'pad'])['master']
+    P.save()
+    got = api._sketch_render({'sp': p, 'letter': 'a', 'mp3': 'none', 'lufs': -11.0})
+    assert 'moved it' in got['balance'] and 'in the final mix it sits' in got['balance'], got['balance']
+    assert (4.0 <= got['tune_lu'] <= 6.0) == held, got['balance']
+    assert ('outside the 4-6 LU' in got['balance']) != held
