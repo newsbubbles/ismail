@@ -19,6 +19,18 @@
 - Tests: `tests/test_beatbox.py` on a generic stand-in (dark thumps over 18 dB of level, hard bright bursts, quiet
   airy ticks, a speaker beat under the take). Docs: `jam-runner.md`, step 5.
 
+### docs: the Live DJ's lessons in the live and phone references
+
+- `references/live.md`, "Played keys": say a take fits only after reading the grid fit's numbers, and a recorded
+  (audio) take gets the same fit on its unrounded onsets (`fit_grid`, the fit `live_played` uses).
+- `references/live.md`, "A set's folder": read the section code and `setlog.md` before describing a past set, and
+  serve a page of the set's files over http, never as a file (a file page's relative audio fails in a browser pane).
+- `references/phone.md`, "Watching the phone" step 2: the first line of a passed-on note or an answer to another
+  agent's ask says who it is for and what it is for.
+- `references/phone.md`, `phone_exam`: a raw take sits about 15 dB under a bounce with its peaks near -3.5 dBFS, so
+  the pre-flight's 1 LUFS check refuses the pair; play it on the computer's page or send a labelled limited copy.
+  (ledger:M223)
+
 ### docs: a quick start the melody reader reads right
 
 - The CLI quick start in `docs/reference.md` writes `0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1` on `preset:acid_bass` at
