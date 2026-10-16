@@ -164,7 +164,9 @@ listening exams and two notes).
    at once cannot both win, and every later `phone_listen` or `phone_watch` line of that note carries
    `claimed {by, at}`. The person's page says "taken by X" under the note (the agent it was said to, then its
    claimer), or "nobody has it yet". A note with a `for` is already that agent's: no claim. Claim only what you will act on now.
-   Then pass it on at once, word for word, with its inbox number, id and time. When the owner is unclear, keep it
+   Then pass it on at once, word for word, with its inbox number, id and time. The first line of anything you pass
+   on, or of your answer to another agent's ask, says who it is for and what it is for; without it the person had to
+   ask "who's this for and what's this for again?". When the owner is unclear, keep it
    and ask the team's lead (or the person, when there is no lead). An untagged note nobody claims for 3 minutes is
    the lead's by default: `phone_presence` lists it with LEAD, so the lead's watcher picks it up.
 3. **Who else is here.** `phone_presence()` shows both sides, many to many: each agent calling the phone server and
@@ -338,6 +340,10 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   row with `voice_notes_pending` has more rows coming. The answer's note says whether it was typed or said
   (`note_source`, and `note_audio` for the recordings). The reply lists each clip's url, path and length, so the
   post can be checked against what was meant.
+  **A raw take beside a render.** A take recorded raw (no auto gain) sat about 15 dB under a mastered bounce
+  (-31.5 against -16.5 LUFS) with its peaks already near -3.5 dBFS, so it cannot be raised to match without a
+  limiter that changes it. The pre-flight refuses clips more than 1 LUFS apart. Play a raw take on the computer's
+  page (`feedback_page`), or send a limited copy whose label says it is limited.
 - Every text box on a panel or exam card has a mic: they say the note, its words go into the box to edit, and the
   answer carries the recording too (`values_audio` on a panel).
 - `phone_offer(path, label=, auto=True)`: a download (a render, a take, a PDF). The label is the card and the file's

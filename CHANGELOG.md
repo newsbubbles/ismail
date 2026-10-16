@@ -15,6 +15,35 @@
   pitch the cents where the two agree. Listed in `guide`, `docs/reference.md` and the listening reference.
 - Tests: `tests/test_note_cents.py` (a tone 50 cents flat, a line with three-quarter-tone steps, the window cap).
 
+### phone: one beatbox classifier (ledger:M222)
+
+- `ismail.phone.beatbox` reads a beatbox voice note into drum hits: `read(y, sr, ref=None)` finds the hits (flux
+  from 100 Hz to 10 kHz, the music under the take taken off when `ref` is given) and classes each one kick, snare
+  or hat; `classify(hits)` is the rule alone, for hits found another way. The hits are ranked against each other
+  on the take: two-means on the log spectral centroid splits dark (kick) from bright when they sit an octave
+  apart, and among the bright ones two-means on onset strength splits the snares (hardest) from the hats. Each hit
+  carries a `margin` (how far it sits from the cut that decided it), so a script picking its clearest hits does
+  not need a band rule of its own. The take is scaled to a -3 dBFS peak first, so a quiet take keeps its quiet
+  hits.
+- Why: three copies of the rule in a live set's scripts drifted apart. The absolute one (more than 30% above 4 kHz
+  a hat, more than 35% under 250 Hz a kick) read 5 of 50 kicks on a real earbud take, where the mouth kick is a
+  dark thump with little under 250 Hz; the relative rule matches the kicks the person played there, and reads the
+  same classes at any take level.
+- Tests: `tests/test_beatbox.py` on a generic stand-in (dark thumps over 18 dB of level, hard bright bursts, quiet
+  airy ticks, a speaker beat under the take). Docs: `jam-runner.md`, step 5.
+
+### docs: the Live DJ's lessons in the live and phone references
+
+- `references/live.md`, "Played keys": say a take fits only after reading the grid fit's numbers, and a recorded
+  (audio) take gets the same fit on its unrounded onsets (`fit_grid`, the fit `live_played` uses).
+- `references/live.md`, "A set's folder": read the section code and `setlog.md` before describing a past set, and
+  serve a page of the set's files over http, never as a file (a file page's relative audio fails in a browser pane).
+- `references/phone.md`, "Watching the phone" step 2: the first line of a passed-on note or an answer to another
+  agent's ask says who it is for and what it is for.
+- `references/phone.md`, `phone_exam`: a raw take sits about 15 dB under a bounce with its peaks near -3.5 dBFS, so
+  the pre-flight's 1 LUFS check refuses the pair; play it on the computer's page or send a labelled limited copy.
+  (ledger:M223)
+
 ### docs: a quick start the melody reader reads right
 
 - The CLI quick start in `docs/reference.md` writes `0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1` on `preset:acid_bass` at
