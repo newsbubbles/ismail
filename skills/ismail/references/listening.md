@@ -10,6 +10,8 @@
 | Is the drum pattern right? | `analyze_drums(source='track:drums')` | step strings per lane; X within 4 dB of the lane's loud hits |
 | What pieces does a kit have? | `analyze_kit(source='ref:drums')` | one component per piece: energy share, pitch region, hits per 16th; `(fragment)` = lower k |
 | How much swing? | `analyze_swing(source=)` | 16ths: the 'a' against the 'and', in beats and ms; straight = 0 |
+| How far off pitch is each note? Quarter tones (maqam steps)? | `analyze_melody(cents=True)` | per note: midi as a float, Hz, cents from the named note; a quarter tone reads near +-50c and can sit on either neighbour, so compare the float midi |
+| How does the pitch move inside a note (slide, vibrato, ornament)? | `analyze_contour(bars=, hop_ms=)` | one row per frame: Hz, float midi, note+cents, voicing p ('-' unvoiced); max_rows per window, the last line names the next start |
 | Does the dynamic shape work? | `analyze_sections(sections={...})` | rms, peak, loudest and quietest 400 ms per section; WARNING when a build is as loud as its climax |
 | One part or several in this stem? | `stem_parts(source=, bars=)` | per band: share of its movement at the note rate; WARNING on a loud band that moves on its own (another player, or bleed) |
 | Does it pump / gate / groove? | `analyze_envelope(bars, band=)` | digits per 16th; a kick-ducked part shows dips on the beats |

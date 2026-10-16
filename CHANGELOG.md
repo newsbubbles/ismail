@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### analyze: pitch in cents per note, and a pitch contour (ledger:M225)
+
+- `analyze_melody(cents=True)` gives every note's measured pitch as numbers, for scoring maqam steps (quarter
+  tones) and intonation against a reference: tab-separated rows `start note dur vel midi hz cents`, where `midi` is
+  the pitch as a float (note + cents/100). The reading already kept each note's offset but printed it only as a
+  `# +NNc` comment past 25 cents. The default output is unchanged.
+- New op `analyze_contour(source, bars, hop_ms=10, fmin, fmax, start=0, max_rows=200)`: f0 per frame with time,
+  bar, beat, Hz, float MIDI, note and cents, and pYIN's voicing probability ('-' unvoiced), for slides, vibrato and
+  ornaments. One window of at most `max_rows` frames (cap 1000) per call, the last line names the next `start`;
+  only the window is analysed, so bars may span up to 64. pYIN gives voicing and the octave, YIN's interpolated
+  pitch the cents where the two agree. Listed in `guide`, `docs/reference.md` and the listening reference.
+- Tests: `tests/test_note_cents.py` (a tone 50 cents flat, a line with three-quarter-tone steps, the window cap).
+
 ### docs: a quick start the melody reader reads right
 
 - The CLI quick start in `docs/reference.md` writes `0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1` on `preset:acid_bass` at

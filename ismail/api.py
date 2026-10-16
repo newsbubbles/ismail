@@ -2104,12 +2104,16 @@ def analyze_chords(project: str, source: str = None, bars: list = None, per_bar:
 
 @op()
 def analyze_melody(project: str, source: str = 'ref:other', bars: list = None, fmin: str = 'C1', fmax: str = 'C7',
-                   quant: float = 0.25, min_conf: float = 0.0) -> str:
+                   quant: float = 0.25, min_conf: float = 0.0, cents: bool = False) -> str:
     """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line. Ends
     with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits within 6 dB on a
-    quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax)."""
+    quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax).
+    cents=True gives every note's measured pitch as numbers, for intonation and quarter tones (maqam steps):
+    tab-separated rows start, note, dur, vel, midi (float), hz, cents from the named note. For the pitch moving
+    inside a note (slides, vibrato, ornaments) read analyze_contour."""
     P = _load(project)
-    return A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)[1]
+    notes, txt = A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)
+    return A.melody_cents_text(notes, txt) if cents else txt
 
 
 @op()
