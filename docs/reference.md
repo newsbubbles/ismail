@@ -99,13 +99,13 @@ python -m ismail guide                                # read first: workflow and
 python -m ismail ops                                  # list operations
 python -m ismail help notes_write                     # one op's arguments and docs
 python -m ismail -p songs/demo project_new bpm=124 length_bars=8
-python -m ismail -p songs/demo track_add name=bass instrument='"preset:acid_bass"'
-python -m ismail -p songs/demo notes_write '{"track": "bass", "bar": 1, "notes": "0 E2 0.5 110; 0.5 E3 0.25", "repeat": 8}'
+python -m ismail -p songs/demo track_add name=bass instrument='"preset:acid_bass"' volume_db=6
+python -m ismail -p songs/demo notes_write '{"track": "bass", "bar": 1, "notes": "0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1", "repeat": 8}'
 python -m ismail -p songs/demo render stems=true out=v1 mp3=also
 python -m ismail -p songs/demo analyze_melody source=track:bass bars=[1,2]
 ```
 
-`render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render. `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
+The last line reads the bass back from its stem as notes: the four you wrote, once per bar. `render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render. `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
 
 Keep your projects under `songs/` (git-ignored) or anywhere else; a project is just a folder.
 

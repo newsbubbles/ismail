@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### docs: a quick start the melody reader reads right
+
+- The CLI quick start in `docs/reference.md` writes `0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1` on `preset:acid_bass` at
+  `volume_db=6`. The old line's sixteenth-note E3 (121 ms at 124 bpm, half of it inside acid_bass's 60 ms glide up
+  from E2) read back as D#3 +42c with a second-part warning, and the render was flagged QUIET at -24.2 LUFS. The new
+  one reads back note for note (voicing 0.50, no warning) and renders at -16.0 LUFS, peak -8.5 dBFS. A clean held E3
+  on acid_bass reads right: the reader was not wrong, the example was too short for the glide (ledger:M214).
+- Tests: `tests/test_quickstart.py` runs the quick start's own lines from the doc through the CLI and checks the
+  notes read back and the level.
+
 ### live: headroom against the real deadline, cutting a section over, the room speaker off and on
 
 - `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since
