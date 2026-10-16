@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Standing grants: the person's sources first, routes stop at what is always asked, a number on watcher_down
+
+- An entry with a `source` now matches before one without, so an old unsourced grant with a wide keyword ("merge")
+  no longer shadows a sourced one that names an owner. `grant_list` marks an unsourced entry and says how to give it
+  a source (`grant_drop`, then `grant_add` with one).
+- A route no longer carries an ask away from the person when it names something always asked (public, money,
+  accounts, deleting) or something only their senses answer (an exam, a listen, a headset test): `grant_check`
+  answers `ask:` and the phone asks them.
+- The heartbeat's `watcher_down` alarm carries `down_since` (epoch seconds of the watcher's last poll), so a lead's
+  alarm reads a number instead of the time in the text.
+
 ### live: headroom against the real deadline, cutting a section over, the room speaker off and on
 
 - `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since

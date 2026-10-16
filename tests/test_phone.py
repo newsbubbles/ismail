@@ -1355,6 +1355,7 @@ def test_a_watcher_that_stops_while_the_person_is_in_vr_raises_one_alarm(phone):
     assert st['deaf'] == [{'who': 'dj', 'min': 3}]
     a = _alarms(ph)
     assert len(a) == 1 and a[0]['agent'] == 'dj' and a[0]['for'] == 'lead a' and 'in VR' in a[0]['text']
+    assert abs(a[0]['down_since'] - (time.time() - 200)) < 5                # a number, not HH:MM in the text
     _state(base, 'quest1', QUEST_UA)
     P.phone_listen('lead a', wait=0, lead=True)
     assert len(_alarms(ph)) == 1                                            # one per stretch down

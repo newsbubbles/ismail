@@ -170,6 +170,9 @@ _ASKS = re.compile(r"\b(should i|shall i|can i|may i|could i|do you want|want me
 STILL_ASK = re.compile(r"\b(public|publish\w*|post|posts|posting|upload\w*|money|pay|paid|payment\w*|purchase\w*|buy|"
                        r"price|prices|spend\w*|account|accounts|password\w*|sign(ing)? (in|up)|log(ging)? in|"
                        r"delete\w*|deleting|erase\w*|wipe\w*|remove (the |his |her |their )?files)\b", re.IGNORECASE)
+# what only the person's own senses can answer (an exam, a listen, a headset test): no grant acts on it and no route
+# sends it to another agent (hq Director, 10-16: "routes should still stop at those")
+SENSES = re.compile(r"\b(exam|exams|blind test\w*|listen\w*|by ear|headset tests?)\b", re.IGNORECASE)
 GRANT_KINDS = ('grant', 'route')
 
 
@@ -240,7 +243,7 @@ def load_grants():
         return [], (f"(standing grants not checked: {p} does not read as a JSON list of "
                     f"{{id, date, topic, keywords, says}} ({e}))")
     out = [g for g in data if isinstance(g, dict) and isinstance(g.get('keywords'), list) and g['keywords']]
-    return out, ''
+    return sorted(out, key=lambda g: not g.get('source')), ''      # an entry with the person's source matches first
 
 
 def grant_for(*values):
@@ -277,7 +280,7 @@ def assess(question, yes_no=True, sender=None):
     g = out['entry']
     if g is None:
         return out
-    m = STILL_ASK.search(joined) if (g.get('kind') or 'grant') == 'grant' else None   # a route approves nothing
+    m = STILL_ASK.search(joined) or SENSES.search(joined)     # a route stops there too: it would carry the ask away
     if m:
         out.update(verdict='still', word=m.group(0))
         return out
