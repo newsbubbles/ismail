@@ -9,7 +9,7 @@
 //   camera  {object} a camera in the scene (keyed or not), {path: {keys, seconds, at}} a story path (cameras.json:
 //           pos and look in Blender metres, lens in mm, keys evenly spaced over t 0..1, eased in and out), or
 //           {pos, fwd, up, vfov} fixed, all in Blender coordinates; vfov overrides the lens;
-//           {track: {person, bone, dist, height, angle, smooth, vfov}} follows a person playing a take: it looks at
+//           {track: {person, bone, dist, height, angle, facing, smooth, vfov}} follows a person playing a take: it looks at
 //           their bone (default spine_03) from dist metres (3), height metres above it (0.1), angle degrees round from
 //           their front at frame 0 (0 = in front, 90 = their left side), the bearing then held in the room so their
 //           turns show; it trails their moves by smooth seconds (0.4). {eyes: {person, vfov}}: through their eyes as
@@ -185,6 +185,8 @@ function place(cam, job, t, aspect, ed, actors) {
         const toes = new THREE.Vector3();
         for (const sd of ['l', 'r']) if (rig.bones[`ball_${sd}`] && rig.bones[`foot_${sd}`]) toes.add(rig.bones[`ball_${sd}`].getWorldPosition(new THREE.Vector3()).sub(rig.bones[`foot_${sd}`].getWorldPosition(new THREE.Vector3())));
         toes.setY(0);
+        // facing: [x, z] fixes the front in the room, so two solvers of the same take are filmed from the same place
+        if (k.facing) toes.set(k.facing[0], 0, k.facing[1]);
         const dir = (toes.lengthSq() > 1e-6 ? toes : rig.fwd.clone().applyQuaternion(yaw).setY(0)).normalize()
           .applyAxisAngle(Y, THREE.MathUtils.degToRad(k.angle ?? 0));
         cam.userData.track = { dir, at: at.clone() };
