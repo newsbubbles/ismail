@@ -2332,6 +2332,7 @@ from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list
 from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
 from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
 from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
+from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)

@@ -369,7 +369,7 @@ def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = Fa
     override_grant='<why it does not fit>' asks anyway and logs the reason). phone.md, "Nothing personal on the
     page" and "Don't ask for what is granted"."""
     guards.check_private(text)                    # first, so an override is never logged for text that cannot go
-    g = guards.check_grant(text, guards.asks_yes_no(text), override_grant, 'phone_say')
+    g = guards.check_grant(text, guards.asks_yes_no(text), override_grant, 'phone_say', sender)
     return guards.with_note(_call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender,
                                   priority=priority), g)
 
@@ -484,7 +484,7 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
     override_grant='<why the grant does not fit>' shows it anyway and logs the reason (phone.md)."""
     guards.check_private(title, text, buttons, inputs, link_label)   # before an override is logged or a video copied
     g = guards.check_grant([title, text], guards.is_yes_no(buttons, inputs, f'{title} {text}'), override_grant,
-                           'phone_panel_show')
+                           'phone_panel_show', sender)
     if video:
         video = phone_video_copy(video, video_wait)
     return guards.with_note(_call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
@@ -504,7 +504,7 @@ def phone_ask(text: str, wait: float = 0, sender: str = None, override_grant: st
     Refused when a standing grant already answers it (act on the grant, then say what you did in a caption;
     override_grant='<why it does not fit>' asks anyway and logs the reason), or when it names a private term."""
     guards.check_private(text)
-    g = guards.check_grant(text, True, override_grant, 'phone_ask')
+    g = guards.check_grant(text, True, override_grant, 'phone_ask', sender)
     return guards.with_note(_call('ask', timeout=float(wait or 0) + 15, text=text, wait=wait, who=sender), g)
 
 

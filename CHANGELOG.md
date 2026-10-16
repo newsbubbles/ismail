@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Standing grants know whose step it is: grant_check, grant_add, routes and the still-ask list
+
+- Grants gain `owner` and `kind` (ledger:M209-M210, the 10-16 intent-rules review, clusters 1 and 2). A grant with
+  an owner is that agent's: its own ask is refused with "act on it", anyone else's with "this is <owner>'s: send it
+  to them". A route (`kind: "route"`) sends any question with its keyword to the owner instead of the person.
+  Phone and stage asks pass `sender` to the check, and overrides log the verdict and the sender.
+- A still-ask list no grant covers: anything public, money, accounts and passwords, deleting. A matching grant then
+  only adds a note, and the question goes to the person.
+- New ops on a new `asks` shelf: `grant_check(ask, sender)` (`act:` / `send:` / `ask:`, for a NEEDS NATE line or
+  any ask no op sees), `grant_list()`, `grant_add(says, keywords, source, owner, kind)` (the person's own words as
+  its source; keywords that match any ask and still-ask words refused; a broken file is never overwritten) and
+  `grant_drop(id, why)` (kept in `grants_dropped.jsonl`). Tests: `tests/test_guards.py`.
+
 ### stage: cameras that follow, baked into keys for the render
 
 - `stage_follow(scene, object, target, offset, space, lag, look, look_offset, look_lag, orbit, snap, where)`: a
