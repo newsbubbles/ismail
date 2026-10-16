@@ -4,6 +4,8 @@ Bar 1 starts at beat 0 when the engine starts. A clip is a block of notes `lengt
 `loop` times (None = until replaced). One rule decides every conflict: a clip queued on a track at beat S
 replaces what that track would play from S on. Clips that start at or after S are removed; a clip still
 playing at S is cut at S (notes it started before S ring out). A stop is the same rule with nothing after.
+A clip or stop may carry a section name (a chapter of a set): cancel_section takes back what a section still had
+to do from a beat on, when the set cuts over to something else mid-chapter.
 """
 import bisect
 import math
@@ -31,6 +33,7 @@ class Clip:
         self.expr = None                 # {lane: [(beat_in_clip, value)]} for performer voices (bend, vib, ...)
         self.beat0 = 0.0                 # the song beat of the clip's beat 0 (a deck's window start), for performers
         self.context = []                # [(beat < 0, midi, dur, vel)]: what a performer played before the clip
+        self.section = None              # the set section (chapter) it was queued for, if named
 
     @property
     def natural_end(self):
@@ -59,6 +62,7 @@ class Timeline:
         self.bpb = bpb
         self.clips = {}                  # id -> Clip (current and future; finished ones are pruned)
         self.stops = {}                  # track -> [beat]: explicit stops, for display
+        self.stop_sections = {}          # track -> {beat: section} for stops queued with a section name
         self._n = 0
 
     def copy(self):
@@ -67,6 +71,7 @@ class Timeline:
         t = Timeline(self.bpb)
         t.clips = {k: _copy.copy(c) for k, c in self.clips.items()}
         t.stops = {k: list(v) for k, v in self.stops.items()}
+        t.stop_sections = {k: dict(v) for k, v in self.stop_sections.items()}
         t._n = self._n
         return t
 
@@ -148,8 +153,46 @@ class Timeline:
         self.clips[c.id] = c
         return c
 
-    def stop(self, track, beat):
+    def stop(self, track, beat, section=None):
         self.stops.setdefault(track, []).append(beat)
+        tags = self.stop_sections.setdefault(track, {})
+        if section:
+            tags[beat] = section
+        else:
+            tags.pop(beat, None)
+
+    def cancel_section(self, section, beat, keep=()):
+        """Take back what `section` still has to do from `beat` on: its clips that start there or later go, its
+        clips still playing then are cut there (their last notes ring out), and its stops after it are dropped.
+        keep: clip ids and (track, stop beat) pairs left alone (a batch that cancels a section may reuse its name).
+        A dropped stop does not bring back a clip it had already ended. Returns (removed ids, cut ids,
+        [(track, stop beat)])."""
+        removed, cut, stops = [], [], []
+        for c in sorted(self.clips.values(), key=lambda c: (c.track, c.start)):
+            if c.section != section or c.id in keep:
+                continue
+            if c.start >= beat - EPS:
+                del self.clips[c.id]
+                removed.append(c.id)
+            elif c.end is None or c.end > beat + EPS:
+                c.cut = beat
+                cut.append(c.id)
+        for track, beats in self.stops.items():
+            tags = self.stop_sections.get(track, {})
+            gone = [s for s in beats if s > beat + EPS and tags.get(s) == section and (track, s) not in keep]
+            if gone:
+                self.stops[track] = [s for s in beats if s not in gone]
+                for s in gone:
+                    tags.pop(s, None)
+                stops += [(track, s) for s in gone]
+        return removed, cut, stops
+
+    def sections(self, now):
+        """Section names with a clip or stop still to come or playing after `now`."""
+        out = {c.section for c in self.clips.values() if c.section and (c.end is None or c.end > now + EPS)}
+        for track, tags in self.stop_sections.items():
+            out |= {sec for b, sec in tags.items() if b > now + EPS and b in self.stops.get(track, [])}
+        return sorted(out)
 
     def cancel(self, cid, now):
         c = self.clips.get(cid)
@@ -167,6 +210,9 @@ class Timeline:
             del self.clips[cid]
         for t in self.stops:
             self.stops[t] = [s for s in self.stops[t] if s > now - EPS]
+        for t, tags in self.stop_sections.items():
+            for b in [b for b in tags if b <= now - EPS]:
+                del tags[b]
 
     def events(self, clip, b0, b1, groups):
         """Onsets of `clip` in [b0, b1): yields (cycle, event index, onset beat). groups: the clip's events as

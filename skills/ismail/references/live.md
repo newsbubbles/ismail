@@ -203,7 +203,14 @@ A section written from scratch took 5 to 10 minutes; a request for a new ending 
 it replaced had already started.
 
 - When a message arrives, read `live_status` (heard bar, runway) before writing anything, and cancel what no
-  longer fits: `Set.cancel('<section>')` takes back the clips logged for it.
+  longer fits: `Set.cancel('<section>')` takes back the clips logged for it that have not started.
+- **Cutting over mid-chapter.** Queue each section with its name (`Set.q(clips, section='s05_canopy')`,
+  `Set.moves(moves, section='s05_canopy')`, or `section=` on `live_queue` and `live_fx`). Then
+  `live_queue(clips, cancel_section='s05_canopy')` lands the new section and takes back what the old one still
+  had to do from where the new clips land (`cancel_at=` for another bar): its later clips go, its playing ones
+  are cut there (last notes ring out), its stops and effect moves after it are dropped, and a glide in progress
+  holds where it is. `Set.cut('<section>', at=<bar>)` does it with nothing new queued. `live_status` lists the
+  sections with work ahead. Clips queued without a section are never touched.
 - Build each move from the kit so the visible work is short calls, not long file writes.
 - Judge a sparse part by `live_status`'s "max 10 s" level, not the snapshot: a vocal call read -70 dB when the
   snapshot fell in its rest.
@@ -217,8 +224,13 @@ sessions' renders, Blender and video jobs.
 - **Read `python -m ismail.machine` before the set and before every slow step.** It names the other jobs. Go on
   when it says go; the person can overrule the heat.
 - **Guard on audio trouble, never on machine CPU alone.** A guard that polls `live_status` every ~15 s and pauses
-  on new underruns past a small allowance, late notes, a mixer above ~65% twice, or STALLED holds a set safely.
-  Four pauses triggered by whole-machine CPU came with zero underruns.
+  on new underruns past a small allowance, late notes, a `headroom:` line saying THIN or DROPOUT, or STALLED
+  holds a set safely. Four pauses triggered by whole-machine CPU came with zero underruns, and three more on a
+  mixer at 65-75% cost minutes of silence with clean audio.
+- **Headroom, not the mixer %, says how near a dropout is.** `mixer:` is the time a block takes to mix against
+  its length, so it climbs when other programs load the machine (a 489% peak while tracks were rigged, with no
+  underrun). The device plays from 500 ms of audio mixed ahead; `headroom: 430 ms of 500` is that cushion at its
+  thinnest since the last status. THIN (under 125 ms) is the time to drop a track or an effect; 0 is a dropout.
 - **Every watchdog runs as a tracked background task**, so its exit wakes you. A detached guard paused a set and
   the person sat in 50 minutes of silence; a helper loop that crashed left 9 more. `live_status` flags what a
   guard should wake you for: `SILENT ON AIR` (nothing sounding for 10 s), `RUNWAY ENDED` (nothing new queued for 8
@@ -379,7 +391,8 @@ air; only you hear it, through `live_listen(deck=...)`.
    playing, puts B on air, and when it ends stops A and takes it off air (cued), ready for the next `live_load`.
    `live_status` says `SILENT ON AIR` when a set that has played sounds nothing for 10 s. The reply is the timeline; `live_status` shows each deck's
    fader and eq as they move.
-4. Watch `live_status`'s mixer load: two full songs is about 50%; above ~70% risks dropouts.
+4. Watch `live_status`'s mixer load (two full songs is about 50%) and its headroom line: the cushion of mixed
+   audio is the real risk, and it reads THIN before a dropout.
 
 Put the swap where the incoming deck's bass plays: a 16-bar section whose loop restarts on a sparse bar leaves a
 hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
@@ -412,6 +425,10 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   reply says "output moved". To move by hand mid-set, `live_device(device='JBL')` (part of a name works): the
   timeline and queue carry on with a gap of about a second, nothing is reloaded. `live_stop` waits for the engine
   to exit and kills it with its workers when a dead device would hang it.
+- **Follow where the person listens.** When they move to the phone, `live_device(device='none')` turns the room
+  speaker off: the clock, the queue, the phone stream, the recording and `live_listen` carry on, and
+  `live_status` says `output off`. `live_device(device='default')` (or a name) turns it back on, no restart. Both
+  at once is a speaker on plus the phone stream.
 - **Heavy jobs before the set.** Stem separation during a set caused 1,654 underruns; measurement scripts at idle
   priority were fine.
 - **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Share reverbs on
