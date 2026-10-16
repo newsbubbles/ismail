@@ -178,6 +178,22 @@ def analyze_kit(project: str, source: str = 'ref:drums', bars: list = None, k: i
 
 
 @op()
+def analyze_contour(project: str, source: str = 'ref:other', bars: list = None, hop_ms: float = 10.0,
+                    fmin: str = 'C1', fmax: str = 'C7', start: int = 0, max_rows: int = 200) -> str:
+    """Pitch contour of a monophonic line: one row per hop_ms frame with time, bar, beat, f0 in Hz, the pitch as
+    a float MIDI number, the nearest note and its cents offset, and pYIN's voicing probability ('-' = unvoiced).
+    For slides, vibrato, ornaments and intonation (maqam steps a quarter tone apart) inside or between notes; for a
+    pitch per note use analyze_melody(cents=True). Output is one window of at most max_rows frames (cap 1000) from
+    frame `start`; the last line names the start of the next window. bars up to 64; only the window is analysed.
+    Narrow fmin/fmax around the line when a backing or an octave error pulls the reading."""
+    P = _load(project)
+    try:
+        return A.pitch_contour(*P.source(source, bars), bars, hop_ms, fmin, fmax, start, max_rows)[1]
+    except A.AnalysisError as e:
+        raise OpError(str(e))
+
+
+@op()
 def analyze_sections(project: str, source: str = 'render', sections: dict = None, block: int = 4) -> str:
     """Loudness per section: rms, peak, loudest and quietest 400 ms, and the song's dynamic range. sections =
     {"intro": [1, 4], "climax": [25, 28], ...} (bars inclusive); omitted = blocks of `block` bars. Flags the

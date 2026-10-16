@@ -58,6 +58,7 @@ HEAR (audio -> text), cheapest first
   analyze_drums       drum lanes as step strings             analyze_pitches   notes sounding per beat
   analyze_roll        piano roll of a source (same features the comparisons score)
   analyze_melody      monophonic line -> notes (+confidence) analyze_formants  vowels of a voice
+  analyze_melody(cents=True) each note's pitch in cents      analyze_contour   f0 per frame (slides, quarter tones)
   stem_parts          one part or several in a stem (a second player, bleed), before tone matching to it
   analyze_timbre / analyze_spectrum / sound_compare          spectrogram (PNG, last resort)
   sound_zoom          one window time-sharp + frequency-sharp sound_zoom_diff  where yours differs from >= 3 takes

@@ -786,6 +786,94 @@ def _octave_up(y, ta, tb, est_midi, max_midi):
     return m
 
 
+# ------------------------------------------------------------------ pitch in cents (maqam steps, intonation)
+
+def melody_cents_text(notes, text):
+    """melody()'s reading with each note's pitch as numbers (ledger:M225): the note lines become tab-separated rows
+    start, note, dur, vel, midi (float), hz, cents. The header and the confidence lines are kept as they are."""
+    lines = text.splitlines()
+    rows = [lines[0], "# start\tnote\tdur\tvel\tmidi\thz\tcents   (the first four columns are notes_write format; midi is "
+                      "the measured pitch as a float = note + cents/100; hz from it at A440; cents from the named "
+                      "equal-tempered note, -50..+50, so a quarter tone reads near +-50 and sits on either neighbour)"]
+    for st, p, d, v, c in notes:
+        m = p + c / 100.0
+        rows.append(f"{fmt_num(st)}\t{midi_to_name(p)}\t{fmt_num(d)}\t{v}\t{m:.2f}\t{440 * 2 ** ((m - 69) / 12):.2f}"
+                    f"\t{int(round(c)):+d}")
+    return '\n'.join(rows + [ln for ln in lines[1:] if ln.startswith('#')])
+
+
+CONTOUR_MAX_ROWS = 1000
+
+
+def pitch_contour(path, grid, bars=None, hop_ms=10.0, fmin='C1', fmax='C7', start=0, max_rows=200, max_bars=64):
+    """f0 per frame over bars, one window of at most max_rows frames from frame `start` (ledger:M225). pYIN gives the
+    voicing and the coarse pitch (10-cent bins, octave-safe); YIN's interpolated pitch replaces it on frames where the
+    two agree within 60 cents, so steady pitches read to a cent or two. Only the window (plus 0.25 s each side) is
+    analysed, so paging through long ranges stays cheap. Returns (rows, text)."""
+    if not 1.0 <= hop_ms <= 100.0:
+        raise AnalysisError(f"hop_ms={hop_ms} is outside 1-100 ms; 10 ms reads note shapes and vibrato, 5 ms "
+                            f"ornaments, 25-50 ms a long phrase in few rows")
+    if not 1 <= max_rows <= CONTOUR_MAX_ROWS:
+        raise AnalysisError(f"max_rows={max_rows} is outside 1-{CONTOUR_MAX_ROWS}; read a long range window by window "
+                            f"with start=, or raise hop_ms for fewer rows")
+    lo, hi = librosa.note_to_hz(fmin), librosa.note_to_hz(fmax)
+    if hi <= lo * 1.5:
+        raise AnalysisError(f"fmin {fmin} .. fmax {fmax} is too narrow (or reversed); give at least half an octave")
+    y = load(path)
+    b0, b1, _ = _range(y, ASR, grid, bars, max_bars)
+    t0 = max(0.0, grid.bar_time(b0))
+    t1 = min(len(y) / ASR, grid.bar_time(b1))
+    hop = int(round(hop_ms * ASR / 1000))
+    nfr = int(np.floor((t1 - t0) * ASR / hop))
+    if nfr <= 0:
+        raise AnalysisError(f"bars {b0}-{b1 - 1} hold no audio in this source (it is {len(y) / ASR:.1f} s long)")
+    if not 0 <= start < nfr:
+        raise AnalysisError(f"start={start} is past the end: bars {b0}-{b1 - 1} have {nfr} frames at {hop_ms:g} ms "
+                            f"(start=0 .. {nfr - 1})")
+    k1 = min(nfr, start + max_rows)
+    ctx = int(np.ceil(0.25 * ASR / hop))
+    ka, kb = start - ctx, k1 + ctx
+    s0 = int(round(t0 * ASR))
+    a, b = s0 + ka * hop, s0 + kb * hop + 1
+    seg = np.zeros(b - a, dtype=np.float32)
+    ia, ib = max(a, 0), min(b, len(y))
+    if ib > ia:
+        seg[ia - a:ib - a] = y[ia:ib]
+    f0, voiced, prob = librosa.pyin(seg, fmin=lo, fmax=hi, sr=ASR, hop_length=hop, frame_length=2048, center=True)
+    fy = librosa.yin(seg, fmin=lo, fmax=hi, sr=ASR, hop_length=hop, frame_length=2048, center=True)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        agree = voiced & (np.abs(1200 * np.log2(fy / f0)) < 60)
+    f0 = np.where(agree, fy, f0)
+    rows = []
+    for k in range(start, k1):
+        i = k - ka
+        t = (s0 + k * hop) / ASR
+        fb = grid.time_to_bar(t)
+        bar = int(np.floor(fb + 1e-9))
+        beat = (fb - bar) * grid.bpb + 1
+        hz = float(f0[i]) if voiced[i] and np.isfinite(f0[i]) else None
+        rows.append({'t': round(t, 4), 'bar': bar, 'beat': round(beat, 3), 'hz': hz,
+                     'midi': float(librosa.hz_to_midi(hz)) if hz else None, 'p': float(prob[i])})
+    L = [f"# pitch contour bars {b0}-{b1 - 1}, frames {start}-{k1 - 1} of {nfr} at {hop_ms:g} ms "
+         f"({rows[0]['t']:.3f}-{rows[-1]['t']:.3f} s)",
+         "# t_s\tbar\tbeat\thz\tmidi\tnote\tcents\tp   (midi is the pitch as a float; cents from the named "
+         "equal-tempered note, -50..+50; p = pYIN voicing probability; '-' = unvoiced)"]
+    for r in rows:
+        if r['hz'] is None:
+            L.append(f"{r['t']:.3f}\t{r['bar']}\t{r['beat']:.2f}\t-\t-\t-\t-\t{r['p']:.2f}")
+        else:
+            n = int(round(r['midi']))
+            L.append(f"{r['t']:.3f}\t{r['bar']}\t{r['beat']:.2f}\t{r['hz']:.2f}\t{r['midi']:.2f}\t{midi_to_name(n)}"
+                     f"\t{int(round((r['midi'] - n) * 100)):+d}\t{r['p']:.2f}")
+    vm = [r['midi'] for r in rows if r['midi'] is not None]
+    L.append(f"# voiced {len(vm)} of {len(rows)} frames" +
+             (f"; median {np.median(vm):.2f} ({midi_to_name(np.median(vm))}), range {min(vm):.2f}-{max(vm):.2f}"
+              if vm else " (unpitched, silent, or the pitch is outside fmin/fmax)"))
+    L.append(f"# more: start={k1} for the next window ({nfr - k1} frames left)" if k1 < nfr else
+             f"# end of bars {b0}-{b1 - 1}")
+    return rows, '\n'.join(L)
+
+
 def transcribe(path, grid, bars=None, quant=0.25, max_bars=16, fmin='C1', n_octaves=7, threshold=0.35,
                max_poly=6, fund_db=24):
     """Polyphonic note estimate from a harmonic-sum CQT salience. Good on synth riffs/chords, rough on dense mixes.
