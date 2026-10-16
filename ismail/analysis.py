@@ -576,6 +576,7 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
         if len(vm) < max(3, 0.25 * (e - a)):
             continue
         p = _refine_pitch(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, float(np.median(vm)))
+        p = _octave_up(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, p, librosa.note_to_midi(fmax))
         sb = grid.time_to_beat(times[a]) - base_beat
         eb = grid.time_to_beat(times[min(e, nfr - 1)]) - base_beat
         qs = round(sb / quant) * quant
@@ -753,6 +754,36 @@ def _refine_pitch(y, ta, tb, est_midi):
         if sc > best:
             best, bm = sc, m
     return bm
+
+
+def _octave_up(y, ta, tb, est_midi, max_midi):
+    """Undo a sub-octave reading. pYIN's smoothing can hold the previous pitch through a quick jump an octave up
+    (the lower note's period is also a period of the higher one), so a note read at f is checked against its own
+    spectrum: if its odd partials (f, 3f, 5f) are near silent while its even ones (2f, 4f, 6f) carry the sound,
+    the note is at 2f. Any real tone at f has energy at f or 3f, so a true low note keeps its octave."""
+    d = tb - ta
+    a, b = int((ta + d * 0.2) * ASR), int((tb - d * 0.2) * ASR)
+    x = y[max(a, 0):b]
+    if len(x) < 1024:
+        return est_midi
+    n = 1 << 16
+    S = np.abs(np.fft.rfft(x * np.hanning(len(x)), n=n))
+
+    def part(f):                                           # strongest bin within 30 cents of f
+        if f >= ASR / 2 * 0.95:
+            return 0.0
+        lo, hi = int(f * 2 ** (-0.3 / 12) * n / ASR), int(np.ceil(f * 2 ** (0.3 / 12) * n / ASR)) + 1
+        return float(S[lo:hi].max())
+
+    m = est_midi
+    while m + 12 <= max_midi + 0.5:
+        f = 440 * 2 ** ((m - 69) / 12)
+        odd = sum(part(f * h) for h in (1, 3, 5))
+        even = sum(part(f * h) for h in (2, 4, 6))
+        if even <= 0 or odd >= 0.1 * even:                 # odd partials within 20 dB: the read octave holds
+            break
+        m += 12
+    return m
 
 
 def transcribe(path, grid, bars=None, quant=0.25, max_bars=16, fmin='C1', n_octaves=7, threshold=0.35,
