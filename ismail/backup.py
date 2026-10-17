@@ -3,8 +3,9 @@
 A song's build.py rebuilds proj/ from scratch and never deletes the old one: the old proj/ moves to backups/. Moved
 whole, every backup also carries cache/, renders/ and stems/, which the engine regenerates: 13 rebuilds in 15
 minutes wrote 3.2 GB (Machine Steward, 2026-10-08). Here the old proj/ still moves to backups/, the regenerable
-folders come back into the new proj/, and older backups that still hold them hand them to the song's _reclaim/
-(never deleted: the user clears _reclaim). What cannot be made again (project.json, history/, sounds/, voices/,
+folders come back into the new proj/, and older backups that still hold them hand them to the reclaim folder at the
+root of the drive, <root>/_reclaim/backups_<date>/<song>/<path from the drive root> (ismail.reclaim, ledger:M229;
+never deleted: the user deletes that folder). What cannot be made again (project.json, history/, sounds/, voices/,
 notes) stays in every backup.
 
     from ismail import backup
@@ -19,6 +20,8 @@ import re
 import shutil
 import sys
 import time
+
+from . import reclaim as _reclaim
 
 REGEN = ('cache', 'renders', 'stems')
 _STAMP = re.compile(r'_(\d{8}_\d{6})(?:_\d+)?$')
@@ -56,7 +59,7 @@ def set_aside(proj, backups=None, regen=REGEN, keep_full=2):
     os.makedirs(backups, exist_ok=True)
     dst = _free(os.path.join(backups, os.path.basename(proj) + '_' + time.strftime('%Y%m%d_%H%M%S')))
     shutil.move(proj, dst)
-    trim(backups, regen=regen, keep_full=keep_full, reclaim=os.path.join(song, '_reclaim', 'backups'))
+    trim(backups, regen=regen, keep_full=keep_full)
     return {'backup': dst, 'carry': {d: os.path.join(dst, d) for d in regen if os.path.isdir(os.path.join(dst, d))}}
 
 
@@ -82,14 +85,23 @@ def carry_back(kept, proj):
     return moved
 
 
-def trim(backups, regen=REGEN, keep_full=2, reclaim=None, dry=False):
+README_LINE = ('Regenerable folders (cache, renders, stems) of old song backups: the engine makes them again. One '
+               'folder per song; the path inside starts at the drive root.')
+
+
+def trim(backups, regen=REGEN, keep_full=2, reclaim=None, dry=False, run=None):
     """The newest keep_full backups that still hold regenerable folders keep them; older ones move those folders
-    to reclaim/<backup name>/ (default: the song's _reclaim/backups). Only time-stamped folders (<name>_YYYYmmdd_HHMMSS)
-    count. Returns [(backup name, bytes moved)]."""
+    to the reclaim folder, <root>/_reclaim/backups_<date>/<song>/<path from the drive root> (ismail.reclaim; reclaim:
+    another root instead). Only time-stamped folders (<name>_YYYYmmdd_HHMMSS) count. run: a list that gets the
+    reclaim.Run used (for its folder and note). Returns [(backup name, bytes moved)]."""
     backups = os.path.abspath(backups)
     if not os.path.isdir(backups):
         return []
-    reclaim = reclaim or os.path.join(os.path.dirname(backups), '_reclaim', 'backups')
+    song = os.path.basename(os.path.dirname(backups))
+    R = _reclaim.Run('backups', why=f"backup trim {song}: regenerable folders of older backups", group=song,
+                     songs=os.path.dirname(os.path.dirname(backups)), root=reclaim)
+    if run is not None:
+        run.append(R)
     stamped = [n for n in os.listdir(backups) if _STAMP.search(n) and os.path.isdir(os.path.join(backups, n))]
     stamped.sort(key=lambda n: (_STAMP.search(n).group(1), n))
     full = [n for n in stamped if any(os.path.isdir(os.path.join(backups, n, d)) for d in regen)]
@@ -102,9 +114,9 @@ def trim(backups, regen=REGEN, keep_full=2, reclaim=None, dry=False):
                 continue
             size += _size(src)
             if not dry:
-                os.makedirs(os.path.join(reclaim, n), exist_ok=True)
-                shutil.move(src, _free(os.path.join(reclaim, n, d)))
+                R.move(src, backup=n)
         out.append((n, size))
+    R.finish(README_LINE, who='ismail backup')
     return out
 
 
@@ -115,12 +127,16 @@ def main(argv=None):
         return 2
     keep = int(a[a.index('--keep') + 1]) if '--keep' in a else 2
     dry = '--dry' in a
-    moved = trim(a[1], keep_full=keep, dry=dry)
+    run = []
+    moved = trim(a[1], keep_full=keep, dry=dry, run=run)
     total = sum(s for _, s in moved)
     for n, s in moved:
         print(f"{'would move' if dry else 'moved'} {n}: {s / 1e6:.0f} MB")
-    print(f"{len(moved)} backups trimmed, {total / 1e9:.2f} GB {'would go' if dry else 'went'} to _reclaim"
-          f" (never deleted: the user clears _reclaim)")
+    print(f"{len(moved)} backups trimmed, {total / 1e9:.2f} GB {'would go' if dry else 'went'} to {run[0].dir}"
+          f" (never deleted: the user deletes {run[0].folder} when they like)" if run else
+          f"{len(moved)} backups trimmed")
+    if run and run[0].note:
+        print('note: ' + run[0].note)
     return 0
 
 
