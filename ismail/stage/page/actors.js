@@ -121,6 +121,9 @@ const HIP_SLACK = 0.12, YAW_SLACK = THREE.MathUtils.degToRad(35);
 // over the planted feet, so a head going forward puts the hips back and the reverse; the hips go at most BAL_MAX from
 // over the feet (past that the feet step), a stepping foot carries half its share, and the hips ease there in BAL_S
 const BAL_UPPER = 0.35, BAL_MAX = 0.15, BAL_S = 0.12;
+// when the weight goes past BAL_MAX from over the feet the body would fall: the back foot steps under it (BAL_STEP on
+// past where the hips are going), as a person leaning in to a partner takes a step instead of tipping
+const BAL_STEP = 0.1;
 // pins while following (the user, 2026-10-04, sitting in real life while following a man on a bar stool: "anchors his
 // butt to the chair, so if I do anything with my head and hands his butt's gonna be anchored unless I move completely
 // away from the chair"). Pinned hips stay on the seat, facing the person's own way; the user's head bends the spine
@@ -317,12 +320,15 @@ export function initActors(ed, live) {
     // the drawn hips: over the feet (balance); hipAt stays where the body is going, which the steps follow
     let hipDraw = hipAt;
     const fl = st.feet.l, fr = st.feet.r;
+    if (st.body) st.body.over = null;
     if (!pin && fl.at && fr.at) {
       const wl = fl.step ? 0.5 : 1, wr = fr.step ? 0.5 : 1;
       const S = fl.at.clone().multiplyScalar(wl).addScaledVector(fr.at, wr).divideScalar(wl + wr);
-      const off = S.clone().addScaledVector(head, -BAL_UPPER).divideScalar(1 - BAL_UPPER).sub(S).setY(0);
+      const off = S.clone().addScaledVector(head, -BAL_UPPER).divideScalar(1 - BAL_UPPER).sub(S).setY(0), b = st.body;
+      // the weight is where the hips would have to go to hold it, reversed: past BAL_MAX it has left the feet
+      b.over = off.length() > BAL_MAX * s ? { dir: off.clone().negate().normalize(), S: S.clone() } : null;
       if (off.length() > BAL_MAX * s) off.setLength(BAL_MAX * s);
-      const tgt = S.add(off).setY(hipAt.y), b = st.body;
+      const tgt = S.add(off).setY(hipAt.y);
       const dt = f.t - (b.balT ?? f.t);
       if (!b.bal || dt < 0 || dt > GAP_S) b.bal = tgt.clone();
       else b.bal.lerp(tgt, 1 - Math.exp(-dt / BAL_S));
@@ -408,8 +414,12 @@ export function initActors(ed, live) {
       if (!ft.at) { ft.at = want.clone(); ft.q = base.clone(); }
       if (!ft.q) ft.q = base.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
-      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
+      // the weight has left the feet: the foot further from it steps under it
+      const over = !pinned && st.body && st.body.over, oa = over && st.feet[sd === 'l' ? 'r' : 'l'].at;
+      const fall = over && oa && ft.at.clone().sub(over.S).dot(over.dir) <= oa.clone().sub(over.S).dot(over.dir);
+      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || fall || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
         const to = pinned ? want.clone() : want.clone().add(lead);
+        if (fall) to.addScaledVector(over.dir, BAL_STEP * st.s);
         ft.step = { from: ft.at.clone(), to, q0: ft.q.clone(), q1: base.clone(), t0: now };
       }
       let at = ft.at, fq = ft.q;
