@@ -22,6 +22,54 @@
   mesh of its material, so screens that show different things need their own materials; which way up a picture
   lands follows the plane's UVs.
 
+### Tests: two stage tests no longer depend on how fast the Windows runner is
+
+- `test_a_recorded_move_thins_to_few_keys_that_play_back_within_two_cm_and_two_degrees` timed out on Windows CI
+  (main after pr:261 on 10-15, and pr:262), and `test_smooth_glides_through_a_key_and_stop_halts_there` did the same
+  on 10-12. Each time it was the run's first `node -e`: the script itself takes about 25 ms, and every later node
+  call in those runs passed. The five stage test files that run page code in node now share `tests/nodejs.py`: the
+  run's first launch is a warm-up of its own (`node -e 0`, up to 300 s, named in the warnings summary if it takes
+  over 5 s), and a script that still times out at 60 s runs once more, with a warning. A script that hangs still
+  fails.
+- `test_listen_and_presence_ops` failed on Windows CI (pr:262 on 10-15, main at 50b115b on 10-17) with the note "heard by
+  tester" but still `waiting`: the check that marks it handed runs on a timer thread 0.3 s after the note, and the
+  test read presence after a fixed 0.6 s sleep. It now waits up to 30 s for the note to be decided, with a 2 s
+  window to hand it over, and still asserts `handed`.
+
+### engine: one reclaim folder at the root of the drive
+
+- New `ismail/reclaim.py` (ledger:M229, the user's voice note: all reclaim folders go in one place at the root of the
+  drive). `reclaim.root()` is `$ISMAIL_RECLAIM`, else on Windows the songs folder's drive root plus `_reclaim`
+  (`D:\_reclaim`), else `songs/_reclaim`; when that cannot be made or written it falls back to `songs/_reclaim` and
+  the op's report says so. `reclaim.move(path, what, group=, why=)` moves a file or folder to
+  `_reclaim/<what>_<YYYYMMDD>/<group>/<path from the drive root>`, never overwrites (a numeric suffix), appends a run
+  to that folder's `manifest.json` and adds or updates its entry in `_reclaim/README.txt` (other entries untouched).
+  `reclaim.Run` keeps many moves as one run. `python -m ismail.reclaim` lists the folders with their sizes;
+  `python -m ismail.reclaim move <path> <what>` moves one. Nothing in it deletes.
+- `song_compress` moves the WAVs to `_reclaim/flac_<date>/<song>/` there (its per-file data kept in the manifest),
+  and `ismail.backup` trims older backups into `_reclaim/backups_<date>/<song>/`, both instead of `songs/_reclaim`.
+- `machine_disk` lists the reclaim folder's folders with their sizes, and the old per-song `songs/*/_reclaim`
+  folders as before. The disk hint, the worktree cleanup message, SKILL.md and docs/reference.md name the new place.
+- Tests point `ISMAIL_RECLAIM` at a temp folder for every test (tests/conftest.py); new tests/test_reclaim.py.
+
+### skill: every song can be made again from its folder
+
+- `skills/ismail/SKILL.md`: each song keeps a script that rebuilds it and renders its audio (`build.py`, `set.py`, and
+  one written for a song taken out of a live session), with what it uses copied into the folder. So its renders and
+  stems are disposable: kept are reference audio, recordings and takes, and upload masters; a WAV gets an mp3 before it
+  goes, and cleared files move to the reclaim folder, never deleted by an agent (ledger:M228, the user's word).
+- Step 8 (play it and ask): a person who cares about disk space is asked once whether WAVs are kept; the answer is
+  a standing choice, and "no" means named renders with `mp3='only'`, older WAVs with an mp3 to the reclaim folder.
+
+### phone: a panel left unsent keeps what you typed
+
+- Typed text, dictated text and picks in a panel were lost when you left it (Later, another tab, a tap outside) and
+  came back: the page rebuilt the panel from the agent's values, so Send went out empty. The page now keeps a
+  panel's inputs when it goes away unsent and puts them back when you reopen it, on this phone across a reload too;
+  a voice note that lands while the panel is closed still adds its words. An answer or Not now drops them
+  (ledger:M227).
+- Tests: `tests/test_phone.py` checks the page keeps, restores and drops them.
+
 ### A sampler with several sounds on one pitch; a phone now label that expires (ledger:M218)
 
 - From the Live DJ's handoff (item 55, 10-16): a kit maps one pitch to one instrument, so the beatbox kit put each

@@ -118,8 +118,12 @@ Find any tool by what you need or by role with `ops_find`.
   measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
   (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
   (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from. A finished song's stems
-  and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to
-  `_reclaim`, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone.
+  and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to the
+  reclaim folder, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone. Everything moved
+  out to free space goes to one reclaim folder at the root of the drive (`ismail.reclaim`: `D:\_reclaim` on
+  Windows, `songs/_reclaim` elsewhere, `$ISMAIL_RECLAIM` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
+  file's path from the drive root, with a `manifest.json` and a `README.txt` line per folder, and `machine_disk`
+  lists its folders with their sizes. The person deletes a folder there; nothing in ismail deletes.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
@@ -408,6 +412,7 @@ ismail/
   audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup
+  reclaim.py     the one reclaim folder at the drive root: moves keep their path, a manifest per folder (M229)
   tags.py        ID3 tags on every mp3; lexicon.py a person's own words mapped to ismail's terms
   mcp_server.py, guide.py
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops

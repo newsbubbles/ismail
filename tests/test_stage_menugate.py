@@ -1,10 +1,7 @@
 """One object menu at a time, and a pick made while the last menu closes is kept (page/menugate.js, run in node)."""
-import json
-import shutil
-import subprocess
 from pathlib import Path
 
-import pytest
+import nodejs
 
 GATE = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 'menugate.js').as_uri()
 
@@ -20,12 +17,8 @@ const close = () => { const c = closeNow; closeNow = null; if (c) c(); };
 
 
 def _node(body):
-    if not shutil.which('node'):
-        pytest.skip('node is not installed')
     js = f"{HARNESS}\nimport('{GATE}').then(async (m) => {{ const g = m.menuGate(run, () => selected); {body} }});"
-    r = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    return json.loads(r.stdout)
+    return nodejs.run(js)
 
 
 def test_picking_another_thing_while_a_menu_is_up_opens_its_menu_once_the_first_closes():

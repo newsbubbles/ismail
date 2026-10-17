@@ -1,10 +1,7 @@
 """A pinch again at the same point takes the next thing under it (page/pickcycle.js, run in node)."""
-import json
-import shutil
-import subprocess
 from pathlib import Path
 
-import pytest
+import nodejs
 
 CYCLE = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 'pickcycle.js').as_uri()
 
@@ -14,12 +11,8 @@ V = """const V = (x, y, z) => ({ x, y, z, clone() { return V(this.x, this.y, thi
 
 
 def _node(body):
-    if not shutil.which('node'):
-        pytest.skip('node is not installed')
     js = f"{V}\nimport('{CYCLE}').then((m) => {{ const seen = []; m.setPickEmit((t, e) => seen.push(e)); {body} }});"
-    r = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    return json.loads(r.stdout)
+    return nodejs.run(js)
 
 
 def test_a_second_pinch_at_the_same_point_takes_the_next_thing():

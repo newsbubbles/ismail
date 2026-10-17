@@ -71,7 +71,8 @@ enters the repository.
    owner record. The project deletes the remote branch by itself.
 10. **Not cleaned up.** `list` flags it:
     - **MERGED:** `done <path>`. It refuses a copy with uncommitted or untracked files (caches aside): look at
-      them, and move what matters to `_reclaim/` in the main checkout. Never delete them.
+      them, and move what matters with `python -m ismail.reclaim move <path> <what>` (it lands in `_reclaim/` at the
+      root of the drive). Never delete them.
     - **IDLE:** an unmerged copy with no commit for 3 days goes back to its owner, or to the person when it has none.
       `done` refuses anything unmerged: open or finish its pull request, or ask the person before dropping it.
       Nothing unmerged is deleted without a yes.

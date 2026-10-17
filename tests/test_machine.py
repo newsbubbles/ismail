@@ -464,8 +464,15 @@ def test_machine_disk_lists_the_songs_their_growth_and_reclaim(board, tmp_path):
     assert 'growth since 2000-01-01' in text and 'big  +0.00 GB' not in text
     lines = text.splitlines()
     assert any(l.strip().startswith('0.00 GB  big') for l in lines)
-    assert '_reclaim (moved out, waiting for the user to clear)' in text
+    assert '_reclaim under songs/, the old per-song places (moved out, waiting for the user to clear)' in text
     assert os.path.join('small', 'live', '_reclaim') in text
+    rr = os.environ['ISMAIL_RECLAIM']                          # the one reclaim folder at the drive root (M229)
+    os.makedirs(os.path.join(rr, 'flac_20261017', 'song'))
+    with open(os.path.join(rr, 'flac_20261017', 'song', 'a.wav'), 'wb') as f:
+        f.write(b'0' * 2 ** 20)
+    text = machine.disk_text(root=str(root), roots=[])
+    assert f"reclaim folder {rr} (moved out, waiting for the user to delete): 0.0 GB in 1 folders" in text
+    assert any(l.strip() == '0.00 GB  flac_20261017' for l in text.splitlines())
     assert sorted(os.listdir(board / 'disk')) == ['2000-01-01.json', __import__('time').strftime('%Y-%m-%d') + '.json']
     assert 'songs/' in api.OPS['machine_disk']()
 
