@@ -6,6 +6,7 @@ import numpy as np
 import soundfile as sf
 
 from . import analysis as A
+from . import audiofile
 from .api import op, OpError, _load
 from .api_cmp import STEMS, ref_stems
 
@@ -60,7 +61,7 @@ def ref_retune(project: str, cents: float = None) -> str:
         nd = orig['stems_dir'].rstrip('/\\') + tag
         os.makedirs(nd, exist_ok=True)
         for s in STEMS:
-            p = os.path.join(orig['stems_dir'], s + '.wav')
+            p = audiofile.find(os.path.join(orig['stems_dir'], s + '.wav'))
             if os.path.exists(p):
                 retune(p, os.path.join(nd, s + '.wav'))
                 done.append(f"{os.path.basename(nd)}/{s}.wav")
@@ -82,7 +83,7 @@ def analyze_swing(project: str, source: str = None) -> str:
     if source is None:
         ref = P.d.get('reference') or {}
         source = 'ref:drums' if ref.get('stems_dir') and os.path.exists(
-            os.path.join(ref['stems_dir'], 'drums.wav')) else P.auto_source(None)
+            audiofile.find(os.path.join(ref['stems_dir'], 'drums.wav'))) else P.auto_source(None)
     path, g = P.source(source)
     data, txt = A.swing(path, g.bpm, g.offset)
     if source in ('ref', 'render'):
