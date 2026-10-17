@@ -20,6 +20,57 @@
 - Tests: `tests/test_worktrees.py` (a squash-merged copy passing on its files, then on its merged pull request after
   main moved on; a commit after the merge, no merged pull request and no gh all refused). No test calls the real gh.
 
+### Stage: a camera crew's tools (stage_on_air, stage_pointer)
+
+- For the same talk on the stage (the user, 10-17: agents as a camera crew, a director calling the shots; "wherever my
+  hands point, the camera view shows some kind of pointer ... funny"). `stage_on_air(scene, camera)` cuts to a
+  camera: the monitor material (default `monitor_screen`) shows it live through `stage_surface`, and the cut is
+  logged in scenes/<scene>/on_air.jsonl with its UTC time and an optional note; a camera the scene's manifest does
+  not list is refused and not logged. `stage_on_air_log` lists the cuts with how long each stayed on air. A cut on a
+  monitor that already shows a camera only changes the camera (no new render target).
+- `stage_pointer`: a giant foam finger where a person's hand points (a body following the user live or playing a
+  take), from the shoulder through the index fingertip to the first surface (2.5 m out when nothing is hit). With
+  `when='point'` it shows only while that hand points (index straight, middle and ring curled, the hand 40 cm or more
+  from the shoulder, held 120 ms), and grows in and shrinks away. It is drawn on a new layer, `CAM_ONLY` (editor.js),
+  which the headset's eyes never enable and capture and surface cameras do, so the speaker never sees it and every
+  camera does.
+- Limits: one style for now (`foam_finger`); the pointing test reads the body's finger bones, so a body without
+  finger bones needs `when='always'`. Only the first person following or playing is used unless `person` is given.
+
+### Stage: screens in the room (stage_surface)
+
+- For a talk given from the stage (the user, 10-17: a lecture hall with slides, a video backdrop, a teleprompter
+  and a monitor showing the camera on air): `stage_surface` shows an image, a video, text or a live camera on every
+  mesh of a named material, now, by an agent. The meshes draw flat and unlit (a screen glows; `glow` dims it) and
+  get their own material back with `clear=True`; nothing is saved to the scene. A re-exported room gets its
+  surfaces back; another scene starts with none.
+- The surface keeps its mesh's shape: its aspect is measured from the UVs of its first triangle in world space (or
+  `aspect=`), and images, video and text are drawn into a canvas of that shape, fitted `contain` (on `background`),
+  `cover` or `stretch`; `px` is the long side. Text wraps to the width, `lines` at once, scrolling `scroll` lines a
+  second from `line`. A camera renders at the surface's aspect with the camera's horizontal field of view, `fps`
+  times a second, never drawing its own screen (a texture cannot be read while it is drawn into).
+- Videos load as a whole file (seekable without range requests), muted unless `sound=True`. In a capture
+  (`stage_capture` setup, timed with `at_song`) a video is seeked to the film's time every frame and a camera
+  renders every frame, so the edit sees what the room showed. Files must be inside the scene folder; the op checks
+  before sending.
+- Limits: each camera feed is one more render of the room (keep `fps` low in the headset); a surface covers every
+  mesh of its material, so screens that show different things need their own materials; which way up a picture
+  lands follows the plane's UVs.
+
+### Tests: two stage tests no longer depend on how fast the Windows runner is
+
+- `test_a_recorded_move_thins_to_few_keys_that_play_back_within_two_cm_and_two_degrees` timed out on Windows CI
+  (main after pr:261 on 10-15, and pr:262), and `test_smooth_glides_through_a_key_and_stop_halts_there` did the same
+  on 10-12. Each time it was the run's first `node -e`: the script itself takes about 25 ms, and every later node
+  call in those runs passed. The five stage test files that run page code in node now share `tests/nodejs.py`: the
+  run's first launch is a warm-up of its own (`node -e 0`, up to 300 s, named in the warnings summary if it takes
+  over 5 s), and a script that still times out at 60 s runs once more, with a warning. A script that hangs still
+  fails.
+- `test_listen_and_presence_ops` failed on Windows CI (pr:262 on 10-15, main at 50b115b on 10-17) with the note "heard by
+  tester" but still `waiting`: the check that marks it handed runs on a timer thread 0.3 s after the note, and the
+  test read presence after a fixed 0.6 s sleep. It now waits up to 30 s for the note to be decided, with a 2 s
+  window to hand it over, and still asserts `handed`.
+
 ### engine: one reclaim folder at the root of the drive
 
 - New `ismail/reclaim.py` (ledger:M229, the user's voice note: all reclaim folders go in one place at the root of the
