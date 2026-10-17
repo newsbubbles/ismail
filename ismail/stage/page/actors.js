@@ -118,8 +118,8 @@ const HIP_SLACK = 0.12, YAW_SLACK = THREE.MathUtils.degToRad(35);
 // balance, a first cut at gravity (the user, 2026-10-04: anchor "any part of their physical gravitational stack"), for
 // bodies from a start pose (moveStartBody): the drawn hips stay within BAL_MAX of their place over the planted feet,
 // easing there in BAL_S, and past that the foot further back steps under the weight, BAL_STEP past its goal. (The same
-// idea in poseBase, the 2026-10-17 study measured, made following worse: hip jitter 3 -> 14 m/s^2, feet sliding
-// 4 cm/s; taken out until it is redone there)
+// idea in poseBase with a counter-lean (hips pushed away from the head), the 2026-10-17 study measured, made following
+// worse: hip jitter 3 -> 14 m/s^2, feet sliding 4 cm/s; poseBase now does it this way too)
 const BAL_MAX = 0.15, BAL_S = 0.12, BAL_STEP = 0.1;
 // pins while following (the user, 2026-10-04, sitting in real life while following a man on a bar stool: "anchors his
 // butt to the chair, so if I do anything with my head and hands his butt's gonna be anchored unless I move completely
@@ -314,20 +314,34 @@ export function initActors(ed, live) {
       b.hip.y = under.y;
       hipAt = b.hip.clone();
     }
+    // balance as in moveStartBody: the drawn hips at most BAL_MAX from over the planted feet, eased in BAL_S; the steps
+    // follow hipAt (where the head leads) and, held at the limit, the foot further back steps under the weight
+    let hipDraw = hipAt;
+    const fl = st.feet.l, fr = st.feet.r;
+    if (!pin && fl.at && fr.at) {
+      const b = st.body, mid = fl.at.clone().add(fr.at).multiplyScalar(0.5);
+      const away = hipAt.clone().sub(mid).setY(0);
+      b.held = away.length() > BAL_MAX * s ? away.clone().normalize() : null;
+      const tgt = b.held ? mid.clone().addScaledVector(b.held, BAL_MAX * s).setY(hipAt.y) : hipAt.clone();
+      const dt = f.t - (b.balT ?? f.t);
+      if (!b.bal || dt < 0 || dt > GAP_S) b.bal = tgt.clone(); else b.bal.lerp(tgt, 1 - Math.exp(-dt / BAL_S));
+      b.bal.y = hipAt.y; b.balT = f.t;
+      hipDraw = b.bal.clone();
+    } else if (st.body) st.body.held = null;
     st.lastHip = hipAt.clone(); st.lastYaw = base.clone();             // the body's facing, not the head's
     pel.parent.updateMatrixWorld(true);
-    pel.position.copy(pel.parent.worldToLocal(hipAt.clone()));
+    pel.position.copy(pel.parent.worldToLocal(hipDraw.clone()));
     setWorldQ(pel, base.clone().multiply(rig.rest.pelvis.q));
     // the spine leans from the hips (or the seat) toward where the user's head is (its length kept)
     let lean = null;
     {
       const up = rig.rest.head.p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base).normalize();
-      const to = head.clone().sub(hipAt).normalize();
+      const to = head.clone().sub(hipDraw).normalize();
       lean = new THREE.Quaternion().setFromUnitVectors(up, to);
       const ang = 2 * Math.acos(Math.min(1, Math.abs(lean.w)));
       if (ang > LEAN_MAX) lean = new THREE.Quaternion().slerp(lean, LEAN_MAX / ang);
     }
-    spreadLook(st, f, base, delta, lean, P, hipAt);
+    spreadLook(st, f, base, delta, lean, P, hipDraw);
     // arms and hands, fingers
     const side = (sd, h) => {
       const hd = f[h];
@@ -393,8 +407,11 @@ export function initActors(ed, live) {
       if (!ft.at) { ft.at = want.clone(); ft.q = base.clone(); }
       if (!ft.q) ft.q = base.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
-      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
+      const held = !pinned && st.body && st.body.held, lagging = held && other.at && ft.at.clone().sub(other.at).dot(held) < 0;
+      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || (lagging && ft.at.distanceTo(want) > 0.05 * st.s)
+          || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
         const to = pinned ? want.clone() : want.clone().add(lead);
+        if (lagging) to.addScaledVector(held, BAL_STEP * st.s);
         ft.step = { from: ft.at.clone(), to, q0: ft.q.clone(), q1: base.clone(), t0: now };
       }
       let at = ft.at, fq = ft.q;
