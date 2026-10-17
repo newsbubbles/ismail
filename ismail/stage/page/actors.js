@@ -1003,7 +1003,7 @@ export function initActors(ed, live) {
       const [up, lo, ha] = ARM[sd];
       const target = byUser ? eye.clone().add(vA(now.j[0]).sub(vA(f.head)).applyQuaternion(M).multiplyScalar(s))
         : S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
-      shoulderFollow(rig, sd, target, S.handW[sd].clone().add(B.off));
+      shoulderFollow(rig, sd, target, S.handW[sd].clone().add(B.draw || B.off));
       twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(B.off).add(new THREE.Vector3(0, -0.3, 0)));
       if (byUser && rig.cal[ha]) setWorldQ(rig.bones[ha], M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha]));
       else setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
@@ -1033,7 +1033,7 @@ export function initActors(ed, live) {
       const a = 2 * Math.acos(Math.min(1, Math.abs(b.lean.w)));
       if (a > LEAN_MAX) b.lean = new THREE.Quaternion().slerp(b.lean, LEAN_MAX / a);
     };
-    if (st.pins && st.pins.hips) { b.yaw.identity(); b.off.set(0, 0, 0); lean(); return b; }
+    if (st.pins && st.pins.hips) { b.yaw.identity(); b.off.set(0, 0, 0); b.draw = null; lean(); return b; }
     const f0 = new THREE.Vector3(0, 0, -1).applyQuaternion(D).setY(0);
     const yawD = f0.lengthSq() > 1e-6 ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), f0.normalize()) : new THREE.Quaternion();
     const ang = b.yaw.angleTo(yawD);
@@ -1054,6 +1054,7 @@ export function initActors(ed, live) {
     const away = P0.clone().add(b.off).sub(S).sub(P0.clone().sub(S0)).setY(0);
     const back = standing && away.length() > BAL_MAX * s ? away.clone().setLength(away.length() - BAL_MAX * s).negate() : new THREE.Vector3();
     const o = b.off.clone().add(back).setY(drop);
+    b.draw = o;                                                         // where the hips are drawn (the arms' rest moves with them)
     lean(o);
     const moved = b.off.lengthSq() > 1e-6 || drop < -1e-3 || back.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3)
       || ['l', 'r'].some((sd) => st.pins && st.pins['foot_' + sd] && st.pins['foot_' + sd].distanceTo(b.feet0[sd].p) > 1e-3);
