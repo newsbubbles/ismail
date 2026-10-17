@@ -437,8 +437,7 @@ def _sounds_used(tr):
     def walk(inst):
         if not inst:
             return
-        if inst.get('type') == 'sampler' and inst.get('sound'):
-            out.add(inst['sound'])
+        out.update(instruments.sampler_sound_names(inst))
         if inst.get('type') == 'kit':
             for v in inst['map'].values():
                 walk(v)

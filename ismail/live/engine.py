@@ -124,6 +124,14 @@ def _chunk_spans(notes, length, bpb, reach):
     return spans
 
 
+def _bar_groups(notes, bpb):
+    """One event per bar of the clip (a sampler that picks among sounds counts the hits of a bar)."""
+    groups = {}
+    for i, (st, _, _, _) in enumerate(notes):
+        groups.setdefault(int(math.floor(round(st, 6) / bpb + 1e-9)), []).append(i)
+    return [sorted(g, key=lambda i: notes[i][0]) for _, g in sorted(groups.items())]
+
+
 def _mono_groups(notes, inst):
     if inst.get('_whole'):          # a deck track with instrument automation: its whole section is one event
         return [list(range(len(notes)))] if notes else []
@@ -496,6 +504,9 @@ class Engine:
                             ns = [c.notes[j] for j in g]
                             t0 = ns[0][0]
                             span = max(s + d for s, _, d, _ in ns) - t0
+                            if instruments.select_cycle(tr['inst']):
+                                # a sampler picks its sound on the note's place in the song: the deck's song beat
+                                extra['_beat0'] = c.beat0 + self._pass_key(c, k) * c.length + t0
                         notes_s = [((s - t0) * self.spb, m + tp, d * self.spb, v) for s, m, d, v in ns]
                         # code and mimic voices do not depend on where the note sits in the bar
                         lead = 0.0 if tr['inst']['type'] in ('code', 'mimic') else (t0 % self.bpb) * self.spb
@@ -1099,14 +1110,23 @@ class Engine:
             if c.context and (not spans or spans[0].on > EPS):
                 spans.insert(0, _Span(0.0, min(float(self.bpb), c.length)))     # what came before rings in
             return spans
+        if not inst.get('_whole') and instruments.select_cycle(inst):
+            return _bar_groups(c.notes, self.bpb)
         return _mono_groups(c.notes, inst)
+
+    def _pass_key(self, c, k):
+        """Which pass of a looped clip a sampler that picks among sounds hears, as a song would if the clip were
+        written out again: passes repeat after the instrument's select_cycle, only for a clip of whole bars."""
+        cyc = instruments.select_cycle(self.tracks[c.track]['inst'])
+        whole = abs(c.length / self.bpb - round(c.length / self.bpb)) < EPS
+        return k % cyc if cyc > 1 and whole else 0
 
     def _variant(self, c, ei, k):
         """For a performer's chunk on pass k of its clip: (context from the previous pass, cut at its end, context
         from before the clip)."""
         spans = self.meta[c.id]['groups']
         if not spans or not isinstance(spans[0], _Span):
-            return ()
+            return (self._pass_key(c, k),) if instruments.select_cycle(self.tracks[c.track]['inst']) else ()
         loops = c.loop is None or c.loop > 1
         more = c.loop is None or k < c.loop - 1
         seam = loops and spans[0].on < EPS and spans[-1].end > c.length - EPS

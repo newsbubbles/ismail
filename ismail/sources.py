@@ -233,7 +233,8 @@ def used_refs(root, d):
             if i.get('type') == 'mimic':
                 out.append(provenance._mimic_source(root, i.get('profile', '')))
             if i.get('type') == 'sampler':
-                out.append(((d.get('sounds') or {}).get(i.get('sound'), {}) or {}).get('note') or '')
+                out += [((d.get('sounds') or {}).get(s, {}) or {}).get('note') or ''
+                        for s in provenance.sampler_sounds(i)]
     ref = (d.get('reference') or {}).get('file')
     if ref:
         out.append(ref)
@@ -281,9 +282,10 @@ def plays_source_audio(d):
         insts = [inst] + list((inst.get('map') or {}).values()) if inst.get('type') == 'kit' else [inst]
         for i in insts:
             if i.get('type') == 'sampler':
-                note = ((d.get('sounds') or {}).get(i.get('sound'), {}) or {}).get('note') or ''
-                if note.startswith(('imported from', 'avg of')):
-                    out.append((name, f"sample {i.get('sound')}, {_public(note)}"))
+                for s in provenance.sampler_sounds(i):
+                    note = ((d.get('sounds') or {}).get(s, {}) or {}).get('note') or ''
+                    if note.startswith(('imported from', 'avg of')):
+                        out.append((name, f"sample {s}, {_public(note)}"))
     return out
 
 

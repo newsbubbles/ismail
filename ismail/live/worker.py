@@ -113,6 +113,7 @@ def render_event(inst, notes, lead_s, bpm, root):
     bake, expr, iauto = inst.get('_bake') or [], inst.get('_expr'), inst.get('_auto') or {}
     tail = float(inst.get('_tail', MAX_TAIL_S))
     beat0, chunk, bpb = float(inst.get('_beat0', 0.0)), inst.get('_chunk'), inst.get('_bpb', 4)
+    keyed = '_beat0' in inst            # a sampler picking among sounds: where the bar sits in the song
     inst = {k: v for k, v in inst.items()
             if k not in ('_bake', '_expr', '_auto', '_whole', '_tail', '_beat0', '_chunk', '_bpb')}
     lead = int(round(lead_s * SR))
@@ -126,7 +127,7 @@ def render_event(inst, notes, lead_s, bpm, root):
     else:
         # onset at lead_s into its bar: synth and drum seeds land where the studio puts them
         y = instruments.render_instrument(inst, shifted, total, _auto_curves(iauto, lead_s, total) or None, bpm,
-                                          SR, root, 0.0, bpb)
+                                          SR, root, beat0 - lead_s * bpm / 60.0 if keyed else 0.0, bpb)
     if bake:
         from .. import fx as studio_fx
         ctx = _BakeCtx(bpm)

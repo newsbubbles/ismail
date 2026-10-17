@@ -41,6 +41,12 @@ def _mimic_source(root, profile):
     return ''
 
 
+def sampler_sounds(inst):
+    """The bank sounds a sampler plays: its 'sound', or each of its 'sounds' (names or {'sound': name, ...})."""
+    out = [inst.get('sound')] + [x if isinstance(x, str) else (x or {}).get('sound') for x in inst.get('sounds') or []]
+    return [s for s in out if s]
+
+
 def of_instrument(inst, d, root):
     """-> (status, text) for one instrument dict (a kit piece counts too)."""
     t = inst.get('type')
@@ -57,11 +63,15 @@ def of_instrument(inst, d, root):
             return DESIGNED, f"library voice {v}: {info['designed']}"
         return UNSTATED, f"code voice {v or '(inline code)'}" + (" (the song's own)" if local else '')
     if t == 'sampler':
-        s = (d.get('sounds') or {}).get(inst.get('sound'), {})
-        note = s.get('note') or ''
+        names = sampler_sounds(inst) or [None]
+        notes = [((d.get('sounds') or {}).get(n, {}) or {}).get('note') or '' for n in names]
+        if len(names) > 1:
+            measured = all(x.startswith(_SAMPLE_FROM) for x in notes)
+            return (MEASURED if measured else UNSTATED), f"samples {', '.join(names)}"
+        note = notes[0]
         if note.startswith(_SAMPLE_FROM):
-            return MEASURED, f"sample {inst.get('sound')}, {note}"
-        return UNSTATED, f"sample {inst.get('sound')}" + (f", {note}" if note else '')
+            return MEASURED, f"sample {names[0]}, {note}"
+        return UNSTATED, f"sample {names[0]}" + (f", {note}" if note else '')
     if t == 'kit':
         parts = [of_instrument(p, d, root) for p in (inst.get('map') or {}).values()]
         n = {k: sum(1 for s, _ in parts if s == k) for k in (MEASURED, DESIGNED, UNSTATED)}

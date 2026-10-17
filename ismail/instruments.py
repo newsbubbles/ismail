@@ -5,6 +5,7 @@ Notes arrive as (start_sec, midi, dur_sec, vel). Automation arrives as {param_pa
 covering the whole song, so voices can index absolute time.
 """
 import copy
+import math
 import numpy as np
 
 from . import dsp
@@ -49,6 +50,12 @@ SAMPLER_DEFAULT = {"type": "sampler", "sound": None, "root": "C4", "start": 0.0,
                    "loop_start": None, "loop_end": None, "one_shot": False, "pitch_track": True, "reverse": False,
                    "transpose": 0.0, "amp_env": {"a": 0.001, "d": 0.0, "s": 1.0, "r": 0.02},
                    "filter": None, "velocity_sens": 0.5, "gain_db": 0.0, "pan": 0.0}
+
+# a sampler with several sounds ('sounds': [a, b, c] in place of 'sound') picks one per note: in turn
+# (round_robin), at random, or by the note's velocity (each sound's 'vel': [lo, hi])
+SAMPLER_SELECT = ('round_robin', 'random', 'velocity')
+SAMPLER_LAYER_KEYS = ('sound', 'vel', 'gain_db')
+RANDOM_CYCLE = 8        # a live loop of a 'random' sampler repeats its picks after this many passes
 
 INSTRUMENT_TYPES = ('synth', 'sprite', 'sampler', 'kit', 'code', 'mimic') + tuple(DRUM_DEFAULTS)
 # the two synth engines: sprite (type 'synth' or 'sprite': oscillators, filter, envelopes; right for synth sounds)
@@ -102,9 +109,23 @@ def normalize(inst):
             raise InstrumentError(f"unknown {t} keys {sorted(unknown)}; valid: {sorted(DRUM_DEFAULTS[t])}")
         return deep_merge(dict(DRUM_DEFAULTS[t], type=t), inst)
     if t == 'sampler':
+        if inst.get('sounds') is not None:
+            if inst.get('sound'):
+                raise InstrumentError("sampler: give 'sound' (one sound) or 'sounds' (several), not both")
+            select = inst.get('select', 'round_robin')
+            if select not in SAMPLER_SELECT:
+                raise InstrumentError(f"sampler select={select!r}: use one of {', '.join(SAMPLER_SELECT)}")
+            full = deep_merge(SAMPLER_DEFAULT, {k: v for k, v in inst.items() if k != 'sounds'})
+            full['sounds'] = _sampler_layers(inst['sounds'], select)
+            full['select'] = select
+            return full
+        if 'select' in inst:
+            raise InstrumentError("sampler 'select' picks among 'sounds': [a, b, ...]; with one 'sound' there is "
+                                  "nothing to pick")
         full = deep_merge(SAMPLER_DEFAULT, inst)
         if not full['sound']:
-            raise InstrumentError("sampler needs 'sound': '<name>' from the sound bank (see sound_list / sound_make)")
+            raise InstrumentError("sampler needs 'sound': '<name>' from the sound bank (see sound_list / sound_make), "
+                                  "or 'sounds': [a, b, ...] with 'select'")
         return full
     if t == 'kit':
         if not isinstance(inst.get('map'), dict) or not inst['map']:
@@ -129,6 +150,118 @@ def normalize(inst):
             raise InstrumentError(f"unknown mimic keys {sorted(unknown)}; valid: profile, params, tail, gain_db, pan")
         return dict({"tail": 1.0, "gain_db": 0.0, "pan": 0.0, "params": {}}, **inst)
     raise InstrumentError(f"unknown instrument type {t!r}; use one of {', '.join(INSTRUMENT_TYPES)}")
+
+
+def _sampler_layers(sounds, select):
+    """'sounds' -> [{'sound', 'vel': [lo, hi] or None, 'gain_db'}]. With select='velocity' and no ranges given,
+    the sounds split 0-127 evenly in the order given (softest first)."""
+    if not isinstance(sounds, (list, tuple)) or not sounds:
+        raise InstrumentError("sampler 'sounds' is a list: ['a', 'b'] or [{'sound': 'a', 'vel': [0, 80]}, ...]")
+    out = []
+    for i, x in enumerate(sounds):
+        x = {'sound': x} if isinstance(x, str) else x
+        if not isinstance(x, dict) or not x.get('sound'):
+            raise InstrumentError(f"sounds[{i}]: a sound name, or {{'sound': '<name>', 'vel': [lo, hi], 'gain_db': 0}}")
+        bad = set(x) - set(SAMPLER_LAYER_KEYS)
+        if bad:
+            raise InstrumentError(f"sounds[{i}]: unknown keys {sorted(bad)}; valid: {', '.join(SAMPLER_LAYER_KEYS)}")
+        vel = x.get('vel')
+        if vel is not None:
+            if select != 'velocity':
+                raise InstrumentError(f"sounds[{i}].vel: velocity ranges are for select='velocity' (it is {select!r})")
+            if not (isinstance(vel, (list, tuple)) and len(vel) == 2 and 0 <= vel[0] <= vel[1] <= 127):
+                raise InstrumentError(f"sounds[{i}].vel={vel!r}: [lo, hi] with 0 <= lo <= hi <= 127")
+            vel = [int(vel[0]), int(vel[1])]
+        out.append({'sound': str(x['sound']), 'vel': vel, 'gain_db': float(x.get('gain_db', 0.0))})
+    if select == 'velocity':
+        given = [l['vel'] is not None for l in out]
+        if any(given) and not all(given):
+            raise InstrumentError("select='velocity': give every sound a 'vel': [lo, hi], or none (then they split "
+                                  "0-127 evenly, softest first)")
+        if not any(given):
+            n = len(out)
+            edges = [int(round(i * 127 / n)) for i in range(n + 1)]
+            for i, l in enumerate(out):
+                l['vel'] = [0 if i == 0 else edges[i] + 1, edges[i + 1]]
+    return out
+
+
+def sampler_sound_names(inst):
+    """Every bank sound a sampler instrument plays (raw or normalized; [] for any other type)."""
+    if not inst or inst.get('type') != 'sampler':
+        return []
+    out = [inst['sound']] if inst.get('sound') else []
+    for x in inst.get('sounds') or []:
+        out.append(x if isinstance(x, str) else (x or {}).get('sound'))
+    return [s for s in out if s]
+
+
+def _velocity_choices(layers, v):
+    """The sounds whose range holds velocity v; none: the nearest range."""
+    c = [j for j, l in enumerate(layers) if l['vel'][0] <= v <= l['vel'][1]]
+    if c:
+        return c
+    dist = [min(abs(v - l['vel'][0]), abs(v - l['vel'][1])) for l in layers]
+    return [int(np.argmin(dist))]
+
+
+def select_cycle(inst):
+    """0 when no sampler in inst picks among several sounds; else how many passes of a live loop (whose length is
+    whole bars) play before the picks repeat: round_robin repeats after len(sounds), velocity after the least common
+    multiple of how many sounds share a velocity, random after RANDOM_CYCLE."""
+    if not inst:
+        return 0
+    if inst.get('type') == 'kit':
+        out = 0
+        for v in (inst.get('map') or {}).values():
+            c = select_cycle(v)
+            if c:
+                out = math.lcm(out or 1, c)
+        return out
+    if inst.get('type') != 'sampler' or not inst.get('sounds'):
+        return 0
+    try:
+        full = normalize(inst)
+    except InstrumentError:
+        return 0
+    layers, sel = full['sounds'], full['select']
+    if sel == 'random':
+        return RANDOM_CYCLE
+    if sel == 'velocity':
+        return math.lcm(*{len(_velocity_choices(layers, v)) for v in range(128)})
+    return len(layers)
+
+
+def sampler_picks(p, notes, beat0=0.0, bpm=120.0, bpb=4):
+    """Which of p['sounds'] each note plays, keyed on where the note sits in the song (beat0: the song beat at
+    sample 0), so a window render, a live deck and the whole song pick alike. round_robin: the k-th hit of a bar
+    of c hits in song bar b plays sound (b * c + k) mod n (in turn, carrying on from bar to bar); random: a draw
+    seeded on the note's song beat and pitch; velocity: the sound whose 'vel' range holds the velocity, in turn
+    when ranges overlap."""
+    layers, sel = p['sounds'], p.get('select', 'round_robin')
+    n = len(layers)
+    spb = 60.0 / bpm
+    beats = [round(beat0 + st / spb, 6) for st, _, _, _ in notes]
+    bars = [int(math.floor(b / bpb + 1e-9)) for b in beats]
+    count = {}
+    for b in bars:
+        count[b] = count.get(b, 0) + 1
+    seen, turn = {}, [0] * len(notes)
+    for i in sorted(range(len(notes)), key=lambda i: (beats[i], notes[i][1], i)):
+        b = bars[i]
+        turn[i] = b * count[b] + seen.get(b, 0)
+        seen[b] = seen.get(b, 0) + 1
+    out = []
+    for i, (st, m, d, v) in enumerate(notes):
+        if sel == 'random':
+            key = int(round(beats[i] * 1e6)) % (1 << 62)
+            out.append(int(np.random.default_rng([key, int(m)]).integers(n)))
+        elif sel == 'velocity':
+            c = _velocity_choices(layers, v)
+            out.append(c[turn[i] % len(c)])
+        else:
+            out.append(turn[i] % n)
+    return out
 
 
 # ------------------------------------------------------------------ envelopes
@@ -439,19 +572,35 @@ def _resample_play(sample, ratio, n_out, start_s, end_s, loop, ls, le):
     return out * valid
 
 
-def render_sampler(p, notes, total_n, auto, sr):
-    snd = _SOUND_RESOLVER(p['sound'])
+def _sampler_source(p, name, sr):
+    """One bank sound as the sampler plays it: (array (2, N), start, end, loop start, loop end) in samples."""
+    snd = _SOUND_RESOLVER(name)
     if p['reverse']:
         snd = snd[:, ::-1]
     N = snd.shape[1]
-    root = pitch_to_midi(p['root'])
     start_s = p['start'] * sr
     end_s = N if p['end'] is None else min(N, p['end'] * sr)
     ls = (p['loop_start'] if p['loop_start'] is not None else p['start']) * sr
     le = (p['loop_end'] * sr) if p['loop_end'] is not None else end_s
+    return snd, start_s, end_s, ls, le
+
+
+def render_sampler(p, notes, total_n, auto, sr, beat0=0.0, bpm=120.0, bpb=4):
+    """One sound ('sound'), or one of several per note ('sounds' + 'select', see sampler_picks)."""
+    if p.get('sounds'):
+        picks = sampler_picks(p, notes, beat0, bpm, bpb)
+        names = [l['sound'] for l in p['sounds']]
+        gains = [dsp.undb(l['gain_db']) for l in p['sounds']]
+    else:
+        picks, names, gains = [0] * len(notes), [p['sound']], [1.0]
+    srcs = {}
+    root = pitch_to_midi(p['root'])
     out = np.zeros((2, total_n))
     ae = p['amp_env']
-    for st, m, d, v in notes:
+    for (st, m, d, v), j in zip(notes, picks):
+        if j not in srcs:
+            srcs[j] = _sampler_source(p, names[j], sr)
+        snd, start_s, end_s, ls, le = srcs[j]
         semis = ((m - root) if p['pitch_track'] else 0) + p['transpose']
         ratio = 2 ** (semis / 12) * p.get('_sr_ratio', 1.0)
         s0 = int(round(st * sr))
@@ -468,6 +617,8 @@ def render_sampler(p, notes, total_n, auto, sr):
         env = adsr(n, gate, ae['a'], ae['d'], ae['s'], ae['r'], sr)
         vs = p['velocity_sens']
         y = y * env * ((1 - vs) + vs * v / 127)
+        if gains[j] != 1.0:
+            y = y * gains[j]
         if p['filter']:
             f = p['filter']
             cut = _curve(auto, 'filter.cutoff', s0, n, f.get('cutoff', 20000))
@@ -583,7 +734,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
     if t == 'synth':
         out = render_synth(inst, notes, total_n, auto, bpm, sr, beat0, bpb) * SYNTH_GAIN
     elif t == 'sampler':
-        out = render_sampler(inst, notes, total_n, auto, sr)
+        out = render_sampler(inst, notes, total_n, auto, sr, beat0, bpm, bpb)
     elif t == 'code':
         out = render_code(inst, notes, total_n, sr, bpm, root, auto, beat0)
     elif t == 'mimic':

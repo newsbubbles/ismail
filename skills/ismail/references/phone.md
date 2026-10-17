@@ -314,6 +314,11 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   `now_mark=` / `next_mark=`: 'loved' (one they loved before, played again), 'replay' (played earlier, back
   again) or 'new' (just made). A small mark sits beside it; without one, the page shows a heart when they tapped
   Love this while that piece played.
+- The now label expires when what it names stops, so a later script that never calls `phone_now` cannot leave a
+  stale name up: by default it is tied to the clips playing as it goes up and those that start in the next 2 bars
+  (a label put up just before its music is queued); `now_of=[...]` ties it to named clips, tracks or decks
+  instead; `now_of=[]` keeps the old way (up until replaced or cleared). When it expires the page shows the
+  engine's own playing list. An engine that stops answering (a pause) leaves the label as it is.
 - The piece's shape: `phone_now(length=<seconds>, sections=[{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
   'drop'}], into=<seconds in, if it started before its name went up>)` on every chapter change. The page keeps a
   position line on screen under now/next (elapsed / length, the section, the next one and when), in time or bars as
