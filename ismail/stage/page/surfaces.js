@@ -9,6 +9,7 @@
 // renders every frame, so the edit sees what the room showed.
 import * as THREE from 'three';
 import { CAPTURE } from './capture.js';
+import { CAM_ONLY } from './editor.js';
 
 const FITS = new Set(['contain', 'cover', 'stretch']);
 
@@ -58,7 +59,8 @@ function wrap(ctx, text, width) {
 export function initSurfaces(ed, live, songNow) {
   const on = new Map();          // material name -> surface
   const renderer = ed.renderer;
-  const scratch = new THREE.PerspectiveCamera(50, 16 / 9, 0.05, 2000);   // layer 0 only, like a capture
+  const scratch = new THREE.PerspectiveCamera(50, 16 / 9, 0.05, 2000);   // layer 0 and the cameras' own, like a capture
+  scratch.layers.enable(CAM_ONLY);
 
   function materialName(c) {
     let name = c.material || null;
@@ -253,6 +255,15 @@ export function initSurfaces(ed, live, songNow) {
     }
     const name = materialName(c);
     const old = on.get(name);
+    // a cut on a monitor (stage_on_air): the same screen, another camera; only the camera changes, at once
+    if (old && old.source === 'camera' && c.camera && ['px', 'aspect', 'glow'].every((k) => (c[k] ?? null) === (old.c[k] ?? null))) {
+      const it = ed.byName.get(c.camera);
+      if (!it || it.type !== 'CAMERA') throw new Error(`no camera "${c.camera}"`);
+      old.cam = it.obj; old.fps = c.fps || 15; old.last = -Infinity; old.c = { ...c };
+      drawCamera(old);
+      live.emit('surface_set', { material: name, source: 'camera', camera: c.camera });
+      return { surface: name, source: 'camera', camera: c.camera, meshes: old.meshes.length, px: [old.W, old.H], on: summary() };
+    }
     const s = await build(name, c, old);
     if (old) { old.kept.clear(); release(old); }     // its meshes are the new one's now, with their own material kept
     on.set(name, s);

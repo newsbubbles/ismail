@@ -74,6 +74,11 @@ person and an agent change the same scene.
   material, and a plane's UVs decide which way up the picture is (check it once in a capture). Not saved to the
   scene. In `stage_capture` it is a setup command (`{"type": "surface", ...}`, timed with `at_song`); a video there
   follows the film's time and a camera renders every frame.
+- **A camera crew** for a talk on the stage: `stage_on_air(scene, camera)` cuts to a camera (the monitor material
+  shows it live, default `monitor_screen`) and logs the cut with its time; `stage_on_air_log` lists the cuts with how
+  long each stayed on air, for cutting the rendered angles afterwards. `stage_pointer` puts a giant foam finger where a
+  person's hand points (shoulder through fingertip), only while it points (`when='point'`), on a layer the headset
+  never shows: the monitor feed and `stage_capture` see it (a capture setup command `{"type": "pointer", ...}`).
 - **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
   moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
   `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.
