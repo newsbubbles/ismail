@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### skill: every song can be made again from its folder
+
+- `skills/ismail/SKILL.md`: each song keeps a script that rebuilds it and renders its audio (`build.py`, `set.py`, and
+  one written for a song taken out of a live session), with what it uses copied into the folder. So its renders and
+  stems are disposable: kept are reference audio, recordings and takes, and upload masters; a WAV gets an mp3 before it
+  goes, and cleared files move to the reclaim folder, never deleted by an agent (ledger:M228, the user's word).
+- Step 8 (play it and ask): a person who cares about disk space is asked once whether WAVs are kept; the answer is
+  a standing choice, and "no" means named renders with `mp3='only'`, older WAVs with an mp3 to the reclaim folder.
+
 ### A sampler with several sounds on one pitch; a phone now label that expires (ledger:M218)
 
 - From the Live DJ's handoff (item 55, 10-16): a kit maps one pitch to one instrument, so the beatbox kit put each

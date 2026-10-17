@@ -75,6 +75,16 @@ rebuild it (scripts, project, the code it imports and the files it reads, follow
 renamed and retagged for the new piece. Nothing in it reads the old folder, so any agent can pick it up like any
 other song. Rebuild its project and compare it with the source's before rendering.
 
+**Every song can be made again from its folder.** Each song keeps a script that rebuilds it and renders its audio:
+`build.py` for a studio song, `set.py` for a set, and one written for a song taken out of a live session or a jam
+too (from its set script, its log and its takes). The instruments, voices, samples and takes it uses are copied into
+the folder (`voices/`, `proj/sounds/`), so the script needs nothing outside it. Then its WAVs are disposable: renders,
+stems and separations can be cleared to free the disk and made again on demand. What stays is what cannot be made
+again (reference audio, recordings and takes) and the masters an upload needs. A WAV with no mp3 beside it gets one
+before it goes, so the person keeps a listenable copy. Nothing is deleted by an agent: cleared files move to the
+reclaim folder for the person to empty. A song without such a script is not finished: write it before clearing its
+audio.
+
 **Song checkpoints with git**: `git init` inside `songs/<slug>/` (the ismail repository ignores the whole `songs/`
 folder, nested repositories included), never in the ismail checkout. The song's `.gitignore` keeps out audio and
 anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backups/`, live recordings,
@@ -123,7 +133,7 @@ else is here (recreate a reference, build an instrument from recordings, play li
 5. **Fix** the worst line, re-render, re-check. Only then move to the next section.
 6. **Full render + structure check**: `analyze_structure(source='render')` must show the form you planned in the Sheet.
 7. **Master** (`references/mastering.md`): loudness for the genre or the reference, glue, mono low end, limiter ceiling -1 dB for mp3.
-8. **Play it to the user and ask** (`render(mp3='also')`): hand them the song itself, not only a sound through the speakers (the file attached where your app shows a player, else a clickable link with its full path; `play_file` opens it in their own player after you say it will play), name one or two things to listen for, report what you measured, and write their answer in the song's `notes/feedback.md`. Their ear overrules every score. Do this after each instrument chunk and each draft, not only at the end.
+8. **Play it to the user and ask** (`render(mp3='also')`): hand them the song itself, not only a sound through the speakers (the file attached where your app shows a player, else a clickable link with its full path; `play_file` opens it in their own player after you say it will play), name one or two things to listen for, report what you measured, and write their answer in the song's `notes/feedback.md`. Their ear overrules every score. Do this after each instrument chunk and each draft, not only at the end. **Disk space:** when the person cares about it, ask once whether they want WAVs kept, and keep their answer as a standing choice (in the song's notes and wherever your harness keeps what you know about them). If not, render named renders with `mp3='only'` (`latest.wav` is still written, since analysis reads it), and older WAVs that already have an mp3 move to the reclaim folder.
 
 ## Session Sheet (template)
 
