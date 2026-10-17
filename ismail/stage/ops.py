@@ -1501,7 +1501,8 @@ def _batch_index(line):
 def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: str = None, cameras: str = None,
                   path: dict = None, view: dict = None, track: dict = None, eyes: dict = None, fps: int = 30, size: list = None, clock_at: float = None,
                   clock: bool = True, setup: list = None, audio: str = None, video: bool = True,
-                  keep_frames: bool = False, sets: bool = True, scenes: str = None, name: str = None) -> str:
+                  keep_frames: bool = False, sets: bool = True, scenes: str = None, name: str = None,
+                  probe: str = None) -> str:
     """Capture the stage on the PC, frame-locked: frame n shows the song at t0 + n / fps (takes and loops, keyed
     objects, tree growth, lights and behaviours all at that time), however long a frame takes to draw; nothing drops.
     Runs in the background with no headset and without touching the stage the person uses (its own server and a
@@ -1527,7 +1528,9 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     in a key colour so a comp in post finds what covers it exactly ("object": instead of "material": that object's
     one material; default material "screen"); "color": "off" puts it back, e.g. timed with at_song.
     audio: the song file, cut to t0..t1 under the video. Out: <scene>/captures/<job>/capture.mp4 (H.264, 4:2:0), frames/f_00000.png with
-    keep_frames (or video=False)."""
+    keep_frames (or video=False). probe: a person playing a take; each frame's drawn hips, feet and head, the hips the
+    steps follow, the balance point and the planted feet go to log.txt as 'probe:' lines (JSON), to judge a body by
+    numbers (foot slide, jitter, balance)."""
     import re
     import uuid
     d = (Path(scenes).resolve() / scene) if scenes else _scene_dir(scene)
@@ -1602,7 +1605,8 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     job = {'id': job_id, 'scene': scene, 'scenes': str(d.parent), 't0': float(t0), 't1': float(t1), 'fps': int(fps),
            'size': size, 'camera': cam, 'clock': bool(clock), 'clock_at': float(t0 if clock_at is None else clock_at),
            'setup': setup or [], 'audio': str(Path(audio).resolve()) if audio else None, 'video': bool(video),
-           'keep_frames': bool(keep_frames or not video), 'sets': bool(sets), 'made': time.strftime('%Y-%m-%d %H:%M:%S')}
+           'keep_frames': bool(keep_frames or not video), 'sets': bool(sets), 'made': time.strftime('%Y-%m-%d %H:%M:%S'),
+           **({'probe': probe} if probe else {})}
     capture.write_json(jd / 'job.json', job)
     capture.write_json(jd / 'status.json', {'job': job_id, 'scene': scene, 'state': 'starting'})
     env = {**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[2]) + os.pathsep + os.environ.get('PYTHONPATH', '')}

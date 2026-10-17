@@ -107,9 +107,12 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
       }
       place(cam, job, songT, W / H, ed, actors);
       step();
+      const pr = job.probe ? JSON.stringify(probe(actors, job.probe, songT)) : null;
       const blob = await new Promise((res) => r.domElement.toBlob(res, 'image/png'));   // in the task that drew it
       const res = await post(`capture/frame?n=${n}`, blob);
       if (!res.ok) throw new Error(`frame ${n}: ${(await res.json().catch(() => ({}))).error || res.status}`);
+      if (pr) await post('clientlog', { entries: [{ level: 'probe', msg: pr }] }, true);   // after the frame: an await
+      // between drawing and toBlob hands back a cleared canvas (black frames)
     }
     performance.now = real;
     await post('capture/status', { state: 'done', frames: N, errors }, true);
@@ -155,6 +158,20 @@ function screenKey(ed) {
     if (!n) throw new Error(`no mesh draws the material "${name}"`);
     return { screen_key: c.color || '#00ff00', material: name, meshes: n };
   };
+}
+
+// probe: a person's body as numbers each frame (the 2026-10-16 body study: judge feet, hips and balance by measure,
+// not by eye): world positions of the drawn hips, feet and head, the hips the steps follow, the balance point, the
+// planted feet and which foot is stepping; written to the capture's log.txt as 'probe:' lines
+function probe(actors, person, t) {
+  const st = actors && actors.playing.get(person), rig = st && st.rig;
+  if (!rig) return { t, none: true };
+  const r = (v) => v && [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)];
+  const at = (n) => rig.bones[n] && r(rig.bones[n].getWorldPosition(new THREE.Vector3()));
+  const b = st.body || {}, fl = (st.feet && st.feet.l) || {}, fr = (st.feet && st.feet.r) || {};
+  return { t: +t.toFixed(3), pel: at('pelvis'), hd: at('head'), fl: at('foot_l'), fr: at('foot_r'), hip: r(st.lastHip),
+    bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: !!fl.step, sr: !!fr.step,
+    mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]) };
 }
 
 // the capture camera at song time t

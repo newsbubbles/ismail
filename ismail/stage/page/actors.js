@@ -1027,8 +1027,8 @@ export function initActors(ed, live) {
       knee: rig.bones[`calf_${sd}`].getWorldPosition(new THREE.Vector3()), thigh: rig.bones[`thigh_${sd}`].getWorldPosition(new THREE.Vector3()) }]));
     const want = vA(f.head).sub(vA(r.head)).setY(0).multiplyScalar(s);
     // a lean: the spine bends from the hips toward where the head went (what the hips did not follow), at most LEAN_MAX
-    const lean = () => {
-      const up = rig.bones.head.getWorldPosition(new THREE.Vector3()).sub(P0), to = up.clone().add(want.clone().sub(b.off));
+    const lean = (o = b.off) => {
+      const up = rig.bones.head.getWorldPosition(new THREE.Vector3()).sub(P0), to = up.clone().add(want.clone().sub(o).setY(0));
       b.lean = new THREE.Quaternion().setFromUnitVectors(up.normalize(), to.normalize());
       const a = 2 * Math.acos(Math.min(1, Math.abs(b.lean.w)));
       if (a > LEAN_MAX) b.lean = new THREE.Quaternion().slerp(b.lean, LEAN_MAX / a);
@@ -1040,18 +1040,32 @@ export function initActors(ed, live) {
     if (ang > YAW_SLACK) b.yaw.rotateTowards(yawD, ang - YAW_SLACK);
     const d = want.distanceTo(b.off), slack = HIP_SLACK * s;
     if (d > slack) b.off.lerp(want, (d - slack) / d);
-    lean();
-    const moved = b.off.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3)
+    // gravity in start-pose mode (the 2026-10-17 probe: a dancer's 34 cm bob drew as 3 cm, his hips at one height and
+    // up to 23 cm off his planted feet): the head going down from the start pose takes the hips down with it, so the
+    // knees bend (going up never lifts them off straight legs); and the drawn hips stay within BAL_MAX of their place
+    // over the planted feet, the spine leaning the rest of the way to the head, while the steps still follow the hips
+    // the head leads (b.off)
+    // (standing start poses only: a seated one, hips well under a leg's length up, keeps its seat)
+    const leg = rig.rest.thigh_l.p.distanceTo(rig.rest.calf_l.p) + rig.rest.calf_l.p.distanceTo(rig.rest.foot_l.p);
+    const standing = P0.y - Math.min(b.feet0.l.p.y, b.feet0.r.p.y) > 0.8 * leg;
+    const drop = standing ? Math.min(0, (f.head[1] - r.head[1]) * s) : 0;
+    const S = ['l', 'r'].map((sd) => st.feet[sd].at || b.feet0[sd].p).reduce((a, v) => a.add(v), new THREE.Vector3()).multiplyScalar(0.5);
+    const S0 = b.feet0.l.p.clone().add(b.feet0.r.p).multiplyScalar(0.5);
+    const away = P0.clone().add(b.off).sub(S).sub(P0.clone().sub(S0)).setY(0);
+    const back = standing && away.length() > BAL_MAX * s ? away.clone().setLength(away.length() - BAL_MAX * s).negate() : new THREE.Vector3();
+    const o = b.off.clone().add(back).setY(drop);
+    lean(o);
+    const moved = b.off.lengthSq() > 1e-6 || drop < -1e-3 || back.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3)
       || ['l', 'r'].some((sd) => st.pins && st.pins['foot_' + sd] && st.pins['foot_' + sd].distanceTo(b.feet0[sd].p) > 1e-3);
     if (!moved) return b;
     pel.parent.updateMatrixWorld(true);
-    pel.position.copy(pel.parent.worldToLocal(P0.clone().add(b.off)));
+    pel.position.copy(pel.parent.worldToLocal(P0.clone().add(o)));
     setWorldQ(pel, b.yaw.clone().multiply(Q0));
     rig.root.updateMatrixWorld(true);
-    const hip = P0.clone().add(b.off), now = f.t;
+    const hip = P0.clone().add(o), go = P0.clone().add(b.off), now = f.t;   // drawn hips; the hips the steps follow
     for (const sd of ['l', 'r']) {
       const F = b.feet0[sd], ft = st.feet[sd], other = st.feet[sd === 'l' ? 'r' : 'l'];
-      const goal = hip.clone().add(F.p.clone().sub(P0).applyQuaternion(b.yaw)); goal.y = F.p.y;
+      const goal = go.clone().add(F.p.clone().sub(P0).applyQuaternion(b.yaw)); goal.y = F.p.y;
       pinFoot(st, sd, goal);
       if (!ft.at) ft.at = F.p.clone();
       if (!ft.step && !other.step && ft.at.distanceTo(goal) > STEP_AT) ft.step = { from: ft.at.clone(), to: goal.clone(), t0: now };
