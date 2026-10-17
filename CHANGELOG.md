@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Worktrees: `done` takes a copy whose pull request was squash-merged
+
+- `done <path>` refused a copy whose pull request GitHub had squash-merged: "is not merged: N commits are not in
+  origin/main". A squash (or rebase) merge puts new commits on main, so the branch's own commits never land there,
+  and the copy stayed until someone removed it by hand.
+- `done` now lets a copy through on any of three tests, in this order, and says which one passed: its commits are in
+  `origin/main` (as before); its files are the same as `origin/main`'s (`git diff --quiet origin/main <head>`: no
+  work is lost); or `gh pr list --head <branch> --state merged` names a merged pull request whose last commit is the
+  copy's last commit. The answer ends with `(its commits are in origin/main)`, `(its files are the same as
+  origin/main)` or `(its pull request #N is merged)`.
+- Real unmerged work is still refused: a commit made after the merge, a branch with no merged pull request, and a
+  copy with no branch. The refusal says why the pull request test did not pass (no merged pull request, commits
+  made after it, or gh missing or not answering). The checks for uncommitted and untracked files are unchanged.
+- Limits: `list` still reads a squash-merged copy as unmerged (it does not ask gh per copy), so such a copy can show
+  IDLE or BEHIND until `done` removes it.
+- Tests: `tests/test_worktrees.py` (a squash-merged copy passing on its files, then on its merged pull request after
+  main moved on; a commit after the merge, no merged pull request and no gh all refused). No test calls the real gh.
+
 ### Stage: a camera crew's tools (stage_on_air, stage_pointer)
 
 - For the same talk on the stage (the user, 10-17: agents as a camera crew, a director calling the shots; "wherever my

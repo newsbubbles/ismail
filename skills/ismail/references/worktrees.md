@@ -75,6 +75,8 @@ enters the repository.
       root of the drive). Never delete them.
     - **IDLE:** an unmerged copy with no commit for 3 days goes back to its owner, or to the person when it has none.
       `done` refuses anything unmerged: open or finish its pull request, or ask the person before dropping it.
+      A squash-merged copy is merged: `done` takes it when its files are the same as `origin/main`'s or when gh
+      names a merged pull request ending at its last commit, and says which test passed.
       Nothing unmerged is deleted without a yes.
     - **An empty folder left behind.** On Windows git cannot remove a copy's folder while a program's working
       folder is inside it: the files and git's record go, the empty folder stays, and `list` never shows it again.

@@ -7,6 +7,8 @@ import pytest
 
 from ismail import handoffs, worktrees as wt
 
+REAL_MERGED_PR = wt._merged_pr
+
 
 def git(cwd, *args):
     r = subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf8')
@@ -38,6 +40,7 @@ def repo(tmp_path, monkeypatch):
         monkeypatch.setenv(k, v)
     monkeypatch.delenv('ISMAIL_WORKTREES_NOW', raising=False)
     monkeypatch.setattr(wt, '_open_prs', lambda repo: ({}, 'not in tests'))
+    monkeypatch.setattr(wt, '_merged_pr', lambda branch, head, repo: (None, 'gh is not asked in tests'))
     origin = str(tmp_path / 'origin.git')
     git(str(tmp_path), 'init', '-q', '--bare', '-b', 'main', origin)
     up = str(tmp_path / 'upstream')
@@ -64,6 +67,33 @@ def merge_pr(up, branch):
     git(up, 'merge', '-q', '--ff-only', 'origin/main')
     git(up, 'merge', '-q', '--no-ff', '--no-edit', f'origin/{branch}')
     git(up, 'push', '-q', 'origin', 'HEAD:main')
+
+
+def squash_pr(up, branch):
+    """origin/main takes a pushed branch as one new commit, as GitHub squash-merges a pull request: none of the
+    branch's own commits land on main."""
+    git(up, 'fetch', '-q', 'origin')
+    git(up, 'merge', '-q', '--ff-only', 'origin/main')
+    git(up, 'merge', '-q', '--squash', f'origin/{branch}')
+    git(up, 'commit', '-q', '-m', f'{branch} (#7)')
+    git(up, 'push', '-q', 'origin', 'HEAD:main')
+
+
+def fake_gh(monkeypatch, answer):
+    """gh answering `pr list --state merged` with answer (a list of pull requests, or an exception to raise); git
+    still runs. -> the gh commands asked."""
+    calls, real_run = [], subprocess.run
+
+    def run(args, **kw):
+        if args[0] != 'gh':
+            return real_run(args, **kw)
+        calls.append(args)
+        if isinstance(answer, Exception):
+            raise answer
+        return subprocess.CompletedProcess(args, 0, json.dumps(answer), '')
+    monkeypatch.setattr(wt, '_merged_pr', REAL_MERGED_PR)
+    monkeypatch.setattr(wt.subprocess, 'run', run)
+    return calls
 
 
 def copy_of(s, path):
@@ -166,6 +196,57 @@ def test_done_removes_only_a_merged_clean_copy(repo):
     assert 'removed' in msg and 'feature' in msg and not os.path.exists(path)
     assert git(main, 'branch', '--list', 'feature') == ''
     assert wt._key(path) not in wt.load_owners(main)
+    assert msg.endswith('(its commits are in origin/main)')
+
+
+def test_done_takes_a_squash_merged_copy_by_its_files_or_its_merged_pull_request(repo, monkeypatch):
+    main, up = repo
+    wt.new('feature', 'dev a', main)
+    path = os.path.join(os.path.dirname(main), 'proj-wt-feature')
+    commit(path, 'f.py', 'f = 1\n')
+    git(path, 'push', '-q', 'origin', 'feature')
+    squash_pr(up, 'feature')
+    monkeypatch.setattr(wt, '_merged_pr', lambda *a: pytest.fail('the files say it: gh is not needed'))
+    msg = wt.done(path, main)                                # nothing landed on main since: the same files
+    assert msg.endswith('local branch feature (its files are the same as origin/main)') and not os.path.exists(path)
+    assert git(main, 'branch', '--list', 'feature') == ''
+
+    wt.new('other', 'dev b', main)
+    path = os.path.join(os.path.dirname(main), 'proj-wt-other')
+    commit(path, 'g.py', 'g = 1\n')
+    git(path, 'push', '-q', 'origin', 'other')
+    squash_pr(up, 'other')
+    advance(up)                                              # main moved on: the files differ, GitHub knows
+    head = git(path, 'rev-parse', 'HEAD')
+    calls = fake_gh(monkeypatch, [{'number': 8, 'headRefOid': head}])
+    msg = wt.done(path, main)
+    assert msg.endswith('local branch other (its pull request #8 is merged)') and not os.path.exists(path)
+    assert git(main, 'branch', '--list', 'other') == '' and wt._key(path) not in wt.load_owners(main)
+    assert calls and calls[0][:7] == ['gh', 'pr', 'list', '--head', 'other', '--state', 'merged']
+
+
+def test_done_still_refuses_unmerged_work_after_a_squash_merge(repo, monkeypatch):
+    main, up = repo
+    wt.new('feature', 'dev a', main)
+    path = os.path.join(os.path.dirname(main), 'proj-wt-feature')
+    commit(path, 'f.py', 'f = 1\n')
+    git(path, 'push', '-q', 'origin', 'feature')
+    merged = git(path, 'rev-parse', 'HEAD')
+    squash_pr(up, 'feature')
+    advance(up)
+    commit(path, 'h.py', 'h = 1\n')                         # work after the merge: not in it
+    fake_gh(monkeypatch, [{'number': 7, 'headRefOid': merged}])
+    with pytest.raises(wt.WorktreeError, match=r'not merged.*files differ.*#7 from feature was merged, but the '
+                                               r'copy has commits made after it.*ask the person'):
+        wt.done(path, main)
+    fake_gh(monkeypatch, [])
+    with pytest.raises(wt.WorktreeError, match='no pull request from feature is merged'):
+        wt.done(path, main)
+    fake_gh(monkeypatch, FileNotFoundError('gh'))
+    with pytest.raises(wt.WorktreeError, match='gh is not installed, so no merged pull request was looked up'):
+        wt.done(path, main)
+    assert os.path.exists(os.path.join(path, 'h.py')) and git(main, 'branch', '--list', 'feature')
+    assert wt._key(path) in wt.load_owners(main)
 
 
 def test_sync_merges_origin_main_and_keeps_a_conflict_for_its_owner(repo):
