@@ -1985,7 +1985,10 @@ class Handler(BaseHTTPRequestHandler):
              '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
              '.png': 'image/png', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
              '.flac': 'audio/flac', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf':
-             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8'}
+             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8',
+             # a plan or a log linked from a panel opens as text on the phone; unknown types download, and a phone
+             # has nothing to open a .md with (Nate 10-17, "Read the plan" downloaded)
+             '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8'}
 
     def log_message(self, fmt, *a):
         if not any(x in (a[0] if a else '') for x in ('/api/state', '/api/keys')):   # a poll, or a key: no line each

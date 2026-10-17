@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Phone: a linked .md, .csv or .log opens as text
+
+- A panel link to a Markdown plan downloaded on the phone instead of opening (the server sent types it did not
+  know as `application/octet-stream`, and a phone has nothing to open a `.md` with). `.md`, `.csv` and `.log` are
+  now sent as `text/plain; charset=utf-8`. Test: the type table in `tests/test_phone.py`.
+
 ### analyze_tuning reads fast notes and their attacks (ledger:M231)
 
 - Each note was read from a fixed 100 ms after its onset and needed 60 ms of steady part after that, so a fast run

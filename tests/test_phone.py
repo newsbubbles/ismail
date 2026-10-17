@@ -903,7 +903,7 @@ def test_a_panel_carries_a_video_that_plays_and_seeks(phone, tmp_path):
     with pytest.raises(urllib.error.HTTPError) as e:
         ranged(f'bytes={len(blob) + 5}-')
     assert e.value.code == 416
-    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime')):
+    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime'), ('.md', 'text/plain; charset=utf-8')):
         assert S.Handler.TYPES[ext] == mime
     big = tmp_path / 'long.mp4'                    # "the rest" comes a chunk at a time, so 4G starts at once
     data = bytes(range(256)) * (S.Handler.RANGE_CHUNK // 256 + 4096)
