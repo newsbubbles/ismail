@@ -103,7 +103,7 @@ const SPINE = [['spine_01', 0.15], ['spine_02', 0.3], ['spine_03', 0.5], ['neck_
 // vertical (YAW) and of the rest of it (SWING), as fractions of the whole look in world space. The head takes it all,
 // so it still looks exactly where the user looked. The hands can turn the chest a little more (CHEST_BY_HANDS).
 const LOOK = { spine_01: [0.03, 0.05], spine_02: [0.06, 0.1], spine_03: [0.12, 0.2], neck_01: [0.55, 0.6], head: [1, 1] };
-const CHEST_BY_HANDS = 0.35, CHEST_HANDS_MAX = THREE.MathUtils.degToRad(25), CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 };
+const CHEST_BY_HANDS = 0.35, CHEST_HANDS_MAX = THREE.MathUtils.degToRad(25), CHEST_REACH = 0.4, CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 };
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
 // steps lead the body (VRIK's velocityFactor): a foot steps to where the hips will be STEP_LEAD s on (at most
 // STEP_LEAD_MAX m), so it lands as the body arrives instead of trailing it; a planted foot keeps its own facing (it no
@@ -248,9 +248,13 @@ export function initActors(ed, live) {
   // bone its LOOK share of the turn about the vertical and of the rest (swing-twist), and the lean from the hips on top.
   // Both hands in front of the chest turn the chest toward them a little (CHEST_BY_HANDS of their bearing, at most
   // CHEST_HANDS_MAX); the neck and head take that back, so the head's own turn is unchanged
+  // q or -q (the same turn), whichever has w >= 0, so its look comes out in -180..180: the other gave about 360 minus the
+  // turn, which the head did not show (the same turn) but the spine's shares of it did (the 2026-10-17 study: the chest
+  // twisted 40 degrees the wrong way, in some runs only, as the tracking's quaternion sign fell)
+  function near(q) { return q.w < 0 ? q.set(-q.x, -q.y, -q.z, -q.w) : q; }
   function spreadLook(st, f, base, delta, lean, P, hipAt) {
     const { rig } = st;
-    const rel = base.clone().invert().multiply(delta);
+    const rel = near(base.clone().invert().multiply(delta));
     const tw = new THREE.Quaternion(0, rel.y, 0, rel.w).normalize();
     const swing = rel.clone().multiply(tw.clone().invert());
     const look = 2 * Math.atan2(tw.y, tw.w);
@@ -259,9 +263,12 @@ export function initActors(ed, live) {
     if (l && r) {
       const mid = P(l).add(P(r)).multiplyScalar(0.5).sub(hipAt).setY(0).applyQuaternion(base.clone().invert());
       const fw = rig.fwd.clone();
-      if (mid.lengthSq() > 0.01 && mid.clone().normalize().dot(fw) > 0.2) {
+      // only hands reached out in front count, fully from CHEST_REACH: near the body their bearing is noise (the
+      // 2026-10-17 study: hands at the sides twisted the chest 40 degrees, flipping side, while the head looked ahead)
+      const reach = THREE.MathUtils.clamp((fw.dot(mid) / st.s - 0.15) / (CHEST_REACH - 0.15), 0, 1);
+      if (reach > 0) {
         const a = Math.atan2(fw.clone().cross(mid).y, fw.dot(mid));
-        hands = THREE.MathUtils.clamp(a * CHEST_BY_HANDS, -CHEST_HANDS_MAX, CHEST_HANDS_MAX);
+        hands = reach * THREE.MathUtils.clamp(a * CHEST_BY_HANDS, -CHEST_HANDS_MAX, CHEST_HANDS_MAX);
       }
     }
     st.chestHands = st.chestHands === undefined ? hands : st.chestHands + (hands - st.chestHands) * 0.15;   // no snapping
@@ -961,7 +968,7 @@ export function initActors(ed, live) {
     // (The user, 2026-10-08: a person with a start pose stood with feet locked and would not walk; this path kept
     // the start pose's hips and legs whatever the user did.) Pinned hips keep the seat.
     const B = moveStartBody(st, f, r, D);
-    const Drel = D.clone().multiply(B.yaw.clone().invert());       // what the body's turn left for the spine and head
+    const Drel = near(D.clone().multiply(B.yaw.clone().invert()));       // what the body's turn left for the spine and head
     const held = Object.fromEntries(SPINE.map(([n]) => [n, rig.bones[n].getWorldQuaternion(new THREE.Quaternion())]));
     const tw = new THREE.Quaternion(0, Drel.y, 0, Drel.w).normalize(), swing = Drel.clone().multiply(tw.clone().invert());
     const look = 2 * Math.atan2(tw.y, tw.w);
