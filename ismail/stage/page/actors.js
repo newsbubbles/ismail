@@ -115,15 +115,12 @@ const ease = (k) => k * k * k * (k * (k * 6 - 15) + 10);
 // lean, a nod: the spine bends toward the head instead) and trail it beyond; the body turns only when the head is
 // turned more than YAW_SLACK from it (a look aside twists the neck and spine, not the feet)
 const HIP_SLACK = 0.12, YAW_SLACK = THREE.MathUtils.degToRad(35);
-// balance, a first cut at gravity (the user, 2026-10-04: anchor "any part of their physical gravitational stack"; the
-// 2026-10-16 study: hips under the head and nothing else let a dancer's hips swing ahead of his planted feet, his back
-// arched, his legs straight): the body's weight (about BAL_UPPER of it above the hips, carried toward the head) sits
-// over the planted feet, so a head going forward puts the hips back and the reverse; the hips go at most BAL_MAX from
-// over the feet (past that the feet step), a stepping foot carries half its share, and the hips ease there in BAL_S
-const BAL_UPPER = 0.35, BAL_MAX = 0.15, BAL_S = 0.12;
-// when the weight goes past BAL_MAX from over the feet the body would fall: the back foot steps under it (BAL_STEP on
-// past where the hips are going), as a person leaning in to a partner takes a step instead of tipping
-const BAL_STEP = 0.1;
+// balance, a first cut at gravity (the user, 2026-10-04: anchor "any part of their physical gravitational stack"), for
+// bodies from a start pose (moveStartBody): the drawn hips stay within BAL_MAX of their place over the planted feet,
+// easing there in BAL_S, and past that the foot further back steps under the weight, BAL_STEP past its goal. (The same
+// idea in poseBase, the 2026-10-17 study measured, made following worse: hip jitter 3 -> 14 m/s^2, feet sliding
+// 4 cm/s; taken out until it is redone there)
+const BAL_MAX = 0.15, BAL_S = 0.12, BAL_STEP = 0.1;
 // pins while following (the user, 2026-10-04, sitting in real life while following a man on a bar stool: "anchors his
 // butt to the chair, so if I do anything with my head and hands his butt's gonna be anchored unless I move completely
 // away from the chair"). Pinned hips stay on the seat, facing the person's own way; the user's head bends the spine
@@ -317,38 +314,20 @@ export function initActors(ed, live) {
       b.hip.y = under.y;
       hipAt = b.hip.clone();
     }
-    // the drawn hips: over the feet (balance); hipAt stays where the body is going, which the steps follow
-    let hipDraw = hipAt;
-    const fl = st.feet.l, fr = st.feet.r;
-    if (st.body) st.body.over = null;
-    if (!pin && fl.at && fr.at) {
-      const wl = fl.step ? 0.5 : 1, wr = fr.step ? 0.5 : 1;
-      const S = fl.at.clone().multiplyScalar(wl).addScaledVector(fr.at, wr).divideScalar(wl + wr);
-      const off = S.clone().addScaledVector(head, -BAL_UPPER).divideScalar(1 - BAL_UPPER).sub(S).setY(0), b = st.body;
-      // the weight is where the hips would have to go to hold it, reversed: past BAL_MAX it has left the feet
-      b.over = off.length() > BAL_MAX * s ? { dir: off.clone().negate().normalize(), S: S.clone() } : null;
-      if (off.length() > BAL_MAX * s) off.setLength(BAL_MAX * s);
-      const tgt = S.add(off).setY(hipAt.y);
-      const dt = f.t - (b.balT ?? f.t);
-      if (!b.bal || dt < 0 || dt > GAP_S) b.bal = tgt.clone();
-      else b.bal.lerp(tgt, 1 - Math.exp(-dt / BAL_S));
-      b.bal.y = hipAt.y; b.balT = f.t;
-      hipDraw = b.bal.clone();
-    }
     st.lastHip = hipAt.clone(); st.lastYaw = base.clone();             // the body's facing, not the head's
     pel.parent.updateMatrixWorld(true);
-    pel.position.copy(pel.parent.worldToLocal(hipDraw.clone()));
+    pel.position.copy(pel.parent.worldToLocal(hipAt.clone()));
     setWorldQ(pel, base.clone().multiply(rig.rest.pelvis.q));
     // the spine leans from the hips (or the seat) toward where the user's head is (its length kept)
     let lean = null;
     {
       const up = rig.rest.head.p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base).normalize();
-      const to = head.clone().sub(hipDraw).normalize();
+      const to = head.clone().sub(hipAt).normalize();
       lean = new THREE.Quaternion().setFromUnitVectors(up, to);
       const ang = 2 * Math.acos(Math.min(1, Math.abs(lean.w)));
       if (ang > LEAN_MAX) lean = new THREE.Quaternion().slerp(lean, LEAN_MAX / ang);
     }
-    spreadLook(st, f, base, delta, lean, P, hipDraw);
+    spreadLook(st, f, base, delta, lean, P, hipAt);
     // arms and hands, fingers
     const side = (sd, h) => {
       const hd = f[h];
@@ -414,12 +393,8 @@ export function initActors(ed, live) {
       if (!ft.at) { ft.at = want.clone(); ft.q = base.clone(); }
       if (!ft.q) ft.q = base.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
-      // the weight has left the feet: the foot further from it steps under it
-      const over = !pinned && st.body && st.body.over, oa = over && st.feet[sd === 'l' ? 'r' : 'l'].at;
-      const fall = over && oa && ft.at.clone().sub(over.S).dot(over.dir) <= oa.clone().sub(over.S).dot(over.dir);
-      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || fall || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
+      if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
         const to = pinned ? want.clone() : want.clone().add(lead);
-        if (fall) to.addScaledVector(over.dir, BAL_STEP * st.s);
         ft.step = { from: ft.at.clone(), to, q0: ft.q.clone(), q1: base.clone(), t0: now };
       }
       let at = ft.at, fq = ft.q;
