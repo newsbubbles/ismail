@@ -956,13 +956,25 @@ def _fundamentals(x, sr, range_db=15.0, max_notes=6):
 
 
 def steady_pitches(y, sr=ASR, skip_ms=100.0, chunk_ms=200.0, max_chunks=4, min_ms=60.0, floor_db=45.0,
-                   max_events=400, min_tonal=0.5, glide_cents=25.0):
-    """The steady pitched notes of one part (ledger:M231): each onset's note is read from skip_ms after the onset
-    (a pluck starts sharp for ~90 ms; a drum's strike is noise) until its level falls 30 dB, the next onset, or
-    max_chunks chunks of chunk_ms. Each chunk is read by _fundamentals; a note whose chunks disagree by more than
-    glide_cents is gliding (a pitch-dropping kick, a slide) and is counted, not read. Chords give one reading per
-    note. Returns (readings [{'t', 'midi', 'db'}], counts {'events', 'pitched', 'noisy', 'gliding', 'short',
-    'sampled'}); t is the onset in seconds from the start of y, midi a float at A440."""
+                   max_events=400, min_tonal=0.5, glide_cents=25.0, floor_ms=25.0, min_cycles=4.0):
+    """The steady pitched notes of one part (ledger:M231), and their attacks. A note lasts from its onset to the
+    next onset or until its level falls 30 dB, whichever is first. Its steady pitch is read from the skip after the
+    onset (a pluck starts sharp for ~90 ms; a drum's strike is noise) to that end, at most max_chunks chunks of
+    chunk_ms. skip_ms is the longest skip: a note shorter than skip_ms / 0.3 (a fast run: a 16th at 104 bpm is
+    ~144 ms) is read from 0.3 of its length, and needs min(min_ms, 0.4 of its length) of steady part, at least
+    floor_ms. Its attack is read too, from 0.3 of its skip to the skip, capped at 0.8 of skip_ms (30-80 ms on a long
+    note). Every reading needs min_cycles periods of its pitch in its window (_fundamentals resolves ~4: a 25 ms
+    window reads down to ~170 Hz, 60 ms to ~70 Hz). A short note with no steady part that resolves is read once
+    from its attack to its end and marked attack_only; one that still resolves nothing is counted short.
+    Each chunk is read by _fundamentals; a note whose chunks disagree by more than glide_cents is gliding (a
+    pitch-dropping kick, a slide) and is counted, not read. Chords give one reading per note. The skip and the
+    attack are timed from the attack itself (the steepest rise in level near the onset), as onsets backtrack up to
+    ~70 ms early, into the note before, or land a few ms late; a note's read ends where the next note's attack
+    starts, and a short note with no attack of its own (the tail of the note before) is counted 'unstruck'.
+    Returns (readings [{'t', 'midi', 'db', 'attack', 'attack_only'}], counts {'events', 'pitched', 'noisy',
+    'gliding', 'short', 'sampled', 'fast', 'attack_only', 'unstruck'}); t is the onset in seconds from the start of
+    y, midi a float at A440, attack the attack's midi float (None when its window does not resolve it, or for an
+    attack_only reading); 'fast' counts the notes read with a shortened skip."""
     pad = int(0.3 * sr)
     z = np.concatenate([np.zeros(pad, dtype=np.float32), np.asarray(y, dtype=np.float32)])
     hop = 256
@@ -970,41 +982,96 @@ def steady_pitches(y, sr=ASR, skip_ms=100.0, chunk_ms=200.0, max_chunks=4, min_m
     ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=sr, hop_length=hop, backtrack=True, units='samples')
     rdb = 20 * np.log10(librosa.feature.rms(y=z, frame_length=1024, hop_length=hop)[0] + 1e-9)
     loud = rdb.max()
-    counts = {'events': 0, 'pitched': 0, 'noisy': 0, 'gliding': 0, 'short': 0, 'sampled': 0}
+    counts = {'events': 0, 'pitched': 0, 'noisy': 0, 'gliding': 0, 'short': 0, 'sampled': 0, 'fast': 0,
+              'attack_only': 0, 'unstruck': 0}
     if loud < -90:
         return [], counts
     ons = [int(o) for o in ons if rdb[min(int(o) // hop + 2, len(rdb) - 1)] > loud - floor_db] or [pad]
     if len(ons) > max_events:                           # a long busy part: an even sample of its hits
         counts['sampled'] = len(ons)
         ons = [ons[i] for i in np.linspace(0, len(ons) - 1, max_events).astype(int)]
-    skip, chunk, mn = int(skip_ms * sr / 1000), int(chunk_ms * sr / 1000), int(min_ms * sr / 1000)
+    ms = sr / 1000
+    skip, chunk, mn, flo = int(skip_ms * ms), int(chunk_ms * ms), int(min_ms * ms), int(floor_ms * ms)
+
+    def read(i, j):                                     # one window: the notes with min_cycles periods in it
+        notes, share = _fundamentals(z[i:j], sr)
+        return [(m, lv) for m, lv in notes if 440 * 2 ** ((m - 69) / 12) * (j - i) / sr >= min_cycles], share
+
+    w6, h6 = 128, 16                                    # 6 ms frames, 0.7 ms apart
+
+    def rises(i, j, w=w6):                              # the level's jump (dB) from each w-sample frame to the next
+        seg = z[max(i, 0):j]
+        if len(seg) < 3 * w:
+            return np.zeros(0)
+        e = 10 * np.log10((librosa.util.frame(np.ascontiguousarray(seg), frame_length=w, hop_length=h6) ** 2)
+                          .mean(0) + 1e-10)
+        return e[w // h6:] - e[:-(w // h6)]
+
+    def struck(s0, s1):                                 # the attack itself: (where, dB) of the steepest rise, from
+        b0 = max(s0 - int(20 * ms), 0)                  # 20 ms before the onset to 100 after it (an onset
+        d = rises(b0, min(s1, s0 + int(100 * ms) + w6))     # backtracks up to ~70 ms early, or lands a few ms
+        if not len(d):                                  # late), never past the next onset
+            return s0, 0.0
+        i = int(np.argmax(d))
+        return min(b0 + i * h6 + w6, s1 - 1), float(d[i])
+
     bounds = ons[1:] + [len(z)]
+    hits = [struck(s0, s1) for s0, s1 in zip(ons, bounds)]
+    nexts = [st - int(3 * ms) if rise >= 3 else len(z) for st, rise in hits[1:]] + [len(z)]
     out = []
-    for s0, s1 in zip(ons, bounds):
-        a = s0 + skip
+    for s0, s1, (st, rise), nx in zip(ons, bounds, hits, nexts):
+        s1 = max(min(s1, nx), s0 + 1)                   # a note ends where the next one's attack starts
         f0, f1 = s0 // hop, min(s1 // hop, len(rdb))
         if f1 <= f0:
             continue
-        pk = rdb[f0:f1].max()
-        e = a
-        while e < s1 and e < a + max_chunks * chunk and rdb[min(e // hop, len(rdb) - 1)] > pk - 30:
-            e += hop
-        e = min(e, s1, len(z))
-        if e - a < mn:
-            counts['short'] += 1
+        pf = f0 + int(np.argmax(rdb[f0:f1]))
+        pk = rdb[pf]
+        fall = np.nonzero(rdb[pf:f1] <= pk - 30)[0]
+        end = min(s1, (pf + int(fall[0])) * hop if len(fall) else s1, len(z))
+        ln = end - st
+        sk = max(0, min(skip, int(0.3 * ln)))           # the skip, shortened on a short note
+        fast = sk < skip
+        if fast and rise < 3:                           # no attack of its own: the tail of the note before
+            counts['unstruck'] += 1
+            continue
+        if fast:                                        # a second attack inside it (an onset missed): end there
+            c0 = st + int(20 * ms) - 2 * w6             # in 12 ms frames, so a low note's ripple is not one
+            d = np.nonzero(rises(c0, end, 2 * w6) >= 6)[0]
+            if len(d):
+                end = c0 + int(d[0]) * h6 + 2 * w6 - int(3 * ms)
+                ln = end - st
+                sk = max(0, min(skip, int(0.3 * ln)))
+        a = st + sk
+        e = min(end, a + max_chunks * chunk)
+        need = min(mn, max(flo, int(0.4 * ln)))
+        a0, a1 = st + int(0.3 * sk), st + min(int(0.8 * skip), sk)     # the attack window
+        reads, tonal, only = [], 0.0, False
+        if e - a >= need:
+            k = max(1, min(max_chunks, (e - a) // chunk))
+            step = (e - a) // k
+            for j in range(k):
+                notes, share = read(a + j * step, a + (j + 1) * step)
+                tonal += share / k
+                reads.append(notes)
+        if fast and not any(reads) and e - a0 >= need:     # no steady part resolves: read it whole, from the attack
+            notes, tonal = read(a0, e)
+            reads, k, only = [notes], 1, True
+        if not any(reads):
+            if fast or e - a < need:                    # too short to have, or to resolve, a steady part
+                counts['short'] += 1
+            else:
+                counts['events'] += 1
+                counts['noisy'] += 1
             continue
         counts['events'] += 1
-        k = max(1, min(max_chunks, (e - a) // chunk))
-        step = (e - a) // k
-        reads = []
-        tonal = 0.0
-        for j in range(k):
-            notes, share = _fundamentals(z[a + j * step:a + (j + 1) * step], sr)
-            tonal += share / k
-            reads.append(notes)
-        if tonal < min_tonal or not any(reads):
+        counts['fast'] += fast
+        if tonal < min_tonal:
             counts['noisy'] += 1
             continue
+        att = []
+        if not only and a1 - a0 >= int(15 * ms):
+            att, share = read(a0, a1)
+            att = att if share >= min_tonal else []
         groups = []                                     # one per note, across the chunks
         for notes in reads:
             for m, lv in notes:
@@ -1016,15 +1083,19 @@ def steady_pitches(y, sr=ASR, skip_ms=100.0, chunk_ms=200.0, max_chunks=4, min_m
                 else:
                     groups.append([[m], lv])
         got = False
-        for ms, lv in groups:
-            if len(ms) < max(1, (k + 1) // 2):          # heard in under half the chunks: a passing partial
+        for ms_, lv in groups:
+            if len(ms_) < max(1, (k + 1) // 2):         # heard in under half the chunks: a passing partial
                 continue
-            if 100 * (max(ms) - min(ms)) > glide_cents:
+            if 100 * (max(ms_) - min(ms_)) > glide_cents:
                 counts['gliding'] += 1
                 continue
-            out.append({'t': (s0 - pad) / sr, 'midi': float(np.median(ms)), 'db': float(lv)})
+            m = float(np.median(ms_))
+            near = min(att, key=lambda x: abs(x[0] - m), default=None)
+            out.append({'t': (s0 - pad) / sr, 'midi': m, 'db': float(lv), 'attack_only': only,
+                        'attack': float(near[0]) if near and abs(near[0] - m) < 0.75 else None})
             got = True
         counts['pitched'] += got
+        counts['attack_only'] += got and only
     return out, counts
 
 
