@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Skill: fetching a reference from a link, and stopping at a block
+
+- A new session given a YouTube link had only "yt-dlp; YouTube may bot-wall" to go on. It hit YouTube's "sign in
+  to confirm you're not a bot" and retried with other clients and a browser, which kept the block going.
+  `references/recreate.md` section 0 now covers the ask, the SOURCES.md row, the JavaScript runtime YouTube needs,
+  what each error means (a 429 or the bot check means stop, no retries; it clears by itself), SoundCloud and other
+  routes meanwhile, and that the person's browser cookies are their call. A row in SKILL.md's table and the
+  instruments guide point to it; `setup.md` installs yt-dlp and deno after one yes.
+
 ### Phone: a linked .md, .csv or .log opens as text
 
 - A panel link to a Markdown plan downloaded on the phone instead of opening (the server sent types it did not
