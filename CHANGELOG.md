@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### analyze_tuning: every part of a render against the tuning grid and key (ledger:M231)
+
+- A pitched part off the tuning grid went unnoticed until someone heard it: a salsa kit measured from records kept
+  their tuning (its tumba sustained at F#3 +46 c, its conga at C#4 -50 c, a quarter tone off any key), and a nylon
+  guitar's chords drifted 10-20 c string to string (songs/spanish_guitar/HANDOFF.md). New op
+  `analyze_tuning(source='render', stems=None, tol_cents=15, bars=None, key=None, tuning_cents=None, skip_ms=100,
+  worst=5)` reads every track stem of the last `render(stems=True)` (or the reference's stems with `source='ref'`, one
+  part by `track:`/`ref:`/`sound:`/path, a whole mix by `render:mix`/`ref:mix`) and flags notes more than
+  `tol_cents` off the grid.
+- Per note it reads the steady pitch from `skip_ms` after the onset (plucks start up to ~10 c sharp for ~90 ms, a
+  drum's strike is noise), from spectral lines: chords give one pitch per note, partials fold onto their note (a
+  tumba's octave mode reads as the tumba), gliding notes and noise are counted and not read. Per part: pitched notes,
+  median cents off the grid, spread (middle half), the count beyond the tolerance, the worst notes (seconds, bar and
+  beat, note, cents, Hz) and one verdict: in tune; the whole part off (retune by N c); a few pitches off (retune
+  that voice or split it onto its own track); or drifting note to note. A part with no steady pitch is skipped,
+  never flagged.
+- The grid is A4 = 440 Hz (ismail plays at A440), moved by `tuning_cents`; a reference `ref_retune` has not moved is
+  read on its own measured tuning. With a key (`key=`, or the project's or the sketch's) the out-of-key pitches are
+  listed as information, never as a flag.
+- Listed in `guide`, `docs/reference.md`, the listening reference (run it after the first render of a song with
+  pitched percussion or a voice in a new register, and before any exam) and the instruments reference.
+- Tests: `tests/test_analyze_tuning.py` (synthetic stems: a part on the grid; tumba +46 c and conga -49 c flagged
+  within 3 c beside an in-tune quinto; a 40 c attack glide inside 90 ms not flagged; a noise part skipped; the grid
+  moved by `tuning_cents`; a reference read on its own tuning until retuned; errors).
+
 ### Worktrees: `done` takes a copy whose pull request was squash-merged
 
 - `done <path>` refused a copy whose pull request GitHub had squash-merged: "is not merged: N commits are not in

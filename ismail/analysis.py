@@ -904,6 +904,130 @@ def pitch_contour(path, grid, bars=None, hop_ms=10.0, fmin='C1', fmax='C7', star
     return rows, '\n'.join(L)
 
 
+# ------------------------------------------------------------------ steady pitches (a part against the tuning grid)
+
+STEADY_BAND = (30.0, 5000.0)    # Hz searched for partials
+
+
+def _fundamentals(x, sr, range_db=15.0, max_notes=6):
+    """The notes sounding in one chunk of a part, as [(midi float at A440, level dB)], and the share of the chunk's
+    energy that sits on spectral lines (a struck or bowed tone ~0.8+, noise ~0.1). One zero-padded Hann FFT; a peak
+    counts when it stands 12 dB over the median of the spectrum around it (noise peaks stand ~6). Peaks within 30 c
+    of a whole multiple (1-12x) of a lower peak no more than 25 dB under them are its partials, and a note's pitch is
+    read from its strongest partial divided by its number, so a soft fundamental under a loud octave (a tumba's
+    second mode) still reads true. Notes more than range_db under the loudest are dropped."""
+    n = 1 << 15
+    X = np.abs(np.fft.rfft(x * np.hanning(len(x)), n=n))
+    L = 20 * np.log10(X + 1e-12)
+    lo, hi = int(STEADY_BAND[0] * n / sr), int(STEADY_BAND[1] * n / sr)
+    hb = max(2.0 * n / len(x), 2.0)                     # Hann main-lobe half width, in bins
+    top = L[lo:hi].max()
+    c = L[lo:hi]
+    pk = np.where((c[1:-1] > c[:-2]) & (c[1:-1] >= c[2:]) & (c[1:-1] > top - 30))[0] + 1 + lo
+    peaks = []
+    for k in pk:
+        r = int(4 * hb)
+        if X[k] < X[max(k - int(hb), 0):k + int(hb) + 1].max():        # a side lobe of a bigger peak
+            continue
+        if L[k] - 20 * np.log10(np.median(X[max(k - r, 1):k + r]) + 1e-12) < 12:
+            continue
+        a, b, g = L[k - 1], L[k], L[k + 1]
+        peaks.append(((k + 0.5 * (a - g) / (a - 2 * b + g - 1e-12)) * sr / n, float(b), k))
+    tot = float((X[lo:hi] ** 2).sum()) + 1e-20
+    on = sum(float((X[max(k - int(hb), 0):k + int(hb) + 1] ** 2).sum()) for _, _, k in peaks)
+    notes = []                                          # [f0, own level, [(partial number, Hz, level)]]
+    for fr, lv, _ in sorted(peaks):
+        for nt in notes:
+            h = fr / nt[0]
+            k = int(round(h))
+            if 1 <= k <= 12 and abs(1200 * np.log2(h / k)) < 30 and nt[1] >= lv - 25:
+                nt[2].append((k, fr, lv))
+                break
+        else:
+            notes.append([fr, lv, [(1, fr, lv)]])
+    out = []
+    for _, _, parts in notes:
+        k, fr, lv = max(parts, key=lambda p: p[2])
+        out.append((float(69 + 12 * np.log2(fr / k / 440.0)), lv))
+    if out:
+        best = max(lv for _, lv in out)
+        out = sorted([o for o in out if o[1] >= best - range_db], key=lambda o: -o[1])[:max_notes]
+    return out, min(on / tot, 1.0)
+
+
+def steady_pitches(y, sr=ASR, skip_ms=100.0, chunk_ms=200.0, max_chunks=4, min_ms=60.0, floor_db=45.0,
+                   max_events=400, min_tonal=0.5, glide_cents=25.0):
+    """The steady pitched notes of one part (ledger:M231): each onset's note is read from skip_ms after the onset
+    (a pluck starts sharp for ~90 ms; a drum's strike is noise) until its level falls 30 dB, the next onset, or
+    max_chunks chunks of chunk_ms. Each chunk is read by _fundamentals; a note whose chunks disagree by more than
+    glide_cents is gliding (a pitch-dropping kick, a slide) and is counted, not read. Chords give one reading per
+    note. Returns (readings [{'t', 'midi', 'db'}], counts {'events', 'pitched', 'noisy', 'gliding', 'short',
+    'sampled'}); t is the onset in seconds from the start of y, midi a float at A440."""
+    pad = int(0.3 * sr)
+    z = np.concatenate([np.zeros(pad, dtype=np.float32), np.asarray(y, dtype=np.float32)])
+    hop = 256
+    oenv = librosa.onset.onset_strength(y=z, sr=sr, hop_length=hop)
+    ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=sr, hop_length=hop, backtrack=True, units='samples')
+    rdb = 20 * np.log10(librosa.feature.rms(y=z, frame_length=1024, hop_length=hop)[0] + 1e-9)
+    loud = rdb.max()
+    counts = {'events': 0, 'pitched': 0, 'noisy': 0, 'gliding': 0, 'short': 0, 'sampled': 0}
+    if loud < -90:
+        return [], counts
+    ons = [int(o) for o in ons if rdb[min(int(o) // hop + 2, len(rdb) - 1)] > loud - floor_db] or [pad]
+    if len(ons) > max_events:                           # a long busy part: an even sample of its hits
+        counts['sampled'] = len(ons)
+        ons = [ons[i] for i in np.linspace(0, len(ons) - 1, max_events).astype(int)]
+    skip, chunk, mn = int(skip_ms * sr / 1000), int(chunk_ms * sr / 1000), int(min_ms * sr / 1000)
+    bounds = ons[1:] + [len(z)]
+    out = []
+    for s0, s1 in zip(ons, bounds):
+        a = s0 + skip
+        f0, f1 = s0 // hop, min(s1 // hop, len(rdb))
+        if f1 <= f0:
+            continue
+        pk = rdb[f0:f1].max()
+        e = a
+        while e < s1 and e < a + max_chunks * chunk and rdb[min(e // hop, len(rdb) - 1)] > pk - 30:
+            e += hop
+        e = min(e, s1, len(z))
+        if e - a < mn:
+            counts['short'] += 1
+            continue
+        counts['events'] += 1
+        k = max(1, min(max_chunks, (e - a) // chunk))
+        step = (e - a) // k
+        reads = []
+        tonal = 0.0
+        for j in range(k):
+            notes, share = _fundamentals(z[a + j * step:a + (j + 1) * step], sr)
+            tonal += share / k
+            reads.append(notes)
+        if tonal < min_tonal or not any(reads):
+            counts['noisy'] += 1
+            continue
+        groups = []                                     # one per note, across the chunks
+        for notes in reads:
+            for m, lv in notes:
+                for gr in groups:
+                    if abs(np.median(gr[0]) - m) < 0.5:
+                        gr[0].append(m)
+                        gr[1] = max(gr[1], lv)
+                        break
+                else:
+                    groups.append([[m], lv])
+        got = False
+        for ms, lv in groups:
+            if len(ms) < max(1, (k + 1) // 2):          # heard in under half the chunks: a passing partial
+                continue
+            if 100 * (max(ms) - min(ms)) > glide_cents:
+                counts['gliding'] += 1
+                continue
+            out.append({'t': (s0 - pad) / sr, 'midi': float(np.median(ms)), 'db': float(lv)})
+            got = True
+        counts['pitched'] += got
+    return out, counts
+
+
 def transcribe(path, grid, bars=None, quant=0.25, max_bars=16, fmin='C1', n_octaves=7, threshold=0.35,
                max_poly=6, fund_db=24):
     """Polyphonic note estimate from a harmonic-sum CQT salience. Good on synth riffs/chords, rough on dense mixes.

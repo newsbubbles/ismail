@@ -51,6 +51,10 @@ Each of these was the difference between "a synth imitating X" and X in at least
   to 7.9. A pickup is the exception: it reads displacement or velocity, as an electric voice does.
 - **Noise between the harmonics, calibrated by synthesis.** Bow hair, breath, finger and hammer noise, measured as the level between partials. Estimating it directly reads 10-20 dB low when the noise is uneven within a band (bow noise is); rebuild the note and raise the noise until the energy between the harmonics matches the recording. Missing air is heard as "not crisp, no breathiness". Without it a voice sounds like an organ.
 - **Inharmonicity and stretch.** Stiff strings (piano, low guitar strings) run sharp up the series.
+- **A voice fitted in one register is proven only there.** Before it plays somewhere new (chords, a lower range,
+  another song's key), render it there with stems and run `analyze_tuning`: drums measured from records keep the
+  records' tuning (a tumba sat a quarter tone sharp, F#3 +46 c), and a random intonation drawn per string on every
+  stroke put a chord's strings 10-20 c apart. Scatter that must hold for a chord is drawn per hand shape, not per pluck.
 - **More than one of it.** Two string polarizations, 1-3 detuned strings per piano note, a section of detuned players each with their own vibrato and timing. Static unison detune is the cheap version.
 - **Velocity changes colour, not just level.** Harder is brighter, with a faster attack and more noise; for guitars, very soft can mean a harmonic or a tap.
 - **No two notes identical.** Seed small random variation per note (timing, level, brightness, noise). Repeated identical hits read as a machine.
