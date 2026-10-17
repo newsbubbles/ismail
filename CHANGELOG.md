@@ -6,7 +6,7 @@
 
 - A pitched part off the tuning grid went unnoticed until someone heard it: a salsa kit measured from records kept
   their tuning (its tumba sustained at F#3 +46 c, its conga at C#4 -50 c, a quarter tone off any key), and a nylon
-  guitar's chords drifted 10-20 c string to string (songs/spanish_guitar/HANDOFF.md). New op
+  guitar's chords drifted 10-20 c string to string. New op
   `analyze_tuning(source='render', stems=None, tol_cents=15, bars=None, key=None, tuning_cents=None, skip_ms=100,
   worst=5)` reads every track stem of the last `render(stems=True)` (or the reference's stems with `source='ref'`, one
   part by `track:`/`ref:`/`sound:`/path, a whole mix by `render:mix`/`ref:mix`) and flags notes more than
