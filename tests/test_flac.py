@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from ismail import api, api_cmp, api_compress, api_measure, audiofile, machine
+from ismail import api, api_cmp, api_compress, api_measure, audiofile, machine, reclaim as rc
 from ismail.render import write_renders
 
 SR = 22050
@@ -218,7 +218,9 @@ def song(tmp_path):
 
 
 def reclaim(songs):
-    found = glob.glob(os.path.join(songs, '_reclaim', 'flac_*', 'song_b'))
+    """<reclaim root>/flac_<date>/song_b: the WAVs go to the one reclaim folder, never under songs/ (ledger:M229)."""
+    assert not os.path.exists(os.path.join(songs, '_reclaim'))
+    found = glob.glob(os.path.join(rc.root(), 'flac_*', 'song_b'))
     assert len(found) == 1, found
     return found[0]
 
@@ -236,7 +238,7 @@ def test_dry_by_default_reports_and_touches_nothing(tmp_path, slots):
     assert 'float WAV (FLAC has no float)' in txt and 'part_float.wav' in txt
     assert 'latest.wav: a copy of renders/take_a.wav' in txt
     assert 'work/build.py: line 2' in txt
-    assert os.path.join('_reclaim', 'flac_') in txt
+    assert os.path.join(rc.root(), 'flac_') in txt and not os.listdir(rc.root())   # named, not made
 
 
 def test_compress_writes_exact_flac_moves_the_wavs_and_links_latest(tmp_path, slots):
@@ -251,15 +253,22 @@ def test_compress_writes_exact_flac_moves_the_wavs_and_links_latest(tmp_path, sl
         flac = p[:-4] + '.flac'
         assert not os.path.exists(p) and sf.info(flac).subtype == sub
         assert np.array_equal(sf.read(flac, dtype='int32')[0], sf.read(os.path.join(
-            rec, os.path.relpath(p, os.path.join(songs, 'song_b'))), dtype='int32')[0])
+            rec, rc.kept_path(p)), dtype='int32')[0])                   # the path from the drive root is kept
     rd = os.path.join(root, 'renders')
     assert os.path.samefile(os.path.join(rd, 'latest.wav'), os.path.join(rd, 'take_a.wav'))
     assert os.path.exists(os.path.join(rd, 'stems', 'part_float.wav'))     # skipped, still there
-    rows = [json.loads(ln) for ln in open(os.path.join(rec, 'manifest.jsonl'), encoding='utf8')]
-    assert len(rows) == 5 and {r['from'] for r in rows} >= {'proj/renders/latest.wav', 'proj/renders/stems/part_16.wav'}
-    assert all(os.path.exists(os.path.join(rec, r['to'])) for r in rows)
-    assert all(r['flac_bytes'] < r['bytes'] for r in rows if r.get('flac'))
+    with open(os.path.join(os.path.dirname(rec), 'manifest.json'), encoding='utf8') as f:
+        runs = json.load(f)['runs']
+    rows = runs[-1]['moved']
+    assert len(runs) == 1 and runs[0]['t'].endswith('Z') and runs[0]['group'] == 'song_b'
+    assert len(rows) == 5 and {r['from'] for r in rows} >= {os.path.join(rd, 'latest.wav'),
+                                                             os.path.join(rd, 'stems', 'part_16.wav')}
+    assert all(os.path.exists(r['to']) and r['why'] and r['at'] for r in rows)
+    assert all(r['flac_bytes'] < r['bytes'] and os.path.exists(r['flac']) for r in rows if r.get('flac'))
     assert 'Nothing was deleted' in txt
+    with open(os.path.join(rc.root(), 'README.txt'), encoding='utf8') as f:
+        readme = f.read()
+    assert os.path.basename(os.path.dirname(rec)) + os.sep in readme and 'ismail song_compress' in readme
     # a source still reads, now from the FLAC
     assert api._load(root).resolve_audio('ref:drums').endswith('drums.flac')
 
@@ -275,8 +284,10 @@ def test_a_new_render_beside_an_old_flac_wins_and_the_old_flac_goes_to_reclaim(t
     api.OPS['song_compress'](root, dry=False)
     assert np.array_equal(sf.read(p[:-4] + '.flac', dtype='int32')[0],
                           sf.read(wav(str(tmp_path / 'x.wav'), fresh), dtype='int32')[0])
-    rec = os.path.join(reclaim(songs), 'proj', 'renders', 'stems')
+    rec = os.path.join(reclaim(songs), rc.kept_path(os.path.join(root, 'renders', 'stems')))
     assert {'part_24.flac', 'part_24.wav', 'part_24_2.wav'} <= set(os.listdir(rec))
+    with open(os.path.join(os.path.dirname(reclaim(songs)), 'manifest.json'), encoding='utf8') as f:
+        assert len(json.load(f)['runs']) == 2                            # the second run appended
 
 
 def test_never_touched_folders(tmp_path, slots):

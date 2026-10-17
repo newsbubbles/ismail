@@ -1,7 +1,7 @@
 """Where a song's audio is on disk, now that a finished song's WAVs may be FLAC (ledger:M221).
 
-`song_compress` turns stems and named renders into FLAC, bit for bit, and moves the WAVs to _reclaim. Readers keep
-building the `.wav` path they always built and pass it through `find`, which returns the `.flac` beside it when the
+`song_compress` turns stems and named renders into FLAC, bit for bit, and moves the WAVs to the reclaim folder.
+Readers keep building the `.wav` path they always built and pass it through `find`, which returns the `.flac` beside it when the
 `.wav` is gone. Writers do not change: a new render writes `<name>.wav`, and `find` prefers it to an older
 `<name>.flac`, so the newest audio wins.
 

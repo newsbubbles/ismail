@@ -1,6 +1,8 @@
+import glob
+import json
 import os
 
-from ismail import backup
+from ismail import backup, reclaim
 
 
 def _proj(path, cache=b'x' * 100):
@@ -54,7 +56,14 @@ def test_trim_moves_old_regen_to_reclaim(tmp_path):
     assert [s for _, s in moved] == [100, 100]
     assert not (b / 'proj_20261008_010000' / 'cache').exists()
     assert (b / 'proj_20261008_010000' / 'project.json').exists()
-    assert (song / '_reclaim' / 'backups' / 'proj_20261008_010000' / 'cache' / 'c.bin').exists()
+    assert not (song / '_reclaim').exists()                  # the one reclaim folder, not the song's (ledger:M229)
+    rec, = glob.glob(os.path.join(reclaim.root(), 'backups_*', 'song'))
+    src = str(b / 'proj_20261008_010000' / 'cache' / 'c.bin')
+    assert os.path.exists(os.path.join(rec, reclaim.kept_path(src)))
+    with open(os.path.join(os.path.dirname(rec), 'manifest.json'), encoding='utf8') as f:
+        runs = json.load(f)['runs']
+    assert len(runs) == 1 and [r['backup'] for r in runs[0]['moved']] == ['proj_20261008_010000',
+                                                                          'proj_20261008_010500']
     assert (b / 'proj_20261008_011500' / 'cache').exists()
     assert backup.trim(str(b), keep_full=2) == []  # the trimmed ones are no longer full
 
@@ -76,5 +85,6 @@ def test_cli_dry(tmp_path, capsys):
         _proj(str(b / f'proj_{stamp}'))
     assert backup.main(['trim', str(b), '--keep', '1', '--dry']) == 0
     out = capsys.readouterr().out
-    assert '2 backups trimmed' in out and 'would' in out
+    assert '2 backups trimmed' in out and 'would' in out and reclaim.root() in out
+    assert not os.listdir(reclaim.root())                     # a dry run names the place and makes nothing
     assert (b / 'proj_20261008_010000' / 'cache').exists()

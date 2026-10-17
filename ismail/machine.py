@@ -6,8 +6,8 @@ jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user st
     python -m ismail.machine run --gpu -- <command ...>   # run a command in the GPU slot (Blender, whisper, demucs)
     python -m ismail.machine run --cpu --mem 6 -- <cmd>   # a CPU-heavy command expected to need ~6 GB
     python -m ismail.machine run --cpu --disk 3 -- <cmd>  # ... that writes ~3 GB
-    python -m ismail.machine disk                         # where the disk went: songs, _reclaim, the pagefile, and
-                                                          # the folders beyond songs/ (disk_roots(), daily growth)
+    python -m ismail.machine disk                         # where the disk went: songs, the reclaim folder, pagefile,
+                                                          # and the folders beyond songs/ (disk_roots(), daily growth)
     with machine.slot('cpu', 'render song bars 1-64', mem_gb=3): ...     # from Python
 
 Rules (the slots): one GPU-heavy job machine-wide, two CPU-heavy jobs (a live engine on air holds one). No new heavy
@@ -355,8 +355,9 @@ def _disk_why(disk_gb=0.0, disk_path=None, disk_hint=''):
     return (f"disk: {need}{where} (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB free): "
             + (disk_hint + '; ' if disk_hint else '')
             + "`python -m ismail.machine disk` shows where the space went; move finished intermediates (caches, old "
-              "renders, uncut takes) into the project's _reclaim/ folder (never delete: the user clears _reclaim), "
-              "and tell the user")
+              "renders, uncut takes) into the reclaim folder at the root of the drive with ismail.reclaim.move or "
+              "`python -m ismail.reclaim move <path> <what>` (it lands in _reclaim/<what>_<date>/; never delete: "
+              "the user deletes that folder), and tell the user")
 
 
 def _memory_why(js):
@@ -1576,7 +1577,8 @@ def _tree_walk(stack, deadline=None, total=0):
 
 
 def disk_sizes(root=None):
-    """-> ({folder under songs/: bytes}, {path of each _reclaim folder: bytes})."""
+    """-> ({folder under songs/: bytes}, {path of each _reclaim folder under songs/: bytes}). These are the old
+    per-song ones; ismail.reclaim keeps one reclaim folder at the root of the drive (ledger:M229)."""
     root = root or SONGS
     sizes, reclaim = {}, {}
     try:
@@ -1585,6 +1587,9 @@ def disk_sizes(root=None):
         return sizes, reclaim
     for e in entries:
         sizes[e.name] = _tree_bytes(e.path)
+        if e.name == '_reclaim':
+            reclaim[e.name] = sizes[e.name]
+            continue
         stack = [e.path]
         while stack:                                   # _reclaim folders sit a few levels down at most
             d = stack.pop()
@@ -1779,8 +1784,11 @@ def _roots_text(roots, top, fresh=False, budget=None):
 
 def disk_text(top=12, root=None, roots=None, fresh=False, budget=None):
     """Where the disk went: each drive's free space and pagefile, the biggest folders under songs/ with their growth
-    since the last day a snapshot was kept (<board>/disk/<date>.json), every _reclaim folder, and the folders beyond
-    songs/ (disk_roots(), or roots: a list; [] for none) with their growth (<board>/disk/roots/<date>.json)."""
+    since the last day a snapshot was kept (<board>/disk/<date>.json), the reclaim folder at the root of the drive
+    (ismail.reclaim.root(), each of its folders with its size) and any old _reclaim folders under songs/, and the
+    folders beyond songs/ (disk_roots(), or roots: a list; [] for none) with their growth
+    (<board>/disk/roots/<date>.json)."""
+    from . import reclaim as _rc
     sizes, reclaim = disk_sizes(root)
     sd = os.path.join(board_dir(), 'disk')
     before, day = _day_snapshot(sd, sizes)
@@ -1798,11 +1806,21 @@ def disk_text(top=12, root=None, roots=None, fresh=False, budget=None):
         fast = [f"{n} +{d / G:.1f} GB" for d, n in grown[:5] if d >= 0.5 * G]
         if fast:
             L.append("grew most since " + day + ": " + ', '.join(fast))
+    rr, note = _rc.where(root)
+    rr_in_songs = os.path.normcase(os.path.abspath(rr)) == os.path.normcase(os.path.abspath(os.path.join(
+        root or SONGS, '_reclaim')))
+    if rr_in_songs:
+        reclaim.pop('_reclaim', None)              # the reclaim root itself: listed below, not twice
+    fs = _rc.folders(rr)
+    L.append(f"reclaim folder {rr} (moved out, waiting for the user to delete): "
+             + (f"{sum(b for _, b in fs) / G:.1f} GB in {len(fs)} folders" if fs else 'empty'))
+    L += [f"  {b / G:7.2f} GB  {n}" for n, b in fs]
+    if note:
+        L.append(f"  note: {note}")
     if reclaim:
-        L.append(f"_reclaim (moved out, waiting for the user to clear): {sum(reclaim.values()) / G:.1f} GB")
+        L.append(f"_reclaim under songs/, the old per-song places (moved out, waiting for the user to clear): "
+                 f"{sum(reclaim.values()) / G:.1f} GB")
         L += [f"  {b / G:7.2f} GB  {p}" for p, b in sorted(reclaim.items(), key=lambda kv: -kv[1])]
-    else:
-        L.append("_reclaim: none")
     L += _roots_text(disk_roots() if roots is None else roots, top, fresh, budget)
     return '\n'.join(L)
 
@@ -1906,7 +1924,7 @@ def main(argv=None):
     oa.add_argument('--policy', default=None, choices=ON_AIR_POLICIES)
     oa.add_argument('--by', default=None, help='who decided (the user)')
     oa.add_argument('--why', default='')
-    dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, _reclaim, the pagefile')
+    dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, the reclaim folder, the pagefile')
     dk.add_argument('--top', type=int, default=12, help='how many songs folders (and folders beyond songs/) to list')
     dk.add_argument('--fresh', action='store_true', help='walk every folder beyond songs/ again, within the budget '
                     f'(a walk is reused for {DISK_ROOTS_FRESH_S / 60:.0f} min)')

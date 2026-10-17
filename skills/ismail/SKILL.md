@@ -82,7 +82,8 @@ the folder (`voices/`, `proj/sounds/`), so the script needs nothing outside it. 
 stems and separations can be cleared to free the disk and made again on demand. What stays is what cannot be made
 again (reference audio, recordings and takes) and the masters an upload needs. A WAV with no mp3 beside it gets one
 before it goes, so the person keeps a listenable copy. Nothing is deleted by an agent: cleared files move to the
-reclaim folder for the person to empty. A song without such a script is not finished: write it before clearing its
+reclaim folder at the root of the drive with `ismail.reclaim.move(path, what)` (`D:\_reclaim` on Windows), for the
+person to delete. A song without such a script is not finished: write it before clearing its
 audio.
 
 **Song checkpoints with git**: `git init` inside `songs/<slug>/` (the ismail repository ignores the whole `songs/`
@@ -93,8 +94,8 @@ anything big or regenerable: `*.wav *.mp3 *.flac *.ogg`, `ref/`, `proj/`, `backu
 **Rebuild backups**: a `build.py` sets the old `proj/` aside with `ismail.backup.set_aside(PROJ)` before
 `project_new`, then `ismail.backup.carry_back(kept, PROJ)` after it. Every backup keeps what cannot be made again
 (`project.json`, `history/`, `sounds/`, `voices/`); `cache/`, `renders/` and `stems/` move back into the new `proj/`
-instead of being copied, and older backups that still hold them hand them to the song's `_reclaim/` (the newest 2
-keep theirs). Moving the whole `proj/` each time wrote 3.2 GB in 15 minutes of rebuilds. Backups made the old way:
+instead of being copied, and older backups that still hold them hand them to the reclaim folder at the root of the
+drive, `<root>/_reclaim/backups_<date>/<song>/` (the newest 2 keep theirs). Moving the whole `proj/` each time wrote 3.2 GB in 15 minutes of rebuilds. Backups made the old way:
 `python -m ismail.backup trim songs/<slug>/backups --dry`, then without `--dry`.
 
 **Words**: "the engine" is `ismail/` on main; "song code" is anything under `songs/<slug>/`. A song never modifies
@@ -265,10 +266,13 @@ nudges you, follow it.
   OVER on the board and in its own output: stop it if it keeps growing, because on Windows the pagefile grows into
   the disk. At 3 times its `--mem` with commit under 10 GB (less on a small machine) its processes are paused (SUSPENDED: OVER, never
   killed); `python -m ismail.machine resume <job>` goes on once memory is free. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
-  space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
-  `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`. A finished song's stems and
-  named renders go to FLAC bit for bit with `song_compress(project)`: read its dry report first, run it per song
-  with `dry=False` only on the owner's or the user's word; the WAVs land in `_reclaim`.
+  space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the one reclaim
+  folder at the root of the drive with `ismail.reclaim.move(path, what, group=, why=)` or
+  `python -m ismail.reclaim move <path> <what>` and tell the user: they land in `_reclaim/<what>_<date>/`, keeping
+  their path from the drive root, with a `manifest.json` and a line in `_reclaim/README.txt`. Nobody deletes; the
+  user deletes a whole folder there. A finished song's stems and named renders go to FLAC bit for bit with
+  `song_compress(project)`: read its dry report first, run it per song with `dry=False` only on the owner's or the
+  user's word; the WAVs land in `_reclaim/flac_<date>/<song>/`.
   While a live set is on air, GPU jobs and Blender renders wait until it ends, and the CPU jobs beside it share
   half the machine's threads (a temporary rule, "only for now during sets": `machine on-air` shows it; only the
   user lifts it). Register Blender honestly: a `--cpu` Blender
