@@ -171,7 +171,16 @@ function probe(actors, person, t) {
   const b = st.body || {}, fl = (st.feet && st.feet.l) || {}, fr = (st.feet && st.feet.r) || {};
   return { t: +t.toFixed(3), pel: at('pelvis'), hd: at('head'), fl: at('foot_l'), fr: at('foot_r'), hip: r(st.lastHip),
     bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: !!fl.step, sr: !!fr.step,
-    mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]) };
+    mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]),
+    hy: yawOf(rig, 'head'), cy: yawOf(rig, 'spine_03'), py: yawOf(rig, 'pelvis') };
+}
+// a bone's heading in degrees: its rest forward (the rig's) turned by its turn from rest, about the vertical
+function yawOf(rig, n) {
+  const b = rig.bones[n];
+  if (!b || !rig.rest[n]) return null;
+  const q = b.getWorldQuaternion(new THREE.Quaternion()).multiply(rig.rest[n].q.clone().invert());
+  const f = rig.fwd.clone().applyQuaternion(q);
+  return +THREE.MathUtils.radToDeg(Math.atan2(f.x, f.z)).toFixed(1);
 }
 
 // the capture camera at song time t
