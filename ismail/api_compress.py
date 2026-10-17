@@ -1,9 +1,10 @@
 """song_compress: a finished song's stems and named renders as FLAC, bit for bit (ledger:M221, hq:D-183).
 
 FLAC keeps every sample of a 16- or 24-bit WAV at about a fifth of the size. Each FLAC is read back and compared
-with its WAV sample for sample; only an exact match moves on. The op never deletes: the WAVs move to
-songs/_reclaim/flac_<date>/<song>/ with a manifest, and the user empties _reclaim when they like. Readers find the
-FLAC through ismail.audiofile.find; writers keep writing WAV.
+with its WAV sample for sample; only an exact match moves on. The op never deletes: the WAVs move to the reclaim
+folder at the root of the drive, <root>/_reclaim/flac_<date>/<song>/<path from the drive root> (ismail.reclaim,
+ledger:M229), whose manifest.json lists each move, and the user deletes that folder when they like. Readers find
+the FLAC through ismail.audiofile.find; writers keep writing WAV.
 
 Scope: renders/stems/, the reference's stems folder and renders/*.wav except latest.wav. Never touched, by rule
 (NEVER_PATHS, NEVER_DIRS, EXAM below): takes, rec, caches and exam clips of the songs that keep their own audio
@@ -11,7 +12,6 @@ there, anything under live/ (sets in progress), sounds/ (the render cache keys o
 """
 import filecmp
 import io
-import json
 import os
 import re
 import shutil
@@ -19,7 +19,7 @@ import time
 
 import numpy as np
 
-from . import machine
+from . import machine, reclaim
 from .api import _load, op
 from .sources import song_root
 
@@ -237,25 +237,18 @@ def _rel(path, base):
     return os.path.relpath(path, base).replace('\\', '/')
 
 
-class _Reclaim:
-    """songs/_reclaim/flac_<date>/<song>/: moved files keep their path inside the song; manifest.jsonl lists each."""
+README_LINE = ('WAVs of finished songs, now FLAC beside where they were (each read back sample for sample '
+               'identical). One folder per song; the path inside starts at the drive root.')
 
-    def __init__(self, plan):
-        self.song = plan.song
-        self.dir = os.path.join(plan.songs, '_reclaim', 'flac_' + time.strftime('%Y%m%d'), os.path.basename(plan.song))
-        self.moved = []
 
-    def move(self, path, why, **extra):
-        dst = _free(os.path.join(self.dir, _rel(path, self.song)))
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        size = os.path.getsize(path)
-        shutil.move(path, dst)
-        row = {'at': time.strftime('%Y-%m-%d %H:%M:%S'), 'from': _rel(path, self.song), 'to': _rel(dst, self.dir),
-               'bytes': size, 'why': why, **extra}
-        with open(os.path.join(self.dir, 'manifest.jsonl'), 'a', encoding='utf8') as f:
-            f.write(json.dumps(row) + '\n')
-        self.moved.append(row)
-        return dst
+def _reclaim(plan):
+    """The run that takes this song's WAVs: <root>/_reclaim/flac_<date>/<song>/<path from the drive root>."""
+    return reclaim.Run('flac', why=f"song_compress {os.path.basename(plan.song)}: WAVs now FLAC, bit for bit",
+                       group=os.path.basename(plan.song), songs=plan.songs)
+
+
+def _move(R, path, why, **extra):
+    return R.move(path, at=time.strftime('%Y-%m-%d %H:%M:%S'), why=why, **extra)
 
 
 def _few(paths, base, n=6):
@@ -288,8 +281,10 @@ def song_compress(project: str, dry: bool = True) -> str:
     call, run by its owner or the user (no sweep over songs). dry=True (the default) only reports: the files, GB
     now, GB after (estimated from a few files), what is skipped and why, and the song's own scripts that name a .wav
     (their owners' code: they read WAV only). dry=False writes each FLAC at the WAV's bit depth, reads it back and
-    compares every sample, and only then moves the WAV to songs/_reclaim/flac_<date>/<song>/ (manifest.jsonl lists
-    every move). It never deletes: the space comes back when the user empties _reclaim. Scope: renders/stems/, the
+    compares every sample, and only then moves the WAV to the reclaim folder at the root of the drive:
+    <root>/_reclaim/flac_<date>/<song>/<path from the drive root> (D:\\_reclaim on Windows; its manifest.json lists
+    every move, README.txt names the folder). It never deletes: the space comes back when the user deletes that
+    folder. Scope: renders/stems/, the
     reference's stems folder, renders/*.wav except latest.wav (a latest.wav that copies a named render becomes a
     hard link to it). Never touched: float WAVs (FLAC has no float), anything under live/, sounds/, takes, exam
     folders, and the folders Voice keeps (boom_trance/takes, vox/exam/clips, vox/work/cache, vox/rec). Every reader
@@ -309,24 +304,27 @@ def song_compress(project: str, dry: bool = True) -> str:
             L.append(f"  {_few([p for p, _ in plan.todo], plan.song)}")
         if plan.dup:
             L.append(f"latest.wav: a copy of renders/{os.path.basename(plan.dup)}; it would become a hard link to it "
-                     f"({_gb(dup_b)} to _reclaim)")
+                     f"({_gb(dup_b)} to the reclaim folder)")
         for p, why in plan.stale + plan.strays:
-            L.append(f"to _reclaim: {_rel(p, plan.song)} ({why})")
+            L.append(f"to the reclaim folder: {_rel(p, plan.song)} ({why})")
         _report_common(plan, L)
-        L.append(f"WAVs would go to {_Reclaim(plan).dir} (never deleted: the user empties _reclaim). "
-                 f"Run song_compress(project, dry=False) to do it.")
+        R = _reclaim(plan)
+        L.append(f"WAVs would go to {R.dir}{os.sep}<path from the drive root> (never deleted: the user deletes the "
+                 f"folder when they like). Run song_compress(project, dry=False) to do it.")
+        if R.note:
+            L.append('note: ' + R.note)
         return '\n'.join(L)
     if not plan.todo and not plan.dup and not plan.stale and not plan.strays:
         L = [head, 'nothing to compress']
         _report_common(plan, L)
         return '\n'.join(L)
-    R = _Reclaim(plan)
+    R = _reclaim(plan)
     done, failed, flac_b = [], [], 0
     with machine.slot('cpu', f"song_compress {os.path.basename(plan.song)}", mem_gb=0.5, threads=1,
                       disk_gb=now * 0.35 / G, disk_path=plan.root,
                       disk_hint='free some space first: the FLACs are written before the WAVs move'):
         for p, why in plan.stale + plan.strays:
-            R.move(p, why)
+            _move(R, p, why)
         if plan.dup:
             latest = os.path.join(plan.root, 'renders', 'latest.wav')
             tmp = latest + '.link'
@@ -335,15 +333,15 @@ def song_compress(project: str, dry: bool = True) -> str:
             except OSError as e:
                 failed.append((latest, f"no hard link on this drive ({e}); latest.wav stays a copy"))
             else:
-                R.move(latest, f"copy of renders/{os.path.basename(plan.dup)}; latest.wav is now a hard link to it")
+                _move(R, latest, f"copy of renders/{os.path.basename(plan.dup)}; latest.wav is now a hard link to it")
                 os.replace(tmp, latest)
         for wav, sub in plan.todo:
             base = os.path.splitext(wav)[0]
             flac, part = base + '.flac', base + '.flac.part'
             if os.path.lexists(part):
-                R.move(part, 'left by an earlier run that stopped')
+                _move(R, part, 'left by an earlier run that stopped')
             if os.path.lexists(flac):
-                R.move(flac, 'an older FLAC of this name')
+                _move(R, flac, 'an older FLAC of this name')
             try:
                 ok = _encode_and_verify(wav, part, sub)
             except Exception as e:                       # noqa: BLE001  (the WAV stays; the next file goes on)
@@ -351,16 +349,17 @@ def song_compress(project: str, dry: bool = True) -> str:
                 failed.append((wav, f"{type(e).__name__}: {e}"))
             if not ok:
                 if os.path.lexists(part):
-                    R.move(part, f"FLAC of {os.path.basename(wav)} did not read back identical; the WAV stayed")
+                    _move(R, part, f"FLAC of {os.path.basename(wav)} did not read back identical; the WAV stayed")
                 if not failed or failed[-1][0] != wav:
                     failed.append((wav, 'the FLAC did not read back identical; the WAV stayed'))
                 continue
             os.replace(part, flac)
             shutil.copystat(wav, flac)
             fb = os.path.getsize(flac)
-            R.move(wav, 'FLAC read back sample for sample identical', flac=_rel(flac, plan.song), flac_bytes=fb)
+            _move(R, wav, 'FLAC read back sample for sample identical', flac=flac, flac_bytes=fb)
             done.append(wav)
             flac_b += fb
+    R.finish(README_LINE, who='ismail song_compress')
     wav_b = sum(r['bytes'] for r in R.moved if r.get('flac'))
     L = [head, f"{len(done)} WAV to FLAC, each read back sample for sample identical: {_gb(wav_b)} of WAV is "
                f"now {_gb(flac_b)} of FLAC"]
@@ -370,7 +369,10 @@ def song_compress(project: str, dry: bool = True) -> str:
         L.append(f"NOT done {len(failed)}:")
         L += [f"  {_rel(p, plan.song)}: {why}" for p, why in failed]
     moved_b = sum(r['bytes'] for r in R.moved)
-    L.append(f"moved {len(R.moved)} files ({_gb(moved_b)}) to {R.dir} (manifest.jsonl lists each). Nothing was "
-             f"deleted: the {_gb(moved_b)} come back when the user empties _reclaim.")
+    L.append(f"moved {len(R.moved)} files ({_gb(moved_b)}) to {R.dir}, each keeping its path from the drive root "
+             f"({os.path.join(R.folder, 'manifest.json')} lists each). Nothing was deleted: the {_gb(moved_b)} come "
+             f"back when the user deletes {R.folder}.")
+    if R.note:
+        L.append('note: ' + R.note)
     _report_common(plan, L)
     return '\n'.join(L)

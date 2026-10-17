@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### engine: one reclaim folder at the root of the drive
+
+- New `ismail/reclaim.py` (ledger:M229, the user's voice note: all reclaim folders go in one place at the root of the
+  drive). `reclaim.root()` is `$ISMAIL_RECLAIM`, else on Windows the songs folder's drive root plus `_reclaim`
+  (`D:\_reclaim`), else `songs/_reclaim`; when that cannot be made or written it falls back to `songs/_reclaim` and
+  the op's report says so. `reclaim.move(path, what, group=, why=)` moves a file or folder to
+  `_reclaim/<what>_<YYYYMMDD>/<group>/<path from the drive root>`, never overwrites (a numeric suffix), appends a run
+  to that folder's `manifest.json` and adds or updates its entry in `_reclaim/README.txt` (other entries untouched).
+  `reclaim.Run` keeps many moves as one run. `python -m ismail.reclaim` lists the folders with their sizes;
+  `python -m ismail.reclaim move <path> <what>` moves one. Nothing in it deletes.
+- `song_compress` moves the WAVs to `_reclaim/flac_<date>/<song>/` there (its per-file data kept in the manifest),
+  and `ismail.backup` trims older backups into `_reclaim/backups_<date>/<song>/`, both instead of `songs/_reclaim`.
+- `machine_disk` lists the reclaim folder's folders with their sizes, and the old per-song `songs/*/_reclaim`
+  folders as before. The disk hint, the worktree cleanup message, SKILL.md and docs/reference.md name the new place.
+- Tests point `ISMAIL_RECLAIM` at a temp folder for every test (tests/conftest.py); new tests/test_reclaim.py.
+
 ### skill: every song can be made again from its folder
 
 - `skills/ismail/SKILL.md`: each song keeps a script that rebuilds it and renders its audio (`build.py`, `set.py`, and

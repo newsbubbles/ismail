@@ -2304,10 +2304,14 @@ def machine_status(project: str = None) -> str:
 @op()
 def machine_disk(top: int = 12) -> str:
     """Where the disk went, when the board says disk LOW or a heavy job waits on disk: each drive's free space and
-    pagefile, the biggest folders under songs/ with their growth since the last daily snapshot, every _reclaim
-    folder, and the folders beyond songs/ with their daily growth (a call walks them for 20 s at most and the next
-    call carries on, so the first look at a whole drive can take a few calls). To free space, move a project's finished intermediates (caches, old renders, uncut takes) into its
-    _reclaim/ folder and tell the user; never delete: the user clears _reclaim."""
+    pagefile, the biggest folders under songs/ with their growth since the last daily snapshot, the reclaim folder
+    at the root of the drive (D:\\_reclaim on Windows) with each of its folders and their sizes, any old per-song
+    songs/*/_reclaim folders, and the folders beyond songs/ with their daily growth (a call walks them for 20 s at
+    most and the next call carries on, so the first look at a whole drive can take a few calls). To free space, move
+    a project's finished intermediates (caches, old renders, uncut takes) with ismail.reclaim.move(path, what) or
+    `python -m ismail.reclaim move <path> <what>`: they land in <root>/_reclaim/<what>_<date>/, keeping their path
+    from the drive root, with a manifest.json (ledger:M229). Tell the user; never delete: the user deletes the
+    folder."""
     return machine.disk_text(top)
 
 
