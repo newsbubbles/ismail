@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 
+from . import audiofile
 from .api import op, OpError, _load
 
 STEMS = ('drums', 'bass', 'other', 'vocals')
@@ -32,7 +33,7 @@ def ref_stems(P):
     sd = ref.get('stems_dir')
     if sd:
         for s in STEMS:
-            p = os.path.join(sd, s + '.wav')
+            p = audiofile.find(os.path.join(sd, s + '.wav'))
             if os.path.exists(p):
                 out[s] = p
     return out
@@ -75,13 +76,13 @@ def render_stems(P, mode):
             continue
         if tr.get('output', 'master') != 'master':
             continue  # routed into a bus: the bus stem carries it (processed), don't count it twice
-        p = os.path.join(sd, t + '.wav')
+        p = audiofile.find(os.path.join(sd, t + '.wav'))
         if not os.path.exists(p):
             raise OpError(f"no rendered stem for {t!r}; render(stems=True) (full song) first")
         add(s, p)
     # buses: assign to the stem of the tracks feeding them (outputs count fully, sends by level)
     for bname in P.d.get('buses', {}):
-        p = os.path.join(sd, f"bus_{bname}.wav")
+        p = audiofile.find(os.path.join(sd, f"bus_{bname}.wav"))
         if not os.path.exists(p):
             continue
         weight = {}

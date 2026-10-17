@@ -105,7 +105,7 @@ python -m ismail -p songs/demo render stems=true out=v1 mp3=also
 python -m ismail -p songs/demo analyze_melody source=track:bass bars=[1,2]
 ```
 
-The last line reads the bass back from its stem as notes: the four you wrote, once per bar. `render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render. `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
+The last line reads the bass back from its stem as notes: the four you wrote, once per bar. `render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render (latest.wav is then a hard link to it: one copy on disk). `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
 
 Keep your projects under `songs/` (git-ignored) or anywhere else; a project is just a folder.
 
@@ -117,7 +117,9 @@ Find any tool by what you need or by role with `ops_find`.
   read back as text. Named effect stacks (`fx_stack_*`, `stack:<name>`) and an `autotune` effect. A second part
   measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
   (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
-  (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from.
+  (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from. A finished song's stems
+  and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to
+  `_reclaim`, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
@@ -403,6 +405,7 @@ ismail/
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
+  audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup
   tags.py        ID3 tags on every mp3; lexicon.py a person's own words mapped to ismail's terms

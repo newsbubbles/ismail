@@ -19,6 +19,7 @@ import time
 import numpy as np
 
 from . import analysis as A
+from . import audiofile
 from . import machine
 from . import provenance
 from . import sources as sourcesmod
@@ -158,7 +159,10 @@ class Project:
         try:
             rel = os.path.relpath(os.path.abspath(path), rd).replace(os.sep, '/')
             with open(os.path.join(rd, WINDOWS_FILE), encoding='utf8') as f:
-                return json.load(f).get(rel)
+                w = json.load(f)
+            if rel.lower().endswith('.flac') and rel not in w:     # song_compress made it from the .wav (M221)
+                rel = rel[:-5] + '.wav'
+            return w.get(rel)
         except (OSError, ValueError):
             return None
 
@@ -189,7 +193,7 @@ class Project:
         src = self.auto_source(src)
         ref = self.d.get('reference') or {}
         if src == 'render':
-            p = os.path.join(self.root, 'renders', 'latest.wav')
+            p = audiofile.find(os.path.join(self.root, 'renders', 'latest.wav'))
             if not os.path.exists(p):
                 raise OpError("nothing rendered yet; call render first")
             return p
@@ -207,12 +211,12 @@ class Project:
             sd = ref.get('stems_dir')
             if not sd:
                 raise OpError("reference has no stems yet; run separate(source='ref') first")
-            p = os.path.join(sd, stem + '.wav')
+            p = audiofile.find(os.path.join(sd, stem + '.wav'))
             if not os.path.exists(p):
-                raise OpError(f"no reference stem {stem!r}; have: {[os.path.basename(x)[:-4] for x in glob.glob(sd + '/*.wav')]}")
+                raise OpError(f"no reference stem {stem!r}; have: {list(audiofile.listing(sd))}")
             return p
         if src.startswith('track:'):
-            p = os.path.join(self.root, 'renders', 'stems', src[6:] + '.wav')
+            p = audiofile.find(os.path.join(self.root, 'renders', 'stems', src[6:] + '.wav'))
             if not os.path.exists(p):
                 raise OpError(f"no rendered stem for track {src[6:]!r}; render(stems=True) first")
             return p
@@ -221,7 +225,7 @@ class Project:
             if not meta:
                 raise OpError(f"no sound {src[6:]!r}; sound_list to see the bank")
             return os.path.join(self.root, meta['file'])
-        p = src if os.path.isabs(src) else os.path.join(self.root, src)
+        p = audiofile.find(src if os.path.isabs(src) else os.path.join(self.root, src))
         if not os.path.exists(p):
             raise OpError(f"audio source {src!r} not found. Use render | ref | ref:<stem> | track:<name> | sound:<name> | a path")
         return p
@@ -885,7 +889,7 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
     else:
         done = "First session over for this person (nothing marked: this computer's owner already makes songs)."
     heard = sorted(f for f in (os.listdir(os.path.join(src, 'renders')) if os.path.isdir(os.path.join(src, 'renders'))
-                                else []) if f.startswith('sketch_') and f.endswith(('.mp3', '.wav')))
+                                else []) if f.startswith('sketch_') and f.endswith(('.mp3', '.wav', '.flac')))
     song = ''
     v = _version_of(hits[0])
     if heard:                                        # ledger:M170 U-5: the kept song plays at once
@@ -976,9 +980,9 @@ def _tune_gap(project):
     except ImportError:
         return 'balance not measured (no pyloudnorm)'
     sd = os.path.join(os.path.abspath(project), 'renders', 'stems')
-    tune = os.path.join(sd, 'melody.wav')
-    others = [os.path.join(sd, f) for f in os.listdir(sd) if f.endswith('.wav') and f != 'melody.wav'
-              and not f.startswith('bus_')] if os.path.isdir(sd) else []
+    have = audiofile.listing(sd)
+    tune = have.get('melody', os.path.join(sd, 'melody.wav'))
+    others = [p for n, p in have.items() if n != 'melody' and not n.startswith('bus_')]
     if not os.path.exists(tune) or not others:
         return 'balance: no tune and parts to weigh'
     y, sr = sf.read(tune)
@@ -1045,7 +1049,7 @@ def _sketch_render(job):
         if not isinstance(final, str) and ('moved it' in bal or down < -0.05 or not 4.0 <= final[0] <= 6.0):
             bal += f"; in the final mix it sits {final[0]:+.1f} LU" + (
                 '' if 4.0 <= final[0] <= 6.0 else ", outside the 4-6 LU a sketch aims for")
-        lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
+        lufs, peak = _lufs_peak(audiofile.find(os.path.join(sp, 'renders', 'latest.wav')))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
         got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time(),
                'tune_lu': None if isinstance(final, str) else round(final[0], 1)}
@@ -1067,7 +1071,7 @@ def _tune_hot(project):
     """A tune stem over HOT_DB in the last stems render: how far (dB) to bring it down to TUNE_PEAK_DB; else 0."""
     try:
         import soundfile as sf
-        y, _ = sf.read(os.path.join(os.path.abspath(project), 'renders', 'stems', 'melody.wav'))
+        y, _ = sf.read(audiofile.find(os.path.join(os.path.abspath(project), 'renders', 'stems', 'melody.wav')))
     except Exception:
         return 0.0
     pk = float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
@@ -1144,7 +1148,7 @@ def _loudness_trim(project, target):
     try:
         import pyloudnorm as pyln
         import soundfile as sf
-        y, sr = sf.read(os.path.join(os.path.abspath(project), 'renders', 'latest.wav'))
+        y, sr = sf.read(audiofile.find(os.path.join(os.path.abspath(project), 'renders', 'latest.wav')))
         lufs = pyln.Meter(sr).integrated_loudness(y)
     except Exception:
         return 0.0
@@ -1926,7 +1930,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     Returns levels, clipping and timing."""
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
-    from .render import Renderer, write_wav, prune_cache, RenderError
+    from .render import Renderer, write_wav, write_renders, prune_cache, RenderError
     try:
         wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
     except ValueError as e:
@@ -1950,9 +1954,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         raise OpError(f"render failed: {e}")
     rd = os.path.join(P.root, 'renders')
     written = ['latest.wav'] + ([out + '.wav'] if out and mp3 != 'only' else [])
-    write_wav(os.path.join(rd, 'latest.wav'), y, R.sr)
-    if out and mp3 != 'only':
-        write_wav(os.path.join(rd, out + '.wav'), y, R.sr)
+    write_renders(rd, y, R.sr, out if out and mp3 != 'only' else None)
     mp3_note = ''
     if mp3 != 'none':
         from .render import write_mp3
@@ -2073,7 +2075,7 @@ def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> st
     P = _load(project)
     g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
     ref = P.d.get('reference') or {}
-    drums = os.path.join(ref.get('stems_dir') or '', 'drums.wav')
+    drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
         txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
     else:
@@ -2356,6 +2358,7 @@ from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by p
 from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
 from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
+from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
