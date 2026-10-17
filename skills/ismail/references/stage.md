@@ -66,6 +66,14 @@ person and an agent change the same scene.
   rebuilt (`stage_scene_export`, swapped in under the construct, so only when they are out or ask): new or changed
   geometry, modelling, modifiers, textures and any material change other than the base colour, a new object, and
   a new merged piece list (a room exported before pieces were numbered splits nothing until its next export).
+- **Screens in the room** (`stage_surface`): an image, a video, text or a live camera on every mesh of a material,
+  now, flat and unlit, until `clear=True`. Slides and a video backdrop on a wall, a teleprompter that scrolls
+  (`text=`, `lines=`, `scroll=` lines a second), a monitor showing a scene camera (`camera=`, `fps=`). Files sit in
+  the scene folder (paths relative to it). The surface keeps its mesh's shape (measured from its UVs; `fit`
+  contain, cover or stretch). Give each screen its own material in the build: a surface covers every mesh of its
+  material, and a plane's UVs decide which way up the picture is (check it once in a capture). Not saved to the
+  scene. In `stage_capture` it is a setup command (`{"type": "surface", ...}`, timed with `at_song`); a video there
+  follows the film's time and a camera renders every frame.
 - **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
   moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
   `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.

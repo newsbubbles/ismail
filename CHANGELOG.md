@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Stage: screens in the room (stage_surface)
+
+- For a talk given from the stage (the user, 10-17: a lecture hall with slides, a video backdrop, a teleprompter
+  and a monitor showing the camera on air): `stage_surface` shows an image, a video, text or a live camera on every
+  mesh of a named material, now, by an agent. The meshes draw flat and unlit (a screen glows; `glow` dims it) and
+  get their own material back with `clear=True`; nothing is saved to the scene. A re-exported room gets its
+  surfaces back; another scene starts with none.
+- The surface keeps its mesh's shape: its aspect is measured from the UVs of its first triangle in world space (or
+  `aspect=`), and images, video and text are drawn into a canvas of that shape, fitted `contain` (on `background`),
+  `cover` or `stretch`; `px` is the long side. Text wraps to the width, `lines` at once, scrolling `scroll` lines a
+  second from `line`. A camera renders at the surface's aspect with the camera's horizontal field of view, `fps`
+  times a second, never drawing its own screen (a texture cannot be read while it is drawn into).
+- Videos load as a whole file (seekable without range requests), muted unless `sound=True`. In a capture
+  (`stage_capture` setup, timed with `at_song`) a video is seeked to the film's time every frame and a camera
+  renders every frame, so the edit sees what the room showed. Files must be inside the scene folder; the op checks
+  before sending.
+- Limits: each camera feed is one more render of the room (keep `fps` low in the headset); a surface covers every
+  mesh of its material, so screens that show different things need their own materials; which way up a picture
+  lands follows the plane's UVs.
+
 ### Tests: two stage tests no longer depend on how fast the Windows runner is
 
 - `test_a_recorded_move_thins_to_few_keys_that_play_back_within_two_cm_and_two_degrees` timed out on Windows CI

@@ -41,6 +41,7 @@ import { setPickEmit } from './pickcycle.js';
 import { CAPTURE, runCapture } from './capture.js';
 import { initTrails } from './trails.js';
 import { initCamRec } from './camrec.js';
+import { initSurfaces } from './surfaces.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -109,6 +110,7 @@ const music = initMusic(ed, live);
 window.VR_music = music;
 actors.setMusicClock(() => music.now());            // takes played on the music (stage_actor_play at_music)
 initStream(ed, live);
+const surfaces = initSurfaces(ed, live, () => (music.now() || {}).t || 0);   // slides, video, text, a live camera on a material
 // a re-exported room comes in without the grown trees (they hang under the old scene's tree_k items): grow them again
 live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reload) setTimeout(() => live.handlers.trees_reload({}).catch(() => {}), 500); });
 const stageClock = initClock(ed, live, xr, panels);   // the 4D timeline: keyed objects, tree growth
@@ -435,4 +437,4 @@ wake();
 const st0 = ed.selftest();
 console.log('[vr] ready:', ed.items.length, 'objects; selftest on load:', st0.pass ? 'PASS' : 'FAIL');
 live.pageLoaded(st0);
-if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets });   // a frame-locked capture (capture.js)
+if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets, surfaces });   // a frame-locked capture (capture.js)
