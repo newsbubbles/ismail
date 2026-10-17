@@ -95,7 +95,9 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     const real = performance.now.bind(performance), base = real();
     let vt = base;
     performance.now = () => vt;
-    for (const st of actors.playing.values()) if (st.frames) { st.t0 = base; st.i = 0; st.feet = { l: {}, r: {} }; }
+    // the body too, as at a loop: its facing and balance from the wait would otherwise carry in, and vary run to run
+    // (the 2026-10-17 study: 0-12 degrees of facing at frame 0, 2 steps or 5 in the same clip)
+    for (const st of actors.playing.values()) if (st.frames) { st.t0 = base; st.i = 0; st.feet = { l: {}, r: {} }; st.body = null; st.chestHands = undefined; }
     await post('capture/status', { state: 'rendering', frames: N }, true);
     for (let n = 0; n < N; n++) {
       songT = job.t0 + n / fps;
