@@ -256,7 +256,9 @@ nudges you, follow it.
   the disk. At 3 times its `--mem` with commit under 10 GB (less on a small machine) its processes are paused (SUSPENDED: OVER, never
   killed); `python -m ismail.machine resume <job>` goes on once memory is free. Heavy jobs wait while a drive is under 15 GB free or commit under 6 GB; `machine_disk` shows where the
   space went. To free space, move finished intermediates (caches, old renders, uncut takes) into the project's
-  `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`.
+  `_reclaim/` folder and tell the user: nobody deletes, the user clears `_reclaim`. A finished song's stems and
+  named renders go to FLAC bit for bit with `song_compress(project)`: read its dry report first, run it per song
+  with `dry=False` only on the owner's or the user's word; the WAVs land in `_reclaim`.
   While a live set is on air, GPU jobs and Blender renders wait until it ends, and the CPU jobs beside it share
   half the machine's threads (a temporary rule, "only for now during sets": `machine on-air` shows it; only the
   user lifts it). Register Blender honestly: a `--cpu` Blender

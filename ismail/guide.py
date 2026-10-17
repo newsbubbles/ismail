@@ -4,6 +4,8 @@ MACHINE
 - The computer is shared by several sessions. machine_status before anything over a minute; heavy ops (render,
   separate, mimic_measure, fits, live_parity) take a slot and refuse with the reason when it is busy or hot. Run
   Blender, whisper, demucs or long scripts through `python -m ismail.machine run --gpu|--cpu -- <command>`.
+- Disk: machine_disk shows where it went. song_compress(project) turns a finished song's stems and named renders
+  into FLAC, bit for bit (dry report first; WAVs go to _reclaim, never deleted). Readers find the FLAC themselves.
 
 ROLE
 - Making music (the default): write only inside songs/<slug>/. Do not edit ismail/, skills/, tests/ or another

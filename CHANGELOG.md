@@ -20,6 +20,31 @@
   and same-pitch lines struck again: quarters with a gap, a decaying note with no gap, eighths stopped dead, and a
   flat note retriggered legato.
 
+### song_compress: a finished song's WAVs as FLAC, bit for bit (ledger:M221)
+
+- Stems are about 29 GB of WAV, and FLAC keeps every sample at about a fifth of the size. New op
+  `song_compress(project, dry=True)` turns `renders/stems/`, the reference's stems folder and the named renders
+  (`renders/*.wav` except latest.wav) into FLAC at the WAV's own bit depth, reads each one back and compares every
+  sample, and only on an exact match moves the WAV to `songs/_reclaim/flac_<date>/<song>/` (a `manifest.jsonl`
+  lists every move). It never deletes: the space comes back when the user empties `_reclaim` (hq:D-183).
+- Dry by default: the report gives the files, GB now, GB after (estimated from three files), the skipped files and
+  why, and the song's own scripts that name a `.wav` (found by grep; their owners' code). `dry=False` runs in a CPU
+  slot on the shared machine, one song per call. Never touched, as code in the op: float WAVs (FLAC has no float),
+  anything under `live/`, `sounds/` (the render cache keys on their mtime), takes and phone folders, exam folders,
+  and `boom_trance/takes`, `vox/exam/clips`, `vox/work/cache`, `vox/rec`.
+- Readers find `<name>.flac` when `<name>.wav` is gone (`ismail/audiofile.py`: `find`, `listing`): every analysis
+  source (`render`, `ref:<stem>`, `track:<name>`, a path), the comparison stems, swing and grid on the drum stem,
+  the sketch's tune balance, and `ref_retune`. A windowed render keeps its window as FLAC. Writers stay WAV: a new
+  render writes `<name>.wav` beside the old FLAC and wins, and the next run moves the old FLAC to `_reclaim`.
+- `render(out=...)` writes `renders/<out>.wav` once and makes `latest.wav` a hard link to it (one copy on disk; a
+  drive without hard links gets a copy as before). `write_wav` never writes through a linked name: it writes a
+  temporary file that replaces the name, so a later render never changes an earlier named one. An existing
+  latest.wav that copies a named render becomes a link when the song is compressed.
+- Listed in `guide`, `docs/reference.md`, the `ops_find` start shelf and the playbook's machine section.
+- Tests: `tests/test_flac.py` (find and listing, each switched read site on FLAC-only stems, the latest.wav link
+  across renders, the dry report, the exact read-back, a float WAV skipped, the moves and manifest, a newer WAV
+  beside an old FLAC, the never-touched folders).
+
 ### analyze_melody: a quick octave jump reads in its own octave
 
 - An eighth-note octave bounce (E2 E3 at 124 bpm) read its E3s as E2. pYIN's smoothing held the lower pitch through
