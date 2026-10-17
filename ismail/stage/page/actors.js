@@ -1053,7 +1053,12 @@ export function initActors(ed, live) {
     const S0 = b.feet0.l.p.clone().add(b.feet0.r.p).multiplyScalar(0.5);
     const away = P0.clone().add(b.off).sub(S).sub(P0.clone().sub(S0)).setY(0);
     const back = standing && away.length() > BAL_MAX * s ? away.clone().setLength(away.length() - BAL_MAX * s).negate() : new THREE.Vector3();
-    const o = b.off.clone().add(back).setY(drop);
+    // eased (BAL_S): a foot landing moves the feet's middle at once, and the hips must not jump with it (the probe: hip
+    // jitter 2 -> 20 m/s^2 on a walk without this)
+    const o0 = b.off.clone().add(back).setY(drop), dt = f.t - (b.drawT ?? f.t);
+    if (!b.drawS || dt < 0 || dt > GAP_S) b.drawS = o0.clone(); else b.drawS.lerp(o0, 1 - Math.exp(-dt / BAL_S));
+    b.drawT = f.t;
+    const o = b.drawS.clone();
     b.draw = o;                                                         // where the hips are drawn (the arms' rest moves with them)
     lean(o);
     const moved = b.off.lengthSq() > 1e-6 || drop < -1e-3 || back.lengthSq() > 1e-6 || b.yaw.angleTo(I0) > 1e-3 || ['l', 'r'].some((sd) => st.feet[sd].at && st.feet[sd].at.distanceTo(b.feet0[sd].p) > 1e-3)
