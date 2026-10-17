@@ -472,7 +472,7 @@ def _remove_empty(p):
         return ''
     try:
         if os.listdir(p):
-            return f'; its folder {p} still holds files git left: look at them (move what matters to _reclaim/)'
+            return f'; its folder {p} still holds files git left: look at them (move what matters with `python -m ismail.reclaim move <path> <what>`: _reclaim/ at the drive root)'
         os.rmdir(p)
         return ''
     except OSError:
@@ -547,8 +547,9 @@ def done(path, repo=HERE):
     loose = [ln[3:] for ln in st if ln.startswith('??') or (ln.startswith('!!') and not CACHES.search(ln[3:]))]
     if loose:
         raise WorktreeError(f"{p} holds {len(loose)} files git does not track ({', '.join(loose[:5])}"
-                            f"{', ...' if len(loose) > 5 else ''}): look at them; move what matters to _reclaim/ in the "
-                            'main checkout, never delete. Then run done again')
+                            f"{', ...' if len(loose) > 5 else ''}): look at them; move what matters with "
+                            '`python -m ismail.reclaim move <path> <what>` (_reclaim/ at the root of the drive), never '
+                            'delete. Then run done again')
     main = worktrees(repo)[0]['path']
     r = _git(['worktree', 'remove', p], main, check=False)
     if r.returncode and _key(p) in {_key(x['path']) for x in worktrees(repo)}:

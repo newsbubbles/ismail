@@ -48,3 +48,11 @@ def _no_local_guard_files(tmp_path_factory):
             os.environ.pop(k, None)
         else:
             os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
+def _reclaim_in_tmp(tmp_path_factory, monkeypatch):
+    """Nothing in the suite moves into the person's reclaim folder (D:\\_reclaim, ledger:M229): every test gets its
+    own temp reclaim root. A short one: Windows paths stop at 260 characters and a moved file keeps its whole path."""
+    from ismail import reclaim
+    monkeypatch.setenv(reclaim.ENV, str(tmp_path_factory.mktemp('rc')))
