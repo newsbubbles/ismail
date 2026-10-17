@@ -1240,10 +1240,38 @@ class _Meter:
 
 
 def _mem_of(p):
-    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; elsewhere
-    the resident size."""
+    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; on macOS
+    the physical footprint (what Activity Monitor shows: resident plus compressed and swapped out); elsewhere the
+    resident size."""
     mi = p.memory_info()
-    return mi.rss, getattr(mi, 'private', mi.rss)
+    own = getattr(mi, 'private', None)
+    if own is None and sys.platform == 'darwin':
+        own = _footprint(p.pid)
+    return mi.rss, mi.rss if own is None else own
+
+
+_RUSAGE = []
+
+
+def _footprint(pid):
+    """macOS: a process's phys_footprint in bytes (proc_pid_rusage, allowed on our own user's processes), or None."""
+    if not _RUSAGE:
+        fn = None
+        for lib in (None, '/usr/lib/libproc.dylib'):
+            try:
+                fn = ctypes.CDLL(lib).proc_pid_rusage
+                break
+            except (OSError, AttributeError):
+                pass
+        if fn is not None:
+            fn.argtypes, fn.restype = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p], ctypes.c_int
+        _RUSAGE.append(fn)
+    if _RUSAGE[0] is None:
+        return None
+    buf = (ctypes.c_uint64 * 32)()         # rusage_info_v0: a 16-byte uuid, then 64-bit fields; phys_footprint is the
+    if _RUSAGE[0](pid, 0, buf) != 0:      # 8th of them (RUSAGE_INFO_V0 = 0)
+        return None
+    return int(buf[9])
 
 
 def _write_bytes(p):

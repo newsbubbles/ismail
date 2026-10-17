@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Governor: the macOS meter counts a job's compressed memory (ledger:M166)
+
+- On macOS the job meter read a process's own memory as its resident size, and macOS compresses pages out of the
+  resident set under memory pressure, random bytes too. In the test suite a `machine run` job holding 900 MB of
+  random bytes read 844 MB resident at its peak and 812 MB a second later, so it stayed under the 0.85 GB OVER
+  line and OVER MEMORY never fired there. Alone on the same runner it read 914 MB and fired. The meter always saw
+  the job; it saw too little of it.
+- `_mem_of` now reads the physical footprint on macOS (`proc_pid_rusage`, the number Activity Monitor shows:
+  resident plus compressed and swapped out pages), which held at 908 MB through the same run. It falls back to the
+  resident size when the call is not there. Windows (private bytes) and Linux (resident size) are unchanged.
+- Tests: `test_the_cli_says_over_memory_in_the_jobs_own_output` is no longer an expected failure on macOS.
+
 ### analyze_melody: a held note reads as one note
 
 - A held note could read as two notes of the same pitch. librosa's onset detector also fires where no note starts:

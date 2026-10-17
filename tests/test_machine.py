@@ -384,9 +384,6 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
     assert not [f for f in os.listdir(board / 'jobs') if f.endswith('.tmp')]
 
 
-@pytest.mark.xfail(sys.platform == 'darwin', strict=False,
-                   reason="macOS runners: the meter often never sees the job's memory (6 s hold, incompressible bytes; "
-                          "ledger:M166); the assert message prints what it measured")
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
     # 2.5x: OVER, not paused (under 3x). Random bytes, not b'x' * n: macOS compresses a page of one repeated byte
