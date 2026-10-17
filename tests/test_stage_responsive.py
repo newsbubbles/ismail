@@ -2,8 +2,6 @@
 receipts.js): a note that reaches a session shows "heard by <who>", a session can say what it is busy with, and a
 note nobody answers is called out."""
 import json
-import shutil
-import subprocess
 import threading
 import time
 import urllib.error
@@ -14,6 +12,7 @@ import pytest
 from ismail.api import OPS
 from ismail.stage import ear as EAR
 from ismail.stage import presence as PR
+import nodejs
 from test_stage import _get, _post, stage  # noqa: F401  (the fixture)
 
 
@@ -134,13 +133,9 @@ RECEIPTS = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 
 
 
 def _note_text(receipt, busy):
-    if not shutil.which('node'):
-        pytest.skip('node is not installed')
     js = (f"import('{RECEIPTS}').then((m) => console.log(JSON.stringify(m.noteText({json.dumps(receipt)}, "
           f"{json.dumps(busy)}))));")
-    r = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    return json.loads(r.stdout)
+    return nodejs.run(js)
 
 
 def test_the_card_says_heard_by_busy_and_stuck():

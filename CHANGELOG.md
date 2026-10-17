@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Tests: two stage tests no longer depend on how fast the Windows runner is
+
+- `test_a_recorded_move_thins_to_few_keys_that_play_back_within_two_cm_and_two_degrees` timed out on Windows CI
+  (main after pr:261 on 10-15, and pr:262), and `test_smooth_glides_through_a_key_and_stop_halts_there` did the same
+  on 10-12. Each time it was the run's first `node -e`: the script itself takes about 25 ms, and every later node
+  call in those runs passed. The five stage test files that run page code in node now share `tests/nodejs.py`: the
+  run's first launch is a warm-up of its own (`node -e 0`, up to 300 s, named in the warnings summary if it takes
+  over 5 s), and a script that still times out at 60 s runs once more, with a warning. A script that hangs still
+  fails.
+- `test_listen_and_presence_ops` failed on Windows CI (pr:262 on 10-15, main at 50b115b on 10-17) with the note "heard by
+  tester" but still `waiting`: the check that marks it handed runs on a timer thread 0.3 s after the note, and the
+  test read presence after a fixed 0.6 s sleep. It now waits up to 30 s for the note to be decided, with a 2 s
+  window to hand it over, and still asserts `handed`.
+
 ### engine: one reclaim folder at the root of the drive
 
 - New `ismail/reclaim.py` (ledger:M229, the user's voice note: all reclaim folders go in one place at the root of the

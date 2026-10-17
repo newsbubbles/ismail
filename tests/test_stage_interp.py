@@ -1,26 +1,21 @@
 """Keyed motion between keys (page/interp.js, run in node) and trial moves (the ops' side)."""
 import json
 import math
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from ismail.api import OPS, OpError
 from ismail.stage import interp as PI
+import nodejs
 from test_stage import FakePage, stage  # noqa: F401,F811  (the fixture)
 
 INTERP = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 'interp.js').as_uri()
 
 
 def _node(expr):
-    if not shutil.which('node'):
-        pytest.skip('node is not installed')
     js = f"import('{INTERP}').then((m) => {{ console.log(JSON.stringify({expr})); }});"
-    r = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    return json.loads(r.stdout)
+    return nodejs.run(js)
 
 
 KEYS = [{'t': 0, 'location': [0, 0, 0]}, {'t': 5, 'location': [10, 0, 0]}, {'t': 10, 'location': [10, 10, 0]}]

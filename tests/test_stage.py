@@ -428,7 +428,9 @@ def test_hooks_run_on_entering_vr_and_presence_tracks_it(stage, tmp_path, monkey
 
 
 def test_listen_and_presence_ops(stage, monkeypatch):
-    monkeypatch.setattr(PR, 'HEARD_WAIT_S', 0.3)
+    # the listener must be handed the note inside HEARD_WAIT_S, and the check runs on a timer thread: on a loaded
+    # Windows CI machine 0.3 s with a 0.6 s sleep read the note while it was still 'waiting' (2026-10-15 and 10-17)
+    monkeypatch.setattr(PR, 'HEARD_WAIT_S', 2)
     port = stage['port']
     first = OPS['stage_listen'](who='tester', wait=0)
     last = int(first.split()[1].rstrip(';'))
@@ -436,7 +438,9 @@ def test_listen_and_presence_ops(stage, monkeypatch):
     _post(port, 'live/event?scene=room', {'type': 'voice_message', 'file': 'voice/n1.webm', 'text': 'play something over Lucy'})
     out = OPS['stage_listen'](who='tester', since=last, wait=2)
     assert '[room]' in out and 'voice_message' in out and 'over Lucy' in out
-    time.sleep(0.6)
+    end = time.time() + 30
+    while _get(port, 'live/presence')[1]['last_voice']['heard'] == 'waiting' and time.time() < end:
+        time.sleep(0.1)
     pr = OPS['stage_presence']()
     assert 'listening: tester' in pr and 'over Lucy' in pr and 'handed' in pr
 
