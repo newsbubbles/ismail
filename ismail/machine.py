@@ -1091,19 +1091,9 @@ class _Meter:
         try:
             me = psutil.Process()
             procs = [me] + me.children(recursive=True)
-        except psutil.Error as e:
-            if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
-                print(f"[DIAG] children failed: {e!r}", file=sys.stderr, flush=True)
+        except psutil.Error:
             return
         rss = priv = 0
-        if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
-            for p in procs:
-                try:
-                    mi = p.memory_info()
-                    print(f"[DIAG] t={time.time():.2f} pid={p.pid} ppid={p.ppid()} name={p.name()} rss={mi.rss/2**20:.0f}M "
-                          f"vms={mi.vms/2**20:.0f}M foot={(_footprint(p.pid) or -2**20)/2**20:.0f}M", file=sys.stderr, flush=True)
-                except Exception as e:
-                    print(f"[DIAG] pid={p.pid} err {e!r}", file=sys.stderr, flush=True)
         for p in procs:
             try:
                 key = (p.pid, p.create_time())
@@ -1119,11 +1109,8 @@ class _Meter:
                     if p.cpu_affinity() != self.job['cores']:   # a child that set its own: back to the slot's cores
                         p.cpu_affinity(self.job['cores'])
                     self.pinned.add(key)
-            except (psutil.Error, AttributeError, NotImplementedError) as e:
-                if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
-                    print(f"[DIAG] sample pid={p.pid} err {e!r}", file=sys.stderr, flush=True)
-        if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
-            print(f"[DIAG] sum rss={rss/2**30:.3f} priv={priv/2**30:.3f} n={len(procs)}", file=sys.stderr, flush=True)
+            except (psutil.Error, AttributeError, NotImplementedError):
+                pass
         self.rss_peak = max(self.rss_peak, rss)
         self.priv_peak = max(self.priv_peak, priv)
         self._note(priv / 2 ** 30)

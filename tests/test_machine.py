@@ -386,8 +386,6 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
 
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
-    if os.environ.get('ISMAIL_METER_DIAG_FILE'):  # DIAG M166
-        env['ISMAIL_METER_DEBUG'] = '1'
     # 2.5x: OVER, not paused (under 3x). Random bytes, not b'x' * n: macOS compresses a page of one repeated byte
     # in memory, so the job's resident size never got past its declared 0.35 GB there (red since main 16:05)
     code = "import os, time; b = os.urandom(900 * 2 ** 20); time.sleep(2.5)"
@@ -395,9 +393,6 @@ def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
                           'hog', '--', sys.executable, '-c', code], capture_output=True, text=True, env=env, timeout=120)
     seen = {k: v for k, v in (machine.history() or [{}])[-1].items()
             if k in ('seconds', 'cpu_s', 'rss_peak_gb', 'mem_peak_gb', 'over_gb', 'exit')}
-    if os.environ.get('ISMAIL_METER_DIAG_FILE'):  # DIAG M166
-        with open(os.environ['ISMAIL_METER_DIAG_FILE'], 'a') as f:
-            f.write(out.stderr + chr(10) + repr((machine.history() or [{}])[-1]) + chr(10))
     assert out.returncode == 0 and 'OVER MEMORY' in out.stderr and "'hog'" in out.stderr, (out.stderr[-400:], seen)
     j = [x for x in machine.history() if x['what'] == 'hog'][-1]
     assert j['over_gb'] > 0.75 and j['mem_peak_gb'] >= 0.85 and not j.get('suspended')
