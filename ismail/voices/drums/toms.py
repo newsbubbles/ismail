@@ -567,7 +567,8 @@ def _lane(lanes, name, i, default):
 
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, pos=POS_REF, stroke='stick', drum='auto',
             close_db=0.0, oh_db=-6.0, btm_db=-9.0, rim_db=RIM_DB, spread=0.5, humanize_ms=2.0, level=1.0,
-            project_root=None, **_):
+            project_root=None, cents_of=None, **_):
+    """cents_of(midi): the instrument's tuning table, cents added to each hit's pitch."""
     out = np.zeros((2, total_n))
     for st, m, d, v in notes:
         beat = beat0 + st * bpm / 60.0
@@ -579,7 +580,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, pos=POS_REF, s
         j = min(int(round(st * sr)), total_n - 1)          # lanes read on the written onset, before the jitter
         p = float(np.clip(_lane(lanes, 'pos', j, pos), 0, 1))
         s = stroke if (lanes or {}).get('stroke') is None else STROKES[int(np.clip(round(_lane(lanes, 'stroke', j, 0)), 0, len(STROKES) - 1))]
-        f0 = 440.0 * 2 ** ((m - 69) / 12)
+        f0 = 440.0 * 2 ** ((m - 69) / 12 + (cents_of(m) / 1200.0 if cents_of else 0.0))
         y = hit(f0, v, sr, p, s, drum, rr=int(round(beat * 4)) + int(m), close_db=close_db, oh_db=oh_db,
                 btm_db=btm_db, rim_db=rim_db, layer_spread=spread, seed=seed, project_root=project_root)
         n = min(y.shape[1], total_n - i0)

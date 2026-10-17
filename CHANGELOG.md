@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### Tuning tables: per-note cents every instrument takes, and a song's own tuning (ledger:M231)
+
+- A part could only be put in tune by editing its voice's params or its notes, and ismail assumed 12-TET at A440
+  everywhere. Now every instrument carries an optional `tuning` table of cents, and a song an optional `tuning` in
+  `project.json` of the same shape: the song's tuning is the target every instrument inherits, an instrument's
+  table adds on top of it (it corrects toward the target, or detunes from it on purpose), and 12-TET holds only
+  when neither is set.
+- A table has five parts that add: `all` (every note), `pitch_class` (`{"E": -14}`, every octave: a 12-note tuning
+  such as just intonation or a maqam on the usual keys), `notes` (`{"F#3": 12}`, one exact note; in a kit, the
+  drum on that mapped pitch), `strings` (`{"6": {"all": -5, "open": 2, "3": 4}}`, string 1 = the highest, for a
+  voice that puts notes on strings) and `scale`, a whole tuning system on keys in a row (`{"edo": 24}`,
+  `{"edo": 19}`, `{"steps": [0, 200, 350, 500, 700, 900, 1050], "period": 1200, "root": "D3"}`: key root + k plays
+  step k mod n in period k // n). An instrument's scale replaces the song's. Keys are normalised on write (sharps,
+  MIDI numbers to names, `open` to fret 0), zero entries dropped, values -1200..1200 c.
+- New op `instrument_tuning(track=None, set=None, clear=False)`: no track is the song's tuning. It merges `set`
+  entry by entry (None removes one), returns the table, the inherited song tuning and the offset of every pitch the
+  part plays, and errs with what to write for an unknown note or pitch class, a value beyond 1200 c, a bad scale,
+  or a performer voice that takes no table. `project_info` marks a tuned track.
+- Every instrument type honours it: a synth's pitch (glides and LFOs ride on it), a sampler's playback rate (one-shot
+  drum samples too, pitch_track off or not: sharper is shorter), a code voice's and a mimic's frequency, a drum
+  synth's tone (kick and tom sweeps, snare tone, hat metal, clap band, noise-hit filter; decays unchanged), a kit's
+  mapped pitches (each piece's own table adds), and performer voices that take a `cents_of(midi, string, fret)`
+  argument: `electric` (per string and fret: poly mode's string choice, mono mode the same rule), `emily`,
+  `rhodes` and `toms`. `kit70`, `rusty` and `crackle` take none, and refuse a table rather than play it untuned.
+- `ismail.tuning.intended_cents(instrument, midi, song=...)` and `project_intended_cents(project, track, midi)` give
+  the pitch each key is meant to sound at (cents from A4 = 440 Hz), so a measurement can check a part against the
+  tuning it was given instead of 12-TET. `analyze_tuning` itself still reads against 12-TET in this change.
+- Live: both tables ride with the instrument onto a deck and into `live_track(instrument='track:<name>')`, and the
+  workers render through the same studio code, so a tuned part plays live as in the studio
+  (`tests/test_live_song_parity.py`: a tuned synth, a tuned kit and a song scale sample for sample, a tuned
+  electric guitar by ear). The song's tuning is part of every track's render cache key.
+- Nothing that exists changes: an instrument and a song with no table render bit for bit as before (every preset,
+  a sampler and the electric voice in both modes and kinds were compared against the previous code).
+- Docs: `docs/reference.md` (Concepts, the hearing table), `guide`, the instruments reference (how to tune an
+  instrument and a song, the adding rule, examples of a correction, just intonation, a maqam on the usual keys, 24
+  and 19 tones, a 7-step maqam and a non-octave period).
+- Tests: `tests/test_tuning_table.py` (normal form, the adding rule, scales, errors; every kind moves its notes by
+  the table, measured; the electric voice reads strings and frets; emily, rhodes and toms on synthetic samples; a
+  pitch class at +40 c read by `analyze_tuning` and a corrective per-note table bringing it back in tune; a sample
+  kit and a drum synth tuned per mapped pitch; the song's tuning inherited and corrected per track, its intended
+  pitches matching what renders), `tests/test_live_song_parity.py` (tuned cases).
+
 ### analyze_tuning: every part of a render against the tuning grid and key (ledger:M231)
 
 - A pitched part off the tuning grid went unnoticed until someone heard it: a salsa kit measured from records kept

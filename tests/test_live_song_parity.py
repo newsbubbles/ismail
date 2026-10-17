@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from ismail import api, voices
+from ismail.presets import PRESETS
 from ismail.live import parity
 from ismail.render import Renderer
 
@@ -80,6 +81,26 @@ def test_a_section_with_a_bus_sends_and_track_effects_plays_live_as_in_the_studi
     for k in ('mix', 'track:p', 'track:d', 'bus:verb'):
         assert parity.verdict(res[k]) == 'ok', (k, res[k])
     assert res['track:d']['resid_db'] < -80
+
+
+TUNED = [('synth', {**PRESETS['pluck'], 'tuning': {'pitch_class': {'E': -30}, 'notes': {'G4': 45}}}, MEL, None),
+         ('kit', {**PRESETS['kit_basic'], 'tuning': {'notes': {'C1': -200, 'D1': 60}}}, KIT, None),
+         ('song scale', 'preset:pluck', MEL, {'scale': {'edo': 24, 'root': 'C4'}, 'all': 7}),
+         ('electric', {**PRESETS['strat70_lead'], 'tuning': {'all': -20, 'strings': {'3': {'all': 25}}}},
+          MEL.replace('4', '3').replace('5', '4'), None)]
+
+
+@pytest.mark.parametrize('what, inst, notes, song_tuning', TUNED, ids=[t[0] for t in TUNED])
+def test_a_tuning_table_plays_live_as_in_the_studio(tmp_path, what, inst, notes, song_tuning):
+    """An instrument's tuning table, and the song's (project.json 'tuning'), ride with the instrument onto a deck
+    (ledger:M231): sample for sample, the performer by ear."""
+    root = song(str(tmp_path / 's'), inst, notes)
+    if song_tuning:
+        api.OPS['instrument_tuning'](root, set=song_tuning)
+    res, _, _ = parity.run(root, [2, 3])
+    assert parity.verdict(res['track:p']) == 'ok', res['track:p']
+    if what != 'electric':
+        assert res['track:p']['resid_db'] < -80, res['track:p']
 
 
 @pytest.mark.parametrize('inst, notes', [('snare', MEL), ('saw_lead', MEL), ('sfx', FX)])

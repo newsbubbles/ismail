@@ -120,7 +120,7 @@ def _lane(lanes, name, a, b):
     return seg
 
 
-def _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_rate):
+def _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_rate, cents_of=None):
     """A legato chain (or one note with expression) on one string: the first note's sample warped along the pitch
     path (steps or fretted slides at the legato notes, pick overshoot, bend and vibrato lanes)."""
     from ismail.voices.guitar.electric import _vibrato
@@ -161,6 +161,13 @@ def _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_
             path[k0:k1] = np.linspace(prev, new, k1 - k0)
             path[k1:] = new
     semis = path - base + (attack_cents * (v0 / 127.0) ** 2 / 100.0) * np.exp(-t / 0.06)
+    if cents_of is not None:                                    # the tuning table, a step at each legato note
+        tc = np.full(n, cents_of(m0) / 100.0)
+        for c in ch[1:]:
+            k0 = int((c[0] - st0) * sr)
+            if k0 < n:
+                tc[k0:] = cents_of(c[1]) / 100.0
+        semis = semis + tc
     semis += _lane(lanes, 'bend', i0, i0 + n)
     vd = _lane(lanes, 'vib', i0, i0 + n)
     if np.any(vd > 0):
@@ -182,7 +189,8 @@ def _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_
 
 
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, twelve=0.0, release_db=-18.0, humanize_ms=3.0,
-            detune_cents=4.0, level=1.0, pan=0.0, mono=False, attack_cents=0.0, vib_rate=5.4, **_):
+            detune_cents=4.0, level=1.0, pan=0.0, mono=False, attack_cents=0.0, vib_rate=5.4, cents_of=None, **_):
+    """cents_of(midi): the instrument's tuning table, cents added to each note."""
     out = np.zeros(total_n)
     lanes = lanes or {}
     expr = attack_cents > 0 or any(np.any(np.asarray(lanes.get(k, [0])) != 0) for k in ('bend', 'vib'))
@@ -197,16 +205,19 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, twelve=0.0, re
         st, m, dur, v = ch[0]
         beat = beat0 + st * bpm / 60.0
         if len(ch) > 1 or expr:
-            _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_rate)
+            _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_rate, cents_of)
             continue
-        _one(out, m, st, dur, v, beat, sr, 1.0, release_db, humanize_ms)
+        c = cents_of(m) if cents_of else 0.0
+        _one(out, m, st, dur, v, beat, sr, 1.0, release_db, humanize_ms, c)
         if twelve > 0:
             # 12-string courses: an octave string under the four lower courses (to G3), a unison string above
             up = (int(round(beat * 2)) % 2) == 1                 # off-beat 8ths: upstroke meets the course string first
             dt = (-0.004 if up else 0.004)
             if m <= 55:
-                _one(out, m + 12, st + dt, dur, max(1, v - 10), beat, sr, twelve, -90.0, humanize_ms, detune_cents, salt=1)
+                _one(out, m + 12, st + dt, dur, max(1, v - 10), beat, sr, twelve, -90.0, humanize_ms, detune_cents + c,
+                     salt=1)
             else:
-                _one(out, m, st + dt, dur, max(1, v - 6), beat, sr, twelve, -90.0, humanize_ms, -detune_cents, salt=2)
+                _one(out, m, st + dt, dur, max(1, v - 6), beat, sr, twelve, -90.0, humanize_ms, -detune_cents + c,
+                     salt=2)
     gl, gr = np.cos((pan + 1) * np.pi / 4), np.sin((pan + 1) * np.pi / 4)
     return np.stack([out * gl, out * gr]) * 0.8 * level

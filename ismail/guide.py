@@ -48,6 +48,8 @@ BUILD
   project_new -> track_add(instrument = dict | 'preset:x' | 'track:y') -> notes_write / pattern_write
   -> fx_add / bus_add / track_set(sends, output) -> automation_set -> render(bars=[a,b] for fast loops)
   instrument_help(type) and fx_help list every parameter with defaults.
+  instrument_tuning(track, set=...) moves an instrument's notes by cents (pitch_class, notes, strings, all, or a
+  scale such as {'edo': 24}); with no track it is the song's tuning, which every instrument inherits.
   Voices: engineered instruments kept as Python modules (grand_piano, growl, sfx ...): voices_list, voice_help;
   use {"type":"code","voice":"<name>"} or 'preset:<name>'. Write a song's own in <project>/voices/<name>.py
   (defines voice(freq, t, vel, gate, sr)); it overrides a built-in of the same name.

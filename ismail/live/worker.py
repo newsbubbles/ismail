@@ -74,7 +74,8 @@ def _perform(inst, notes, total, bpm, root, expr, beat0=0.0):
     from .. import dsp, voices
     mod = voices.load(inst['voice'], root)
     lanes = {k: _lane_curve(p, total) for k, p in (expr or {}).items()}
-    kw = instruments.performer_kw(mod.perform, inst.get('params'), beat0, root)
+    kw = instruments.performer_kw(mod.perform, inst.get('params'), beat0, root, inst.get('tuning'),
+                                  voice=inst['voice'])
     y = np.asarray(mod.perform(notes, total, SR, bpm=bpm, lanes=lanes, **kw), dtype=np.float64)
     y = np.stack([y, y]) if y.ndim == 1 else y
     out = np.zeros((2, total))

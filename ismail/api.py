@@ -353,6 +353,7 @@ def project_info(project: str) -> str:
                  + (f" sends {tr['sends']}" if tr.get('sends') else '') + (f" | fx [{fxs}]" if fxs else '')
                  + (f" | auto {list(tr['automation'])}" if tr.get('automation') else '')
                  + (f" | offset {tr['offset_ms']:+g} ms" if tr.get('offset_ms') else '')
+                 + (" | tuning table (instrument_tuning)" if inst.get('tuning') else '')
                  + (f" | {sum(1 for n in ns if len(n) > 4 and n[4])} notes nudged" if any(len(n) > 4 and n[4] for n in ns) else '')
                  + (f" | {len(tr['audio'])} audio clips" if tr.get('audio') else '') + (f" {flags}" if flags else ''))
     for b, bus in d.get('buses', {}).items():
@@ -1446,6 +1447,138 @@ def instrument_show(project: str, track: str, full: bool = False) -> str:
     if inst is None:
         return "(audio-only track, no instrument)"
     return json.dumps(inst_mod.normalize(inst) if full else inst, indent=1)
+
+
+def _tuning_reach(inst, P):
+    """(how this instrument takes its tuning table, whether it knows strings). Raises OpError for a performer voice
+    that cannot take one."""
+    from . import voices
+    t = inst.get('type')
+    if t == 'code' and inst.get('voice'):
+        try:
+            mod = voices.load(inst['voice'], P.root)
+        except voices.VoiceError as e:
+            raise OpError(str(e))
+        want = inst.get('fn') or 'voice'
+        plays = want == 'perform' or not callable(getattr(mod, want, None))
+        perform = getattr(mod, 'perform', None) if plays else None
+        if callable(perform):
+            if not inst_mod.takes_arg(perform, 'cents_of'):
+                raise OpError(inst_mod.no_tuning_message(inst['voice']))
+            how = (getattr(mod, 'INFO', None) or {}).get('tuning') or 'each note moved by its cents'
+            return f"performer {inst['voice']!r}: {how}", 'strings' in how
+        return f"voice {inst['voice']!r}: each note's frequency moved by its cents", False
+    return {'synth': "each note's pitch moved by its cents (glides and LFOs ride on it)",
+            'sprite': "each note's pitch moved by its cents",
+            'sampler': "each note's playback rate moved by its cents (pitch_track off too: a one-shot is tuned like "
+                       "a tape, sharper is shorter)",
+            'mimic': "each note's frequency moved by its cents",
+            'code': "each note's frequency moved by its cents",
+            'kit': "each mapped pitch (notes, pitch_class, all) moves the piece it plays: a drum synth's tone, a "
+                   "sampler's playback rate, a synth's or voice's pitch; a piece's own table adds to it"}.get(
+        t, "the drum's tone moved by its cents (its pitch sweep, tone, metal or band; decays stay)"), False
+
+
+@op(mutates=True)
+def instrument_tuning(project: str, track: str = None, set: dict = None, clear: bool = False) -> str:
+    """Tuning tables (ledger:M231): cents added to the notes an instrument plays, to correct it, detune it on purpose
+    or play another tuning system (a maqam, just intonation, 24 or 19 tones to the octave) without editing a note.
+    Reach for it when an instrument, its strings or a whole song should be in tune, sharp, flat or microtonal.
+    track=None is the SONG's tuning (project.json 'tuning'): the target every instrument inherits; 12-TET
+    (A4 = 440 Hz) holds only when neither the song nor the instrument sets one. A track's table adds on top
+    of the song's (it corrects toward it, or detunes from it); a scale in a track's table replaces the song's.
+    Every instrument type takes a table: a synth's pitch, a sampler's playback rate (one-shots too), a voice's or
+    mimic's frequency, a drum synth's tone, a kit's mapped pitches (one drum each), and performer voices that take
+    it (electric with strings and frets, emily, rhodes, toms). With no set/clear it returns the table and the offset
+    of every pitch the track (or the song) plays.
+    set: a partial table merged into the current one, entry by entry; None removes an entry:
+      {"scale": {"edo": 24, "root": "C4"}}   a tuning system on keys in a row (key root + k plays step k mod n in
+          period k // n), or {"steps": [0, 200, 350, 500, 700, 900, 1050], "period": 1200, "root": "D4"} (cents from
+          the root: a maqam on 7 keys)
+      {"all": -3}                       every note, cents
+      {"pitch_class": {"E": -14}}       that pitch class in every octave (a 12-note tuning on the usual keys: just
+          intonation, or a maqam with half-flat E and B: {"E": -50, "B": -50})
+      {"notes": {"F#3": 12, 40: -5}}    one exact note (names or MIDI numbers; in a kit, the drum on that pitch)
+      {"strings": {"6": {"all": -5, "open": 2, "3": 4}}}   a voice that puts notes on strings (string 1 = highest)
+    The parts ADD: a note's offset = scale + all + pitch_class + notes + string (all + fret); write a measured
+    correction as minus what was measured. Values -1200..1200 c. clear=True removes the table first (with set:
+    replaces it). ismail.tuning.intended_cents gives the pitch each key is meant to sound at.
+    analyze_tuning(source='track:<name>') measures the result after render(stems=True).
+    Errors: an unknown note or pitch class, a value beyond 1200 c, a bad scale, or a performer voice that takes no
+    table, each with what to write instead."""
+    from . import tuning as tun_mod
+    P = _load(project)
+    song_old = P.d.get('tuning')
+    if track is None:
+        notes = [n for t in P.d['tracks'].values() for n in t.get('notes', [])]
+        owner, where, inst = P.d, 'the song', None
+        how, strings_ok, cannot = "every instrument inherits it; a track's own table adds on top", True, None
+    else:
+        tr = P.track(track)
+        inst = tr.get('instrument')
+        if not inst:
+            raise OpError(f"{track!r} is an audio-only track with no instrument: a tuning table belongs to an "
+                          f"instrument (instrument_set gives it one); retune audio with sound_autotune")
+        owner, where, notes = inst, f"{track} ({inst['type']})", tr.get('notes', [])
+        try:
+            how, strings_ok = _tuning_reach(inst, P)
+            cannot = None
+        except OpError as e:                   # a performer that takes no table: it can only be read and cleared
+            how, strings_ok, cannot = '', False, e
+    try:
+        song = tun_mod.normalize(song_old)
+        old = tun_mod.normalize(owner.get('tuning'))
+        new = old
+        if clear:
+            new = None
+        if set is not None:
+            new = tun_mod.merge(new, set)
+    except tun_mod.TuningError as e:
+        raise OpError(f"tuning not changed: {e}")
+    if new and cannot:
+        raise OpError(f"tuning not changed: {cannot}")
+    changed = new != old
+    if changed:
+        if new:
+            owner['tuning'] = new
+        else:
+            owner.pop('tuning', None)
+        if inst is not None:
+            try:
+                inst_mod.normalize(inst)
+            except inst_mod.InstrumentError as e:
+                raise OpError(f"instrument invalid: {e}")
+        P.save()
+    L = [f"{where} tuning" + (" (changed)" if changed else '') + ':']
+    if inst is not None and song:
+        L.append("  song (inherited): " + '; '.join(tun_mod.describe(song)))
+    L += ['  ' + x for x in tun_mod.describe(new)] if (new or inst is None or not song) else ['  own table: none']
+    eff = new if inst is None else tun_mod.combine(song, new)
+    if new or (inst is not None and song):
+        L.append(f"  the parts add: scale + all + pitch_class + notes + string and fret"
+                 f"{'; a track adds to the song' if inst is not None and song else ''}. Here: {how}")
+        if new and new.get('strings') and not strings_ok:
+            L.append("  NOTE the strings entries do nothing on this instrument (it does not put notes on strings): "
+                     "use notes or pitch_class")
+        if inst is not None and inst['type'] == 'kit' and new and new.get('notes'):
+            mapped = {pitch_to_midi(k) for k in inst['map']}
+            miss = [k for k in new['notes'] if pitch_to_midi(k) not in mapped]
+            if miss:
+                L.append(f"  NOTE {miss} are not in the kit map, so no piece plays there; mapped: "
+                         f"{[midi_to_name(m) for m in sorted(mapped)]}")
+        played = sorted({int(n[1]) for n in notes})
+        if played and eff:
+            offs = [(m, tun_mod.cents(eff, m)) for m in played]
+            L.append("  played pitches: " + ', '.join(f"{midi_to_name(m)} {c:+g}" for m, c in offs[:16]) +
+                     (f" ... ({len(offs)} pitches)" if len(offs) > 16 else '') +
+                     ("" if not eff.get('strings') or not strings_ok else " (before string and fret)"))
+    if changed or eff:
+        L.append(f"render(stems=True), then analyze_tuning(source='track:{track or '<name>'}') reads what it plays "
+                 f"(against 12-TET for now: deliberate microtones read as off)")
+    else:
+        L.append("set={'pitch_class': {'E': -14}} or {'notes': {'F#3': 12}} or {'scale': {'edo': 24}} writes one; "
+                 "analyze_tuning finds what is off")
+    return '\n'.join(L)
 
 
 # ------------------------------------------------------------------ notes

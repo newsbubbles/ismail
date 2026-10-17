@@ -65,7 +65,8 @@ def _rng(beat, m, salt):
 
 
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, level=1.0, pan=0.0, humanize_ms=2.0, spread=0.35,
-            detune_cents=1.5, release_scale=1.0, **_):
+            detune_cents=1.5, release_scale=1.0, cents_of=None, **_):
+    """cents_of(midi): the instrument's tuning table, cents added to each note."""
     out = np.zeros(total_n)
     idx = _index()
     keys = sorted(idx)
@@ -81,7 +82,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, level=1.0, pan
         lo = {5: 0, 4: 47, 3: 72, 2: 95, 1: 111}[want]
         hi = dict(LAYER_TOP)[want]
         g = 10 ** ((-3.0 + 3.0 * (vv - lo) / max(1, hi - lo)) / 20)   # layers sit ~3 dB apart: slope within one
-        y = _load(have[layer], sr, m - base, r.normal(0, detune_cents))
+        y = _load(have[layer], sr, m - base, r.normal(0, detune_cents) + (cents_of(m) if cents_of else 0.0))
         i0 = max(0, int(round((float(st) + r.normal(0, humanize_ms / 1000.0)) * sr)))
         if i0 >= total_n:
             continue

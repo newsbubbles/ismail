@@ -8,7 +8,7 @@ import time
 import numpy as np
 import soundfile as sf
 
-from . import dsp, fx as fxmod, instruments, notation, voices
+from . import dsp, fx as fxmod, instruments, notation, tuning, voices
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
@@ -266,7 +266,7 @@ class Renderer:
         sounds = sorted(_sounds_used(tr))
         blob = json.dumps([tr, self.bpm, self.sr, self.offset, self.t0, self.n, self.r_b0, self.win_b1,
                            [(s, self.sound_mtime(s)) for s in sounds], dep_keys, _CODE_VERSION,
-                           voices.fingerprint(tr.get('instrument'), self.root)],
+                           voices.fingerprint(tr.get('instrument'), self.root), self.project.get('tuning')],
                           sort_keys=True, default=str)
         return hashlib.sha1(blob.encode()).hexdigest()[:20]
 
@@ -274,6 +274,9 @@ class Renderer:
     def render_track(self, name, tr):
         n = self.n
         inst = instruments.normalize(tr['instrument']) if tr.get('instrument') else None
+        if inst is not None and self.project.get('tuning'):
+            # the song's tuning (project.json 'tuning') is every instrument's target; its own table adds on top
+            inst = tuning.with_song(inst, self.project['tuning'])
         auto = tr.get('automation', {})
         inst_auto, fx_auto, mix_auto = {}, {}, {}
         for key, pts in auto.items():
@@ -422,7 +425,7 @@ def _code_hash():
     # any change to the synthesis/effect code invalidates cached track renders
     h = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py'):
+    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py', 'tuning.py'):
         with open(os.path.join(here, f), 'rb') as fh:
             h.update(fh.read())
     return h.hexdigest()[:12]

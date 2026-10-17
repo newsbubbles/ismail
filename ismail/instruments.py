@@ -8,7 +8,7 @@ import copy
 import math
 import numpy as np
 
-from . import dsp
+from . import dsp, tuning as tuning_mod
 from .notation import pitch_to_midi, midi_to_hz
 
 SR = dsp.SR
@@ -81,9 +81,20 @@ def deep_merge(base, over):
 
 
 def normalize(inst):
-    """Fill defaults and validate. Raises InstrumentError with a corrective message."""
+    """Fill defaults and validate. Raises InstrumentError with a corrective message. Every type takes a 'tuning'
+    table (cents per note, see ismail/tuning.py), kept in its normal form, or left out when it holds nothing."""
     if not isinstance(inst, dict) or 'type' not in inst:
         raise InstrumentError(f"instrument needs a 'type': one of {', '.join(INSTRUMENT_TYPES)}")
+    if 'tuning' in inst:
+        try:
+            tun = tuning_mod.normalize(inst['tuning'])
+        except tuning_mod.TuningError as e:
+            raise InstrumentError(str(e) if str(e).startswith('tuning') else f"tuning.{e}")
+        inst = {k: v for k, v in inst.items() if k != 'tuning'}
+        full = normalize(inst)
+        if tun:
+            full['tuning'] = tun
+        return full
     t = inst['type']
     if t == 'sprite':
         inst, t = dict(inst, type='synth'), 'synth'
@@ -462,7 +473,7 @@ def render_synth(p, notes, total_n, auto, bpm, sr, beat0=0.0, bpb=4):
             steps = lfilter([1 - a], [1, -a], steps_in, zi=zi)[0]
         prev_pitch = g[-1][1]
         vel = g[0][3]
-        l, r = _synth_voice(p, steps, gate, vel, s0, n, auto, bpm, sr, seed=_bar_key(st, beat0, bpm, bpb, sr) * 31 + g[0][1])
+        l, r = _synth_voice(p, steps, gate, vel, s0, n, auto, bpm, sr, seed=_bar_key(st, beat0, bpm, bpb, sr) * 31 + int(round(g[0][1])))
         if p['mono'] and gi + 1 < len(groups):
             fade = min(int(0.004 * sr), n)
             ramp = np.linspace(1, 0, fade)
@@ -483,7 +494,16 @@ def _hit_env(n, decay, sr, hold=0.0):
     return e
 
 
-def render_drum(p, vel, sr, seed):
+DRUM_PITCH = {'kick': ('pitch_start', 'pitch_end'), 'tom': ('pitch_start', 'pitch_end'), 'snare': ('tone_hz',),
+              'hat': ('tune',), 'clap': ('bp',), 'noise_hit': ('cutoff', 'cutoff_end')}
+
+
+def render_drum(p, vel, sr, seed, cents=0.0):
+    """One hit. cents (a tuning table's offset for the note) moves the drum's tone: kick and tom sweeps, the snare's
+    tone, the hat's metal partials, the clap's band, a noise hit's filter; decays and noise stay as they are."""
+    if cents:
+        r = 2 ** (cents / 1200.0)
+        p = dict(p, **{k: p[k] * r for k in DRUM_PITCH.get(p['type'], ())})
     t = p['type']
     rng = np.random.default_rng(seed)
     if t in ('kick', 'tom'):
@@ -585,8 +605,10 @@ def _sampler_source(p, name, sr):
     return snd, start_s, end_s, ls, le
 
 
-def render_sampler(p, notes, total_n, auto, sr, beat0=0.0, bpm=120.0, bpb=4):
-    """One sound ('sound'), or one of several per note ('sounds' + 'select', see sampler_picks)."""
+def render_sampler(p, notes, total_n, auto, sr, beat0=0.0, bpm=120.0, bpb=4, cents=None):
+    """One sound ('sound'), or one of several per note ('sounds' + 'select', see sampler_picks). cents: per note,
+    from a tuning table: the playback rate moves with it even when pitch_track is off (a one-shot drum sample is
+    tuned like a tape: sharper is shorter)."""
     if p.get('sounds'):
         picks = sampler_picks(p, notes, beat0, bpm, bpb)
         names = [l['sound'] for l in p['sounds']]
@@ -597,12 +619,14 @@ def render_sampler(p, notes, total_n, auto, sr, beat0=0.0, bpm=120.0, bpb=4):
     root = pitch_to_midi(p['root'])
     out = np.zeros((2, total_n))
     ae = p['amp_env']
-    for (st, m, d, v), j in zip(notes, picks):
+    for i, ((st, m, d, v), j) in enumerate(zip(notes, picks)):
         if j not in srcs:
             srcs[j] = _sampler_source(p, names[j], sr)
         snd, start_s, end_s, ls, le = srcs[j]
         semis = ((m - root) if p['pitch_track'] else 0) + p['transpose']
         ratio = 2 ** (semis / 12) * p.get('_sr_ratio', 1.0)
+        if cents is not None and cents[i]:
+            ratio *= 2 ** (cents[i] / 1200.0)
         s0 = int(round(st * sr))
         if p['one_shot']:
             n = int((end_s - start_s) / ratio) + 1
@@ -643,10 +667,17 @@ def takes_beat0(perform):
     return takes_arg(perform, 'beat0')
 
 
-def performer_kw(perform, params, beat0, root):
+def performer_kw(perform, params, beat0, root, tuning=None, cents=0.0, voice=None):
     """A performer's keyword arguments: its params, plus beat0 and project_root (the project folder, for a voice
-    that finds files in the project's ref/, such as toms) when it names them."""
+    that finds files in the project's ref/, such as toms) when it names them, and cents_of(midi, string=None,
+    fret=None) when the instrument has a tuning table (or a kit entry moves it by `cents`). A performer that does not
+    take cents_of cannot be tuned by the table: that raises, rather than playing it untuned."""
     kw = dict(params or {})
+    fn = tuning_mod.cents_fn(tuning, cents)
+    if fn is not None:
+        if not takes_arg(perform, 'cents_of'):
+            raise InstrumentError(no_tuning_message(voice))
+        kw['cents_of'] = fn
     if takes_beat0(perform):
         kw['beat0'] = beat0
     if root and takes_arg(perform, 'project_root'):
@@ -654,7 +685,16 @@ def performer_kw(perform, params, beat0, root):
     return kw
 
 
-def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.0):
+def no_tuning_message(voice):
+    v = repr(voice) if voice else 'this performer'
+    h = f"voice_help({voice!r})" if voice else "voice_help"
+    return (f"voice {v} plays the whole part itself and takes no tuning table (its perform() has no cents_of "
+            f"argument): tune it with its own params ({h}), or remove the table with "
+            f"instrument_tuning(track, clear=True)")
+
+
+def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.0, cents=0.0):
+    """cents: a kit entry's offset for this piece; the instrument's own 'tuning' table is read here too."""
     from . import voices
     if p.get('voice'):
         try:
@@ -668,7 +708,7 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
             # a performer voice renders the whole part at once (strings that ring on, legato, whammy):
             # it gets every note and its expression lanes (automation 'inst.lane.<name>', per-sample curves)
             lanes = {k[5:]: v for k, v in (auto or {}).items() if k.startswith('lane.')}
-            kw = performer_kw(perform, p.get('params'), beat0, root)
+            kw = performer_kw(perform, p.get('params'), beat0, root, p.get('tuning'), cents, p['voice'])
             y = np.asarray(perform(notes, total_n, sr, bpm=bpm, lanes=lanes, **kw), dtype=np.float64)
             if y.ndim == 1:
                 y = np.stack([y, y])
@@ -686,6 +726,7 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
         if fn is None:
             raise InstrumentError("code instrument must define voice(freq, t, vel, gate, sr)")
     out = np.zeros((2, total_n))
+    tun = p.get('tuning')
     for st, m, d, v in notes:
         s0 = int(round(st * sr))
         # the whole note even past the buffer's end: a voice's noise draws and filters depend on the length it is
@@ -694,7 +735,8 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
         if n <= 0 or s0 >= total_n:
             continue
         try:
-            y = voices.call(fn, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, bpm, p.get('params'))
+            hz = midi_to_hz(m) * 2 ** ((cents + tuning_mod.cents(tun, m)) / 1200.0)
+            y = voices.call(fn, hz, np.arange(n) / sr, v / 127, d, sr, bpm, p.get('params'))
         except voices.VoiceError as e:
             raise InstrumentError(str(e))
         y = np.asarray(y, dtype=np.float64)
@@ -705,7 +747,7 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
     return out
 
 
-def render_mimic(p, notes, total_n, sr, root=None):
+def render_mimic(p, notes, total_n, sr, root=None, cents=0.0):
     from . import mimic
     try:
         prof = mimic.load_profile(p['profile'], root)
@@ -717,7 +759,8 @@ def render_mimic(p, notes, total_n, sr, root=None):
         n = int((d + p['tail']) * sr)             # the whole note, as in render_code
         if n <= 0 or s0 >= total_n:
             continue
-        y = mimic.render(prof, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, **(p.get('params') or {}))
+        hz = midi_to_hz(m) * 2 ** ((cents + tuning_mod.cents(p.get('tuning'), m)) / 1200.0)
+        y = mimic.render(prof, hz, np.arange(n) / sr, v / 127, d, sr, **(p.get('params') or {}))
         k = min(y.shape[1], n, total_n - s0)
         out[:, s0:s0 + k] += y[:, :k]
     return out
@@ -725,20 +768,26 @@ def render_mimic(p, notes, total_n, sr, root=None):
 
 # ------------------------------------------------------------------ entry point
 
-def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None, beat0=0.0, bpb=4):
+def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None, beat0=0.0, bpb=4, cents=0.0):
     """inst: normalized instrument; notes: [(start_sec, midi, dur_sec, vel)]; -> (2, total_n). root = project
     directory (song voices in <root>/voices/). beat0: the song beat at sample 0 (performers key notes on it; synths
-    and drums seed on where a note sits in its bar of bpb beats)."""
+    and drums seed on where a note sits in its bar of bpb beats). The instrument's 'tuning' table (ismail/tuning.py)
+    moves each note by its cents; `cents` adds a kit entry's offset for the piece it plays."""
     auto = auto or {}
     t = inst['type']
+    tun = inst.get('tuning')
+    tuned = bool(tun) or bool(cents)
     if t == 'synth':
+        if tuned:
+            notes = [(st, m + (cents + tuning_mod.cents(tun, m)) / 100.0, d, v) for st, m, d, v in notes]
         out = render_synth(inst, notes, total_n, auto, bpm, sr, beat0, bpb) * SYNTH_GAIN
     elif t == 'sampler':
-        out = render_sampler(inst, notes, total_n, auto, sr, beat0, bpm, bpb)
+        out = render_sampler(inst, notes, total_n, auto, sr, beat0, bpm, bpb,
+                             [cents + tuning_mod.cents(tun, m) for _, m, _, _ in notes] if tuned else None)
     elif t == 'code':
-        out = render_code(inst, notes, total_n, sr, bpm, root, auto, beat0)
+        out = render_code(inst, notes, total_n, sr, bpm, root, auto, beat0, cents)
     elif t == 'mimic':
-        out = render_mimic(inst, notes, total_n, sr, root)
+        out = render_mimic(inst, notes, total_n, sr, root, cents)
     elif t == 'kit':
         out = np.zeros((2, total_n))
         by = {}
@@ -747,12 +796,14 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
         for key, nts in by.items():
             if key not in inst['map']:
                 continue  # unmapped pitches are silent; notes_read flags them
-            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root, beat0, bpb)
+            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root, beat0, bpb,
+                                     cents + tuning_mod.cents(tun, int(key)))
     elif t in DRUM_DEFAULTS:
         out = np.zeros((2, total_n))
         for st, m, d, v in notes:
             s0 = int(round(st * sr))
-            y = render_drum(inst, v, sr, seed=_bar_key(st, beat0, bpm, bpb, sr)) * DRUM_GAIN
+            y = render_drum(inst, v, sr, seed=_bar_key(st, beat0, bpm, bpb, sr),
+                            cents=cents + tuning_mod.cents(tun, m)) * DRUM_GAIN
             n = min(len(y), total_n - s0)
             if n > 0:
                 out[0, s0:s0 + n] += y[:n]

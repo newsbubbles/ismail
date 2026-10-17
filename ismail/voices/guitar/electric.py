@@ -82,6 +82,8 @@ INFO = {
         "strum_ms": "chord spread (poly)", "vib_rate": "vibrato rate Hz", "attack_cents": "pitch overshoot of a hard pick",
         "humanize_ms": "timing jitter", "level": "output gain", "seed": "random seed",
     },
+    "tuning": "the instrument's tuning table, strings included: poly mode puts each note on a string (string 1 = the "
+              "highest, fret = note - open string); mono mode reads the string the same rule picks",
 }
 
 KINDS = {
@@ -203,10 +205,26 @@ def _rng(seed, beat0, t, bpm, salt, extra=0):
     return np.random.default_rng([int(seed) & 0xFFFFFFFF, tick, int(salt) & 0xFFFF, int(extra) & 0xFFFF])
 
 
+def _string_for(m, tuning, max_fret, used=()):
+    """The string (index into tuning, 0 = the lowest) a note goes on: the highest free string that plays it within
+    12 frets, else any free string that reaches it."""
+    cands = [s for s in range(len(tuning)) if tuning[s] <= m <= tuning[s] + max_fret and s not in used]
+    if not cands:
+        cands = [s for s in range(len(tuning)) if s not in used] or [0]
+    s = max(cands) if m - tuning[max(cands)] >= 0 else min(cands)
+    # prefer lower frets: the highest string that can play it, unless the fret is very high
+    for c in sorted(cands, reverse=True):
+        if 0 <= m - tuning[c] <= 12:
+            s = c
+            break
+    return s
+
+
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, kind='strat', mode='poly', seed=1, humanize_ms=4.0,
-            beat0=0.0, **params):
+            beat0=0.0, cents_of=None, **params):
     """beat0: the song beat at sample 0. Each note's randomness is keyed on where it sits in the song, so a slice
-    of the part (the live engine renders bar by bar) plays exactly as it does in the whole part."""
+    of the part (the live engine renders bar by bar) plays exactly as it does in the whole part.
+    cents_of(midi, string, fret): the instrument's tuning table (string 1 = the highest), added to each note."""
     P = dict(KINDS[kind])
     P.update({k: v for k, v in params.items() if v is not None})
     lanes = lanes or {}
@@ -251,15 +269,7 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kind='strat', mode='poly'
             order = sorted(range(len(g)), key=lambda i: g[i][1], reverse=up)
             for rank, i in enumerate(order):
                 st, m, d, v = g[i]
-                cands = [s for s in range(len(tuning)) if tuning[s] <= m <= tuning[s] + P['max_fret'] and s not in used]
-                if not cands:
-                    cands = [s for s in range(len(tuning)) if s not in used] or [0]
-                s = max(cands) if m - tuning[max(cands)] >= 0 else min(cands)
-                # prefer lower frets: the highest string that can play it, unless the fret is very high
-                for c in sorted(cands, reverse=True):
-                    if 0 <= m - tuning[c] <= 12:
-                        s = c
-                        break
+                s = _string_for(m, tuning, P['max_fret'], used)
                 used.add(s)
                 st2 = st + rank * P['strum_ms'] / 1000.0 * (0.8 + 0.4 * _rng(seed, beat0, st, bpm, m, 1).random())
                 ci = last_chain_on.get(s)
@@ -327,6 +337,16 @@ def perform(notes, total_n, sr, bpm=120.0, lanes=None, kind='strat', mode='poly'
         # pick transient: a hard pick starts sharp (tension), settling in ~60 ms
         semis = base - 69.0 + (P['attack_cents'] * v0 ** 2 / 100.0) * np.exp(-t / 0.06)
         semis += lane('bend', a, b)
+        if cents_of is not None:
+            # the tuning table: each note of the chain on its string and fret, a step where the note starts
+            si = string_of[k] if string_of[k] is not None else _string_for(ch[0][1], tuning, P['max_fret'])
+            tc = np.zeros(n)
+            for j, nt in enumerate(ch):
+                fret = nt[1] - tuning[si]
+                i0 = 0 if j == 0 else int((nt[0] - ch[0][0]) * sr)
+                if i0 < n:
+                    tc[i0:] = cents_of(nt[1], len(tuning) - si, fret if fret >= 0 else None)
+            semis += tc / 100.0
         if P.get('drift_cents', 0) > 0:
             k = max(2, int(n / sr * 2.5) + 2)                   # a wander with ~0.4 s correlation
             w = np.interp(np.arange(n), np.linspace(0, n - 1, k), rng.normal(0, 1, k))

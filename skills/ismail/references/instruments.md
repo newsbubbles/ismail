@@ -92,6 +92,41 @@ You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='als
 **When the numbers plateau, give an eye exam.** Put the real sound next to "lenses", versions that each change exactly ONE named thing (body colour, wood ring, room, open strings, bow noise, brightness, attack, vibrato, evenness), all at the same loudness and long enough to include the release. Ask the user to pick the closest and say what is still off in those words ("E, but the vibrato starts slower, more air"). Host it as an exam page with a Submit button that writes the answers to a file you read
 (`references/blind-tests.md`, "Page mechanics"). One round of this found three things no metric had shown (moving vibrato, missing air, sympathetic strings); the metrics were blind to them because they average over time and stop at the release. To know when you are done, follow it with a blind exam (`references/blind-tests.md`).
 
+## Tuning: the song's, and each instrument's
+
+"In tune" depends on the tradition, so ismail does not assume 12-TET: a song can carry a tuning, and every
+instrument a table of cents on top of it. `instrument_tuning()` (no track) reads or sets the song's tuning;
+`instrument_tuning(track, set=..., clear=...)` an instrument's. 12-TET at A4 = 440 Hz holds only when neither is set.
+
+- **The song's tuning is the target.** Every instrument inherits it. An instrument's own table adds on top (it
+  corrects toward the target, or detunes from it on purpose); a scale in an instrument's table replaces the song's.
+- **Inside one table the parts add:** scale + all + pitch_class + notes + string and fret. A correction is minus
+  what was measured, per note.
+- **Every instrument takes it:** a synth's pitch, a sampler's playback rate (one-shot drum samples too: sharper is
+  shorter), a voice's or mimic's frequency, a drum synth's tone, a kit's mapped pitches (one drum each), and the
+  performers electric (per string and fret), emily, rhodes and toms. kit70 and rusty take none: tune them with their
+  own params.
+
+Examples (a song's or an instrument's `set=`):
+
+- A small correction: `{"notes": {"F#3": -12}}`; a whole part 8 c flat: `{"all": 8}`; a deliberate detune of one
+  doubled part: `{"all": -7}` on that track.
+- A 12-note tuning on the usual keys, per pitch class (every octave): just intonation on C,
+  `{"pitch_class": {"D": 4, "E": -14, "F": -2, "G": 2, "A": -16, "B": -12}}`; maqam Rast on C, E and B half flat,
+  `{"pitch_class": {"E": -50, "B": -50}}`.
+- 24 tones to the octave, each key a quarter tone from root C4: `{"scale": {"edo": 24, "root": "C4"}}`.
+- A 7-step maqam on seven keys in a row (key root + k plays step k mod 7, one octave per 7 keys):
+  `{"scale": {"steps": [0, 200, 350, 500, 700, 900, 1050], "period": 1200, "root": "D3"}}`.
+- 19 equal steps to the octave: `{"scale": {"edo": 19, "root": "C4"}}`; a period other than the octave:
+  `{"scale": {"edo": 13, "period": 1901.96}}` (Bohlen-Pierce, 13 steps to the tritave).
+
+`analyze_tuning` measures what a part plays (against 12-TET for now, so deliberate microtones read as off until it
+reads the intended tuning). `ismail.tuning.intended_cents(instrument, midi, song=...)` (or
+`project_intended_cents(project, track, midi)`) is the pitch each key is meant to sound at, for any check that
+wants it. A later op will render each note alone, measure it and write the correcting table. The table moves a
+note's fundamental and all its partials together; partials bent per tuning (a stretched or gamelan-like timbre)
+are a voice's own design, not this table.
+
 ## Genre palettes
 
 Before choosing sounds, list what the genre is actually played on, then check `voices_list` for each:

@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
 from . import fx_blocks as F
-from .. import instruments, machine
+from .. import instruments, machine, tuning
 from ..dsp import SR
 from ..notation import NotationError, format_notes, parse_notes, parse_steps, pitch_to_midi, fmt_num, with_offsets
 from ..presets import PRESETS
@@ -1040,13 +1040,18 @@ class Engine:
         if isinstance(spec, str) and spec.startswith('track:'):
             try:
                 with open(os.path.join(self.root, 'project.json'), encoding='utf8') as f:
-                    tracks = json.load(f)['tracks']
+                    song = json.load(f)
+                tracks = song['tracks']
             except (OSError, ValueError, KeyError):
                 raise LiveError(f"instrument {spec!r}: the live folder {self.root} has no project.json with tracks")
             if spec[6:] not in tracks or not tracks[spec[6:]].get('instrument'):
                 raise LiveError(f"instrument {spec!r}: project tracks with instruments: "
                                 f"{[k for k, v in tracks.items() if v.get('instrument')]}")
-            spec = copy.deepcopy(tracks[spec[6:]]['instrument'])
+            # the song's tuning rides with the copied instrument, as it plays in the studio
+            try:
+                spec = tuning.with_song(copy.deepcopy(tracks[spec[6:]]['instrument']), song.get('tuning'))
+            except tuning.TuningError as e:
+                raise LiveError(f"instrument {spec!r}: the song's tuning in project.json: {e}")
         elif isinstance(spec, str):
             name = spec[7:] if spec.startswith('preset:') else spec
             if name not in PRESETS:

@@ -15,6 +15,7 @@ from scipy import signal
 
 from . import dsp_blocks as dsp, fx_blocks as F
 from ..dsp import SR
+from .. import tuning
 from ..notation import placed
 
 KILL_DB = -40.0              # an isolator band at or below this is off
@@ -213,7 +214,8 @@ def read_song(path, deck, bars, house_bpb, performers=()):
                       if n[0] < beat0 and n[0] + n[2] - beat0 >= HELD_MIN_BEATS]
         full = f"{deck}.{name}"
         out = t.get('output', 'master')
-        tracks.append({'track': full, 'instrument': t['instrument'], 'fx': _rename_fx(t.get('fx'), deck, tnames),
+        inst = tuning.with_song(t['instrument'], d.get('tuning'))     # the song's tuning rides with each instrument
+        tracks.append({'track': full, 'instrument': inst, 'fx': _rename_fx(t.get('fx'), deck, tnames),
                        'volume_db': min(6.0, float(t.get('volume_db', 0.0))), 'pan': float(t.get('pan', 0.0)),
                        'sends': {f"{deck}.{b}": float(v) for b, v in (t.get('sends') or {}).items()},
                        'output': None if out in (None, 'master') else f"{deck}.{out}", 'root': root})
