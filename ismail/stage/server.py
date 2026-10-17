@@ -54,7 +54,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import perform, presence, takes
+from . import pairing, perform, presence, takes
 
 PAGE = Path(__file__).resolve().parent / 'page'
 SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
@@ -255,6 +255,7 @@ def server_event(name, ev):
         L = live(name)
         L['ev_id'] += 1
         e = {'id': L['ev_id'], 'ts': now_iso(), **ev}
+        e.setdefault('principal', {'server': True})
         append_lines(live_dir(name) / 'events.jsonl', [e])
         L['events'].append(e)
         del L['events'][:-2000]
@@ -269,6 +270,7 @@ def server_cmd(name, cmd):
         L = live(name)
         L['cmd_id'] += 1
         c = {'id': L['cmd_id'], 'ts': now_iso(), **cmd}
+        c.setdefault('principal', {'server': True})
         append_lines(live_dir(name) / 'cmds.jsonl', [c])
         L['cmds'].append(c)
         del L['cmds'][:-500]
@@ -437,6 +439,22 @@ def live_engines():
     return out
 
 
+def split_host(h):
+    """'name:port' (or '[::1]:port') -> (lowercase name, port or None); ('', None) when malformed."""
+    h = (h or '').strip().lower()
+    if h.startswith('['):
+        end = h.find(']')
+        if end < 0:
+            return '', None
+        name, rest = h[1:end], h[end + 1:]
+        port = rest[1:] if rest.startswith(':') else ''
+    else:
+        name, _, port = h.partition(':')
+    if port and not port.isdigit():
+        return '', None
+    return name, int(port) if port else None
+
+
 class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
                       '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json',
@@ -453,6 +471,85 @@ class Handler(SimpleHTTPRequestHandler):
             rel = [x for x in unquote(p[len('/scenes/'):]).split('/') if x and x not in ('.', '..')]
             return str(SCENES.joinpath(*rel))
         return super().translate_path(path)
+
+    # ---- the security floor, part B1 (pairing.py): who sent it. Report mode (the default) accepts everyone and stamps
+    # them; enforce mode refuses the unpaired on everything that writes, listens or speaks (the page's files and
+    # /pair/claim stay open). Checked before any handler runs; a refusal is counted in /health and logged in one line
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        path = urlparse(self.path).path
+        auth = self.server.auth
+        self.principal, self.key_hash, problem = auth.principal(self.headers.get('X-Stage-Key'), self.headers.get('X-Stage-Agent'),
+                                                                self.headers.get('X-Stage-Who'))
+        # in enforce, the scene's files too: voice audio, transcripts, takes and performances (motion identifies a
+        # person), snapshots, panels. Open: the page's own files and /pair/claim (the B1 review, F2)
+        guarded = path != '/pair/claim' and (self.command not in ('GET', 'HEAD') or path.startswith(
+            ('/live', '/voice/', '/pair/', '/scenes/'))) or path in ('/livestream', '/world', '/edits', '/takes', '/snapshots',
+                                                                  '/actor/profile', '/updates.json', '/waypoints', '/cues')
+        if guarded and auth.mode() == 'enforce' and 'unpaired' in self.principal:
+            return self._refused(401, 'unpaired', problem or 'pair this device first (stage_pair shows a code)')
+        return True
+
+    def local_direct(self):
+        """From this PC itself, not through tailscale serve (which connects from loopback too, with forwarded headers)."""
+        return self.client_address[0] in ('127.0.0.1', '::1') and split_host(self.headers.get('Host', ''))[0] in (
+            '127.0.0.1', 'localhost', '::1') and not any(
+            k.lower().startswith(('x-forwarded-', 'tailscale-', 'forwarded')) for k in self.headers.keys())
+
+    def _pair(self, u):
+        """/pair/start (this PC directly, or an agent), /pair/claim (a device's page), /pair/unpair, /pair/devices."""
+        auth = self.server.auth
+        if self.command == 'GET' and u.path != '/pair/devices':
+            return self._json(405, {'error': 'POST'})
+        # a web page open on this PC can send a text/plain POST here without a preflight (it could unpair the headset):
+        # pairing takes JSON only, and never a cross-site request (pr:#275 review, E2)
+        if self.command == 'POST' and ((self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json'
+                                       or self.headers.get('Sec-Fetch-Site', '').lower() == 'cross-site'):
+            return self._refused(415, 'pairing not JSON', 'pairing takes application/json from this site only')
+        if u.path == '/pair/claim':
+            body = self._body() or {}
+            # the proxy on this PC appends the address it saw: the LAST entry is its own, the first may be the client's
+            fwd = self.headers.get('X-Forwarded-For', '').split(',')[-1].strip() if self.client_address[0] in ('127.0.0.1', '::1') else ''
+            addr = fwd or self.client_address[0]
+            try:
+                rec, key = auth.claim(body.get('code'), addr, body.get('name'), body.get('kind'))
+            except PermissionError as e:
+                self.server.refuse('pairing rate-limited', self)
+                return self._json(429, {'error': str(e), 'refused': 'pairing rate-limited'})
+            except ValueError as e:
+                self.server.refuse('wrong pairing code', self)
+                return self._json(403, {'error': str(e), 'refused': 'wrong pairing code'})
+            print(f"PAIRED {rec['device']} ({rec['kind']}) for {rec['person']}", flush=True)
+            return self._json(200, {**rec, 'key': key, 'header': 'X-Stage-Key'})
+        if not ('agent' in self.principal or self.local_direct()):
+            return self._refused(403, 'pairing from outside', 'pairing starts on this PC (stage_pair), not over the network')
+        if u.path == '/pair/devices':
+            return self._json(200, {'mode': auth.mode(), 'person': auth.person(), 'devices': auth.listing()})
+        body = self._body() or {}
+        if u.path == '/pair/start':
+            try:
+                return self._json(200, auth.start(body.get('name'), body.get('kind', 'headset'), body.get('person')))
+            except ValueError as e:
+                return self._json(400, {'error': str(e)})
+        if u.path == '/pair/unpair':
+            n = auth.unpair(str(body.get('device') or ''))
+            with COND:
+                COND.notify_all()                  # open long-polls with the revoked key wake and close
+            return self._json(200 if n else 404, {'unpaired': n, 'device': body.get('device')})
+        return self._json(404, {'error': 'not found'})
+
+    def revoked(self):
+        return self.key_hash is not None and not self.server.auth.valid(self.key_hash)
+
+    def _refused(self, code, reason, msg):
+        self.server.refuse(reason, self)
+        self.close_connection = True
+        try:
+            self._json(code, {'error': msg, 'refused': reason})
+        except OSError:
+            pass
+        return False
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
@@ -582,6 +679,8 @@ class Handler(SimpleHTTPRequestHandler):
                 L = live(name)
                 st, age = L['state'], round(time.time() - L['state_t'], 2) if L['state'] else None
             return self._json(200, {'scene': name, 'state': st, 'age_s': age})
+        if self.revoked():
+            return self._json(401, {'error': 'this device was unpaired', 'refused': 'revoked'})
         if u.path == '/live/events':
             limit = int(q.get('limit', ['500'])[0])
             who = q.get('who', [None])[0]
@@ -590,9 +689,11 @@ class Handler(SimpleHTTPRequestHandler):
             with COND:
                 L = live(name)
                 if wait > 0 and since >= 0:
-                    COND.wait_for(lambda: L['ev_id'] > since, timeout=wait)
+                    COND.wait_for(lambda: L['ev_id'] > since or self.revoked(), timeout=wait)
                 evs = [e for e in L['events'] if e.get('id', 0) > since] if since >= 0 else L['events'][-limit:]
                 last = L['ev_id']
+            if self.revoked():
+                return self._json(401, {'error': 'this device was unpaired', 'refused': 'revoked'})
             if since >= 0:
                 presence.seen(who, name, delivered=last)
             return self._json(200, {'scene': name, 'last': last, 'events': evs[-limit:]})
@@ -600,9 +701,11 @@ class Handler(SimpleHTTPRequestHandler):
             with COND:
                 L = live(name)
                 if wait > 0 and since >= 0:
-                    COND.wait_for(lambda: L['cmd_id'] > since, timeout=wait)
+                    COND.wait_for(lambda: L['cmd_id'] > since or self.revoked(), timeout=wait)
                 cmds = [c for c in L['cmds'] if c['id'] > since] if since >= 0 else []
                 last = L['cmd_id']
+            if self.revoked():
+                return self._json(401, {'error': 'this device was unpaired', 'refused': 'revoked'})
             return self._json(200, {'scene': name, 'last': last, 'cmds': cmds})
         return self._json(404, {'error': 'not found'})
 
@@ -620,11 +723,13 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             with COND:
                 if wait > 0:
-                    COND.wait_for(lambda: presence.SEQ[0] > since, timeout=wait)
+                    COND.wait_for(lambda: presence.SEQ[0] > since or self.revoked(), timeout=wait)
                 evs, last = presence.inbox_after(since, limit), presence.SEQ[0]
         finally:
             if wait > 0:
                 self.server.longpoll_leave(self.client_address[0])
+        if self.revoked():
+            return self._json(401, {'error': 'this device was unpaired', 'refused': 'revoked'})
         presence.seen(who, '*', inbox=last)
         return self._json(200, {'last': last, 'events': evs, 'started': round(presence.STARTED)})   # a new start: count from 0
 
@@ -655,7 +760,7 @@ class Handler(SimpleHTTPRequestHandler):
                 out = []
                 for e in evs:
                     L['ev_id'] += 1
-                    out.append({'id': L['ev_id'], 'ts': now_iso(), **{k: v for k, v in e.items() if k not in ('id', 'ts')}})
+                    out.append({'id': L['ev_id'], 'ts': now_iso(), **pairing.stamp({k: v for k, v in e.items() if k not in ('id', 'ts')}, self.principal)})
                 append_lines(live_dir(name) / 'events.jsonl', out)
                 L['events'].extend(out)
                 del L['events'][:-2000]
@@ -681,7 +786,7 @@ class Handler(SimpleHTTPRequestHandler):
                 out = []
                 for c in cmds:
                     L['cmd_id'] += 1
-                    out.append({'id': L['cmd_id'], 'ts': now_iso(), **{k: v for k, v in c.items() if k not in ('id', 'ts')}})
+                    out.append({'id': L['cmd_id'], 'ts': now_iso(), **pairing.stamp({k: v for k, v in c.items() if k not in ('id', 'ts')}, self.principal)})
                 append_lines(live_dir(name) / 'cmds.jsonl', out)
                 L['cmds'].extend(out)
                 del L['cmds'][:-500]
@@ -706,6 +811,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, scene_names())
         if u.path == '/health':                    # is the server well: workers, long-polls, threads, disk
             return self._json(200, self.server.health())
+        if u.path.startswith('/pair/'):
+            return self._pair(u)
         if u.path == '/stage':                     # what this server serves: the default scene first
             from .world import default_scene
             return self._json(200, {'scenes': scene_names(), 'default': default_scene(SCENES), 'code': code_version()})
@@ -806,6 +913,14 @@ class Handler(SimpleHTTPRequestHandler):
         u = urlparse(self.path)
         if CAPTURE is not None:
             return self._capture_post(u)
+        if u.path.startswith('/pair/'):
+            try:
+                return self._pair(u)
+            except (ValueError, json.JSONDecodeError) as e:
+                return self._json(400, {'error': str(e)})
+        # the person's voice is theirs: in enforce mode only a paired device of a person sends audio to be transcribed
+        if u.path in ('/voice/in', '/voice/perf') and self.server.auth.mode() == 'enforce' and 'person' not in self.principal:
+            return self._refused(401, 'voice from a non-person', 'only a paired device of the person sends their voice')
         if u.path == '/upload/file':               # footage from the headset (upload.html): streamed to the song's footage folder
             q = parse_qs(u.query)
             raw = Path(q.get('name', ['clip.mp4'])[0]).name
@@ -1062,7 +1177,16 @@ class Server(ThreadingHTTPServer):
         self.busy = self.served = 0
         self.polls = {}
         self.t0 = time.time()
+        self.refused = {}
+        self.auth = pairing.Auth(registry_dir())   # part B1: devices, the agent token, report or enforce
         super().__init__(*a, **kw)
+
+    def refuse(self, reason, handler=None):
+        with self.stats_lock:
+            self.refused[reason] = self.refused.get(reason, 0) + 1
+        h = handler
+        print(f"REFUSED {reason}: {getattr(h, 'command', '?')} {getattr(h, 'path', '?')[:200]} "
+              f"Host={h.headers.get('Host') if h else None!r}", flush=True)
 
     def process_request(self, request, client_address):
         self.pool.submit(self._work, request, client_address)
@@ -1101,6 +1225,7 @@ class Server(ThreadingHTTPServer):
         return {'ok': free is None or free > 200, 'pid': os.getpid(), 'uptime_s': round(time.time() - self.t0),
                 'workers': self.workers, 'busy': busy, 'served': served, 'long_polls': polls,
                 'threads': threading.active_count(), 'scenes': len(scene_names()), 'state_free_mb': free,
+                'refused': dict(self.refused), 'auth': self.auth.health(),
                 'disk_warned_s_ago': round(time.time() - DISK['warned']) if DISK['warned'] else None}
 
     def server_close(self):
