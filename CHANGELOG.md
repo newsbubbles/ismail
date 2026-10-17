@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### analyze_melody: a held note reads as one note
+
+- A held note could read as two notes of the same pitch. librosa's onset detector also fires where no note starts:
+  on the click of a note that stops dead (an eighth held 60% split at +0.30 beat), and inside a held tone whose
+  timbre moves (a wah fires every sweep). `melody()` kept every onset as a split, and the tail past it still read as
+  pitched, since pYIN's 93 ms window smears the pitch past the cut, so it passed as a note of its own; the merge
+  step after it only shortens notes and never joins two of the same pitch.
+- An onset is now dropped when the pitch is the same on both sides (within 50 cents) and nothing re-attacks. A
+  re-attack is a level rise of 3 dB or more out of a dip before the next onset (a gap, or a decaying note struck
+  again), or a hard restart: the level holds and the onset stands 15 times over the onset strength around it (a
+  legato retrigger of a flat synth note clicks). A note struck again at the same pitch stays two notes. The output
+  format is unchanged (ledger:M226).
+- Limits: a legato retrigger that barely clicks (a pure sine restarted near its own phase, or under a fast wah)
+  can still read as one longer note.
+- Tests: `tests/test_melody_split.py` reads held legato notes (plain and under a 6 Hz wah), eighths stopped dead,
+  and same-pitch lines struck again: quarters with a gap, a decaying note with no gap, eighths stopped dead, and a
+  flat note retriggered legato.
+
 ### song_compress: a finished song's WAVs as FLAC, bit for bit (ledger:M221)
 
 - Stems are about 29 GB of WAV, and FLAC keeps every sample at about a fifth of the size. New op
