@@ -114,7 +114,7 @@ class Capture:
         with open(self.d / 'log.txt', 'a', encoding='utf-8') as fh:
             for e in ents:
                 if e.get('level') != 'beat':
-                    fh.write(f"{time.strftime('%H:%M:%S')} {e.get('level')}: {str(e.get('msg'))[:500]}\n")
+                    fh.write(f"{time.strftime('%H:%M:%S')} {e.get('level')}: {str(e.get('msg'))[:2000]}\n")
                 if e.get('level') == 'error' and len(self.errors) < 50:
                     self.errors.append(str(e.get('msg'))[:300])
         return {'ok': True}

@@ -175,7 +175,7 @@ function probe(actors, person, t) {
     bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: !!fl.step, sr: !!fr.step,
     mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]),
     short: Object.keys(rig.short || {}).filter((k) => rig.short[k]), hy: yawOf(rig, 'head'), cy: yawOf(rig, 'spine_03'), py: yawOf(rig, 'pelvis'),
-    hl: at('hand_l'), hr: at('hand_r'), ch: st.chestHands === undefined ? null : +THREE.MathUtils.radToDeg(st.chestHands).toFixed(1) };
+    hl: at('hand_l'), hr: at('hand_r'), kl: at('calf_l'), kr: at('calf_r'), tl: at('thigh_l'), tr: at('thigh_r'), ch: st.chestHands === undefined ? null : +THREE.MathUtils.radToDeg(st.chestHands).toFixed(1) };
 }
 // a bone's heading in degrees: its rest forward (the rig's) turned by its turn from rest, about the vertical
 function yawOf(rig, n) {
