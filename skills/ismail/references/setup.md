@@ -166,7 +166,7 @@ winget install -e --id DenoLand.Deno --accept-package-agreements --accept-source
 
 (`pip install -U "yt-dlp[default]"` when there is no uv.) On macOS `brew install yt-dlp deno`; on Linux the deno
 install script from deno.com, and yt-dlp as above. A runtime installed during the session is not on its PATH yet:
-pass its path (`recreate.md` section 0).
+pass `--js-runtimes deno:<path to deno>` until the next session.
 
 ### Optional: VR (the stage)
 

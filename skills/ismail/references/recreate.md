@@ -9,35 +9,22 @@ days of rounds comparing its own lines against the record's, which the ear could
 
 ## 0. Getting the audio from a link
 
-The person gives a YouTube link, a SoundCloud page or a track name. Their part is the yes you ask for; the rest is
-yours.
+The person gives a link or a track name. Their part is the yes you ask for ("I'll download the audio of <title> to
+measure it"); the rest is yours. yt-dlp is the default route (installed by `setup.md`, Optional: fetching
+references); another is fine if it is as hands-off. From the song folder, two commands:
 
-- **Ask once, saying what and why:** "I'll download the audio of <title> to measure it, nothing else." Their words
-  go in the `ref/SOURCES.md` row (file, title, uploader, link, length, who approved it and how, date, what you
-  measure).
-- **yt-dlp is the default route.** Another one is fine if it is as hands-off. Audio only (`-f bestaudio`) into
-  `ref/` (or `ref/dl/`). If it is missing, ask once in plain words and install it (`setup.md`, Optional: fetching
-  references).
-- **YouTube needs a JavaScript runtime** (deno) and the `yt-dlp[default]` extras. Pass the runtime explicitly when
-  it is not on PATH (`--js-runtimes deno:<path>`, or `js_runtimes={'deno': {'path': ...}}` from Python; winget puts
-  it under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\DenoLand.Deno_*`). Without it YouTube answers 403 or asks
-  for a sign-in, and it looks like a block when it is a setup gap.
-- **One attempt, then read the error before anything else:**
-  - 403, or a line about the JS runtime or the signature: setup. Fix the runtime, try once more.
-  - **"Sign in to confirm you're not a bot", or HTTP 429:** YouTube has flagged this computer. Stop. Every retry
-    (another player client, extractor arguments, another video, a browser) extends the block. It is not a version
-    problem, and a check the person passes in their own browser frees only that browser, not yt-dlp. It usually
-    clears by itself in hours, sometimes a day: try once later, not in a loop.
-  - Meanwhile get the same track elsewhere: SoundCloud (`scsearch5:<artist> <title>`, then check each result's
-    length: official uploads are often 30-second previews; measure a full-length one), Bandcamp, or a file the
-    person already has.
-  - Their browser cookies (`--cookies-from-browser`) are their call, never yours: every request then carries their
-    Google account, which can get that account flagged. If they want it, a separate browser profile signed into a
-    spare account.
-- Don't open the video in a browser to capture its audio, and don't switch downloaders to get around a block.
-- Several links at once are fine; fetch them one after another, one attempt each, not in parallel.
-- A download that waits on a block never holds the session: say what happened in one line, offer the other routes,
-  and keep making music with the person meanwhile.
+```
+yt-dlp "ytsearch5:<artist> <title>" --flat-playlist --print "%(id)s | %(title)s | %(channel)s | %(duration_string)s"
+yt-dlp -q --no-playlist -f bestaudio -x --audio-format wav -o "ref/<short_name>.%(ext)s" "<url or id>"
+```
+
+- The first picks the right upload (the original, full length, not a live take or a remix) and gives the
+  `ref/SOURCES.md` row: file, title, channel, link, length, who approved it and in what words, date, what you
+  measure. With a link instead of a search, use `--skip-download --print` and the same fields. SoundCloud works the
+  same way with `scsearch5:`; check the length there, official uploads are often 30-second previews.
+- Several references: one after another, a few, one attempt each.
+- If a download fails, say so in one line and offer SoundCloud or a file they have. Don't retry with other player
+  clients, a browser or their browser cookies: retries can get this computer blocked by YouTube for hours.
 
 ## 1. Grid first; timing errors poison everything
 
