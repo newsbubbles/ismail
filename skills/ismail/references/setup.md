@@ -157,7 +157,7 @@ Nothing is public.
 ### Optional: fetching references
 
 The first time the person gives a link to a reference, ask once ("I'll add the downloader that fetches it; nothing
-for you to do"), then install yt-dlp with its extras, and a JavaScript runtime, which YouTube needs:
+for you to do"), then install yt-dlp and deno (yt-dlp uses it for YouTube):
 
 ```
 uv tool install "yt-dlp[default]"
@@ -165,8 +165,7 @@ winget install -e --id DenoLand.Deno --accept-package-agreements --accept-source
 ```
 
 (`pip install -U "yt-dlp[default]"` when there is no uv.) On macOS `brew install yt-dlp deno`; on Linux the deno
-install script from deno.com, and yt-dlp as above. A runtime installed during the session is not on its PATH yet:
-pass `--js-runtimes deno:<path to deno>` until the next session.
+install script from deno.com, and yt-dlp as above.
 
 ### Optional: VR (the stage)
 

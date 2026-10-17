@@ -7,7 +7,8 @@
 - A new session given a YouTube link had only "yt-dlp; YouTube may bot-wall" to go on, improvised other clients
   and a browser, and got the computer blocked. `references/recreate.md` section 0 now gives the two commands the
   sessions that fetch references fine use (find the upload and its SOURCES.md fields, then fetch the audio into
-  `ref/`), with one line for a failed download: say so, offer SoundCloud or a file, no retries. A row in SKILL.md's
+  `ref/`), recording it as it plays (`listen_start` on the speakers) when there is no download, and one line for
+  a failed download: say so, offer the recording or a file, no retries. A row in SKILL.md's
   table and the instruments guide point to it; `setup.md` installs yt-dlp and deno after one yes.
 
 ### Phone: a linked .md, .csv or .log opens as text

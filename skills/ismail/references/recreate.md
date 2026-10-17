@@ -23,8 +23,13 @@ yt-dlp -q --no-playlist -f bestaudio -x --audio-format wav -o "ref/<short_name>.
   measure. With a link instead of a search, use `--skip-download --print` and the same fields. SoundCloud works the
   same way with `scsearch5:`; check the length there, official uploads are often 30-second previews.
 - Several references: one after another, a few, one attempt each.
-- If a download fails, say so in one line and offer SoundCloud or a file they have. Don't retry with other player
-  clients, a browser or their browser cookies: retries can get this computer blocked by YouTube for hours.
+- **Or record it as it plays.** When there is no download (it failed, or the track is only in their player), they
+  play it on this computer and you record the speakers: `listen_start(streams=['speakers'], project=<song>)`, then
+  `listen_stop`; the take lands in the song's `listen/` folder, with the skips and their comments on one clock
+  (`listen-together.md`). Something they play or sing themselves comes in through the mic the same way, after their
+  yes. The SOURCES.md row says it was recorded from playback.
+- If a download fails, say so in one line and offer to record it as it plays, or a file they have. Don't retry
+  with other download settings or a browser: retries can get this computer blocked for hours.
 
 ## 1. Grid first; timing errors poison everything
 
