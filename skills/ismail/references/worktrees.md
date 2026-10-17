@@ -1,7 +1,7 @@
 # Dev copies (git worktrees): the decision tree
 
 Read this when you change ismail itself as a dev: the contributor dev, an area dev (the stage dev so far) or a
-helper agent one of them started. Every dev works in its own copy of the repository (a git worktree), so a live
+helper agent one of them started (`helpers.md`). Every dev works in its own copy of the repository (a git worktree), so a live
 set, the phone page and the stage keep running from the main checkout while code changes elsewhere. Branches
 alone would put every agent in one folder and switch code under running servers; copies keep them apart.
 

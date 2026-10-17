@@ -51,8 +51,8 @@ How fast you answer depends on what the person is doing:
 - **A jam is threaded.** The person plays parts in (takes: voice notes, recordings) and you turn them into loops.
   They lead; you are the DAW. The main thread answers everything they send within about a minute, before any long
   work, even if the answer is only "got it, it goes in at the next loop". Any work longer than a couple of minutes
-  (fixing a transcription, sync, sound matching, levels) goes to a helper (a subagent, or a second session when
-  your harness has no helpers) with full context: the song folder, the take, what the person said, and what done
+  (fixing a transcription, sync, sound matching, levels) goes to a helper (`helpers.md`; a second session when
+  your harness has none) with full context: the song folder, the take, what the person said, and what done
   looks like. The main thread keeps listening and talking, and says when the helper's result goes in.
 
 ### In a jam
