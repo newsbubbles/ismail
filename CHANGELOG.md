@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Stage: a camera crew's tools (stage_on_air, stage_pointer)
+
+- For the same talk on the stage (the user, 10-17: agents as a camera crew, a director calling the shots; "wherever my
+  hands point, the camera view shows some kind of pointer ... funny"). `stage_on_air(scene, camera)` cuts to a
+  camera: the monitor material (default `monitor_screen`) shows it live through `stage_surface`, and the cut is
+  logged in scenes/<scene>/on_air.jsonl with its UTC time and an optional note; a camera the scene's manifest does
+  not list is refused and not logged. `stage_on_air_log` lists the cuts with how long each stayed on air. A cut on a
+  monitor that already shows a camera only changes the camera (no new render target).
+- `stage_pointer`: a giant foam finger where a person's hand points (a body following the user live or playing a
+  take), from the shoulder through the index fingertip to the first surface (2.5 m out when nothing is hit). With
+  `when='point'` it shows only while that hand points (index straight, middle and ring curled, the hand 40 cm or more
+  from the shoulder, held 120 ms), and grows in and shrinks away. It is drawn on a new layer, `CAM_ONLY` (editor.js),
+  which the headset's eyes never enable and capture and surface cameras do, so the speaker never sees it and every
+  camera does.
+- Limits: one style for now (`foam_finger`); the pointing test reads the body's finger bones, so a body without
+  finger bones needs `when='always'`. Only the first person following or playing is used unless `person` is given.
+
 ### Stage: screens in the room (stage_surface)
 
 - For a talk given from the stage (the user, 10-17: a lecture hall with slides, a video backdrop, a teleprompter

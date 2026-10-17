@@ -42,6 +42,7 @@ import { CAPTURE, runCapture } from './capture.js';
 import { initTrails } from './trails.js';
 import { initCamRec } from './camrec.js';
 import { initSurfaces } from './surfaces.js';
+import { initPointer } from './pointer.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -111,6 +112,7 @@ window.VR_music = music;
 actors.setMusicClock(() => music.now());            // takes played on the music (stage_actor_play at_music)
 initStream(ed, live);
 const surfaces = initSurfaces(ed, live, () => (music.now() || {}).t || 0);   // slides, video, text, a live camera on a material
+initPointer(ed, live, actors);                     // a foam finger where a person points, for the cameras only
 // a re-exported room comes in without the grown trees (they hang under the old scene's tree_k items): grow them again
 live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reload) setTimeout(() => live.handlers.trees_reload({}).catch(() => {}), 500); });
 const stageClock = initClock(ed, live, xr, panels);   // the 4D timeline: keyed objects, tree growth

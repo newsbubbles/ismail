@@ -24,6 +24,7 @@
 // The job comes from GET capture/job; frames go to POST capture/frame?n= (PNG) and the end to POST capture/status.
 import * as THREE from 'three';
 import { vec, ease } from './interp.js';
+import { CAM_ONLY } from './editor.js';
 
 export const CAPTURE = new URLSearchParams(location.search).has('capture');
 
@@ -43,6 +44,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     r.setPixelRatio(1);
     r.setSize(W, H, false);
     const cam = new THREE.PerspectiveCamera(50, W / H, 0.05, 2000);   // layer 0 only: no gizmos, panels or markers
+    cam.layers.enable(CAM_ONLY);                    // and what only cameras see (the pointer)
     if (ed.selected) ed.select(null, 'capture');
     const step = () => {
       for (const f of ed.preRender) guard(f.name || 'preRender', f);
