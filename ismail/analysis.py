@@ -540,6 +540,8 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     midi = np.where(voiced & (prob > min_conf), librosa.hz_to_midi(np.nan_to_num(f0, nan=1.0)), np.nan)
     oenv = librosa.onset.onset_strength(y=seg, sr=ASR, hop_length=hop)
     ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=ASR, hop_length=hop, backtrack=True).tolist()
+    ldb = 20 * np.log10(librosa.feature.rms(y=seg, hop_length=hop, frame_length=512)[0] + 1e-9)
+    ons = [o for o, nx in zip(ons, ons[1:] + [nfr]) if not _same_note(midi, ldb, oenv, o, nx, hop)]
     # split legato phrases where the rounded pitch changes and stays changed for >= 100 ms
     # (shorter changes are glides or pYIN window smear at note boundaries)
     r = np.where(np.isnan(midi), -1, np.round(midi)).astype(int)
@@ -598,6 +600,34 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     else:
         lines += _melody_confidence(seg, ts, merged, grid, base_beat, prob, times, fmin, fmax)
     return merged, '\n'.join(lines)
+
+
+def _same_note(midi, db, oenv, o, nxt, hop):
+    """True when the onset at frame o is not a new note: the pitch is the same on both sides (within 50 cents) and
+    nothing re-attacks. Onsets also fire on a note-off click and inside a steady held tone, and the tail past such a
+    split keeps pYIN's smeared pitch, so it read as a second note (ledger:M226). A re-attack is a level rise of 3 dB
+    or more out of a dip between the onset and the next one (nxt; within 150 ms), as after a gap or on a decaying
+    note struck again, or a hard restart: with the level held after it, an onset of strength 0.3 or more that stands
+    15 times over the onset strength around it (median over 200 ms each side), a click as a legato retrigger of a flat
+    synth note makes. A filter sweep or wah inside a held note fires onsets too, but they stand only a few times over
+    their own sweep. db is the level per frame from a 512-sample window, short enough to see the dip at a re-attack;
+    the rise is looked for up to 3 frames short of the next onset, so the next note's attack does not count."""
+    w = int(0.05 * ASR / hop)
+    a, b = midi[max(o - w, 0):o], midi[o:o + w]
+    a, b = a[~np.isnan(a)], b[~np.isnan(b)]
+    if len(a) < 3 or len(b) < 3 or abs(np.median(a) - np.median(b)) >= 0.5:
+        return False
+    lo = max(o - 4, 0)
+    end = max(min(nxt - 3, o + 3 * w), o + 4)
+    m = lo + int(np.argmin(db[lo:end]))                    # the deepest dip before the next onset
+    if db[m:end].max() - db[m] >= 3:
+        return False
+    held = o + 4 < min(o + w, len(db)) and np.median(db[o + 4:o + w]) >= db[lo] - 6
+    r, g = 4 * w, int(0.03 * ASR / hop)
+    around = np.concatenate([oenv[max(o - r, 0):max(o - g, 0)], oenv[o + g:o + r]])
+    peak = oenv[o:o + 4].max()
+    click = peak >= 0.3 and (len(around) == 0 or peak >= 15 * np.median(around))
+    return not (held and click)
 
 
 def _melody_confidence(seg, ts, notes, grid, base_beat, prob, times, fmin, fmax):
