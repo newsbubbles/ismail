@@ -452,6 +452,7 @@ export function initActors(ed, live) {
     if (!frames.length) throw new Error('take has no frames');
     // a trimmed take plays only its kept part (actions.js review: Start here / End here; saved in meta.trim)
     const trim = c.trim === null ? null : c.trim || meta.trim;
+    const whole = frames;                                    // standing height comes from all of it (below)
     if (Array.isArray(trim) && trim.length === 2) {
       const cut = frames.filter((f) => f.t >= trim[0] && f.t <= trim[1]);
       if (cut.length > 1) frames = cut;
@@ -460,7 +461,9 @@ export function initActors(ed, live) {
     const J = Object.fromEntries((meta.joints || []).map((n, i) => [n, i]));
     // scale: the user's standing head height to the actor's
     const floor = world().floor || 0;                       // the user's floor while recording
-    const heads = frames.map((f) => f.head[1]).sort((a, b) => a - b);
+    // the median of the whole take, not of the part kept: a part spent dipping took the dip for standing, so the knees
+    // never bent in it (the 2026-10-17 study: head 1.70-1.90 m in a take standing at 1.87 drew 6 cm of bob)
+    const heads = whole.map((f) => f.head[1]).sort((a, b) => a - b);
     // the median: a take can hold moments raised on the thumbstick, which a high percentile took for standing height
     const userH = heads[Math.floor(heads.length * 0.5)] - floor, actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
     const s = THREE.MathUtils.clamp(actorH / Math.max(0.5, userH), 0.6, 1.4);
@@ -486,7 +489,7 @@ export function initActors(ed, live) {
     // mirrored as it was made (the user, 2026-10-05: a take recorded with Follow's mirror played back the other way):
     // the take keeps meta.mirror; the plane is the person's facing through the take's anchor, as in the Follow
     const mirror = !!(c.mirror ?? meta.mirror);
-    const st = { person, rig, frames, J, s, anchor, to, floor: ground, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
+    const st = { person, rig, frames, J, s, anchor, to, floor: ground, standY: floor + userH, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
       t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta,
       mirror, mirrorN: fc ? new THREE.Vector3(fc.z, 0, -fc.x) : null,
       voice: c.voice == null ? null : !!c.voice,           // perform.js: the performance's voice with it
@@ -1047,7 +1050,9 @@ export function initActors(ed, live) {
     // (standing start poses only: a seated one, hips well under a leg's length up, keeps its seat)
     const leg = rig.rest.thigh_l.p.distanceTo(rig.rest.calf_l.p) + rig.rest.calf_l.p.distanceTo(rig.rest.foot_l.p);
     const standing = P0.y - Math.min(b.feet0.l.p.y, b.feet0.r.p.y) > 0.8 * leg;
-    const drop = standing ? Math.min(0, (f.head[1] - r.head[1]) * s) : 0;
+    // from the start frame's head, or the take's standing height when that is lower: a part starting raised on the
+    // thumbstick (2026-10-17 study: 30 cm above standing) otherwise drew four seconds of bent knees once back down
+    const drop = standing ? Math.min(0, (f.head[1] - Math.min(r.head[1], st.standY ?? r.head[1])) * s) : 0;
     const S = ['l', 'r'].map((sd) => st.feet[sd].at || b.feet0[sd].p).reduce((a, v) => a.add(v), new THREE.Vector3()).multiplyScalar(0.5);
     const S0 = b.feet0.l.p.clone().add(b.feet0.r.p).multiplyScalar(0.5);
     const away = P0.clone().add(b.off).sub(S).sub(P0.clone().sub(S0)).setY(0);
