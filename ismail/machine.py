@@ -1091,9 +1091,19 @@ class _Meter:
         try:
             me = psutil.Process()
             procs = [me] + me.children(recursive=True)
-        except psutil.Error:
+        except psutil.Error as e:
+            if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
+                print(f"[DIAG] children failed: {e!r}", file=sys.stderr, flush=True)
             return
         rss = priv = 0
+        if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
+            for p in procs:
+                try:
+                    mi = p.memory_info()
+                    print(f"[DIAG] t={time.time():.2f} pid={p.pid} ppid={p.ppid()} name={p.name()} rss={mi.rss/2**20:.0f}M "
+                          f"vms={mi.vms/2**20:.0f}M foot={(_footprint(p.pid) or -2**20)/2**20:.0f}M", file=sys.stderr, flush=True)
+                except Exception as e:
+                    print(f"[DIAG] pid={p.pid} err {e!r}", file=sys.stderr, flush=True)
         for p in procs:
             try:
                 key = (p.pid, p.create_time())
@@ -1109,8 +1119,11 @@ class _Meter:
                     if p.cpu_affinity() != self.job['cores']:   # a child that set its own: back to the slot's cores
                         p.cpu_affinity(self.job['cores'])
                     self.pinned.add(key)
-            except (psutil.Error, AttributeError, NotImplementedError):
-                pass
+            except (psutil.Error, AttributeError, NotImplementedError) as e:
+                if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
+                    print(f"[DIAG] sample pid={p.pid} err {e!r}", file=sys.stderr, flush=True)
+        if os.environ.get('ISMAIL_METER_DEBUG'):  # DIAG M166
+            print(f"[DIAG] sum rss={rss/2**30:.3f} priv={priv/2**30:.3f} n={len(procs)}", file=sys.stderr, flush=True)
         self.rss_peak = max(self.rss_peak, rss)
         self.priv_peak = max(self.priv_peak, priv)
         self._note(priv / 2 ** 30)
@@ -1240,10 +1253,38 @@ class _Meter:
 
 
 def _mem_of(p):
-    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; elsewhere
-    the resident size."""
+    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; on macOS
+    the physical footprint (what Activity Monitor shows: resident plus compressed and swapped out); elsewhere the
+    resident size."""
     mi = p.memory_info()
-    return mi.rss, getattr(mi, 'private', mi.rss)
+    own = getattr(mi, 'private', None)
+    if own is None and sys.platform == 'darwin':
+        own = _footprint(p.pid)
+    return mi.rss, mi.rss if own is None else own
+
+
+_RUSAGE = []
+
+
+def _footprint(pid):
+    """macOS: a process's phys_footprint in bytes (proc_pid_rusage, allowed on our own user's processes), or None."""
+    if not _RUSAGE:
+        fn = None
+        for lib in (None, '/usr/lib/libproc.dylib'):
+            try:
+                fn = ctypes.CDLL(lib).proc_pid_rusage
+                break
+            except (OSError, AttributeError):
+                pass
+        if fn is not None:
+            fn.argtypes, fn.restype = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p], ctypes.c_int
+        _RUSAGE.append(fn)
+    if _RUSAGE[0] is None:
+        return None
+    buf = (ctypes.c_uint64 * 32)()         # rusage_info_v0: a 16-byte uuid, then 64-bit fields; phys_footprint is the
+    if _RUSAGE[0](pid, 0, buf) != 0:      # 8th of them (RUSAGE_INFO_V0 = 0)
+        return None
+    return int(buf[9])
 
 
 def _write_bytes(p):

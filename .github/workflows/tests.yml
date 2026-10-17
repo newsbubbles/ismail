@@ -38,6 +38,19 @@ jobs:
       - name: WORLD for autotune (optional; its tests skip without it)
         continue-on-error: true
         run: pip install "pyworld>=0.3.4"
+      - name: DIAG M166 meter
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        env:
+          ISMAIL_METER_DEBUG: "1"
+        run: |
+          export ISMAIL_MACHINE_DIR=$(mktemp -d)
+          python -c "import psutil, sys, platform; print(psutil.__version__, sys.version, sys.executable, platform.platform())"
+          sysctl hw.memsize vm.swapusage; vm_stat | head -12
+          time python -c "import os; b = os.urandom(900 * 2 ** 20)"
+          python -m ismail.machine run --cpu --force --mem 0.35 --what hog -- python -c "import os, time; b = os.urandom(900 * 2 ** 20); time.sleep(2.5)"
+          python -m ismail.machine run --cpu --force --mem 0.35 --what hog6 -- python -c "import os, time; b = os.urandom(900 * 2 ** 20); time.sleep(6)"
+          tail -3 $ISMAIL_MACHINE_DIR/*.jsonl 2>/dev/null || ls -R $ISMAIL_MACHINE_DIR
       - name: tests
         run: python -m pytest tests -q
 
