@@ -734,6 +734,65 @@ def stage_material_set(scene: str, color: list, material: str = None, object: st
 
 
 @op(mutates=True)
+def stage_surface(scene: str, material: str = None, object: str = None, image: str = None, video: str = None,
+                  text: str = None, camera: str = None, clear: bool = False, fit: str = 'contain',
+                  background: str = '#000000', glow: float = 1.0, px: int = 1024, lines: int = 8, scroll: float = 0,
+                  line: float = 0, color: str = '#ffffff', align: str = 'left', font: str = 'sans-serif',
+                  fps: int = 15, sound: bool = False, loop: bool = True, start: float = 0, aspect: float = None) -> str:
+    """Show an image, a video, text or a live camera on every mesh of a material, now (page command: surface): slides
+    on a whiteboard, a video backdrop, a teleprompter, a monitor with the camera on air, screens on desks. The meshes
+    draw flat and unlit (a screen glows; glow 0..1 dims it) until clear=True gives them their own material back
+    (clear without material: every surface). Not saved to the scene: a re-exported room gets its surfaces back,
+    another scene starts with none. The surface keeps its mesh's shape (aspect measured from its UVs, or aspect=
+    width / height); px is the long side in pixels.
+    One source: image= or video= a file inside the scene folder (path relative to it, e.g. "slides/s01.png"), placed
+    by fit 'contain' (whole, on background), 'cover' (filled, cropped) or 'stretch'; a video plays from start=
+    seconds, loops unless loop=False, silent unless sound=True. text= wrapped to the width, lines= lines on the surface
+    at once, scroll= lines a second (0: still), line= the top line to start at, color, background, align left | center
+    | right, font. camera= a camera in the scene, rendered fps times a second at the surface's aspect with the
+    camera's horizontal field of view (each feed costs a render of the room: keep fps low in the headset).
+    object= instead of material: that object's one material. In a stage_capture setup (with at_song for timing) a
+    video follows the film's time and a camera renders every frame. Errors: no such material or camera, a file that
+    is not in the scene folder, no source. Page replies {surface, source, meshes, px, aspect, size?, text_lines?, on}
+    or {cleared, on}. Emits: surface_set, surface_cleared, surface_lost (a reload could not put one back)."""
+    if not (material or object) and not clear:
+        raise OpError('surface needs material= (or object=)')
+    srcs = [k for k, v in (('image', image), ('video', video), ('text', text), ('camera', camera)) if v is not None]
+    if not clear and len(srcs) != 1:
+        raise OpError(f'pass one of image, video, text or camera (got {", ".join(srcs) or "none"})')
+    if fit not in ('contain', 'cover', 'stretch'):
+        raise OpError("fit is 'contain', 'cover' or 'stretch'")
+    if align not in ('left', 'center', 'right'):
+        raise OpError("align is 'left', 'center' or 'right'")
+    for f in (image, video):
+        if f is not None:
+            _scene_file(scene, f)
+    c = {'material': material, 'object': object, 'clear': clear}
+    if not clear:
+        c.update({'fit': fit, 'background': background, 'glow': glow, 'px': px, 'aspect': aspect})
+        if image is not None:
+            c['image'] = image
+        elif video is not None:
+            c.update({'video': video, 'sound': sound, 'loop': loop, 'from': start})
+        elif text is not None:
+            c.update({'text': text, 'lines': lines, 'scroll': scroll, 'line': line, 'color': color, 'align': align, 'font': font})
+        else:
+            c.update({'camera': camera, 'fps': fps})
+    return page_cmd(scene, 'surface', c, timeout=120 if video else 30)
+
+
+def _scene_file(scene, rel):
+    """A file inside the scene folder, the only place the page can load it from."""
+    from pathlib import Path
+    from .link import server_for
+    d = (Path(server_for(scene)['scenes']) / scene).resolve()
+    f = (d / rel).resolve()
+    if d not in f.parents or not f.is_file():
+        raise OpError(f'{rel!r} is not a file in the scene folder {d}')
+    return f
+
+
+@op(mutates=True)
 def stage_scene_go(scene: str, name: str, position: list = None, target: list = None, reload: bool = False) -> str:
     """Go to another scene, under the construct (the grey void closes, the room is swapped, the void opens) (page
     command: scene_go; the page reads `name` or `scene` for the destination). Unsaved edits are saved first, playing
@@ -948,4 +1007,4 @@ def stage_actor_part(scene: str, person: str, part: str = None, show: bool = Tru
     return page_cmd(scene, 'actor_part', {'person': person, 'part': part, 'show': show, 'move': move,
                                           'seconds': seconds, 'reset': reset or None}, timeout=30)
 
-TYPED = {'follow': 'stage_follow', 'replay_input': 'stage_take_replay', 'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'take_keep_recent': 'stage_take_keep_recent', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'follow': 'stage_follow', 'replay_input': 'stage_take_replay', 'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'take_keep_recent': 'stage_take_keep_recent', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'surface': 'stage_surface', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

@@ -30,7 +30,7 @@ export const CAPTURE = new URLSearchParams(location.search).has('capture');
 const P = (v) => new THREE.Vector3(v[0], v[2], -v[1]);   // Blender (Z up) to three (Y up)
 const SENSOR_MM = 36;                                     // Blender's default sensor, fitted to the width
 
-export async function runCapture(ed, { music, clock, construct, live, actors, sets }) {
+export async function runCapture(ed, { music, clock, construct, live, actors, sets, surfaces }) {
   const post = (path, body, json) => fetch(path, { method: 'POST', body: json ? JSON.stringify(body) : body,
     headers: json ? { 'Content-Type': 'application/json' } : {} });
   const errors = [];
@@ -100,6 +100,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
         const c = timed.shift();
         try { await run(c); } catch (e) { throw new Error(`setup ${c.type} at_song ${c.at_song}: ${e.message || e}`); }
       }
+      if (surfaces) await surfaces.sync(songT);     // videos on surfaces at the film's time (surfaces.js)
       place(cam, job, songT, W / H, ed);
       step();
       const blob = await new Promise((res) => r.domElement.toBlob(res, 'image/png'));   // in the task that drew it
