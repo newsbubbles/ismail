@@ -1451,3 +1451,17 @@ def test_a_now_label_expires_when_what_it_named_stops(phone, monkeypatch):
     assert ph.now_text() == 'Sticky' and ph.view['now_of'] is None
     P.phone_now(now='')
     assert ph.now_text() == 'ch3 (lead)'
+
+
+def test_a_panel_left_unsent_keeps_what_was_typed_said_or_picked():
+    """Nate 10-17 (n6203): he typed and dictated into a panel, left it, came back, and the boxes were empty; Send then
+    sent nothing (ledger:M227). Leaving by Later, another tab or a tap outside keeps the inputs; reopening puts them
+    back; an answer or Not now drops them."""
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "const panelKept = store.get('panel_kept', {}) || {};" in js
+    assert "function closeSheet() { keepPanel();" in js
+    assert "function showPanel(p) {\n  keepPanel();" in js and "function showNotes() {\n  keepPanel();" in js
+    assert "if (panelKept[p.id] && p.kind !== 'exam') putBack(box, p, panelKept[p.id]);" in js
+    assert js.index('putBack(box, p, panelKept[p.id])') < js.index('(fieldDrafts[p.id] || []).forEach')   # late voice text adds to it
+    assert "function answeredHere(id) { answered.add(id); forgetPanel(id);" in js
+    assert "if (!shown || shown === '__notes' || answered.has(shown)) return;" in js
