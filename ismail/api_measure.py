@@ -1,6 +1,9 @@
-"""Measurement ops: tuning and retune, swing, kit discovery, per-section loudness, fader levels from reference
-stems (registered into api.OPS on import). Each exists because guessing the number cost a draft."""
+"""Measurement ops: tuning and retune, every part against the tuning grid, swing, kit discovery, per-section
+loudness, fader levels from reference stems (registered into api.OPS on import). Each exists because guessing the
+number cost a draft."""
+import json
 import os
+import re
 
 import numpy as np
 import soundfile as sf
@@ -9,6 +12,7 @@ from . import analysis as A
 from . import audiofile
 from .api import op, OpError, _load
 from .api_cmp import STEMS, ref_stems
+from .notation import midi_to_name
 
 
 def _segment(P, src, bars=None):
@@ -299,4 +303,234 @@ def levels_from_ref(project: str, bars: list = None, apply: bool = False) -> str
                  ". Re-render and run levels_from_ref again; stop when every change is within 1 dB.")
     else:
         L.append("apply=True writes these fader changes.")
+    return '\n'.join(L)
+
+
+# ------------------------------------------------------------------ every part against the tuning grid (ledger:M231)
+
+_SCALE_WORDS = {'': 'major', 'maj': 'major', 'm': 'minor', 'min': 'minor', 'aeolian': 'minor', 'ionian': 'major'}
+
+
+def _song_key(P, key):
+    """(label, pitch classes) of the key to check against: `key` ('A minor', 'Am', 'F# major', 'D dorian'), else the
+    project's ('key' in project.json, or the sketch's in sketch.json); (None, None) when there is none."""
+    from . import tune
+    if not key:
+        key = P.d.get('key')
+    if not key:
+        try:
+            with open(os.path.join(P.root, 'sketch.json'), encoding='utf8') as f:
+                key = json.load(f).get('key')
+        except (OSError, ValueError):
+            key = None
+    if not key:
+        return None, None
+    m = re.fullmatch(r'\s*([A-Ga-g][#b]?)\s*([A-Za-z_ ]*?)\s*', str(key))
+    if not m:
+        raise OpError(f"key {key!r}: write it like 'A minor', 'Am', 'F# major' or 'D dorian'")
+    scale = m.group(2).strip().lower().replace(' ', '_')
+    scale = _SCALE_WORDS.get(scale, scale)
+    try:
+        return f"{m.group(1)[0].upper()}{m.group(1)[1:]} {scale}", set(tune.scale_classes(m.group(1), scale))
+    except tune.TuneError:
+        raise OpError(f"key {key!r}: the scale must be one of {', '.join(n for n in tune.SCALES if n != 'chromatic')}")
+
+
+def _tuning_parts(P, source, stems):
+    """[(name, source string)] of the parts to read, and a note on their age (or '')."""
+    note = ''
+    if source == 'render':
+        rd = os.path.join(P.root, 'renders')
+        latest = audiofile.find(os.path.join(rd, 'latest.wav'))
+        if not os.path.exists(latest):
+            raise OpError("nothing rendered yet: render(stems=True) first (bars=[a, b] is enough to check a part), "
+                          "then call analyze_tuning again")
+        have = {n: p for n, p in audiofile.listing(os.path.join(rd, 'stems')).items() if n in P.d['tracks']}
+        if not have:
+            raise OpError("the last render wrote no track stems: render(stems=True) (bars=[a, b] is enough), then call "
+                          "again. To read the whole mix as one part pass source='render:mix' (less precise: every "
+                          "part's notes at once)")
+        if any(os.path.getmtime(p) < os.path.getmtime(latest) - 60 for p in have.values()):
+            note = ("NOTE some stems are older than renders/latest.wav (a render without stems=True came after): "
+                    "render(stems=True) to read the parts as they are now")
+        parts = [(n, f'track:{n}') for n in have]
+    elif source == 'ref':
+        have = {s: p for s, p in ref_stems(P).items() if s != 'mix'}
+        if not have:
+            raise OpError("the reference has no stems yet: separate(source='ref') first (or project_set("
+                          "reference_stems=<folder>)), then call again; source='ref:mix' reads the whole record as "
+                          "one part")
+        parts = [(s, f'ref:{s}') for s in have]
+    elif source in ('render:mix', 'ref:mix'):
+        parts = [('mix', source.split(':')[0])]
+    else:
+        parts = [(source.split(':', 1)[1] if source.startswith(('track:', 'ref:', 'sound:')) else
+                  os.path.splitext(os.path.basename(source))[0], source)]
+    if stems:
+        names = [n for n, _ in parts]
+        bad = [s for s in stems if s not in names]
+        if bad:
+            raise OpError(f"no part named {bad} in {source!r}; parts: {names}")
+        parts = [p for p in parts if p[0] in stems]
+    return parts, note
+
+
+def _grid_cents(P, source, tuning_cents):
+    """(cents of the grid from A440, where that came from). Renders play at A440; a reference that ref_retune has not
+    moved is read on its own grid, measured as analyze_grid does."""
+    if tuning_cents is not None:
+        return float(tuning_cents), f"tuning_cents={tuning_cents:+g} as given"
+    ref = P.d.get('reference') or {}
+    if source.startswith('ref') and ref.get('file'):
+        if 'retuned_cents' in ref:
+            return 0.0, f"the reference was moved onto A440 by ref_retune ({ref['retuned_cents']:+g} c)"
+        cents, r = A.tuning(A.load(ref['file']))
+        if r >= 0.1 and abs(cents) >= 3:
+            return cents, f"the reference's own tuning, {cents:+.0f} c from A440 (ref_retune() moves it onto A440)"
+    return 0.0, "ismail plays at A440"
+
+
+def _cents_off(m, gc):
+    """(nearest grid note as a MIDI number, cents from it) for a float MIDI pitch on a grid gc cents from A440."""
+    x = m - gc / 100.0
+    k = int(round(x))
+    return k, 100.0 * (x - k)
+
+
+def _spread_stats(offs):
+    """(median, spread) of cents offsets that wrap at +-50: read around their circular mean, so a part sitting at a
+    quarter tone (+49 and -49 on either side) is one part at ~50, not two halves averaging 0. Spread = the middle
+    half (75th - 25th percentile)."""
+    o = np.asarray(offs)
+    c = 100 * np.angle(np.exp(2j * np.pi * o / 100).mean()) / (2 * np.pi)
+    r = (o - c + 50) % 100 - 50 + c
+    med = (np.median(r) + 50) % 100 - 50
+    return float(med), float(np.percentile(r, 75) - np.percentile(r, 25))
+
+
+def _clusters(rows):
+    """Readings grouped into the pitches a part plays (gaps of more than a third of a semitone split them)."""
+    rows = sorted(rows, key=lambda r: r['midi'])
+    out = []
+    for r in rows:
+        if out and r['midi'] - out[-1][-1]['midi'] <= 0.33:
+            out[-1].append(r)
+        else:
+            out.append([r])
+    return out
+
+
+def _tuning_verdict(name, rows, tol, gc, skip_ms):
+    """One line an agent can act on, for one part's readings."""
+    med, spread = _spread_stats([r['off'] for r in rows])
+    off = [r for r in rows if abs(r['off']) > tol]
+    n = len(rows)
+    if not off:
+        return f"{name}: in tune (median {med:+.0f} c, spread {spread:.0f} c)"
+    bad = []                                            # the pitches that sit off: (count, label, a quarter tone?)
+    for cl in _clusters(rows):
+        cm, _ = _spread_stats([r['off'] for r in cl])
+        if abs(cm) > tol:
+            k, _ = _cents_off(float(np.median([r['midi'] for r in cl])), gc)
+            bad.append((len(cl), f"~{midi_to_name(k)} {cm:+.0f} c (x{len(cl)})", abs(cm) >= 40))
+    quarter = ' a quarter tone' if any(q for *_, q in bad) else ''
+    named = ', '.join(s for _, s, _ in sorted(bad, reverse=True)[:3]) + (' ...' if len(bad) > 3 else '')
+    in_bad = sum(c for c, *_ in bad)
+    if abs(med) > tol and spread < tol:
+        return (f"{name}: the whole part sits{quarter} off the grid at {med:+.0f} c, spread {spread:.0f} c "
+                f"({named}): retune its voice by {-med:+.0f} c (its tune/tone param, or the sample's root pitch)")
+    if bad and len(bad) <= 3 and in_bad >= 0.7 * len(off):
+        return (f"{name}: {in_bad} of {n} pitched notes sit{quarter} off the grid ({named}): retune that voice "
+                f"(params.tone or tune) or split it onto its own track to retune it alone")
+    if len(off) <= max(1, 0.1 * n):
+        return (f"{name}: mostly in tune (median {med:+.0f} c, spread {spread:.0f} c); {len(off)} of {n} notes beyond "
+                f"{tol:g} c (worst above)")
+    return (f"{name}: {len(off)} of {n} notes beyond {tol:g} c, over {len({r['k'] for r in off})} pitches (median "
+            f"{med:+.0f} c, spread {spread:.0f} c): the tuning drifts note to note. Look for a random detune or "
+            f"intonation drawn per note or per string, unison or chorus detune, or an attack glide lasting past "
+            f"{skip_ms:g} ms")
+
+
+@op()
+def analyze_tuning(project: str, source: str = 'render', stems: list = None, tol_cents: float = 15.0,
+                   bars: list = None, key: str = None, tuning_cents: float = None, skip_ms: float = 100.0,
+                   worst: int = 5) -> str:
+    """Check every part of a render against the song's tuning grid (12-TET) and key, and flag notes more than
+    tol_cents off (ledger:M231). A pitched part off the grid goes unnoticed until someone hears it: drums measured
+    from records keep the records' tuning (a tumba a quarter tone sharp). Run it after the first render of a song
+    with pitched percussion or a voice playing in a new register, and before any exam.
+    Reads: source='render' (default) every track stem of the last render(stems=True); 'ref' the reference's stems;
+    'track:<name>', 'ref:<stem>', 'sound:<name>' or a file path one part; 'render:mix' / 'ref:mix' a whole mix as one
+    part. stems=[names] keeps some parts; bars=[a, b] (inclusive) cuts the range.
+    Per note: the steady pitch from skip_ms (100) after its onset (plucks start sharp for ~90 ms, a drum's strike is
+    noise), read from spectral lines, so a chord reads one pitch per note and a drum its sustained mode; gliding
+    notes and noise are counted, not read. Grid: A4 = 440 Hz moved by tuning_cents; by default 0 for renders, and
+    for a reference ref_retune has not moved, its own measured tuning. key ('A minor', 'D dorian'; default the
+    project's or the sketch's) lists out-of-key pitches as information (they can be intended).
+    Returns a table per part (pitched notes, median cents off the grid, spread = middle half, count beyond
+    tol_cents), up to `worst` worst notes per part (seconds in the file, bar and beat, note, cents, Hz), and one
+    verdict per part: in tune; the whole part off (retune its voice by N c); a few pitches off (retune that voice or
+    split it onto its own track); or drifting note to note (per-note or per-string detune). A part with no steady
+    pitch (hats, noise, a sliding vocal) says so and is skipped, never flagged.
+    Errors: nothing rendered or no stems -> render(stems=True) first; no reference stems -> separate(source='ref');
+    an unknown part in stems= -> the reply lists the parts."""
+    if not 0 < tol_cents < 50:
+        raise OpError(f"tol_cents={tol_cents}: give 1-49 cents (15 is the usual line; wider is heard as out of tune)")
+    if not 0 <= skip_ms <= 1000:
+        raise OpError(f"skip_ms={skip_ms}: give 0-1000 ms (100 skips a pluck's sharp start and a drum's strike)")
+    P = _load(project)
+    parts, note = _tuning_parts(P, source, stems)
+    gc, why = _grid_cents(P, source, tuning_cents)
+    klabel, kpcs = _song_key(P, key)
+    L = [f"analyze_tuning {source}{f' bars {bars[0]}-{bars[1]}' if bars else ''}: 12-TET at A4 = "
+         f"{440.0 * 2 ** (gc / 1200):.1f} Hz ({why}); flag beyond {tol_cents:g} c; each note read from {skip_ms:g} ms "
+         f"after its onset" + (f"; key {klabel}" if klabel else "; no key known (key='A minor' adds out-of-key pitches)")]
+    if note:
+        L.append(note)
+    L.append(f"  {'part':<14} {'notes':>5} {'median':>7} {'spread':>7} {'beyond':>10}")
+    verdicts, details = [], []
+    for name, src in parts:
+        path, g = P.source(src, bars)
+        y = A.load(path)
+        t0 = 0.0
+        if bars:
+            t0 = max(g.bar_time(bars[0]), 0.0)
+            y = y[int(t0 * A.ASR):max(int(g.bar_time(bars[1] + 1) * A.ASR), 0)]
+        rows, cnt = A.steady_pitches(y, A.ASR, skip_ms=skip_ms)
+        if len(rows) < 3 or cnt['pitched'] < 0.1 * cnt['events']:
+            L.append(f"  {name:<14} {len(rows):>5} {'-':>7} {'-':>7} {'-':>10}")
+            verdicts.append(f"{name}: no steady pitch ({cnt['pitched']} of {cnt['events']} notes or hits pitched, "
+                            f"{cnt['noisy']} noise, {cnt['gliding']} gliding): unpitched or too noisy, skipped")
+            continue
+        for r in rows:
+            r['t'] += t0
+            r['k'], r['off'] = _cents_off(r['midi'], gc)
+        med, spread = _spread_stats([r['off'] for r in rows])
+        off = sorted([r for r in rows if abs(r['off']) > tol_cents], key=lambda r: -abs(r['off']))
+        L.append(f"  {name:<14} {len(rows):>5} {med:>+6.0f}c {spread:>6.0f}c {len(off):>4} "
+                 f"({100 * len(off) / len(rows):3.0f}%)")
+        verdicts.append(_tuning_verdict(name, rows, tol_cents, gc, skip_ms))
+        extra = []
+        if cnt['sampled']:
+            extra.append(f"read an even sample of {cnt['events']} of {cnt['sampled']} onsets")
+        if cnt['gliding']:
+            extra.append(f"{cnt['gliding']} gliding notes not read")
+        if kpcs:
+            out_key = {}
+            for r in rows:
+                if r['k'] % 12 not in kpcs:
+                    out_key[midi_to_name(r['k'])] = out_key.get(midi_to_name(r['k']), 0) + 1
+            if out_key:
+                top = sorted(out_key.items(), key=lambda kv: -kv[1])
+                extra.append(f"outside {klabel} (information; may be intended): " +
+                             ', '.join(f"{n} x{c}" for n, c in top[:6]) + (' ...' if len(top) > 6 else ''))
+        for r in off[:max(worst, 0)]:
+            bt = round(g.time_to_beat(r['t']), 2)          # song beats from bar 1, rounded before splitting
+            extra.append(f"{r['t']:7.2f} s  bar {int(bt // g.bpb) + 1} beat {bt % g.bpb + 1:.2f}  "
+                         f"{midi_to_name(r['k'])} {r['off']:+.0f} c  ({440 * 2 ** ((r['midi'] - 69) / 12):.1f} Hz)")
+        if extra:
+            details.append(f"  {name}:\n" + '\n'.join('    ' + x for x in extra))
+    L += details
+    L.append("verdict:")
+    L += ['  ' + v for v in verdicts]
     return '\n'.join(L)
