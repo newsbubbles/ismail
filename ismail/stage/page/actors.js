@@ -120,7 +120,7 @@ const HIP_SLACK = 0.12, YAW_SLACK = THREE.MathUtils.degToRad(35);
 // easing there in BAL_S, and past that the foot further back steps under the weight, BAL_STEP past its goal. (The same
 // idea in poseBase with a counter-lean (hips pushed away from the head), the 2026-10-17 study measured, made following
 // worse: hip jitter 3 -> 14 m/s^2, feet sliding 4 cm/s; poseBase now does it this way too)
-const BAL_MAX = 0.15, BAL_S = 0.12, BAL_STEP = 0.1;
+const BAL_MAX = 0.15, BAL_S = 0.12, BAL_STEP = 0.1, UNDER_S = 0.4;   // UNDER_S: held at the limit this long before the step under
 // pins while following (the user, 2026-10-04, sitting in real life while following a man on a bar stool: "anchors his
 // butt to the chair, so if I do anything with my head and hands his butt's gonna be anchored unless I move completely
 // away from the chair"). Pinned hips stay on the seat, facing the person's own way; the user's head bends the spine
@@ -329,12 +329,14 @@ export function initActors(ed, live) {
       const b = st.body, mid = fl.at.clone().add(fr.at).multiplyScalar(0.5);
       const away = hipAt.clone().sub(mid).setY(0);
       b.held = away.length() > BAL_MAX * s ? away.clone().normalize() : null;
+      b.heldT = b.held ? (b.heldT ?? f.t) : null;
+      if (b.held && f.t - b.heldT < UNDER_S) b.under = null; else b.under = b.held;   // a lean held a moment, not at once
       const tgt = b.held ? mid.clone().addScaledVector(b.held, BAL_MAX * s).setY(hipAt.y) : hipAt.clone();
       const dt = f.t - (b.balT ?? f.t);
       if (!b.bal || dt < 0 || dt > GAP_S) b.bal = tgt.clone(); else b.bal.lerp(tgt, 1 - Math.exp(-dt / BAL_S));
       b.bal.y = hipAt.y; b.balT = f.t;
       hipDraw = b.bal.clone();
-    } else if (st.body) st.body.held = null;
+    } else if (st.body) st.body.held = st.body.under = null;
     st.lastHip = hipAt.clone(); st.lastYaw = base.clone();             // the body's facing, not the head's
     pel.parent.updateMatrixWorld(true);
     pel.position.copy(pel.parent.worldToLocal(hipDraw.clone()));
@@ -414,12 +416,13 @@ export function initActors(ed, live) {
       if (!ft.at) { ft.at = want.clone(); ft.q = base.clone(); }
       if (!ft.q) ft.q = base.clone();
       const other = st.feet[sd === 'l' ? 'r' : 'l'];
-      const held = !pinned && st.body && st.body.held, lagging = held && other.at && ft.at.clone().sub(other.at).dot(held) < 0;
+      const held = !pinned && st.body && st.body.under, lagging = held && other.at && ft.at.clone().sub(other.at).dot(held) < 0;
       if (!ft.step && !other.step && (ft.at.distanceTo(want) > STEP_AT || (lagging && ft.at.distanceTo(want) > 0.05 * st.s)
           || (!pinned && ft.q.angleTo(base) > STEP_TURN))) {
         const to = pinned ? want.clone() : want.clone().add(lead);
         if (lagging) to.addScaledVector(held, BAL_STEP * st.s);
-        ft.step = { from: ft.at.clone(), to, q0: ft.q.clone(), q1: base.clone(), t0: now };
+        const why = ft.at.distanceTo(want) > STEP_AT ? 'far' : lagging ? 'under' : 'turn';   // read back by the capture probe
+        ft.step = { from: ft.at.clone(), to, q0: ft.q.clone(), q1: base.clone(), t0: now, why };
       }
       let at = ft.at, fq = ft.q;
       if (ft.step) {
@@ -1059,6 +1062,7 @@ export function initActors(ed, live) {
     const back = standing && away.length() > BAL_MAX * s ? away.clone().setLength(away.length() - BAL_MAX * s).negate() : new THREE.Vector3();
     // eased (BAL_S): a foot landing moves the feet's middle at once, and the hips must not jump with it (the probe: hip
     // jitter 2 -> 20 m/s^2 on a walk without this)
+    b.heldT = back.lengthSq() > 1e-6 ? (b.heldT ?? f.t) : null;
     const o0 = b.off.clone().add(back).setY(drop), dt = f.t - (b.drawT ?? f.t);
     if (!b.drawS || dt < 0 || dt > GAP_S) b.drawS = o0.clone(); else b.drawS.lerp(o0, 1 - Math.exp(-dt / BAL_S));
     b.drawT = f.t;
@@ -1080,9 +1084,10 @@ export function initActors(ed, live) {
       if (!ft.at) ft.at = F.p.clone();
       // the weight past the feet (the hips held BAL_MAX off them): the foot further from where the head leads steps,
       // a little past its goal, as a person leaning in takes a step instead of tipping
-      const lagging = back.lengthSq() > 1e-6 && other.at && ft.at.clone().sub(other.at).dot(away) < 0;
+      const lagging = back.lengthSq() > 1e-6 && f.t - b.heldT >= UNDER_S && other.at && ft.at.clone().sub(other.at).dot(away) < 0;
       if (!ft.step && !other.step && (ft.at.distanceTo(goal) > STEP_AT || (lagging && ft.at.distanceTo(goal) > 0.05 * s)))
-        ft.step = { from: ft.at.clone(), to: lagging ? goal.clone().addScaledVector(away.clone().normalize(), BAL_STEP * s) : goal.clone(), t0: now };
+        ft.step = { from: ft.at.clone(), to: lagging ? goal.clone().addScaledVector(away.clone().normalize(), BAL_STEP * s) : goal.clone(), t0: now,
+          why: ft.at.distanceTo(goal) > STEP_AT ? 'far' : 'under' };
       let at = ft.at;
       if (ft.step) {
         const k = Math.min(1, (now - ft.step.t0) / STEP_S);

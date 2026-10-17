@@ -172,7 +172,7 @@ function probe(actors, person, t) {
   const at = (n) => rig.bones[n] && r(rig.bones[n].getWorldPosition(new THREE.Vector3()));
   const b = st.body || {}, fl = (st.feet && st.feet.l) || {}, fr = (st.feet && st.feet.r) || {};
   return { t: +t.toFixed(3), pel: at('pelvis'), hd: at('head'), fl: at('foot_l'), fr: at('foot_r'), hip: r(st.lastHip),
-    bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: !!fl.step, sr: !!fr.step,
+    bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: fl.step ? fl.step.why || true : false, sr: fr.step ? fr.step.why || true : false,
     mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]),
     short: Object.keys(rig.short || {}).filter((k) => rig.short[k]), hy: yawOf(rig, 'head'), cy: yawOf(rig, 'spine_03'), py: yawOf(rig, 'pelvis'),
     hl: at('hand_l'), hr: at('hand_r'), kl: at('calf_l'), kr: at('calf_r'), tl: at('thigh_l'), tr: at('thigh_r'), ch: st.chestHands === undefined ? null : +THREE.MathUtils.radToDeg(st.chestHands).toFixed(1) };
