@@ -8,6 +8,28 @@
   know as `application/octet-stream`, and a phone has nothing to open a `.md` with). `.md`, `.csv` and `.log` are
   now sent as `text/plain; charset=utf-8`. Test: the type table in `tests/test_phone.py`.
 
+### analyze_tuning reads fast notes and their attacks (ledger:M231)
+
+- Each note was read from a fixed 100 ms after its onset and needed 60 ms of steady part after that, so a fast run
+  (a 16th at 104 bpm is ~144 ms onset to onset, and a plucked voice may end it ~60 ms early) read as zero notes:
+  the passage a listener called badly out of tune was never measured. In fast runs the fault is in the attack
+  itself: each fast plucked note starts 5-10 c sharp (the voice's pitch glide) and never settles.
+- The skip now scales with the note: `min(skip_ms, 0.3 x its length)` (onset to the next onset, or to its level's
+  30 dB fall), and the steady part it needs is `min(60 ms, 0.4 x its length)`, at least 25 ms. `skip_ms` keeps its
+  meaning as the longest skip. Every reading needs 4 periods of its pitch in its window (a 25 ms window reads down
+  to ~170 Hz); a note too short to resolve its pitch is counted ("too short to resolve"), never guessed.
+- Notes are timed from the attack itself (the steepest rise in level near the onset), and a read ends where the
+  next note's attack starts, so a short window never mixes two notes.
+- The attack is read too, from 30 to 80 ms after the onset (less on a short note). The table gets an `attack`
+  column (median cents of the attack over the steady pitch), and when most attacks sit more than 5 c off, the
+  verdict adds "attacks start N c sharp ...: shorten the voice's pitch glide". A note too short for a separate
+  steady part is read from its attack on, marked `attack only` in the worst notes, and still counts against the
+  grid, so a fast run is never silently empty.
+- Tests: a run of plucked 16ths at 104 bpm 30 c sharp is read (32 notes, +30 c; the fixed skip read none) and
+  flagged; a run whose notes start 8 c sharp for 40 ms reads in tune with an attack of +8 c and is flagged on the
+  attack; the 40 c glide on slow plucks stays out of the steady pitch and is now named as the attack (+16 c); the
+  drum (tumba +46 c, conga -49 c), noise and grid tests are unchanged.
+
 ### analyze_tuning: every part of a render against the tuning grid and key (ledger:M231)
 
 - A pitched part off the tuning grid went unnoticed until someone heard it: a salsa kit measured from records kept

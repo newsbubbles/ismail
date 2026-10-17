@@ -464,14 +464,20 @@ def analyze_tuning(project: str, source: str = 'render', stems: list = None, tol
     part. stems=[names] keeps some parts; bars=[a, b] (inclusive) cuts the range.
     Per note: the steady pitch from skip_ms (100) after its onset (plucks start sharp for ~90 ms, a drum's strike is
     noise), read from spectral lines, so a chord reads one pitch per note and a drum its sustained mode; gliding
-    notes and noise are counted, not read. Grid: A4 = 440 Hz moved by tuning_cents; by default 0 for renders, and
-    for a reference ref_retune has not moved, its own measured tuning. key ('A minor', 'D dorian'; default the
+    notes and noise are counted, not read. skip_ms is the longest skip: a note shorter than skip_ms / 0.3 (a fast
+    run: a 16th at 104 bpm is ~144 ms) is read from 0.3 of its length, so a picado scale is read, not skipped. The
+    attack is read too (30-80 ms after the onset, less on a short note); a note too short for a steady part is read
+    from its attack on and marked 'attack only' (it still counts against the grid), and one too short to resolve
+    its pitch (under 4 periods of it) is counted, not read. Grid: A4 = 440 Hz moved by tuning_cents; by default 0
+    for renders, and for a reference ref_retune has not moved, its own measured tuning. key ('A minor', 'D dorian'; default the
     project's or the sketch's) lists out-of-key pitches as information (they can be intended).
     Returns a table per part (pitched notes, median cents off the grid, spread = middle half, count beyond
-    tol_cents), up to `worst` worst notes per part (seconds in the file, bar and beat, note, cents, Hz), and one
-    verdict per part: in tune; the whole part off (retune its voice by N c); a few pitches off (retune that voice or
-    split it onto its own track); or drifting note to note (per-note or per-string detune). A part with no steady
-    pitch (hats, noise, a sliding vocal) says so and is skipped, never flagged.
+    tol_cents, attack = median cents of the attack over the steady pitch), up to `worst` worst notes per part
+    (seconds in the file, bar and beat, note, cents, Hz), and one verdict per part: in tune; the whole part off
+    (retune its voice by N c); a few pitches off (retune that voice or split it onto its own track); or drifting note
+    to note (per-note or per-string detune). When most attacks sit more than 5 c off their steady pitch, the
+    verdict adds "attacks start N c sharp: shorten the voice's pitch glide" (in fast runs that attack is what is
+    heard). A part with no steady pitch (hats, noise, a sliding vocal) says so and is skipped, never flagged.
     Errors: nothing rendered or no stems -> render(stems=True) first; no reference stems -> separate(source='ref');
     an unknown part in stems= -> the reply lists the parts."""
     if not 0 < tol_cents < 50:
@@ -484,10 +490,11 @@ def analyze_tuning(project: str, source: str = 'render', stems: list = None, tol
     klabel, kpcs = _song_key(P, key)
     L = [f"analyze_tuning {source}{f' bars {bars[0]}-{bars[1]}' if bars else ''}: 12-TET at A4 = "
          f"{440.0 * 2 ** (gc / 1200):.1f} Hz ({why}); flag beyond {tol_cents:g} c; each note read from {skip_ms:g} ms "
-         f"after its onset" + (f"; key {klabel}" if klabel else "; no key known (key='A minor' adds out-of-key pitches)")]
+         f"after its onset (0.3 of a shorter note), its attack before that" +
+         (f"; key {klabel}" if klabel else "; no key known (key='A minor' adds out-of-key pitches)")]
     if note:
         L.append(note)
-    L.append(f"  {'part':<14} {'notes':>5} {'median':>7} {'spread':>7} {'beyond':>10}")
+    L.append(f"  {'part':<14} {'notes':>5} {'median':>7} {'spread':>7} {'beyond':>10} {'attack':>7}")
     verdicts, details = [], []
     for name, src in parts:
         path, g = P.source(src, bars)
@@ -498,21 +505,36 @@ def analyze_tuning(project: str, source: str = 'render', stems: list = None, tol
             y = y[int(t0 * A.ASR):max(int(g.bar_time(bars[1] + 1) * A.ASR), 0)]
         rows, cnt = A.steady_pitches(y, A.ASR, skip_ms=skip_ms)
         if len(rows) < 3 or cnt['pitched'] < 0.1 * cnt['events']:
-            L.append(f"  {name:<14} {len(rows):>5} {'-':>7} {'-':>7} {'-':>10}")
+            L.append(f"  {name:<14} {len(rows):>5} {'-':>7} {'-':>7} {'-':>10} {'-':>7}")
+            short = f", {cnt['short']} too short to resolve" if cnt['short'] else ''
             verdicts.append(f"{name}: no steady pitch ({cnt['pitched']} of {cnt['events']} notes or hits pitched, "
-                            f"{cnt['noisy']} noise, {cnt['gliding']} gliding): unpitched or too noisy, skipped")
+                            f"{cnt['noisy']} noise, {cnt['gliding']} gliding{short}): unpitched, too noisy or too "
+                            f"short, skipped")
             continue
         for r in rows:
             r['t'] += t0
             r['k'], r['off'] = _cents_off(r['midi'], gc)
         med, spread = _spread_stats([r['off'] for r in rows])
         off = sorted([r for r in rows if abs(r['off']) > tol_cents], key=lambda r: -abs(r['off']))
+        att = [100 * (r['attack'] - r['midi']) for r in rows if r['attack'] is not None]
+        am = float(np.median(att)) if att else None
         L.append(f"  {name:<14} {len(rows):>5} {med:>+6.0f}c {spread:>6.0f}c {len(off):>4} "
-                 f"({100 * len(off) / len(rows):3.0f}%)")
-        verdicts.append(_tuning_verdict(name, rows, tol_cents, gc, skip_ms))
+                 f"({100 * len(off) / len(rows):3.0f}%) " + (f"{am:>+6.0f}c" if att else f"{'-':>7}"))
+        v = _tuning_verdict(name, rows, tol_cents, gc, skip_ms)
+        if len(att) >= 3 and sum(abs(d) > 5 and d * am > 0 for d in att) > len(att) / 2:
+            v += (f"; attacks start {abs(am):.0f} c {'sharp' if am > 0 else 'flat'} (median of {len(att)}): "
+                  f"shorten the voice's pitch glide")
+        verdicts.append(v)
         extra = []
         if cnt['sampled']:
             extra.append(f"read an even sample of {cnt['events']} of {cnt['sampled']} onsets")
+        if cnt['fast']:
+            extra.append(f"{cnt['fast']} fast notes read from 0.3 of their length, not {skip_ms:g} ms")
+        if cnt['attack_only']:
+            extra.append(f"{cnt['attack_only']} too short for a steady part: read from the attack on, marked "
+                         f"'attack only'")
+        if cnt['short']:
+            extra.append(f"{cnt['short']} notes too short to resolve their pitch (under 4 periods or 25 ms), not read")
         if cnt['gliding']:
             extra.append(f"{cnt['gliding']} gliding notes not read")
         if kpcs:
@@ -527,7 +549,8 @@ def analyze_tuning(project: str, source: str = 'render', stems: list = None, tol
         for r in off[:max(worst, 0)]:
             bt = round(g.time_to_beat(r['t']), 2)          # song beats from bar 1, rounded before splitting
             extra.append(f"{r['t']:7.2f} s  bar {int(bt // g.bpb) + 1} beat {bt % g.bpb + 1:.2f}  "
-                         f"{midi_to_name(r['k'])} {r['off']:+.0f} c  ({440 * 2 ** ((r['midi'] - 69) / 12):.1f} Hz)")
+                         f"{midi_to_name(r['k'])} {r['off']:+.0f} c  ({440 * 2 ** ((r['midi'] - 69) / 12):.1f} Hz)"
+                         + ("  attack only" if r['attack_only'] else ''))
         if extra:
             details.append(f"  {name}:\n" + '\n'.join('    ' + x for x in extra))
     L += details
