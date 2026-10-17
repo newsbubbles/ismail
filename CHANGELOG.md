@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### phone: a panel left unsent keeps what you typed
+
+- Typed text, dictated text and picks in a panel were lost when you left it (Later, another tab, a tap outside) and
+  came back: the page rebuilt the panel from the agent's values, so Send went out empty. The page now keeps a
+  panel's inputs when it goes away unsent and puts them back when you reopen it, on this phone across a reload too;
+  a voice note that lands while the panel is closed still adds its words. An answer or Not now drops them
+  (ledger:M227).
+- Tests: `tests/test_phone.py` checks the page keeps, restores and drops them.
+
 ### A sampler with several sounds on one pitch; a phone now label that expires (ledger:M218)
 
 - From the Live DJ's handoff (item 55, 10-16): a kit maps one pitch to one instrument, so the beatbox kit put each
