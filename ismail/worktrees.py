@@ -25,6 +25,9 @@ Flags on a copy: UNASSIGNED (no owner: claim it), MERGED (its branch is in origi
 (unmerged, last commit older than IDLE_DAYS: it goes back to its owner, or to the person when it has none), BEHIND
 (origin/main has commits it lacks: sync it). Nothing here passes --force to git, stashes or deletes a file: `done`
 removes only a copy whose work is all in origin/main and that holds nothing git does not track (caches aside).
+Its work is in origin/main when its commits are, when its files are the same as origin/main's, or when GitHub says
+a pull request from its branch was merged with the copy's last commit (a squash or rebase merge puts new commits
+on main, so the branch's own never land there); `done` says which.
 The age of a commit is measured against $ISMAIL_WORKTREES_NOW (seconds since 1970) when set, for tests."""
 import argparse
 import datetime
@@ -209,6 +212,33 @@ def _open_prs(repo):
         return {p['headRefName']: p['number'] for p in json.loads(r.stdout or '[]')}, None
     except (ValueError, KeyError, TypeError):
         return {}, 'gh answered something that is not a list of pull requests'
+
+
+def _merged_pr(branch, head, repo):
+    """-> (number, None) for a merged pull request from branch whose last commit is head, or (None, why not). A
+    commit made after the merge is not in it, so a branch with one does not pass."""
+    try:
+        r = subprocess.run(['gh', 'pr', 'list', '--head', branch, '--state', 'merged', '--limit', '20',
+                            '--json', 'number,headRefOid'],
+                           cwd=repo, capture_output=True, text=True, encoding='utf8', timeout=60)
+    except FileNotFoundError:
+        return None, 'gh is not installed, so no merged pull request was looked up'
+    except subprocess.TimeoutExpired:
+        return None, 'gh did not answer in 60 s, so no merged pull request was looked up'
+    if r.returncode:
+        msg = (r.stderr or '').strip().splitlines()
+        return None, f"gh could not look up its pull requests ({msg[-1] if msg else f'exit {r.returncode}'})"
+    try:
+        prs = json.loads(r.stdout or '[]')
+        hit = [p['number'] for p in prs if p['headRefOid'] == head]
+        if hit:
+            return hit[0], None
+        if prs:
+            return None, (f"pull request #{prs[0]['number']} from {branch} was merged, but the copy has commits "
+                          'made after it')
+    except (ValueError, KeyError, TypeError, IndexError):
+        return None, 'gh answered something that is not a list of pull requests'
+    return None, f'no pull request from {branch} is merged'
 
 
 def _status(path, ignored=False):
@@ -534,10 +564,20 @@ def done(path, repo=HERE):
         stale = ''
     except WorktreeError as e:
         stale = f' ({BASE} could not be fetched, so it may be old: {e})'
-    if not _ok(['merge-base', '--is-ancestor', w['head'], BASE], repo):
-        ahead = _git(['rev-list', '--count', f"{BASE}..{w['head']}"], repo)
-        raise WorktreeError(f"{p} ({w['branch'] or 'detached'}) is not merged: {ahead} commits are not in {BASE}"
-                            f"{stale}; open or finish its pull request, or ask the person before dropping it")
+    main = worktrees(repo)[0]['path']
+    # which test let it through goes in the answer
+    if _ok(['merge-base', '--is-ancestor', w['head'], BASE], repo):
+        how = f'its commits are in {BASE}'
+    elif _ok(['diff', '--quiet', BASE, w['head']], repo):
+        how = f'its files are the same as {BASE}'
+    else:
+        pr, why = _merged_pr(w['branch'], w['head'], main) if w['branch'] else (None, 'it has no branch')
+        if pr is None:
+            ahead = _git(['rev-list', '--count', f"{BASE}..{w['head']}"], repo)
+            raise WorktreeError(f"{p} ({w['branch'] or 'detached'}) is not merged: {ahead} commits are not in "
+                                f"{BASE}, its files differ from {BASE}'s and {why}{stale}; open or finish its pull "
+                                'request, or ask the person before dropping it')
+        how = f'its pull request #{pr} is merged'
     st = _status(p, ignored=True)
     changed = [ln[3:] for ln in st if not ln.startswith(('??', '!!'))]
     if changed:
@@ -549,7 +589,6 @@ def done(path, repo=HERE):
         raise WorktreeError(f"{p} holds {len(loose)} files git does not track ({', '.join(loose[:5])}"
                             f"{', ...' if len(loose) > 5 else ''}): look at them; move what matters to _reclaim/ in the "
                             'main checkout, never delete. Then run done again')
-    main = worktrees(repo)[0]['path']
     r = _git(['worktree', 'remove', p], main, check=False)
     if r.returncode and _key(p) in {_key(x['path']) for x in worktrees(repo)}:
         msg = (r.stderr or r.stdout or '').strip().splitlines()
@@ -559,11 +598,13 @@ def done(path, repo=HERE):
     said = f'removed {p}'
     if w['branch']:
         if not _ok(['branch', '--quiet', '-d', w['branch']], main):
-            # -d compares with the main checkout's HEAD, which may be behind: the branch is in origin/main (checked
-            # above), so delete the ref only if it still points where it did
+            # -d compares with the main checkout's HEAD, which may be behind, and never passes a squash-merged
+            # branch: its work is in origin/main (checked above), so delete the ref only if it still points where
+            # it did
             _git(['update-ref', '-d', f"refs/heads/{w['branch']}", w['head']], main)
             _git(['config', '--remove-section', f"branch.{w['branch']}"], main, check=False)
-        said += f" and its local branch {w['branch']} (its work is in {BASE})"
+        said += f" and its local branch {w['branch']}"
+    said += f' ({how})'
     owners = load_owners(repo)
     if owners.pop(_key(p), None) is not None:
         save_owners(owners, repo)
