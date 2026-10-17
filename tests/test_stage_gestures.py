@@ -2,14 +2,13 @@
 scene can rebind, with locked rows nobody can take away and collisions refused by name."""
 import json
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from ismail.api import OPS, OpError
 from ismail.stage import gestures as gm
+import nodejs
 from test_stage import FakePage, _get, stage  # noqa: F401  (the fixture)
 
 PAGE = Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page'
@@ -140,8 +139,6 @@ MAP = PAGE.joinpath('gestures.js').as_uri()
 
 
 def _node(body, rows=None):
-    if not shutil.which('node'):
-        pytest.skip('node is not installed')
     fetch = (f"async () => ({{ json: async () => ({json.dumps({'rows': rows})}) }})" if rows
              else "async () => { throw new Error('no server'); }")
     js = (f"globalThis.fetch = {fetch};\n"
@@ -149,9 +146,7 @@ def _node(body, rows=None):
           "const hand = (side, g, more = {}) => Object.assign(hands.state[side], { g, cand: g, f: {}, resting: false }, more);\n"
           f"import('{MAP}').then(async (m) => {{ const G = m.initGestures(hands, () => 'room'); "
           "await new Promise((r) => setTimeout(r, 0)); " + body + " });")
-    r = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    return json.loads(r.stdout)
+    return nodejs.run(js)
 
 
 def test_the_page_defaults_match_the_engine():
