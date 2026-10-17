@@ -59,7 +59,7 @@ def test_trim_moves_old_regen_to_reclaim(tmp_path):
     assert not (song / '_reclaim').exists()                  # the one reclaim folder, not the song's (ledger:M229)
     rec, = glob.glob(os.path.join(reclaim.root(), 'backups_*', 'song'))
     src = str(b / 'proj_20261008_010000' / 'cache' / 'c.bin')
-    assert os.path.exists(os.path.join(rec, reclaim.kept_path(src)))
+    assert os.path.exists(os.path.join(rec, reclaim.kept_path(src, songs=str(song.parent))))
     with open(os.path.join(os.path.dirname(rec), 'manifest.json'), encoding='utf8') as f:
         runs = json.load(f)['runs']
     assert len(runs) == 1 and [r['backup'] for r in runs[0]['moved']] == ['proj_20261008_010000',

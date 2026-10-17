@@ -253,7 +253,7 @@ def test_compress_writes_exact_flac_moves_the_wavs_and_links_latest(tmp_path, sl
         flac = p[:-4] + '.flac'
         assert not os.path.exists(p) and sf.info(flac).subtype == sub
         assert np.array_equal(sf.read(flac, dtype='int32')[0], sf.read(os.path.join(
-            rec, rc.kept_path(p)), dtype='int32')[0])                   # the path from the drive root is kept
+            rec, rc.kept_path(p, songs=songs)), dtype='int32')[0])                   # the path from the drive root is kept
     rd = os.path.join(root, 'renders')
     assert os.path.samefile(os.path.join(rd, 'latest.wav'), os.path.join(rd, 'take_a.wav'))
     assert os.path.exists(os.path.join(rd, 'stems', 'part_float.wav'))     # skipped, still there
@@ -284,7 +284,7 @@ def test_a_new_render_beside_an_old_flac_wins_and_the_old_flac_goes_to_reclaim(t
     api.OPS['song_compress'](root, dry=False)
     assert np.array_equal(sf.read(p[:-4] + '.flac', dtype='int32')[0],
                           sf.read(wav(str(tmp_path / 'x.wav'), fresh), dtype='int32')[0])
-    rec = os.path.join(reclaim(songs), rc.kept_path(os.path.join(root, 'renders', 'stems')))
+    rec = os.path.join(reclaim(songs), rc.kept_path(os.path.join(root, 'renders', 'stems'), songs=songs))
     assert {'part_24.flac', 'part_24.wav', 'part_24_2.wav'} <= set(os.listdir(rec))
     with open(os.path.join(os.path.dirname(reclaim(songs)), 'manifest.json'), encoding='utf8') as f:
         assert len(json.load(f)['runs']) == 2                            # the second run appended
