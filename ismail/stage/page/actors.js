@@ -1074,7 +1074,11 @@ export function initActors(ed, live) {
       const goal = go.clone().add(F.p.clone().sub(P0).applyQuaternion(b.yaw)); goal.y = F.p.y;
       pinFoot(st, sd, goal);
       if (!ft.at) ft.at = F.p.clone();
-      if (!ft.step && !other.step && ft.at.distanceTo(goal) > STEP_AT) ft.step = { from: ft.at.clone(), to: goal.clone(), t0: now };
+      // the weight past the feet (the hips held BAL_MAX off them): the foot further from where the head leads steps,
+      // a little past its goal, as a person leaning in takes a step instead of tipping
+      const lagging = back.lengthSq() > 1e-6 && other.at && ft.at.clone().sub(other.at).dot(away) < 0;
+      if (!ft.step && !other.step && (ft.at.distanceTo(goal) > STEP_AT || (lagging && ft.at.distanceTo(goal) > 0.05 * s)))
+        ft.step = { from: ft.at.clone(), to: lagging ? goal.clone().addScaledVector(away.clone().normalize(), BAL_STEP * s) : goal.clone(), t0: now };
       let at = ft.at;
       if (ft.step) {
         const k = Math.min(1, (now - ft.step.t0) / STEP_S);
