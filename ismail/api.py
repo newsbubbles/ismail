@@ -1307,7 +1307,12 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
     if type == 'sampler':
         return "sampler params (defaults):\n" + json.dumps(inst_mod.SAMPLER_DEFAULT, indent=1) + \
             "\nroot = pitch at which the sound plays unshifted; one_shot plays the whole sample regardless of note length;" \
-            " start/end/loop_* in seconds; filter = {type, cutoff, res} (cutoff automatable as inst.filter.cutoff)"
+            " start/end/loop_* in seconds; filter = {type, cutoff, res} (cutoff automatable as inst.filter.cutoff)." \
+            "\nseveral sounds on one pitch (round robin, velocity layers): 'sounds': ['a', 'b', 'c'] in place of" \
+            " 'sound', with 'select': round_robin (default: in turn, carrying on from bar to bar) | random | velocity" \
+            " (each sound {'sound': 'a', 'vel': [0, 80], 'gain_db': 0}; without vel ranges they split 0-127 evenly," \
+            " softest first). The pick is keyed on where the note sits in the song, so a window render, a live deck" \
+            " and the whole song play the same sound for the same note."
     if type == 'kit':
         return 'kit: {"type":"kit","map":{"C1":{"type":"kick",...},"D1":{"type":"sampler","sound":"snare1","one_shot":true}}}' \
                " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1."

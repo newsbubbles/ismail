@@ -404,7 +404,7 @@ def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = Fa
 @op()
 def phone_now(now: str = None, next: str = None, recording_why: str = None, mood: str = None,
               now_mark: str = None, next_mark: str = None, length: float = None, sections: list = None,
-              into: float = None, sender: str = None) -> str:
+              into: float = None, now_of: list = None, sender: str = None) -> str:
     """What the page shows as now playing and next up (default: read from the engine), and why recording is on or
     off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak).
     now_mark/next_mark: a small mark beside the piece, so they know what they are hearing: 'loved' (one they loved
@@ -412,9 +412,12 @@ def phone_now(now: str = None, next: str = None, recording_why: str = None, mood
     without one the page shows a heart when they tapped Love this while that piece played.
     length: the piece's length in seconds and sections: [{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
     'drop'}, ...]: the page keeps a position line on screen (elapsed / length, the next section). into: seconds into
-    the piece now, when it did not start as its name went up."""
+    the piece now, when it did not start as its name went up.
+    The now label expires when what it names stops, so a later script that never calls phone_now cannot leave a
+    stale name up: by default it is tied to the clips playing as it goes up and those that start in the next 2 bars;
+    now_of=[names] ties it to those clips, tracks or decks instead; now_of=[] leaves it up until replaced or cleared."""
     return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, now_mark=now_mark,
-                 next_mark=next_mark, length=length, sections=sections, into=into, who=sender)
+                 next_mark=next_mark, length=length, sections=sections, into=into, now_of=now_of, who=sender)
 
 
 VIDEO_MAX_H = 720

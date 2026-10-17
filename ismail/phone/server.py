@@ -107,6 +107,7 @@ MOODS = ('calm', 'steady', 'lift', 'peak')
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
 MARKS = ('loved', 'replay', 'new')   # a piece they loved before, one the DJ plays again, one just made
 PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
+LABEL_GRACE_BARS = 2        # a phone_now label also takes the clips that start this soon after it (queued next)
 AGENT_SEEN_S = 90.0         # an agent that called this recently is listening (phone_watch calls every 25 s)
 CLAIM_GRACE_S = 180.0       # an untagged note nobody claimed this long after it came is the lead's by default
 # Who has a phone note (Nate 10-16, n5737 and n5776): untagged notes went to nobody, or to six agents at once, because
@@ -263,6 +264,7 @@ def parse_status(text):
             'output': out.group(1) if out else None, 'follow': bool(out and out.group(2)),
             'recording': rec.group(1) if rec else None,
             'playing': [f"{c} ({t})" for t, c in playing[:3]],
+            'clips': [[t, c] for t, c in playing],
             'sounding': bool(playing or re.search(r'^deck \S+: on air', text, re.M)) and 'SILENT ON AIR' not in text,
             'next': f"{nxt.group(1)} at {nxt.group(2)}" if nxt else None}
 
@@ -351,7 +353,8 @@ class Phone:
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
-                                                    'shape', 'sounds', 'vibe_moves', 'scenes')
+                                                    'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                    'now_bind_until')
                               if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
@@ -558,6 +561,50 @@ class Phone:
         return {'ts': r.get('ts'), 'what': r.get('what') or 'mood', 'mood': r.get('mood'),
                 'of': (r.get('heard') or {}).get('of') or (r.get('room') or {}).get('of'), 'now': r.get('now'),
                 'into_s': r.get('into_s')}
+
+    @staticmethod
+    def _label_plays(name, clips):
+        """A phone_now label's name still sounds: a clip ('clip (track)', a clip id or a track) or a deck (a deck's
+        tracks are '<deck>.<track>') among the engine's [track, clip] pairs."""
+        return any(name in (c, t, f"{c} ({t})") or t.startswith(name + '.') for t, c in clips)
+
+    def bind_label(self, now_of=None):
+        """Tie the 'now' label to what it describes (ledger:M218): now_of names clips, tracks or decks; None takes
+        the clips playing now and those that start within LABEL_GRACE_BARS (a label put up just before its music is
+        queued); [] or '' leaves it unbound (it stays until replaced or cleared)."""
+        v, e = self.view, self.engine
+        if not v['now'] or now_of in ([], ''):
+            v['now_of'], v['now_bind_until'] = None, None
+            return
+        if now_of is not None:
+            v['now_of'] = [now_of] if isinstance(now_of, str) else [str(x) for x in now_of]
+            v['now_bind_until'] = None
+            return
+        bpm, bpb = (e['bpm'], e.get('bpb') or 4) if e else (120.0, 4)
+        v['now_of'] = [f"{c} ({t})" for t, c in (e.get('clips') or [])] if e else []
+        v['now_bind_until'] = time.time() + LABEL_GRACE_BARS * bpb * 60.0 / bpm
+
+    def track_label(self, e):
+        """Each engine poll: a label still in its grace takes the clips that started; one whose clips, tracks or
+        decks have all stopped expires, so the page shows the engine's own playing list again instead of a stale
+        name. An engine that does not answer changes nothing (a pause or a missed poll keeps the label)."""
+        v = self.view
+        if not v.get('now') or v.get('now_of') is None or e is None:
+            return
+        clips = e.get('clips') or []
+        if v.get('now_bind_until'):
+            if time.time() < v['now_bind_until']:
+                v['now_of'] = list(dict.fromkeys(v['now_of'] + [f"{c} ({t})" for t, c in clips]))
+                return
+            v['now_bind_until'] = None
+            if not v['now_of']:                    # nothing played under it: unbound, as before
+                v['now_of'] = None
+                self.save()
+                return
+        if not any(self._label_plays(n, clips) for n in v['now_of']):
+            v['now'], v['now_of'] = None, None
+            self.save()
+            self.cmd('view')
 
     def now_text(self):
         e = self.engine
@@ -856,7 +903,8 @@ class Phone:
     def save(self):
         try:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
-                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes')}
+                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                'now_bind_until')}
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
@@ -888,6 +936,7 @@ class Phone:
                 self.engine = got
                 self.cmd('engine', sounding=on)           # wakes the page's long poll: its background stills or moves now
             self.engine = got
+            self.track_label(got)
             if got and got.get('playing') and KEEP_MASTER:  # the music under a note heard from the room speaker too
                 with self.cond:
                     if self.feeder is None or not self.feeder.is_alive():
@@ -1439,11 +1488,15 @@ class Agent:
         return out
 
     def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, length=None,
-               sections=None, into=None, who=None):
+               sections=None, into=None, who=None, now_of=None):
         v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
                 v[k] = val or None
+        if now is not None:
+            ph.bind_label(now_of)
+        elif now_of is not None and v['now']:
+            ph.bind_label(now_of)
         for text, m in ((ph.now_text(), now_mark), (v['next'], next_mark)):
             if m is None or not text:
                 continue
@@ -1468,8 +1521,13 @@ class Agent:
             v['shape'] = sh
         ph.save()
         ph.cmd('view')
+        tied = ''
+        if v['now'] and v.get('now_of') is not None:
+            what = ', '.join(v['now_of']) or 'nothing yet'
+            tied = f"; the now label stays while {what} plays" + (
+                f" (and what starts in the next {LABEL_GRACE_BARS} bars)" if v.get('now_bind_until') else '')
         return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
-                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}")
+                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}{tied}")
 
     def _wait_answer(self, pid, wait):
         if not wait:

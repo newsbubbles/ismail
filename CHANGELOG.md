@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### A sampler with several sounds on one pitch; a phone now label that expires (ledger:M218)
+
+- From the Live DJ's handoff (item 55, 10-16): a kit maps one pitch to one instrument, so the beatbox kit put each
+  take of a drum on its own pitch and rewrote every note's pitch in turn, and the live loop started that cycle over
+  every pass. A sampler now takes `'sounds': ['a', 'b', 'c']` in place of `'sound'` with `'select'`:
+  `round_robin` (the default: the k-th hit of a bar of c hits in song bar b plays sound (b * c + k) mod n, so the
+  turns carry on from bar to bar), `random` (seeded on the note's song beat and pitch) or `velocity` (each sound
+  `{'sound': 'soft', 'vel': [0, 80], 'gain_db': 0}`; without ranges they split 0-127 evenly, softest first; sounds
+  whose ranges overlap take turns). Each sound may carry its own `gain_db`.
+- The pick is keyed on where the note sits in the song, as synth and drum seeds are, so a window render picks what
+  the whole song picks. Live, a track whose sampler picks among sounds renders a bar per event and passes the
+  deck's song beat to the worker, so a deck plays the studio's sounds sample for sample (`live_parity`). A looped
+  live clip of whole bars carries the turns on from pass to pass as if the bar were written out again, repeating
+  after `select_cycle` passes (round robin: the number of sounds; random: 8) so the render cache stays bounded.
+- One `'sound'` plays exactly as before. `'select'` without `'sounds'`, both `'sound'` and `'sounds'`, a `'vel'`
+  range outside velocity mode, and ranges given to some sounds and not others are refused with what to write.
+  Render caching, provenance and the credits read every sound of a sampler.
+- phone_now: a now label set by a script used to win over the engine's playing list until someone cleared it (on
+  10-12 the page named a cumbia while the beatbox loop played). The label is now tied to the clips playing as it
+  goes up and those that start in the next 2 bars (a label put up just before its music is queued), and expires
+  when they all stop; the page then shows the engine's own playing list. `now_of=[...]` ties it to named clips,
+  tracks or decks; `now_of=[]` keeps it up until replaced or cleared, as before. An engine that does not answer
+  (a pause) leaves the label as it is.
+- Limits: played keys (`live_midi`) render each key once and have no place in the song, so a multi-sound sampler
+  on keys plays one sound per key (keys render at velocity 100 and scale, so velocity layers do not switch there). A looped live clip whose length is not whole bars repeats its first
+  pass's picks. A label bound to clips expires on a chapter change that queues new clips without a new phone_now
+  (the page falls back to the engine's list, not a wrong name).
+- Tests: `tests/test_sampler_select.py` (the checks, round robin, random, velocity layers and overlaps, per-sound
+  gain, a window render matching the whole song inside a kit, a deck matching the studio for round robin and
+  random, a looped live clip carrying the turns on); `tests/test_phone.py` (a label expiring when its clip stops,
+  one named by deck, and an unbound one).
+
 ### analyze_melody: a held note reads as one note
 
 - A held note could read as two notes of the same pitch. librosa's onset detector also fires where no note starts:

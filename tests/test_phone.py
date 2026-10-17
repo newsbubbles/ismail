@@ -1412,3 +1412,42 @@ def test_a_listen_with_lines_names_the_other_watchers(phone):
     out = json.loads(P.phone_listen('watcher a', since=ph.seq - 1, wait=0))
     assert out['watching'] == ['watcher b']
     t.join(10)
+
+
+def _until(cond, s=5.0):
+    end = time.time() + s
+    while time.time() < end and not cond():
+        time.sleep(0.05)
+    return cond()
+
+
+def test_a_now_label_expires_when_what_it_named_stops(phone, monkeypatch):
+    """ledger:M218 (the Live DJ, 10-12): a label a set script put up with phone_now stayed over a later loop that
+    never called it, and the page named the wrong piece. The label is tied to what played under it."""
+    ph, base, _ = phone
+    status = {'text': STATUS}
+    monkeypatch.setattr(S, 'engine_call', lambda port, op, timeout=3, **a: status['text'] if op == 'status' else {})
+    monkeypatch.setattr(S, 'LABEL_GRACE_BARS', 0)
+    assert _until(lambda: ph.engine and ph.engine['clips'] == [['lead', 'ch3']])
+    out = P.phone_now(now='Piece one')
+    assert 'the now label stays while ch3 (lead) plays' in out
+    ph.track_label(S.parse_status(STATUS))
+    assert ph.now_text() == 'Piece one'                                         # still playing: it holds
+    status['text'] = STATUS.replace('lead       code', 'beats      code').replace('playing ch3', 'playing loop1')
+    assert _until(lambda: ph.view['now'] is None)                               # a later loop: it expires
+    assert ph.now_text() == 'loop1 (beats)' and ph.view['now_of'] is None
+    # named by deck: it holds while the deck's tracks play
+    status['text'] = STATUS.replace('lead       code', 'a.lead     code')
+    assert _until(lambda: ph.engine['clips'] == [['a.lead', 'ch3']])
+    assert 'stays while a plays' in P.phone_now(now='Deck song', now_of=['a'])
+    time.sleep(1.5)
+    assert ph.now_text() == 'Deck song'
+    status['text'] = STATUS.replace('lead       code', 'b.lead     code')
+    assert _until(lambda: ph.view['now'] is None)
+    # now_of=[]: up until replaced or cleared, whatever plays
+    P.phone_now(now='Sticky', now_of=[])
+    status['text'] = STATUS
+    time.sleep(1.5)
+    assert ph.now_text() == 'Sticky' and ph.view['now_of'] is None
+    P.phone_now(now='')
+    assert ph.now_text() == 'ch3 (lead)'
