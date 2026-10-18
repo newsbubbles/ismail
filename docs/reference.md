@@ -220,6 +220,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
 | fx | `crackle` | designed vinyl surface noise: clicks and hiss |
+| fx | `transitions` | designed transitions picked by the note: C1 impact, D1 uplifter, E1 downlifter, F1 reverse crash; the sweeps last as long as the note |
 | guitar | `electric` | performer: electric guitar or bass as waveguide strings (pick, pickup comb, pickup resonance) playing a whole part, with legato, slides, bends, whammy, vibrato and mutes as lanes. Presets `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `strat70_clean` (the clean guitar a sketch reaches for) and `pbass70` (a bass fitted to a record's bass stem); it is the DI signal, so `voice_help` lists the rig each preset was fitted with |
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 | drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
@@ -279,6 +280,7 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
 | Vowels of a voice | `analyze_formants` |
+| Is the voice heard over the mix | `analyze_voice_heard` (per band, the voice stem over the other stems while it speaks, and the band and part that mask it) |
 | A picture, if you really need one | `spectrogram` (PNG), `sound_zoom` (one window time-sharp and frequency-sharp) |
 | Where yours differs from the real takes | `sound_zoom_diff` (hot spots beyond the takes' own spread), `region_measure` (power in a box) |
 
@@ -407,7 +409,7 @@ ismail/
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
                  (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
-                 fx (sfx, crackle), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
+                 fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role

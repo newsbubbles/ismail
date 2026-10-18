@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Transitions, speech on a rhythm, is the voice heard (ledger:M249, M250)
+
+Three pieces built in a song and proven there.
+
+- New library voice `transitions` (fx family): the note picks the effect, C1 an impact, D1 a noise uplifter, E1 a
+  downlifter, any other note (F1) a reverse crash, and the sweeps last as long as the note, so a 2-bar note ending
+  on the drop is a 2-bar riser. Designed by ear, no recordings. It plays live sample for sample.
+- `sound_speak` saves the engine's own word and phone timings beside the sound on Windows
+  (`sounds/<name>.timings.json`; other systems say timings are not available). New params `rhythm=` and `bpm=`
+  put each syllable on a written 16th: `rhythm='night 0; shift 2; engineer 12 14 16'`, one position per syllable,
+  `-` skips one. Each syllable is cut where the next starts (a syllable starts at the last consonant before its
+  vowel), and the reply says where the sound starts so the stressed word lands on its beat. The timings come from
+  SAPI's events because a speech server's word starts ran early and cut syllables.
+- New op `analyze_voice_heard(project, voice, bars=None)`: after `render(stems=True)`, the voice stem against the
+  sum of the other stems per band (body, words, consonants, air) over the frames where the voice speaks, the
+  loudest other part in each band, and a one-line verdict naming the band that masks it. No transcription.
+
 ### Replies that read the live state: the reference, a Send button, "hear it" (ledger:M245, M246, M247)
 
 - A first-session test kept its reference in a separate analysis project, never compared a draft with
