@@ -11,6 +11,14 @@
   job per crew), cheaper models for short narrow tasks with the person's choice winning, and working without
   helpers. SKILL.md (the loop, the table, the reference list), live.md, stage-takes.md, development.md and
   worktrees.md point to it.
+### Skill: fetching a reference from a link
+
+- A new session given a YouTube link had only "yt-dlp; YouTube may bot-wall" to go on, improvised other clients
+  and a browser, and got the computer blocked. `references/recreate.md` section 0 now gives the two commands the
+  sessions that fetch references fine use (find the upload and its SOURCES.md fields, then fetch the audio into
+  `ref/`), recording it as it plays (`listen_start` on the speakers) when there is no download, and one line for
+  a failed download: say so, offer the recording or a file, no retries. A row in SKILL.md's
+  table and the instruments guide point to it; `setup.md` installs yt-dlp and deno after one yes.
 
 ### Phone: a linked .md, .csv or .log opens as text
 

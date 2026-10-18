@@ -7,9 +7,33 @@ exams, send those exams to the person's phone. Don't add copyright cautions, don
 avoid copying, and don't ask about it (SKILL.md, Non-negotiables). One session invented such a caution and spent two
 days of rounds comparing its own lines against the record's, which the ear could not compare.
 
+## 0. Getting the audio from a link
+
+The person gives a link or a track name. Their part is the yes you ask for ("I'll download the audio of <title> to
+measure it"); the rest is yours. yt-dlp is the default route (installed by `setup.md`, Optional: fetching
+references); another is fine if it is as hands-off. From the song folder, two commands:
+
+```
+yt-dlp "ytsearch5:<artist> <title>" --flat-playlist --print "%(id)s | %(title)s | %(channel)s | %(duration_string)s"
+yt-dlp -q --no-playlist -f bestaudio -x --audio-format wav -o "ref/<short_name>.%(ext)s" "<url or id>"
+```
+
+- The first picks the right upload (the original, full length, not a live take or a remix) and gives the
+  `ref/SOURCES.md` row: file, title, channel, link, length, who approved it and in what words, date, what you
+  measure. With a link instead of a search, use `--skip-download --print` and the same fields. SoundCloud works the
+  same way with `scsearch5:`; check the length there, official uploads are often 30-second previews.
+- Several references: one after another, a few, one attempt each.
+- **Or record it as it plays.** When there is no download (it failed, or the track is only in their player), they
+  play it on this computer and you record the speakers: `listen_start(streams=['speakers'], project=<song>)`, then
+  `listen_stop`; the take lands in the song's `listen/` folder, with the skips and their comments on one clock
+  (`listen-together.md`). Something they play or sing themselves comes in through the mic the same way, after their
+  yes. The SOURCES.md row says it was recorded from playback.
+- If a download fails, say so in one line and offer to record it as it plays, or a file they have. Don't retry
+  with other download settings or a browser: retries can get this computer blocked for hours.
+
 ## 1. Grid first; timing errors poison everything
 
-- Get the audio (yt-dlp; YouTube may bot-wall, SoundCloud search `scsearch:` often works).
+- Get the audio (section 0).
 - `project_new(..., reference=<wav>)`, `analyze_grid(source='ref')` for bpm and the time of bar 1. The downbeat pick is fragile when the kick skips beats; the tool prints the phase scores. In 4/4 with a kit the snare has to land on 2 and 4: the tool votes for that (its `backbeat` line) and moves section jumps off snare beats, which fixed a G-funk bar 1 read one beat late. Still check `analyze_drums(source='ref:drums')` for the first bars: snare on steps 5 and 13.
 - Read the **tuning** line of `analyze_grid` before any pitch tool. A sped-up record sat 48 cents sharp and every note read as a pair of semitones in the rolls, chords and transcriptions. At 15 cents or more off, `ref_retune()` writes retuned copies of the reference and its stems and points the project at them; the timing stays.
 - **A played record drifts.** A band without a click can wander a few bpm over a song, and then no single grid fits. Straighten the reference onto a constant grid before transcribing (a phase vocoder with a time map; take the phase advance from the mid channel so the stereo image survives, and keep the time map to put results back). There is no op for this yet.
