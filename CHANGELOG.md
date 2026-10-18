@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Synthesis unless the user asks for samples
+
+A session cut a reference's kick, snare and shaker into the song after the listener said the drums sounded too
+synthetic. The skill and `sound_extract` both left that door open.
+
+- SKILL.md, Non-negotiables: songs are made with synthesis (sprites, measured voices, mimic profiles, the modeled
+  library voices). Samples (slices of the reference, imported one-shots, the sampled library voices) go in only when
+  the user asks for them in words. "Too synthetic" means measure the hit against the reference's and rebuild it.
+- instruments.md: the sampled-voice and sampler routes are for when the user asked for samples. recreate.md: an
+  extracted hit is a fitting target, never a part.
+- `sound_extract`: its description no longer says "use it", and its reply says the hit is a target to fit.
+
 ### Transitions, speech on a rhythm, is the voice heard (ledger:M249, M250)
 
 Three pieces built in a song and proven there.
