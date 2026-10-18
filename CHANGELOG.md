@@ -4,7 +4,7 @@
 
 ### Replies that read the live state: the reference, a Send button, "hear it" (ledger:M245, M246, M247)
 
-- A first session (electrohouse) kept its reference in a separate analysis project, never compared a draft with
+- A first-session test kept its reference in a separate analysis project, never compared a draft with
   it, and called a draft "measured on" the reference. render's reply had no word about the reference. Now, when
   the project has a reference, render prints one line: compared with it never, or not since this render with the
   last comparison (compare, cmp_run and sound_compare against `ref` leave a receipt in `renders/compared.json`);

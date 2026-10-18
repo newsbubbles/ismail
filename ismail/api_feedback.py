@@ -23,7 +23,7 @@ def _project(project):
 
 def _base(project):
     """-> (the folder given, the folder its rounds go in). A song's proj/ (a project.json whose song folder is its
-    parent) is rebuilt by the song's build, which would take the answers with it (electrohouse HANDOFF 3), so its
+    parent) is rebuilt by the song's build, which would take the answers with it (a first-session test lost its answers that way), so its
     rounds go in the song folder: songs/<slug>/work/feedback/<round>/."""
     p = _project(project)
     if (p / 'project.json').is_file():
