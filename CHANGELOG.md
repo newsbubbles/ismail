@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Balance against the reference in every render with stems
+
+A recreation's second bass was far too loud through three drafts, and nothing said so: the only balance check
+(`levels_from_ref`) ran once, on draft 1, and averages over the whole song.
+
+- `render(stems=True)`, with a reference that has stems and a stem map, prints each stem's share of the mix against
+  the reference's per 8-bar stretch (quiet stretches left out): how far off over the song, the worst stretch, the
+  loudest track of the stem there; a layer the reference has in a stretch and yours lacks (often a part filed under
+  another stem); a stem that plays where the reference's is silent.
+- Then one line on the master: a limiter alone is not a mastering pass; balance first, then `references/mastering.md`.
+- SKILL.md step 6 and mastering.md section 0 say the balance comes before loudness and the master.
+
 ### Synthesis unless the user asks for samples
 
 A session cut a reference's kick, snare and shaker into the song after the listener said the drums sounded too
