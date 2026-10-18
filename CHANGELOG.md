@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The effects pass is part of the first draft
+
+Two sessions (an electro track, a drum and bass recreation) handed over whole drafts with no effects pass until the
+person asked for one: the loop ended its build at "ear candy" and never named the pass.
+
+- SKILL.md loop, step 5: the effects pass in the first draft: a transition into every section, what changes at each
+  phrase end (fill, filter dip or sweep, drop-out, delay or reverb throw), the ducks; with a reference, zoom on a
+  phrase's last bar against the one before. The Session Sheet gets a `Moves:` line.
+- A full render of a song with three or more tracks and no automation lane or no transitions part says so in one line.
+
 ### Balance against the reference in every render with stems
 
 A recreation's second bass was far too loud through three drafts, and nothing said so: the only balance check

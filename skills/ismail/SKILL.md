@@ -134,9 +134,17 @@ done), so go to the item their words or the work call for, and keep every item t
 2. **Build** the skeleton: tracks with instruments from the Sheet, the part that carries the signature first, then drums, bass, harmony, lead and ear candy. Use `batch` for multi-op edits (atomic, one round trip). Pieces that take more than a few minutes (several voices, measuring a reference) can go to helpers while the person listens to what already plays (`references/helpers.md`).
 3. **Render a window**, not the song: `render(bars=[a, b], stems=True)` on the section you just changed.
 4. **Listen** with the checks in `references/listening.md` and write a **Listening Report** (artifact): one line per check, a number from a tool on each line. Zoom early (`spectrogram` or `sound_zoom` on the same window of the reference and yours, `sound_zoom_diff` against 3 or more takes of the reference (4 for a control), `exam_eye_crops` for a blind look of your own) when the person names a texture (robotic, digital, smeared, cut off), when the numbers say close and the ear says no, on voices and played instruments, and after two rounds without progress: on the voice work the zoom found what dozens of rounds of numbers missed (`references/listening.md`, "When to zoom"). When the song has a reference, compare against it before every draft goes out, not only after they reject one: `compare(bars=)` or `cmp_run`, `sound_compare` on the part you changed, full mix against full mix (a stem is a hint).
-5. **Fix** the worst line, re-render, re-check. Only then move to the next section.
-6. **Full render + structure check**: `analyze_structure(source='render')` must show the form you planned in the Sheet. With a reference, `render(stems=True)` prints each stem's share of the mix against the reference's per 8-bar stretch and any layer you lack: the balance over the song, part by part, comes before loudness and before the master.
-7. **Master** (`references/mastering.md`): loudness for the genre or the reference, glue, mono low end, limiter ceiling -1 dB for mp3.
+5. **Fix** the worst line, re-render, re-check. Only then move to the next section. Then the **effects pass**, in
+   the first draft, never left for later: a transition into every section (the `transitions` voice: impact, riser,
+   downlifter, reverse crash), what changes at each phrase end (a fill, a filter dip or sweep, a drop-out, a delay or
+   reverb throw: `automation_set` on a filter, a send or a volume), the ducks under the kick, and the space: where
+   each part sits (width, a reverb or `hall` send for depth) and what moves in it (`spatial`: a place in metres, an
+   orbit or a flyby with doppler, `doppler=0` for pitched parts that must stay in key; sound-design.md "Moving a
+   sound in 3D"). Flat is a choice, not a default. With a reference,
+   zoom on the last bar of a phrase against the bar before it (`sound_zoom`, `analyze_bars`) and build the moves it
+   makes. A draft without them sounds static, and the person spends their notes on what a pass would have caught.
+6. **Levels, on a full render** (after the effects pass: effects move levels), and the structure check: `analyze_structure(source='render')` must show the form you planned in the Sheet. With a reference, `render(stems=True)` prints each stem's share of the mix against the reference's per 8-bar stretch and any layer you lack: the balance over the song, part by part, comes before loudness and before the master.
+7. **Master** once the levels hold (`references/mastering.md`): loudness for the genre or the reference, glue, mono low end, limiter ceiling -1 dB for mp3.
 8. **Hand it over, whenever they should hear something** (each draft and instrument chunk, not only the end; `render(mp3='also')`): they always get something they can open and hear, never only a sound through the speakers. `render`'s and `sketch`'s replies end with a "hear it" block (the full path, the phone page, the live engine, an open feedback round, the VR stage) and one suggestion picked from what is running: start from it. A hosted page (`feedback_page`) or the file (its full path, `play_file`) is your call for the moment; in VR, play it in their room (`stage_music`). Ask once how they like to listen, then keep that choice. Name one or two things to listen for, say what you measured, and write their answer in the song's `notes/feedback.md`; on a page, wait for their Send (`feedback_wait`), never for a typed "done". Their ear overrules every score. **Disk space:** when the person cares about it, ask once whether they want WAVs kept, and keep their answer as a standing choice (in the song's notes and wherever your harness keeps what you know about them). If not, render named renders with `mp3='only'` (`latest.wav` is still written, since analysis reads it), and older WAVs that already have an mp3 move to the reclaim folder.
 
 ## Session Sheet (template)
@@ -158,6 +166,9 @@ Parts (role, register, rhythm, sound, modeled on):
   (an acoustic part names its voice and its example, e.g.
   fiddle G3-E6 double stops on 2 and 4          voice bowed inst=violin; the fiddle in <reference> 0:12-0:20)
 Variation plan:    what changes every 8 bars (a part in/out, filter opens, fill in bar 8)
+Moves:             what happens at each phrase end and into each section (transition, fill, filter or send move,
+                   drop-out, duck), measured at the reference's phrase ends when there is one
+Space:             where each part sits (wide or mono, near or far) and what moves (spatial: orbit, flyby, doppler)
 Mix targets:       master <LUFS for the genre or reference>, peak -1 dBFS, limiter GR < 4 dB; kick and bass own the sub
 ```
 

@@ -12,6 +12,7 @@ registry file, with a short timeout (a server that does not answer is skipped in
   reference_next()             project_set(reference=)'s lines: what to run next with a reference
   note_compared(root, op, ..)  compare, cmp_run and sound_compare leave a receipt here (renders/compared.json)
   hear_it(root, path, d)       the "hear it" block for render and sketch
+  moves_line(d)                a full render's line when the song has no moves yet (no automation, no transitions)
   balance_lines(P)             render(stems=True)'s lines: each stem's share of the mix against the reference's,
                                over the song and in its worst stretch, and whether a mastering pass comes next
 """
@@ -395,3 +396,25 @@ def balance_lines(P, win=BALANCE_WIN):
         return L
     except Exception:                    # noqa: BLE001  a reply line never breaks the render that made it
         return []
+
+
+# ------------------------------------------------------------------ the effects pass (full renders)
+
+def moves_line(d):
+    """One line for a full render whose song has no moves yet: no automation lane anywhere (tracks, buses, master)
+    or no transitions part. Two sessions handed over whole drafts with neither until the person asked for effects.
+    '' once both are there. Never raises."""
+    try:
+        lanes = sum(len((x or {}).get('automation') or {}) for x in
+                    list((d.get('tracks') or {}).values()) + list((d.get('buses') or {}).values()) + [d.get('master')])
+        trans = any('transitions' in json.dumps(t.get('instrument') or '') for t in (d.get('tracks') or {}).values())
+        if lanes and trans:
+            return ''
+        have = ', '.join(x for x in ((f"{lanes} automation lanes" if lanes else 'no automation'),
+                                     ('a transitions part' if trans else 'no transitions')))
+        return (f"moves: {have}. A full draft without moves sounds static; the effects pass (SKILL.md loop, step 5): "
+                f"a transition into each section (voice 'transitions'), what changes at phrase ends (automation_set on "
+                f"a filter, a send or a volume; a fill; a drop-out), the ducks under the kick, and the space (width, a reverb "
+                f"send for depth, fx 'spatial' to place or fly a part, with doppler)")
+    except Exception:                    # noqa: BLE001
+        return ''
