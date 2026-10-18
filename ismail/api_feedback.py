@@ -77,7 +77,7 @@ def _open(url):
 
 @op()
 def feedback_page(project: str, round: str, items: list = None, questions: list = None, voice: bool = True,
-                  title: str = None, open: bool = True, port: int = None) -> str:
+                  title: str = None, open: bool = True, port: int = None, footer: bool = True) -> str:
     """A feedback page for the person, on this computer: the items to look at or listen to, then numbered questions,
     each with a text box and (voice=True) a Record button. Everything they type is saved as it changes and every
     recording is saved as a file and transcribed in the background; when they reopen the page, their text, their
@@ -91,14 +91,16 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
     the same round rewrites the page and keeps every answer. The page ends in a Send button: the person presses it
     when they have said everything (done.json in the round), and pressing it again after a late addition counts as a
     new send. feedback_wait(project, round) waits for that Send and returns the answers; feedback_read reads them
-    at any time and says SENT or STILL WRITING first. Never ask the person to type "done".
+    at any time and says SENT or STILL WRITING first. Never ask the person to type "done". The page ends with the
+    made-with-ismail footer and how the piece's sound was made (credits(format='footer'); footer=False leaves it off).
     Reach for it whenever the person should answer questions by voice or by typing at the desk: notes on a cut, a
     mix, a set of shots or sketches, a round of choices, anything you would otherwise build a page and a server for."""
     proj, rnd = _project(project), _round(round)
     folder, base = _round_dir(project, rnd)
     try:
         d, man, kept = FB.build(proj, rnd, items, questions, voice=voice, title=title,
-                                folder=folder if folder != FB.round_dir(proj, rnd) else None)
+                                folder=folder if folder != FB.round_dir(proj, rnd) else None,
+                                footer=_footer(proj, base) if footer else None)
     except (OSError, ValueError) as e:
         raise OpError(f"feedback_page: {e}")
     rid = FB.register(d)
@@ -130,6 +132,20 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
     if old:
         L.append(old)
     return '\n'.join(L)
+
+
+def _footer(proj, base):
+    """The footer for a round's page (ledger:M254): from the song's project when there is one (the folder given, the
+    song folder or its proj/), else the made-with line alone."""
+    from . import sources
+    for cand in dict.fromkeys([proj, base, base / 'proj']):
+        f = cand / 'project.json'
+        if f.is_file():
+            try:
+                return sources.footer(str(cand), FB.read_json(f, {}) or {})
+            except Exception:          # noqa: BLE001  a project this can't read still gets the made-with line
+                break
+    return sources.footer()
 
 
 def _old_server(port):

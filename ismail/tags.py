@@ -13,6 +13,7 @@ import subprocess
 
 HOME_URL = 'https://github.com/newsbubbles/ismail'
 MADE_WITH = f'Made with ismail ({HOME_URL})'
+SITE_URL = 'https://newsbubbles.github.io/ismail/'   # where a listener lands from a page footer (ledger:M254)
 PKG = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(PKG)
 

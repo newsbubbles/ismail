@@ -1439,7 +1439,8 @@ def track_model(project: str, track: str, on=None, by: str = None) -> str:
 
 
 @op()
-def credits(project: str, out: str = None, overwrite: bool = False, consulted: bool = False) -> str:
+def credits(project: str, out: str = None, overwrite: bool = False, consulted: bool = False,
+            format: str = 'md') -> str:
     """Write the piece's credits (CREDITS.md at the song root) from its SOURCES files (the recording, who made
     or played it, the licence, the link; columns about approval, local paths, dates and notes are left out), each
     track's model (measured from what, or designed) and its lineage (derived_from). Only the sources the piece uses
@@ -1448,8 +1449,17 @@ def credits(project: str, out: str = None, overwrite: bool = False, consulted: b
     rest under 'Also consulted'. A plain list that repeats a table's rows (a SOURCES.txt of video ids) is left out.
     It says whether the piece holds any recorded audio (imported samples, audio clips) or only measurements rebuilt
     by synthesis. Files in ref/ with no SOURCES row are not credited: the reply lists them. Review the file before
-    it goes public. out: another path; overwrite: replace an existing file (it may have been edited by hand)."""
+    it goes public. out: another path; overwrite: replace an existing file (it may have been edited by hand).
+    format='footer' writes nothing and returns the footer a page people may share ends with (ledger:M254): made
+    with ismail, the link, and how the sound was made, by counts only (no names, no paths), as text and as HTML.
+    Reach for it whenever you build a listening page or post by hand: every page a person may pass on ends with it."""
     P = _load(project)
+    if format == 'footer':
+        f = sourcesmod.footer(P.root, P.d)
+        return '\n'.join([f"footer text: {f['text']}", f"footer html: {f['html']}",
+                          "end every page a person may share with it (feedback_page adds it on its own)"])
+    if format != 'md':
+        raise OpError(f"format={format!r}: 'md' writes CREDITS.md, 'footer' returns the footer for a shared page")
     path = os.path.abspath(out) if out else os.path.join(sourcesmod.song_root(P.root), 'CREDITS.md')
     if os.path.exists(path) and not overwrite:
         raise OpError(f"{path} exists (it may have been edited by hand): pass overwrite=True to replace it, or "

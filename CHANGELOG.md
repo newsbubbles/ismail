@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Shared pages say what made the song
+
+A listening page sent to a friend had no word on what made the song or where to find it.
+
+- `credits(format='footer')` returns the footer for a page people may share, as text and HTML: made with ismail, the
+  link to the site, and how the sound was made by counts only (parts modeled on measured recordings, designed,
+  playing recorded audio), with no names and no paths. It writes nothing.
+- `feedback_page` pages end with it (`footer=False` leaves it off).
+- SKILL.md step 8: a page you build yourself for someone who may pass it on ends with it.
+
 ### The effects pass is part of the first draft
 
 Two sessions (an electro track, a drum and bass recreation) handed over whole drafts with no effects pass until the

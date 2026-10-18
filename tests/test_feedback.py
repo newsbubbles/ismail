@@ -380,3 +380,22 @@ def test_a_songs_proj_writes_its_rounds_in_the_song_folder(env):
     assert 'nothing has come in yet' in api.OPS['feedback_read'](str(proj), 'old')
     out = api.OPS['feedback_page'](str(proj), 'old', questions=['Still there?'], open=False)
     assert 'in proj/, which a rebuild replaces' in out and not (song / 'work' / 'feedback' / 'old').exists()
+
+
+def test_the_page_ends_with_the_made_with_footer(env):
+    """ledger:M254: a page a person may pass on says what made the song, with no names or paths."""
+    srv = _serve(env)
+    song = env['song']
+    proj = song / 'proj'
+    api.project_new(str(proj), bpm=120, length_bars=2)
+    api.track_add(str(proj), 'my_private_name', instrument={'type': 'synth'})
+    api.OPS['feedback_page'](str(proj), 'r3', items=[str(song / 'take.wav')], questions=['How is it?'], open=False)
+    url = f'http://127.0.0.1:{srv.port}/f/song-r3/'
+    man = json.loads(_get(url + 'manifest')[2])
+    assert man['footer']['link'].startswith('https://') and 'ismail' in man['footer']['lead']
+    assert man['footer']['how'] == '1 part, synthesized (designed).'
+    assert 'my_private_name' not in json.dumps(man)
+    assert b'madewith' in _get(url)[2]
+    api.OPS['feedback_page'](str(proj), 'r3', questions=['How is it?'], open=False, footer=False)
+    assert 'footer' not in json.loads(_get(url + 'manifest')[2]) or \
+        json.loads(_get(url + 'manifest')[2])['footer'] is None

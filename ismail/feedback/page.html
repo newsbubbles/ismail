@@ -43,6 +43,8 @@
   .send-card { border-color: var(--accent); }
   button.send { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.send:disabled { opacity: 0.6; cursor: default; }
+  .made-with { color: var(--soft); font-size: 0.85rem; margin: 32px 0 0; text-align: center; }
+  .made-with a { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -53,6 +55,7 @@
   <section id="items"></section>
   <section id="questions"></section>
   <section id="send"></section>
+  <footer class="made-with" id="madewith" hidden></footer>
 </main>
 <script>
 (() => {
@@ -227,6 +230,22 @@
     }
   }
 
+  // the made-with-ismail line and how the piece's sound was made (ledger:M254)
+  function renderFooter(f) {
+    const box = $('#madewith');
+    if (!f || !f.lead || !box) return;
+    const i = f.lead.indexOf('ismail');
+    const p = make('p');
+    p.appendChild(document.createTextNode(i < 0 ? f.lead : f.lead.slice(0, i)));
+    if (i >= 0) {
+      const a = make('a', null, 'ismail'); a.href = f.link; a.target = '_blank'; a.rel = 'noopener'; p.appendChild(a);
+      p.appendChild(document.createTextNode(f.lead.slice(i + 6)));
+    }
+    p.appendChild(document.createTextNode('.' + (f.how ? ' ' + f.how : '')));
+    box.appendChild(p);
+    box.hidden = false;
+  }
+
   let polling = null;
   async function refresh(first) {
     let st;
@@ -263,6 +282,7 @@
     renderItems(manifest.items || []);
     renderQuestions(manifest.questions || []);
     renderSend();
+    renderFooter(manifest.footer);
     showSent();
     await refresh(true);
   })();

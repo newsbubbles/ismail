@@ -160,9 +160,10 @@ def _question(n, q):
     return {'n': n, 'text': str(q).strip()}
 
 
-def build(project, rnd, items, questions, voice=True, title=None, folder=None):
+def build(project, rnd, items, questions, voice=True, title=None, folder=None, footer=None):
     """Write (or rewrite) a round's manifest; answers already given stay. folder: where the round goes (default
     <project>/work/feedback/<round>; a song's proj/ passes the song folder's, which a rebuild leaves alone).
+    footer: sources.footer()'s dict, shown at the bottom of the page (ledger:M254), or None.
     -> (folder, manifest, kept answers)."""
     d = Path(folder) if folder else round_dir(project, rnd)
     its = [_item(n, it, project) for n, it in enumerate(items or [], 1)]
@@ -175,6 +176,9 @@ def build(project, rnd, items, questions, voice=True, title=None, folder=None):
     man = {'title': title or old.get('title') or f"{name}: {rnd}", 'round': str(rnd),
            'project': str(Path(project).resolve()), 'voice': bool(voice), 'items': its, 'questions': qs,
            'made': old.get('made') or now(), 'updated': now()}
+    if footer:
+        from ..sources import FOOTER_LEAD
+        man['footer'] = {'lead': FOOTER_LEAD, 'link': footer['link'], 'how': footer.get('how') or ''}
     write_json(d / 'manifest.json', man)
     ans = read_json(d / 'answers.json', None)
     if ans is None:
@@ -186,7 +190,7 @@ def build(project, rnd, items, questions, voice=True, title=None, folder=None):
 
 def public_manifest(man):
     """What the page sees: no paths on this computer, each file by its number."""
-    out = {k: man.get(k) for k in ('title', 'round', 'voice', 'questions')}
+    out = {k: man.get(k) for k in ('title', 'round', 'voice', 'questions', 'footer')}
     out['items'] = [{k: v for k, v in it.items() if k != 'path'} | ({'src': f"item/{it['n']}"} if it.get('path')
                                                                      else {}) for it in man.get('items', [])]
     return out
