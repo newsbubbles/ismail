@@ -1193,7 +1193,8 @@ def _loudness_trim(project, target):
 
 @op()
 def lexicon_note(project: str = None, said: str = None, means=None, craft: str = None, where: str = None,
-                 outcome: str = None, why: str = None, who: str = 'user', id: str = None) -> str:
+                 outcome: str = None, why: str = None, who: str = 'user', id: str = None, track: str = None,
+                 heard: str = None) -> str:
     """Record what the person called something, and what it means in ismail. said: their words, verbatim ("too
     clean", "the snare is boxy"). means: the system terms it maps to, a list or ';'-separated ("fx eq peak 400 Hz -3
     dB on snare; analyze_timbre centroid"). craft: the role the word belongs to (composer, arranger, performer, sound
@@ -1201,14 +1202,17 @@ def lexicon_note(project: str = None, said: str = None, means=None, craft: str =
     choreographer, listener). outcome: open | worked | partly | missed, with why. Update an entry with id=... (means,
     craft, outcome, why); the words themselves never change. Words about the work only: never record emotion, mood
     or health. The file is local and shared by every session (lexicon_view shows where). Returns the entry and what
-    the same words meant before."""
+    the same words meant before. track: the part their words name ("the answer bass" is the track 'reese'). heard: the
+    feedback round where they named that part after hearing it alone (feedback_page(parts=...)); only then is the
+    name confirmed, checked against what they typed there. A name you inferred stays unconfirmed: ask them."""
     from . import lexicon as LX
     from . import sketch as SK
     song = os.path.basename(os.path.abspath(project)) if project else None
+    confirmed = _heard_name(project, track, said, heard, id) if heard else None
     with LX.scoped(SK.lexicon_file(project)):        # ledger:M175: a guest's words stay theirs
         before = LX.find(said, who) if said and not id else []
         try:
-            e = LX.note(said, means, craft, song, where, outcome, why, who, id)
+            e = LX.note(said, means, craft, song, where, outcome, why, who, id, track=track, confirmed=confirmed)
         except ValueError as ex:
             raise OpError(str(ex))
     L = [("updated " if id else "noted ") + LX.line(e)]
@@ -1218,6 +1222,28 @@ def lexicon_note(project: str = None, said: str = None, means=None, craft: str =
     if not e.get('means'):
         L.append(f"not mapped yet: when you know what it meant, lexicon_note(id={e['id']!r}, means=[...])")
     return '\n'.join(L)
+
+
+def _heard_name(project, track, said, heard, id):
+    """'feedback <round>' when the person named `track` `said` on that round's parts block, else an OpError that says
+    what they did name it (ledger:M253: a part's name is confirmed only by the person)."""
+    from . import api_feedback as AF
+    from . import feedback as FB
+    if not project or not track:
+        raise OpError("heard= confirms a part's name: pass project= (the song) and track= (the part) with it")
+    if id and not said:
+        raise OpError("heard= checks their words: pass said= with them (an entry's words never change, so note a new "
+                      "entry)")
+    d, _ = AF._round_dir(project, AF._round(heard))
+    names = FB.names(d)
+    if track not in names:
+        raise OpError(f"round {heard!r} has no name for {track!r} from them" + (
+            f" (they named {', '.join(f'{t}: {n!r}' for t, n in names.items())})" if names else
+            "; feedback_page(project, round, parts=[...]) lets them hear each part and name it"))
+    if FB._norm(names[track]) != FB._norm(said):
+        raise OpError(f"in round {heard!r} they called {track!r} {names[track]!r}, not {said!r}: note their words "
+                      f"verbatim")
+    return f"feedback {heard}"
 
 
 @op()

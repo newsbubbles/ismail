@@ -78,7 +78,7 @@ def _open(url):
 @op()
 def feedback_page(project: str, round: str, items: list = None, questions: list = None, voice: bool = True,
                   title: str = None, open: bool = True, port: int = None, footer: bool = True,
-                  share: bool = False) -> str:
+                  share: bool = False, parts=None, parts_bars: int = 4) -> str:
     """A feedback page for the person, on this computer: the items to look at or listen to, then numbered questions,
     each with a text box and (voice=True) a Record button. Everything they type is saved as it changes and every
     recording is saved as a file and transcribed in the background; when they reopen the page, their text, their
@@ -100,14 +100,20 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
     server and no write access: their typing and voice notes stay in their browser, and 'Send my answers' sends them
     back as a message (the share menu, or a copy to paste, with the voice notes as files); feedback_paste(project,
     round, text, files) reads that message into this round.
+    parts=True (every part) or a list of track names adds a 'Name the parts' block: each part alone and in the mix at
+    the bars where it stands out most (parts_bars long, cut from the latest render(stems=True)), and a box for the
+    person's name for it. Use it in the first round of a song, and whenever a note's words could mean more than one
+    part ("the bass" with a sub, a reese and a talking bass): you change the part they meant only once you share
+    its name. feedback_read shows their names; lexicon_note(said=<their name>, track=<part>, heard=<round>) keeps each.
     Reach for it whenever the person should answer questions by voice or by typing at the desk: notes on a cut, a
     mix, a set of shots or sketches, a round of choices, anything you would otherwise build a page and a server for."""
     proj, rnd = _project(project), _round(round)
     folder, base = _round_dir(project, rnd)
+    part_clips, left_out = _parts(proj, base, folder, parts, parts_bars) if parts else (None, [])
     try:
         d, man, kept = FB.build(proj, rnd, items, questions, voice=voice, title=title,
                                 folder=folder if folder != FB.round_dir(proj, rnd) else None,
-                                footer=_footer(proj, base) if footer else None)
+                                footer=_footer(proj, base) if footer else None, parts=part_clips)
     except (OSError, ValueError) as e:
         raise OpError(f"feedback_page: {e}")
     rid = FB.register(d)
@@ -126,7 +132,7 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
     kinds = {}
     for it in man['items']:
         kinds[it['kind']] = kinds.get(it['kind'], 0) + 1
-    L = [f"feedback round {rnd}: {len(man['questions'])} questions, "
+    L = [f"feedback round {rnd}: {_n(len(man['questions']), 'question')}, "
          + (', '.join(f"{n} {k}" for k, n in kinds.items()) or 'no items') + (', voice on' if voice else ', typing only')
          + (f"; kept the {_n(kept, 'answer')} already given" if kept else ''),
          f"link: {url}",
@@ -141,6 +147,12 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
          f"the person presses Send at the bottom when they are finished: feedback_wait(project, round='{rnd}') waits "
          f"for it and returns the answers (feedback_read shows them any time, headed SENT or STILL WRITING); never "
          f"ask them to type 'done'"]
+    if part_clips:
+        L.append(f"parts block: {_n(len(part_clips), 'part')}, each alone and in the mix where it stands out most ("
+                 + ', '.join(f"{c['track']} bars {c['bars'][0]}-{c['bars'][1]}" for c in part_clips) + ')'
+                 + (f"; left out: {', '.join(f'{t} ({why})' for t, why in left_out)}" if left_out else '')
+                 + ". Their names come back in feedback_read; keep each one: lexicon_note(project, said=<their name>, "
+                   f"track=<part>, heard='{rnd}')")
     if shared:
         sd, files, size = shared
         L += [f"shared copy: {sd} (index.html + {_n(len(files), 'clip file')}, {size / 1e6:.1f} MB): host the folder where "
@@ -153,6 +165,41 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
     if old:
         L.append(old)
     return '\n'.join(L)
+
+
+def _song_project(proj, base):
+    """The song's project folder (the folder given, the song folder or its proj/), or None."""
+    for cand in dict.fromkeys([proj, base, base / 'proj']):
+        if (cand / 'project.json').is_file():
+            return cand
+    return None
+
+
+def _parts(proj, base, folder, parts, span):
+    """The parts block's clips (ledger:M253) -> ([{track, bars, solo, mix}], [(track, why left out)])."""
+    from .api import _load
+    from .feedback import parts as PT
+    cand = _song_project(proj, base)
+    if cand is None:
+        raise OpError("parts= needs a song: pass the song folder (or its proj/) as project")
+    P = _load(str(cand))
+    have = list(P.d.get('tracks') or {})
+    want = have if parts is True or parts == 'all' else [parts] if isinstance(parts, str) else list(parts)
+    unknown = [t for t in want if t not in have]
+    if unknown:
+        raise OpError(f"parts: no track {', '.join(map(repr, unknown))}; the song has {', '.join(have)}")
+    try:
+        span = max(1, int(span))
+    except (TypeError, ValueError):
+        raise OpError(f"parts_bars={span!r}: how many bars each clip lasts, e.g. 4")
+    try:
+        clips, left = PT.clips(P, want, str(folder / 'parts'), span)
+    except OpError as e:
+        raise OpError(f"parts= cuts each part from the latest render: {e}")
+    if not clips:
+        raise OpError("parts=: no part has a stem in the latest render ("
+                      + ', '.join(f"{t}: {why}" for t, why in left) + "): render(stems=True) the full song first")
+    return clips, left
 
 
 def _footer(proj, base):
@@ -221,7 +268,8 @@ def feedback_paste(project: str, round: str, text: str = None, files: list = Non
         except ValueError as e:
             raise OpError(f"feedback_paste: {e}")
     voice = _voice_files(files, len(qs))
-    if not answers and not voice:
+    named = FB.parse_names(text, [p['track'] for p in man.get('parts') or []]) if text else {}
+    if not answers and not voice and not named:
         raise OpError("feedback_paste: nothing to keep: pass text= (their message, verbatim) and/or files= (their "
                       "voice notes)")
     try:
@@ -242,6 +290,8 @@ def feedback_paste(project: str, round: str, text: str = None, files: list = Non
             post('text', json.dumps({'q': n, 'text': a}).encode('utf8'), 'application/json')
         for n, path in voice:
             post(f"voice?q={n}", path.read_bytes(), VOICE_TYPES[path.suffix.lower()])
+        for t, name in named.items():
+            post('name', json.dumps({'track': t, 'text': name}).encode('utf8'), 'application/json')
         if send:
             post('done', b'{}', 'application/json')
     except OSError as e:
@@ -249,6 +299,7 @@ def feedback_paste(project: str, round: str, text: str = None, files: list = Non
     L = [f"pasted into round {rnd}: " + (f"answers to {_n(len(answers), 'question')} "
                                         f"({', '.join(str(n) for n in sorted(answers))})" if answers else 'no typed answers')
          + (f", {_n(len(voice), 'voice note')} (written down in the background)" if voice else '')
+         + (f", names for {_n(len(named), 'part')}" if named else '')
          + ('; counted as their Send' if send else '; not sent (send=False)')]
     if replaced:
         L.append(f"replaced the earlier typed answer to {', '.join(str(n) for n in replaced)} (every earlier wording is "
@@ -330,6 +381,11 @@ def feedback_read(project: str, round: str, since: str = None) -> str:
         for c in new_said:
             L.append(_clip_line(c, d))
             shown += 1
+    names = FB.names(d)
+    texts = [((ans.get(str(q['n'])) or {}).get('text') or '') + ' ' + ' '.join(
+        c.get('text') or '' for c in (ans.get(str(q['n'])) or {}).get('said') or []) for q in man.get('questions', [])]
+    L += _names_lines(project, rnd, man, names, texts)
+    shown += len(names) if not cut else 0
     state = _state_lines(d, rnd)
     head = f"feedback round {rnd} ({d}), {len(man.get('questions', []))} questions"
     if not shown:
@@ -350,6 +406,33 @@ def feedback_read(project: str, round: str, since: str = None) -> str:
         text = text[:READ_MAX] + f"\n... (cut at {READ_MAX} characters: everything is in {d / 'answers.json'}; " \
                                  f"since= shows only what is new)"
     return text
+
+
+def _names_lines(project, rnd, man, names, texts):
+    """The person's names for the parts (ledger:M253), and notes whose words could mean several parts."""
+    L = []
+    parts = [p['track'] for p in man.get('parts') or []]
+    if names:
+        L.append("their names for the parts (heard alone and in the mix on this page):")
+        L += [f"   {t} -> \"{names[t]}\"" for t in parts if t in names]
+        L.append(f"   keep each: lexicon_note(project, said=<their name>, track=<part>, heard='{rnd}'); from now on, "
+                 f"their name is the part")
+    unnamed = [t for t in parts if t not in names]
+    if parts and unnamed and names:
+        L.append(f"   not named yet: {', '.join(unnamed)}")
+    try:
+        base = _base(project)[1]
+        cand = _song_project(_project(project), base)
+        d = FB.read_json(cand / 'project.json', {}) if cand else None
+    except OpError:
+        d = None
+    if d:
+        from .feedback import parts as PT
+        for q, text in zip(man.get('questions', []), texts):
+            for word, cands in PT.ambiguous(text, d, names):
+                L.append(f"{q['n']}. says \"{word}\", and {len(cands)} parts could be it ({', '.join(cands)}): ask which "
+                         f"before you change one (by name, or feedback_page(parts={cands!r}) to let them hear each)")
+    return L
 
 
 def _no_round(project, rnd):

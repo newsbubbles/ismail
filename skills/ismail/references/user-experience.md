@@ -89,6 +89,19 @@ The words never change; the mapping and the outcome do, and the file keeps every
 - Before explaining a change: `lexicon_find(text="eq peak")` finds the person's word for it, so say "less boxy"
   instead of "a 3 dB cut at 400 Hz", unless they speak in Hz themselves.
 
+**Names for the parts.** Your track names are yours: a listener who said "the bass overpowers it" meant the answering
+bass, the agent turned down another one, and three rounds went by before anyone noticed. In a song's first feedback
+round, and whenever a note's words could mean several parts (`feedback_read` says so: "says 'bass', and 3 parts could
+be it"), add the parts block: `feedback_page(..., parts=True)` plays each part alone and in the mix where it stands
+out most, with a box for their name. Then keep each name with the part it names:
+
+```
+lexicon_note(project, said="the answer bass", track="reese", heard="r3")
+```
+
+`heard=` checks it against what they typed in that round, so a name is confirmed only by them; a name you inferred
+(`track=` without `heard=`) stays marked as not confirmed. From then on, use their name for the part.
+
 **Pictures have a vernacular too.** Words about how something looks ("waxy", "cluttered", "flat", "the shadows are
 muddy") go in the same lexicon, with the visual crafts (director, cinematographer, colourist), mapped to what
 changed: a material setting, a light, a grade value.

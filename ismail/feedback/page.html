@@ -46,6 +46,9 @@
   .downloads { display: grid; gap: 6px; margin-top: 10px; }
   .downloads a { color: var(--accent); }
   textarea.copy { min-height: 160px; margin-top: 10px; }
+  .part .sub { color: var(--soft); font-size: 0.85rem; margin: 8px 0 4px; }
+  .part input { width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
+                border-radius: 8px; padding: 10px; margin-top: 10px; }
   .made-with { color: var(--soft); font-size: 0.85rem; margin: 32px 0 0; text-align: center; }
   .made-with a { color: var(--accent); }
 </style>
@@ -56,6 +59,7 @@
   <p class="lead" id="lead">Everything you type or say here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.</p>
   <div class="card status bad" id="err"></div>
   <section id="items"></section>
+  <section id="parts"></section>
   <section id="questions"></section>
   <section id="send"></section>
   <footer class="made-with" id="madewith" hidden></footer>
@@ -122,8 +126,10 @@
       answers[String(q.n)] = { text: local.get('t' + q.n) || '', typed_at: local.get('at' + q.n),
                                said: clips.filter((c) => c.q === q.n) };
     }
+    const names = {};
+    for (const p of manifest.parts || []) { const v = local.get('p:' + p.track); if (v) names[p.track] = { text: v }; }
     const at = local.get('sent');
-    return { answers, sent: { state: at ? (local.get('changed') ? 'changed' : 'sent') : 'writing', at, changed_at: null } };
+    return { answers, names, sent: { state: at ? (local.get('changed') ? 'changed' : 'sent') : 'writing', at, changed_at: null } };
   }
 
   function showError(msg) { const e = $('#err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
@@ -191,6 +197,10 @@
       }
       if (!typed && !said.length) L.push('(no answer)');
       L.push('');
+    }
+    if ((manifest.parts || []).length) {
+      L.push('Names for the parts');
+      for (const p of manifest.parts) { const v = ($('#pn' + p.n) || {}).value || ''; L.push('- ' + p.track + ': ' + (v.trim() || '(no name)')); }
     }
     return L.join('\n').trim() + '\n';
   }
@@ -406,6 +416,48 @@
     }
   }
 
+  // Name the parts (ledger:M253): each part alone and in the mix where it stands out most, and the person's name
+  // for it, so a note about "the bass" means the same part to both of them
+  async function saveName(p) {
+    const text = $('#pn' + p.n).value.trim();
+    const st = $('#pst' + p.n);
+    if (SHARED) {
+      const ok = local.set('p:' + p.track, text);
+      st.textContent = ok ? 'Kept in this browser' : 'This browser does not keep it: send your answers before you close the page.';
+      st.className = 'status' + (ok ? ' ok' : ' bad');
+      return;
+    }
+    try {
+      const r = await fetch('name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: p.track, text }) });
+      if (!r.ok) throw new Error(r.status);
+      st.textContent = 'Saved'; st.className = 'status ok';
+    } catch (e) { st.textContent = 'Not saved yet: the page server does not answer.'; st.className = 'status bad'; }
+  }
+
+  function renderParts(parts) {
+    if (!parts || !parts.length) return;
+    const box = $('#parts');
+    const head = make('div', 'card');
+    head.appendChild(make('p', 'label', 'Name the parts'));
+    head.appendChild(make('p', 'sub', 'Each part plays alone, then in the mix, where it stands out most. Write what you call it, so that when you say "the bass" we both mean the same one.'));
+    box.appendChild(head);
+    for (const p of parts) {
+      const c = make('div', 'card part');
+      c.appendChild(make('p', 'label', 'Part ' + p.n + ' (I call it "' + p.track + '")'));
+      for (const [k, word] of [['solo', 'Alone'], ['mix', 'In the mix']]) {
+        c.appendChild(make('p', 'sub', word));
+        const a = make('audio'); a.controls = true; a.preload = 'metadata'; a.src = p[k]; c.appendChild(a);
+      }
+      const t = make('input'); t.type = 'text'; t.id = 'pn' + p.n; t.placeholder = 'What do you call it?';
+      t.setAttribute('aria-label', 'Your name for part ' + p.n);
+      t.addEventListener('input', () => { changedAfterSend(); clearTimeout(timers['p' + p.n]); timers['p' + p.n] = setTimeout(() => saveName(p), 500); });
+      t.addEventListener('blur', () => saveName(p));
+      c.appendChild(t);
+      const st = make('span', 'status'); st.id = 'pst' + p.n; c.appendChild(st);
+      box.appendChild(c);
+    }
+  }
+
   // the made-with-ismail line and how the piece's sound was made (ledger:M254)
   function renderFooter(f) {
     const box = $('#madewith');
@@ -429,6 +481,7 @@
     catch (e) { showError('The page server does not answer right now. What you already saved is safe on the computer.'); return; }
     lastState = st;
     if (first && st.sent) { sent = st.sent; showSent(); }
+    if (first) for (const p of manifest.parts || []) { const v = ((st.names || {})[p.track] || {}).text; if (v && $('#pn' + p.n)) $('#pn' + p.n).value = v; }
     let waiting = 0;
     for (const q of manifest.questions) {
       const a = st.answers[String(q.n)] || {};
@@ -459,6 +512,7 @@
     if (SHARED) $('#lead').textContent = 'What you type' + (voiceOn ? ' and record' : '') + ' here stays in this browser until you send it, and is still here if you close the page and open it again. When you have said everything, press Send my answers at the bottom: it opens your share menu, or copies your answers to paste into a chat.';
     else if (!voiceOn) $('#lead').textContent = 'Everything you type here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.';
     renderItems(manifest.items || []);
+    renderParts(manifest.parts || []);
     renderQuestions(manifest.questions || []);
     renderSend();
     renderFooter(manifest.footer);
