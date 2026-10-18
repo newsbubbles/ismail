@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Part names are checked with the person by ear
+
+A listener said the bass overpowered the track. He meant the answering bass; the agent turned down another one it
+called the talker, and three rounds went by before anyone noticed. Nothing checked that both used the same names.
+
+- `feedback_page(parts=True)` (or a list of tracks) adds "Name the parts": each part alone and in the mix at the bars
+  where it stands out most (cut from the latest `render(stems=True)`), with a box for the person's name for it. It
+  works on the shared copy and comes back through "Copy my answers" and `feedback_paste`.
+- `feedback_read` shows their names, and flags a note whose words could mean several parts ("says 'bass', and 3
+  parts could be it") from the track names, the stem map and the instruments, unless the note names one of them.
+- `lexicon_note(track=, heard=<round>)` keeps their name for a part, confirmed only when it matches what they typed in
+  that round; `track=` alone is marked as not confirmed.
+
 ### A listener who is not at this computer can answer, by voice too
 
 A friend answering rounds from another country could not send his answers: the feedback page runs on this computer

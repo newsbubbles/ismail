@@ -10,6 +10,8 @@ A round is a folder in the project, <project>/work/feedback/<round>/:
   answers_log.jsonl  every write in order, so no earlier wording is lost to a later edit
   done.json          written when the person presses Send: every send time, and when they changed something after
                      the last one (a late addition), so an agent acts only on a round they sent (ledger:M246)
+  names.json         the person's names for the parts in the parts block, {track: {text, at}} (ledger:M253)
+  parts/             the parts block's clips: each part alone and in the mix at its most exposed bars
   voice/             the voice clips (q<n>_<stamp>.webm, .ogg, .m4a or .wav), each transcript beside it as .txt
   share/             with share=True: a standalone copy of the page (index.html and the clips beside it) for a
                      listener who is not at this computer (ledger:M255). It needs no server: it is hosted anywhere,
@@ -164,10 +166,11 @@ def _question(n, q):
     return {'n': n, 'text': str(q).strip()}
 
 
-def build(project, rnd, items, questions, voice=True, title=None, folder=None, footer=None):
+def build(project, rnd, items, questions, voice=True, title=None, folder=None, footer=None, parts=None):
     """Write (or rewrite) a round's manifest; answers already given stay. folder: where the round goes (default
     <project>/work/feedback/<round>; a song's proj/ passes the song folder's, which a rebuild leaves alone).
-    footer: sources.footer()'s dict, shown at the bottom of the page (ledger:M254), or None.
+    footer: sources.footer()'s dict, shown at the bottom of the page (ledger:M254), or None. parts: the parts block,
+    [{track, bars, solo, mix}] from feedback.parts.clips (ledger:M253), or None.
     -> (folder, manifest, kept answers)."""
     d = Path(folder) if folder else round_dir(project, rnd)
     its = [_item(n, it, project) for n, it in enumerate(items or [], 1)]
@@ -180,6 +183,8 @@ def build(project, rnd, items, questions, voice=True, title=None, folder=None, f
     man = {'title': title or old.get('title') or f"{name}: {rnd}", 'round': str(rnd),
            'project': str(Path(project).resolve()), 'voice': bool(voice), 'items': its, 'questions': qs,
            'made': old.get('made') or now(), 'updated': now()}
+    if parts:
+        man['parts'] = [dict(p, n=i) for i, p in enumerate(parts, 1)]
     if footer:
         from ..sources import FOOTER_LEAD
         man['footer'] = {'lead': FOOTER_LEAD, 'link': footer['link'], 'how': footer.get('how') or ''}
@@ -197,7 +202,15 @@ def public_manifest(man):
     out = {k: man.get(k) for k in ('title', 'round', 'voice', 'questions', 'footer')}
     out['items'] = [{k: v for k, v in it.items() if k != 'path'} | ({'src': f"item/{it['n']}"} if it.get('path')
                                                                      else {}) for it in man.get('items', [])]
+    out['parts'] = [{'n': p['n'], 'track': p['track'], 'bars': p.get('bars'), 'solo': f"part/{p['n']}/solo",
+                     'mix': f"part/{p['n']}/mix"} for p in man.get('parts') or []]
     return out
+
+
+def names(d):
+    """{track: the person's name for it} from a round's parts block (ledger:M253)."""
+    return {t: (v.get('text') or '').strip() for t, v in (read_json(Path(d) / 'names.json', {}) or {}).items()
+            if (v.get('text') or '').strip()}
 
 
 # ------------------------------------------------------------------ a shared copy, and its answers coming back
@@ -219,6 +232,12 @@ def share(d, man):
             shutil.copyfile(it['path'], out / name)
             src['src'] = name
             files.append(name)
+    for part, src in zip(man.get('parts') or [], pub['parts']):
+        for k in ('solo', 'mix'):
+            name = f"part{part['n']}-{k}{os.path.splitext(part[k])[1].lower()}"
+            shutil.copyfile(part[k], out / name)
+            src[k] = name
+            files.append(name)
     rid = re.sub(r'[^A-Za-z0-9_.-]+', '-', f"{Path(d).parents[2].name}-{Path(d).name}").strip('-.') or 'round'
     data = json.dumps({'id': rid, 'manifest': pub}, ensure_ascii=False)
     data = data.replace('<', '\\u003c')                  # no '</script>' or '<!--' can end the script early
@@ -236,6 +255,24 @@ def _norm(s):
     return re.sub(r'[^a-z0-9]+', ' ', str(s).lower()).strip()
 
 
+_NAMES_HEAD = re.compile(r'^\s*names for the parts\b', re.I)
+_NAME_LINE = re.compile(r'^\s*[-*]\s*(.+?)\s*:\s*(.*?)\s*$')
+
+
+def parse_names(text, tracks):
+    """{track: name} from the 'Names for the parts' block of a pasted message ('- <track>: <their name>')."""
+    lines = str(text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    cut = next((i for i, ln in enumerate(lines) if _NAMES_HEAD.match(ln)), None)
+    if cut is None:
+        return {}
+    out, known = {}, {str(t).lower(): t for t in tracks}
+    for ln in lines[cut + 1:]:
+        m = _NAME_LINE.match(ln)
+        if m and m.group(1).lower() in known and m.group(2) and m.group(2) != '(no name)':
+            out[known[m.group(1).lower()]] = m.group(2)
+    return out
+
+
 def parse_answers(text, questions):
     """A pasted message of answers (the page's 'Copy my answers' text, or any numbered reply) -> ({question n:
     answer}, [lines before the first answer that were left out]). Numbered lines that repeat a question's words head
@@ -243,6 +280,10 @@ def parse_answers(text, questions):
     head them; one question takes the whole message. Raises ValueError when no numbered answer is found."""
     qs = {q['n']: _norm(q['text']) for q in questions}
     lines = str(text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    cut = next((i for i, ln in enumerate(lines) if _NAMES_HEAD.match(ln)), None)
+    if cut is not None:
+        lines = lines[:cut]
+        text = '\n'.join(lines)
     cands = []
     for i, ln in enumerate(lines):
         m = _NUM.match(ln)
@@ -443,6 +484,18 @@ class Store:
             done['changed_at'] = t
             write_json(d / 'done.json', done)
 
+    def name(self, d, track, text):
+        """The person's name for a part in the parts block (ledger:M253)."""
+        with self.lock:
+            nm = read_json(d / 'names.json', {}) or {}
+            if (nm.get(track) or {}).get('text', '') == text:
+                return nm[track].get('at')
+            nm[track] = {'text': text, 'at': now()}
+            write_json(d / 'names.json', nm)
+            self._log(d, {'at': nm[track]['at'], 'part': track, 'named': text})
+            self._changed_after_send(d, nm[track]['at'])
+            return nm[track]['at']
+
     def send(self, d):
         """The person pressed Send: one more send time, and no change after it yet. -> the time."""
         with self.lock:
@@ -634,6 +687,7 @@ def handler(store, page_html):
             if rest == 'state':
                 st = sent_state(d)
                 return self._send(200, {'answers': read_json(d / 'answers.json', {}) or {}, 'stt': store.stt,
+                                        'names': read_json(d / 'names.json', {}) or {},
                                         'sent': {k: st[k] for k in ('state', 'at', 'changed_at')}})
             mi = re.match(r'^item/(\d+)$', rest)
             if mi:
@@ -642,6 +696,13 @@ def handler(store, page_html):
                 if it and os.path.isfile(it['path']):
                     return self._file(it['path'])
                 return self._send(404, {'error': 'no such item'})
+            mp = re.match(r'^part/(\d+)/(solo|mix)$', rest)
+            if mp:
+                part = next((x for x in read_json(d / 'manifest.json', {}).get('parts') or []
+                             if x['n'] == int(mp.group(1))), None)
+                if part and os.path.isfile(part[mp.group(2)]):
+                    return self._file(part[mp.group(2)])
+                return self._send(404, {'error': 'no such part'})
             mv = re.match(r'^voice/([A-Za-z0-9_.-]+)$', rest)
             if mv and os.path.isfile(d / 'voice' / mv.group(1)):
                 return self._file(d / 'voice' / mv.group(1))
@@ -669,14 +730,21 @@ def handler(store, page_html):
                 store.stopped.set()
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
-            m = re.match(r'^/f/([^/]+)/(text|voice|done)$', u.path)
+            m = re.match(r'^/f/([^/]+)/(text|voice|done|name)$', u.path)
             d = m and store.folder(m.group(1))
             if not d:
                 return self._send(404, {'error': 'no such round'})
             if m.group(2) == 'done':                   # the Send button (ledger:M246)
                 return self._send(200, {'ok': True, 'at': store.send(d)})
-            nq = len(read_json(d / 'manifest.json', {}).get('questions', []))
+            man = read_json(d / 'manifest.json', {})
+            nq = len(man.get('questions', []))
             try:
+                if m.group(2) == 'name':
+                    r = json.loads(self._body(1 << 16).decode('utf8'))
+                    track = str(r.get('track') or '')
+                    if track not in {x['track'] for x in man.get('parts') or []}:
+                        raise ValueError('no such part')
+                    return self._send(200, {'ok': True, 'at': store.name(d, track, str(r.get('text') or '').strip())})
                 if m.group(2) == 'text':
                     r = json.loads(self._body(1 << 20).decode('utf8'))
                     qn = int(r['q'])

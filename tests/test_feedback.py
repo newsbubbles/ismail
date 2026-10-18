@@ -466,3 +466,79 @@ def test_paste_errors_point_forward(env, tmp_path):
         api.OPS['feedback_paste'](str(env['song']), 'r1', files=[str(bad)])
     with pytest.raises(api.OpError, match='nothing to keep'):
         api.OPS['feedback_paste'](str(env['song']), 'r1', text='  ')
+
+
+# ledger:M253: the agent's names for the parts are checked with the person by ear
+
+def _band(proj):
+    api.project_new(str(proj), bpm=120, length_bars=16)
+    api.track_add(str(proj), 'drums', instrument='preset:kit_basic')
+    api.track_add(str(proj), 'sub', instrument={"type": "synth", "oscs": [{"wave": "sine"}], "mono": True})
+    api.track_add(str(proj), 'reese', instrument={"type": "synth", "oscs": [{"wave": "saw"}], "mono": True})
+    api.pattern_write(str(proj), 'drums', 1, {"C1": "x...x...x...x..."}, repeat=16)
+    api.notes_write(str(proj), 'sub', 1, "0 E1 4", repeat=16)
+    api.notes_write(str(proj), 'reese', 9, "0 E2 2; 2 G2 2", repeat=4)          # bars 9-12 only
+    api.OPS['stem_map_set'](str(proj), {'drums': 'drums', 'sub': 'bass', 'reese': 'bass'})
+    api.render(str(proj), stems=True, cache=False)
+
+
+def test_parts_block_names_come_back_and_a_note_that_could_mean_two_parts_is_flagged(env, tmp_path, monkeypatch):
+    monkeypatch.setenv('ISMAIL_LEXICON', str(tmp_path / 'lexicon.jsonl'))
+    srv = _serve(env)
+    proj = env['song'] / 'proj'
+    _band(proj)
+    out = api.OPS['feedback_page'](str(proj), 'r5', parts=True, questions=['Which part is too loud?'], open=False,
+                                   share=True)
+    assert 'parts block: 3 parts' in out and 'reese bars 9-12' in out, out
+    d = env['song'] / 'work' / 'feedback' / 'r5'
+    man = FB.read_json(d / 'manifest.json')
+    assert [p['track'] for p in man['parts']] == ['drums', 'sub', 'reese']
+    assert all(os.path.isfile(p['solo']) and os.path.isfile(p['mix']) for p in man['parts'])
+    assert (d / 'share' / 'part3-solo.wav').is_file()
+    url = f'http://127.0.0.1:{srv.port}/f/song-r5/'
+    pub = json.loads(_get(url + 'manifest')[2])
+    assert pub['parts'][2] == {'n': 3, 'track': 'reese', 'bars': [9, 12], 'solo': 'part/3/solo', 'mix': 'part/3/mix'}
+    assert _get(url + 'part/3/solo')[1]['Content-Type'] == 'audio/wav'
+    assert _post(url + 'name', json.dumps({'track': 'reese', 'text': 'the answer bass'}).encode())['ok']
+    with pytest.raises(urllib.error.HTTPError):
+        _post(url + 'name', json.dumps({'track': 'nope', 'text': 'x'}).encode())
+    _post(url + 'text', json.dumps({'q': 1, 'text': 'the bass is way too loud'}).encode())
+    read = api.OPS['feedback_read'](str(proj), 'r5')
+    assert 'reese -> "the answer bass"' in read and 'not named yet: drums, sub' in read
+    assert '1. says "bass", and 2 parts could be it (reese, sub): ask which' in read, read
+    _post(url + 'text', json.dumps({'q': 1, 'text': 'the answer bass is way too loud'}).encode())
+    assert 'parts could be it' not in api.OPS['feedback_read'](str(proj), 'r5')
+    # the name is confirmed only by what they typed there
+    ok = api.lexicon_note(str(env['song']), said='the answer bass', track='reese', heard='r5')
+    assert 'the part reese, confirmed by ear (feedback r5)' in ok
+    with pytest.raises(api.OpError, match="they called 'reese' 'the answer bass', not 'the talker'"):
+        api.lexicon_note(str(env['song']), said='the talker', track='reese', heard='r5')
+    with pytest.raises(api.OpError, match="has no name for 'sub' from them"):
+        api.lexicon_note(str(env['song']), said='the sub', track='sub', heard='r5')
+    assert 'not confirmed by them yet' in api.lexicon_note(str(env['song']), said='the low one', track='sub')
+
+
+def test_paste_brings_names_for_the_parts(env):
+    _serve(env)
+    proj = env['song'] / 'proj'
+    _band(proj)
+    api.OPS['feedback_page'](str(proj), 'r6', parts=['sub', 'reese'], questions=['Anything?'], open=False)
+    msg = ("song: r6 (round r6): my answers\n\n1. Anything?\nmore drums\n\nNames for the parts\n- sub: the deep one\n"
+           "- reese: (no name)\n")
+    out = api.OPS['feedback_paste'](str(proj), 'r6', text=msg)
+    assert 'answers to 1 question (1), names for 1 part' in out
+    d = env['song'] / 'work' / 'feedback' / 'r6'
+    assert FB.names(d) == {'sub': 'the deep one'} and FB.read_json(d / 'answers.json')['1']['text'] == 'more drums'
+
+
+def test_parts_errors_point_forward(env):
+    _serve(env)
+    with pytest.raises(api.OpError, match='needs a song'):
+        _page(env, open=False, parts=True)
+    proj = env['song'] / 'proj'
+    api.project_new(str(proj), bpm=120, length_bars=2)
+    api.track_add(str(proj), 'pad', instrument={'type': 'synth'})
+    with pytest.raises(api.OpError, match="no track 'nope'; the song has pad"):
+        api.OPS['feedback_page'](str(proj), 'r7', parts=['nope'], questions=['?'], open=False)
+    with pytest.raises(api.OpError, match='latest render'):
+        api.OPS['feedback_page'](str(proj), 'r7', parts=True, questions=['?'], open=False)
