@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Skill: "ytdl" means yt-dlp, and it is a Python library too
+
+- Told "use ytdl", a session searched the disk for a folder of that name. `recreate.md` section 0 now says the
+  names people use for yt-dlp, and that it is a Python library as well as a command.
+
 ### Skill: one reference for helper agents (ledger:M243)
 
 - A first session took 15 minutes to its first sound while one agent built every voice in turn. Helpers were
