@@ -4,7 +4,7 @@
 
 ### Part names are checked with the person by ear
 
-A listener said the bass overpowered the track. He meant the answering bass; the agent turned down another one it
+A listener said the bass overpowered the track. They meant the answering bass; the agent turned down another one it
 called the talker, and three rounds went by before anyone noticed. Nothing checked that both used the same names.
 
 - `feedback_page(parts=True)` (or a list of tracks) adds "Name the parts": each part alone and in the mix at the bars
