@@ -320,7 +320,11 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
         d['objectives'] = [_objective(objective, 'user')]
     with open(os.path.join(root, 'project.json'), 'w', encoding='utf8') as f:
         json.dump(d, f, indent=1)
-    return f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
+    out = f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
+    if reference:
+        from . import replies
+        out += '\n' + '\n'.join(replies.reference_next())
+    return out
 
 
 @op()
@@ -339,6 +343,8 @@ def project_info(project: str) -> str:
     for anc in d.get('lineage', [])[:3]:
         last = (anc.get('objectives') or [{}])[-1].get('text')
         L.append(f"derived from {anc.get('name')}" + (f", whose objective was {last!r}" if last else ''))
+    if d.get('listen_pref'):
+        L.append(f"how they hear drafts (listen_pref): {d['listen_pref']!r}")
     if d.get('reference'):
         L.append(f"reference: {d['reference'].get('file')}" + (f" (stems: {d['reference']['stems_dir']})" if d['reference'].get('stems_dir') else ''))
     L.append(f"tracks ({len(d['tracks'])}):")
@@ -387,8 +393,14 @@ def _ranges(xs):
 @op(mutates=True)
 def project_set(project: str, bpm: float = None, length_bars: int = None, offset_sec: float = None,
                 reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None,
-                objective: str = None, objective_by: str = 'user', artist: str = None) -> str:
-    """Change project settings. Changing bpm keeps notes on the same beats (the song gets faster/slower).
+                objective: str = None, objective_by: str = 'user', artist: str = None,
+                listen_pref: str = None) -> str:
+    """Change project settings (tempo, length, bar 1, the reference, the objective, the artist tag, how they hear
+    drafts). Changing bpm keeps notes on the same beats (the song gets faster/slower).
+    reference: the recording this song is measured against, to match it or as inspiration; the reply says what to
+    run next. Reach for it when a reference arrives, even partway through a song, as a target or as inspiration.
+    listen_pref: the person's standing choice of how they hear a draft, in their words ("send every draft to my
+    phone", "just give me the file"); render's and sketch's "hear it" block follows it and says so. '' clears it.
     artist: the artist tag render writes into its mp3s (default 'ismail'); '' writes no artist tag, for a copy
     whose artist is added later, by hand.
     reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference.
@@ -418,8 +430,19 @@ def project_set(project: str, bpm: float = None, length_bars: int = None, offset
             raise OpError("set reference first")
         P.d['reference']['stems_dir'] = os.path.abspath(reference_stems)
         ch.append(f"reference_stems={reference_stems}")
+    if listen_pref is not None:
+        if str(listen_pref).strip():
+            P.d['listen_pref'] = str(listen_pref).strip()
+            ch.append(f"listen_pref={P.d['listen_pref']!r}")
+        else:
+            P.d.pop('listen_pref', None)
+            ch.append("listen_pref cleared")
     P.save()
-    return "set " + (', '.join(ch) if ch else 'nothing')
+    out = "set " + (', '.join(ch) if ch else 'nothing')
+    if reference is not None:
+        from . import replies
+        out += '\n' + '\n'.join(replies.reference_next())
+    return out
 
 
 @op(mutates=True)
@@ -771,6 +794,10 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
              f"{top or 'its file'} where your app shows a player, else a clickable link with its full path. "
              f"play_file(path) opens it in their own player (say first that it will play out loud). End on the song "
              f"and the SAY block's question: no setup report, tool counts or devices unless they ask.")
+    first_file = top or (built[0].get('done') or {}).get('file')
+    if first_file:                       # ledger:M247: what is up right now to hear it on, and one option
+        from . import replies
+        L.append(replies.hear_it(root, first_file, what='sketch'))
     song = _kept_version(root)
     keep_line = (f"The song is version {song} (kept); sketch_keep(project, '<version number>', replace=True) makes a "
                  f"new pick the song." if song else
@@ -1315,13 +1342,17 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
             " and the whole song play the same sound for the same note."
     if type == 'kit':
         return 'kit: {"type":"kit","map":{"C1":{"type":"kick",...},"D1":{"type":"sampler","sound":"snare1","one_shot":true}}}' \
-               " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1."
+               " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1." \
+               "\nnote names follow C4 = 60, so C1 = MIDI 24 (GM drum charts number C1 as 36): a voice that maps" \
+               " pieces by MIDI number adds 12 to the note before looking it up in a GM chart, or maps by name."
     if type == 'code':
         return ('code: {"type":"code","voice":"<name>","fn":"voice","params":{},"tail":1.0} plays a voice module '
                 "(voices_list, voice_help; a song's own voices go in <project>/voices/<name>.py). Inline form: "
                 '{"type":"code","code":"def voice(freq, t, vel, gate, sr):\\n    return np.sin(2*np.pi*freq*t)*np.exp(-t*4)",'
                 ' "tail":0.3}. t is a time array (s) covering gate+tail, vel 0..1; return mono or (2,n); np and dsp '
-                'are available inline. Prefer a voice module for anything you will reuse.')
+                'are available inline. Prefer a voice module for anything you will reuse. Note names follow C4 = 60, '
+                'so C1 = MIDI 24 (GM drum charts number C1 as 36): a drum voice that picks its piece by MIDI number '
+                '(69 + 12*log2(freq/440)) adds 12 before looking it up in a GM chart, or maps by name.')
     if type == 'mimic':
         from . import mimic
         return ('mimic: {"type":"mimic","profile":"<name>","params":{},"tail":1.0} plays an instrument measured from '
@@ -1932,7 +1963,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg on PATH or $ISMAIL_FFMPEG.
     wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once). A bare number is
     minutes: wait='10' is ten minutes; for seconds write wait='600s'.
-    Returns levels, clipping and timing."""
+    Returns levels, clipping and timing; with a reference, whether it was compared since this render; after an mp3
+    or a named render, a "hear it" block: the file's full path, what is up now to hear it on (the phone page, the
+    stage, a live engine, a feedback round) and one option chosen from that state."""
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
     from .render import Renderer, write_wav, write_renders, prune_cache, RenderError
@@ -2031,6 +2064,14 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     short = sourcesmod.summary(P.root, P.d)[1]
     if short:
         L.append(short)
+    from . import replies                # ledger:M245 B, M247: lines read from the live state, never "at step 8"
+    ref_line = replies.reference_line(P.root, P.d)
+    if ref_line:
+        L.append(ref_line)
+    heard = (os.path.join(rd, (out or 'latest') + '.mp3') if mp3 != 'none' else
+             os.path.join(rd, out + '.wav') if out else None)
+    if heard:
+        L.append(replies.hear_it(P.root, heard, P.d))
     return '\n'.join(L)
 
 
@@ -2225,10 +2266,15 @@ def compare(project: str, a: str = 'render', b: str = 'ref', bars: list = None, 
             detail: int = 8) -> str:
     """Compare two sources bar by bar on the project grid (default: your render vs the reference). Scores:
     chroma_sim, rhythm_corr, band dB deltas, log-mel L1, plus the worst bars and advice. Compare stems too:
-    a='track:bass', b='ref:bass'."""
+    a='track:bass', b='ref:bass'. Reach for it when a reference is set (as a target or as inspiration) and a draft
+    is about to go to the person, or they say it is not like the reference; render's reply says when it last ran."""
     P = _load(project)
     (pa, ga), (pb, gb) = P.source(a, bars), P.source(b, bars)
-    return A.compare(pa, pb, ga, bars, offset_b + gb.offset - ga.offset, detail=detail)[1]
+    out = A.compare(pa, pb, ga, bars, offset_b + gb.offset - ga.offset, detail=detail)[1]
+    from . import replies
+    if replies.is_ref(a) or replies.is_ref(b):
+        replies.note_compared(P.root, 'compare', f"{a} vs {b}" + (f" bars {bars[0]}-{bars[1]}" if bars else ''))
+    return out
 
 
 @op()

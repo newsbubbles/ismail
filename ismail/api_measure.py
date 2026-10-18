@@ -114,7 +114,8 @@ def analyze_kit(project: str, source: str = 'ref:drums', bars: list = None, k: i
     and writes each component's audio to <project>/analysis/kit/comp_<n>.wav (use it as a sound_import /
     instrument_fit target, never in the render). analyze_drums shows 3 band lanes and hides pieces: on a G-funk
     record this found 6 (punch kick apart from the 808, ghost snares). Raise k until new components are only
-    fragments (< 2% energy, or a copy of another's pattern)."""
+    fragments (< 2% energy, or a copy of another's pattern). Reach for it when a snare, kick or hat sounds dated,
+    generic or not the genre's: the reference's own pieces, each as a clean target."""
     import librosa
     P = _load(project)
     path, g = P.source(source, bars)

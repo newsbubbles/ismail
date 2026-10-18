@@ -40,15 +40,19 @@
   .clip .words.wait { color: var(--soft); font-style: italic; }
   .text-item { white-space: pre-wrap; margin: 0; }
   #err { display: none; }
+  .send-card { border-color: var(--accent); }
+  button.send { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.send:disabled { opacity: 0.6; cursor: default; }
 </style>
 </head>
 <body>
 <main>
   <h1 id="title">Feedback</h1>
-  <p class="lead" id="lead">Everything you type or say here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here.</p>
+  <p class="lead" id="lead">Everything you type or say here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.</p>
   <div class="card status bad" id="err"></div>
   <section id="items"></section>
   <section id="questions"></section>
+  <section id="send"></section>
 </main>
 <script>
 (() => {
@@ -58,6 +62,7 @@
   const pending = {};
   let manifest = null;
   let voiceOn = false;
+  let sent = { state: 'writing', at: null, changed_at: null };
 
   function showError(msg) { const e = $('#err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
   function when(iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } }
@@ -91,11 +96,65 @@
       const r = await fetch('text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ q: n, text: text }) });
       if (!r.ok) throw new Error(r.status);
       setStatus(n, 'Saved', 'ok');
+      return true;
     } catch (e) {
       pending[n] = true;
       setStatus(n, 'Not saved yet: the page server does not answer. Keep this tab open; it tries again.', 'bad');
       timers[n] = setTimeout(() => saveText(n), 5000);
+      return false;
     }
+  }
+
+  // Send: the person says they are finished (done.json on the computer); typing after it is a late addition, shown
+  // here and to the agent, until they press Send again (ledger:M246)
+  function showSent() {
+    const b = $('#sendbtn'), s = $('#sendst');
+    if (!b || !s) return;
+    b.disabled = false;
+    if (sent.state === 'sent') { b.textContent = 'Send again'; s.textContent = 'Sent ' + when(sent.at) + '. Thank you. If you add anything, press Send again.'; s.className = 'status ok'; }
+    else if (sent.state === 'changed') { b.textContent = 'Send again'; s.textContent = 'You changed something after sending. Press Send again when you are done.'; s.className = 'status'; }
+    else { b.textContent = 'Send'; s.textContent = 'Not sent yet.'; s.className = 'status'; }
+  }
+
+  function changedAfterSend() {
+    if (sent.state === 'sent') { sent.state = 'changed'; showSent(); }
+  }
+
+  async function send() {
+    const b = $('#sendbtn');
+    b.disabled = true;
+    $('#sendst').textContent = 'Sending...';
+    $('#sendst').className = 'status';
+    for (const n of Object.keys(pending)) {
+      if (pending[n] && !(await saveText(Number(n)))) {
+        $('#sendst').textContent = 'Not sent: an answer could not be saved because the page server does not answer. Try again in a moment.';
+        $('#sendst').className = 'status bad';
+        b.disabled = false;
+        return;
+      }
+    }
+    try {
+      const r = await fetch('done', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (!r.ok) throw new Error(r.status);
+      const j = await r.json();
+      sent = { state: 'sent', at: j.at, changed_at: null };
+      showSent();
+    } catch (e) {
+      $('#sendst').textContent = 'Not sent: the page server does not answer. Your answers are saved; try Send again in a moment.';
+      $('#sendst').className = 'status bad';
+      b.disabled = false;
+    }
+  }
+
+  function renderSend() {
+    const c = make('div', 'card send-card');
+    c.appendChild(make('p', 'label', 'When you have said everything, press Send.'));
+    const row = make('div', 'row');
+    const b = make('button', 'send', 'Send'); b.type = 'button'; b.id = 'sendbtn'; b.addEventListener('click', send);
+    row.appendChild(b);
+    const st = make('span', 'status'); st.id = 'sendst'; row.appendChild(st);
+    c.appendChild(row);
+    $('#send').appendChild(c);
   }
 
   function renderClips(n, said) {
@@ -137,6 +196,7 @@
           const r = await fetch('voice?q=' + n + '&secs=' + secs, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
           if (!r.ok) throw new Error(r.status);
           setStatus(n, 'Recording saved. Your words appear under it when they are written down.', 'ok');
+          changedAfterSend();
           refresh();
           return;
         } catch (e) { await new Promise((ok) => setTimeout(ok, 2000)); }
@@ -155,7 +215,7 @@
       const c = make('div', 'card q');
       const h = make('h2'); h.appendChild(make('span', 'n', q.n + '.')); h.appendChild(document.createTextNode(q.text)); c.appendChild(h);
       const t = make('textarea'); t.id = 't' + q.n; t.setAttribute('aria-label', 'Answer ' + q.n); t.placeholder = voiceOn ? 'Type here, or press Record and say it' : 'Type here';
-      t.addEventListener('input', () => { pending[q.n] = true; setStatus(q.n, 'Typing...'); clearTimeout(timers[q.n]); timers[q.n] = setTimeout(() => saveText(q.n), 600); });
+      t.addEventListener('input', () => { pending[q.n] = true; changedAfterSend(); setStatus(q.n, 'Typing...'); clearTimeout(timers[q.n]); timers[q.n] = setTimeout(() => saveText(q.n), 600); });
       t.addEventListener('blur', () => { if (pending[q.n]) saveText(q.n); });
       c.appendChild(t);
       const row = make('div', 'row');
@@ -172,6 +232,7 @@
     let st;
     try { st = await getJSON('state'); showError(''); }
     catch (e) { showError('The page server does not answer right now. What you already saved is safe on the computer.'); return; }
+    if (first && st.sent) { sent = st.sent; showSent(); }
     let waiting = 0;
     for (const q of manifest.questions) {
       const a = st.answers[String(q.n)] || {};
@@ -198,9 +259,11 @@
     voiceOn = !!manifest.voice;
     document.title = manifest.title || 'Feedback';
     $('#title').textContent = manifest.title || 'Feedback';
-    if (!voiceOn) $('#lead').textContent = 'Everything you type here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here.';
+    if (!voiceOn) $('#lead').textContent = 'Everything you type here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.';
     renderItems(manifest.items || []);
     renderQuestions(manifest.questions || []);
+    renderSend();
+    showSent();
     await refresh(true);
   })();
 })();

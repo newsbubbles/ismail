@@ -142,10 +142,11 @@ Find any tool by what you need or by role with `ops_find`.
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
   rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
-- **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_list`, `feedback_stop`): questions the person
-  answers by typing or by voice at the desk, served on this computer, opened in their default browser (an app's
-  browser pane has no microphone), with every typed answer and voice clip saved in the song and transcribed, and
-  all of it back when they reopen the page.
+- **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
+  questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
+  browser (an app's browser pane has no microphone), with every typed answer and voice clip saved in the song and
+  transcribed, and all of it back when they reopen the page. The page ends in a Send button: `feedback_wait` waits
+  for it and returns the answers, and `feedback_read` says SENT or STILL WRITING first.
 - **The first session** for someone new: `guide(new_person=True)`, `sketch` versions 1, 2 and 3 on the showcase
   voices (`sketch(base=)`, `sketch_keep` for the next round), and feeling words ("happier", "calmer", "darker") that
   change a sketch by named moves.

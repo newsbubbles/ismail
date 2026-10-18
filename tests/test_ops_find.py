@@ -36,6 +36,22 @@ def test_a_need_in_plain_words_finds_its_op_first(need, first):
     assert out.splitlines()[1].split()[0] == first, out
 
 
+def _top(need, n):
+    return [l.split()[0] for l in api.OPS['ops_find'](need=need, n=n).splitlines()[1:]]
+
+
+def test_a_dated_drum_finds_the_kit_and_fit_ops():
+    """ledger:M245: the query found phone_sounds and sound_speak (the word 'sound' in their names), and missed the
+    ops that give a drum the genre's character. Their own 'Reach for it when' sentences now say it."""
+    top = _top('the snare sounds dated, make it sound like the genre', 4)
+    assert set(top) == {'analyze_kit', 'sound_extract', 'instrument_fit', 'sound_compare'}, top
+
+
+def test_a_reference_as_inspiration_finds_where_to_set_it_and_compare():
+    top = _top('a reference arrived, use it as inspiration', 3)
+    assert top[0] == 'project_set' and 'compare' in top, top
+
+
 def test_a_role_page_lists_its_shelves_first_and_their_ops():
     out = api.OPS['ops_find'](role='voice')
     shelf_lines = [l for l in out.splitlines()[1:] if not l.startswith(' ')]

@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Replies that read the live state: the reference, a Send button, "hear it" (ledger:M245, M246, M247)
+
+- A first-session test kept its reference in a separate analysis project, never compared a draft with
+  it, and called a draft "measured on" the reference. render's reply had no word about the reference. Now, when
+  the project has a reference, render prints one line: compared with it never, or not since this render with the
+  last comparison (compare, cmp_run and sound_compare against `ref` leave a receipt in `renders/compared.json`);
+  when the song's ref/ holds audio the project does not use, it says `project_set(reference=)` makes the reference
+  ops reachable. `project_set(reference=)` and `project_new(reference=)` say what to run next, with the caveat
+  that the part carrying the reference's identity is checked on top, never averaged down to its stem.
+- `ops_find("the snare sounds dated, make it sound like the genre")` returned phone_sounds and sound_speak (the
+  word "sound" in their names). analyze_kit, sound_extract, instrument_fit and sound_compare now have "Reach for it
+  when" sentences in their descriptions, as project_set and compare do for a reference that arrives as
+  inspiration; both queries are tests.
+- `instrument_help(type='kit')` and `type='code'` say that note names follow C4 = 60, so C1 is MIDI 24 where GM
+  drum charts say 36 (a kit voice mapped by GM numbers played a rim click on every hit).
+- The feedback page saved on every keystroke and had no way to say "finished", so an agent read and answered a
+  half-typed note. Every round now ends in a Send button that writes `done.json`; typing or recording after it
+  marks the round changed after sending (the earlier send time stays) until Send is pressed again.
+  `feedback_read` opens with SENT or STILL WRITING and, when not sent, "not sent yet: don't act on these answers".
+  New op `feedback_wait(project, round, timeout_s=180, after=)` waits for the Send and returns the answers, or at
+  timeout what is typed so far and how to call it again; `feedback_page`'s reply points to it and never asks the
+  person to type "done". A page server started before this has no Send button: the replies say so and how to
+  restart it.
+- Rounds given a song's `proj/` were written inside it and lost when the song's build regenerated `proj/`. They now
+  go in the song folder (`songs/<slug>/work/feedback/<round>/`); a round already in `proj/` stays where it is.
+- Drafts went out as file cards the person did not find. render (after an mp3 or a named render) and sketch now end
+  in a short "hear it" block built from live state, by file reads and local requests of under half a second: the
+  file's full path; the phone page and when the phone last checked in (the phone server's `/health` now lists its
+  devices); the stage when the person is in the headset; a live engine for this song; this project's feedback
+  round; then one option chosen from that state (a standing choice in `project_set(listen_pref=)`, then the stage,
+  an open feedback round, a phone seen in the last 5 minutes, a live engine, else play_file or a feedback page).
+  It offers; whether a draft goes on a page or hands over as a file stays the agent's call.
+
 ### Skill: lessons from a first-session test, and one consistent playbook (ledger:M245)
 
 - A test song came out bland: it matched the reference's averages (a riff turned down 10 dB to a stem's level),

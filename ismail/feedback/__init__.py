@@ -8,6 +8,8 @@ A round is a folder in the project, <project>/work/feedback/<round>/:
   manifest.json      what the page shows: title, items (clips, pictures, text), numbered questions, voice on or off
   answers.json       per question: the typed text (saved as they type) and every voice clip with its transcript
   answers_log.jsonl  every write in order, so no earlier wording is lost to a later edit
+  done.json          written when the person presses Send: every send time, and when they changed something after
+                     the last one (a late addition), so an agent acts only on a round they sent (ledger:M246)
   voice/             the voice clips (q<n>_<stamp>.webm, .ogg, .m4a or .wav), each transcript beside it as .txt
 
 One shared server serves every round on 127.0.0.1:
@@ -103,6 +105,23 @@ def round_dir(project, rnd):
     return Path(project).resolve() / 'work' / 'feedback' / str(rnd)
 
 
+def sent_state(d):
+    """Where a round stands (ledger:M246): {'state': 'sent' | 'changed' | 'writing', 'sent': [every send time],
+    'at': the last send or None, 'changed_at': the first change after the last send or None, 'last_save': the newest
+    typed or said time or None}. 'changed' is a late addition: sent, then changed, not sent again yet."""
+    d = Path(d)
+    done = read_json(d / 'done.json', None) or {}
+    ans = read_json(d / 'answers.json', {}) or {}
+    saves = [a.get('typed_at') for a in ans.values() if a.get('typed_at')]
+    saves += [c.get('at') for a in ans.values() for c in a.get('said') or [] if c.get('at')]
+    last = max(saves, key=parse_time) if saves else None
+    sent = list(done.get('sent') or ([done['at']] if done.get('at') else []))
+    at = sent[-1] if sent else None
+    changed = done.get('changed_at') if at else None
+    return {'state': 'writing' if not at else 'changed' if changed else 'sent', 'sent': sent, 'at': at,
+            'changed_at': changed, 'last_save': last}
+
+
 def _kind(path):
     ext = os.path.splitext(str(path))[1].lower()
     return 'audio' if ext in AUDIO else 'video' if ext in VIDEO else 'image' if ext in IMAGE else None
@@ -141,16 +160,19 @@ def _question(n, q):
     return {'n': n, 'text': str(q).strip()}
 
 
-def build(project, rnd, items, questions, voice=True, title=None):
-    """Write (or rewrite) a round's manifest; answers already given stay. -> (folder, manifest, kept answers)."""
-    d = round_dir(project, rnd)
+def build(project, rnd, items, questions, voice=True, title=None, folder=None):
+    """Write (or rewrite) a round's manifest; answers already given stay. folder: where the round goes (default
+    <project>/work/feedback/<round>; a song's proj/ passes the song folder's, which a rebuild leaves alone).
+    -> (folder, manifest, kept answers)."""
+    d = Path(folder) if folder else round_dir(project, rnd)
     its = [_item(n, it, project) for n, it in enumerate(items or [], 1)]
     if not questions:
         raise ValueError("no questions: give at least one, e.g. questions=['What do you hear first?']")
     qs = [_question(n, q) for n, q in enumerate(questions, 1)]
     (d / 'voice').mkdir(parents=True, exist_ok=True)
     old = read_json(d / 'manifest.json', {}) or {}
-    man = {'title': title or old.get('title') or f"{Path(project).resolve().name}: {rnd}", 'round': str(rnd),
+    name = d.parents[2].name if folder else Path(project).resolve().name
+    man = {'title': title or old.get('title') or f"{name}: {rnd}", 'round': str(rnd),
            'project': str(Path(project).resolve()), 'voice': bool(voice), 'items': its, 'questions': qs,
            'made': old.get('made') or now(), 'updated': now()}
     write_json(d / 'manifest.json', man)
@@ -320,7 +342,27 @@ class Store:
             row['text'], row['typed_at'] = text, now()
             write_json(d / 'answers.json', ans)
             self._log(d, {'at': row['typed_at'], 'q': q, 'typed': text})
+            self._changed_after_send(d, row['typed_at'])
             return row['typed_at']
+
+    def _changed_after_send(self, d, t):
+        """A change after Send (called under the lock): the round reads 'changed after sending' until Send again;
+        the earlier send times stay."""
+        done = read_json(d / 'done.json', None)
+        if done and not done.get('changed_at'):
+            done['changed_at'] = t
+            write_json(d / 'done.json', done)
+
+    def send(self, d):
+        """The person pressed Send: one more send time, and no change after it yet. -> the time."""
+        with self.lock:
+            done = read_json(d / 'done.json', None) or {}
+            t = now()
+            done['sent'] = list(done.get('sent') or []) + [t]
+            done['at'], done['changed_at'] = t, None
+            write_json(d / 'done.json', done)
+            self._log(d, {'at': t, 'sent': True})
+            return t
 
     def voice(self, d, q, data, mime, secs):
         ext = ('webm' if 'webm' in mime else 'ogg' if 'ogg' in mime else 'm4a' if 'mp4' in mime or 'm4a' in mime
@@ -336,6 +378,7 @@ class Store:
             ans.setdefault(str(q), {'text': '', 'typed_at': None, 'said': []}).setdefault('said', []).append(clip)
             write_json(d / 'answers.json', ans)
             self._log(d, {'at': clip['at'], 'q': q, 'said': clip['file'], 'secs': clip['secs']})
+            self._changed_after_send(d, clip['at'])
             self.queue.append((d, str(q), vid))
         return clip
 
@@ -480,7 +523,7 @@ def handler(store, page_html):
             p = urlparse(self.path).path
             if p == '/health':
                 return self._send(200, {'ok': True, 'what': WHAT, 'home': str(store.home), 'pid': os.getpid(),
-                                        'stt': store.stt, 'waiting': len(store.queue)})
+                                        'stt': store.stt, 'waiting': len(store.queue), 'send': True})
             if p in ('/', '/f', '/f/'):
                 rows = ''.join(f'<li><a href="/f/{k}/">{k}</a></li>' for k in sorted(rounds(store.home))
                                if store.folder(k))
@@ -499,7 +542,9 @@ def handler(store, page_html):
             if rest == 'manifest':
                 return self._send(200, public_manifest(read_json(d / 'manifest.json', {})))
             if rest == 'state':
-                return self._send(200, {'answers': read_json(d / 'answers.json', {}) or {}, 'stt': store.stt})
+                st = sent_state(d)
+                return self._send(200, {'answers': read_json(d / 'answers.json', {}) or {}, 'stt': store.stt,
+                                        'sent': {k: st[k] for k in ('state', 'at', 'changed_at')}})
             mi = re.match(r'^item/(\d+)$', rest)
             if mi:
                 it = next((i for i in read_json(d / 'manifest.json', {}).get('items', [])
@@ -534,10 +579,12 @@ def handler(store, page_html):
                 store.stopped.set()
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
-            m = re.match(r'^/f/([^/]+)/(text|voice)$', u.path)
+            m = re.match(r'^/f/([^/]+)/(text|voice|done)$', u.path)
             d = m and store.folder(m.group(1))
             if not d:
                 return self._send(404, {'error': 'no such round'})
+            if m.group(2) == 'done':                   # the Send button (ledger:M246)
+                return self._send(200, {'ok': True, 'at': store.send(d)})
             nq = len(read_json(d / 'manifest.json', {}).get('questions', []))
             try:
                 if m.group(2) == 'text':
