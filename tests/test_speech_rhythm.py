@@ -57,7 +57,7 @@ def test_speak_rhythm_sets_each_syllable_on_its_16th():
 def test_speak_rhythm_through_the_op_with_a_fake_engine(monkeypatch):
     import sys
     from ismail import api_sound
-    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setattr(api_sound, '_has_sapi', lambda: True)   # patching sys.platform breaks soundfile off Windows
 
     def fake_tts(text, voice, rate, base):
         sf.write(base + '.wav', np.random.default_rng(0).standard_normal(22050) * 0.3, 22050)

@@ -187,6 +187,12 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
             f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}")
 
 
+def _has_sapi():
+    """Windows SAPI is the engine that gives word and phone timings (tests patch this, never sys.platform)."""
+    import sys
+    return sys.platform == 'win32'
+
+
 def _tts(text, voice, rate, tmp_base):
     """Speak text into an audio file with the OS's own engine: Windows SAPI, macOS `say`, Linux espeak-ng/espeak.
     A voice the engine doesn't have falls back to its default voice. Returns (path, voice actually used)."""
@@ -250,7 +256,7 @@ def sound_speak(project: str, name: str, text: str, voice: str = None, rate: int
     from . import speech
     spec = None
     if rhythm:
-        if sys.platform != 'win32':
+        if not _has_sapi():
             raise OpError("rhythm= needs the speech engine's word and phone timings, which only Windows SAPI gives; "
                           "on this system speak the line without rhythm= and cut it by ear (sound_zoom)")
         try:
