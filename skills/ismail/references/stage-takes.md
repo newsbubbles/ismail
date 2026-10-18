@@ -8,7 +8,8 @@ work. The helper keeps the loop with the person and hands back what it got. The 
 agent harnesses are built (one agent, many helpers) works for the performance loop too.
 
 Read `stage.md` first (the stage tools, contact with a person in a headset, a Follow is a performance), and
-`rigged-characters.md` for the bodies the person plays.
+`rigged-characters.md` for the bodies the person plays. `helpers.md` covers helpers in general (the shared machine,
+which model for which task).
 
 ## Who owns what
 

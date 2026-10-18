@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Skill: one reference for helper agents (ledger:M243)
+
+- A first session took 15 minutes to its first sound while one agent built every voice in turn. Helpers were
+  mentioned only inside the jam and stage-takes guides. `references/helpers.md` now covers them for any piece:
+  quick mode by default and a crew when it pays, sound first while helpers build, who owns what (only the main
+  agent talks and plays sound), the brief, the shared machine (helpers use the parent's `ISMAIL_SESSION`, one heavy
+  job per crew), cheaper models for short narrow tasks with the person's choice winning, and working without
+  helpers. SKILL.md (the loop, the table, the reference list), live.md, stage-takes.md, development.md and
+  worktrees.md point to it.
+
 ### Skill: fetching a reference from a link
 
 - A new session given a YouTube link had only "yt-dlp; YouTube may bot-wall" to go on, improvised other clients
