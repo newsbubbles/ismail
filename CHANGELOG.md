@@ -35,10 +35,31 @@
   an open feedback round, a phone seen in the last 5 minutes, a live engine, else play_file or a feedback page).
   It offers; whether a draft goes on a page or hands over as a file stays the agent's call.
 
-### Skill: "ytdl" means yt-dlp, and it is a Python library too
+### Skill: lessons from a first-session test, and one consistent playbook (ledger:M245)
 
-- Told "use ytdl", a session searched the disk for a folder of that name. `recreate.md` section 0 now says the
-  names people use for yt-dlp, and that it is a Python library as well as a command.
+- A test song came out bland: it matched the reference's averages (a riff turned down 10 dB to a stem's level),
+  wrote a stock chord loop over a reference with one pedal, kept a generic snare, and never compared a draft with
+  the reference, because every reference op was routed through recreate.md. The skill now says, where the decision
+  is made: a reference that arrives as inspiration is set on the song and compared before every draft (a new row,
+  the loop's listen item, a Reference line in the Listening Report, recreate.md); the Session Sheet's harmony is
+  measured from the reference or the genre, a pedal included, and names the reference's signature, built first and
+  pushed; the part that carries the identity is checked on top where it enters, not averaged; "design it" still
+  means measuring genre tracks yourself; a stem is a hint and the full mix the target; genre drums come from
+  measured kit pieces; C1 is MIDI 24 in ismail (GM charts say 36).
+- One rule against guessing in Non-negotiables: a cause, a fact about the reference or a reading of the person's
+  words is a guess until one check backs it, the check is named, and an unchecked cause is never acted on twice.
+- Handing a draft over: the person always gets something to open and hear, the agent follows the "hear it" block
+  in render's and sketch's replies (the VR stage included), the person's way of listening is asked once and kept,
+  and a feedback page is read after their Send (`feedback_wait`), never a typed "done".
+- Coherence pass: the loop reads as a checklist, not a sequence; the guide's lines tied to "step 8" or "step 0"
+  name the moment instead; duplicates folded (the mp3-and-question rule into the loop, the measured-numbers rule
+  into the guess rule, the eye exam in instruments.md into a pointer); an exam page is never handed over as a file
+  path while a song file is.
+
+### Skill: yt-dlp is a Python library too
+
+- `recreate.md` section 0 says yt-dlp is a Python library as well as a command, so a script can fetch several
+  references at once.
 
 ### Skill: one reference for helper agents (ledger:M243)
 

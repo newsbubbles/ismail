@@ -119,8 +119,8 @@ a view of the stage) has been the fastest route to a good result. The rules that
   on the phone and spends whole days away from the desk: plan exams that work on a phone and
   earbuds.
 - A desk page that takes their voice or mic opens in their own browser, not an app pane (a pane has no
-  microphone), and brings back everything they typed or said when reopened: `feedback_page` does all of it, and
-  `feedback_read` reads their answers. A hand-built page only for what it cannot do (`blind-tests.md`, page
+  microphone), and brings back everything they typed or said when reopened: `feedback_page` does all of it,
+  `feedback_wait` returns when they press Send, and `feedback_read` reads their answers. A hand-built page only for what it cannot do (`blind-tests.md`, page
   mechanics).
 
 ## Bars or time: their unit

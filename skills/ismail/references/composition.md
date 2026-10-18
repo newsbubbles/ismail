@@ -27,14 +27,16 @@ Rules of thumb: accents (X) on no more than 4 steps per bar per part; a part tha
 
 ## Harmony and voicing
 
-- Write the chord loop first in the Session Sheet (roots per bar), then derive: bass takes roots (C2-A2), stabs take root + fifth or triad in A#2-B4, pad takes 3-4 note voicings in C3-C6 with common tones held across the change.
+- The harmony is measured before it is written: the reference's roots (`analyze_structure` root row, `analyze_chords`), or two or three tracks of the genre when there is no reference. Many genres (electro, techno, much house) live on a pedal or one or two chords, and the riff and the sound carry them: then "a pedal, no progression" is the Session Sheet's answer. A stock loop written by habit over such a genre was the first thing the person called basic.
+- When the harmony does move, write its roots per bar in the Session Sheet, then derive: bass takes roots (C2-A2), stabs take root + fifth or triad in A#2-B4, pad takes 3-4 note voicings in C3-C6 with common tones held across the change.
 - Voice-lead: move the fewest notes between chords; hold shared notes (write them as one long note across the bar line).
-- A pedal (one bass note under changing chords) builds tension in intros; release it when the drums come in.
-- Minor loops that work: i-VI-VII-i, i-iv-VI-V, i | i-IV | v | v | VI | VI | v | v (the Allan Dellon loop is D | D-G | A | A | F | F | A | A).
+- A pedal under changing chords builds tension in an intro; in a genre built on the pedal, it is the song.
+- Minor loops that work, when the genre moves: i-VI-VII-i, i-iv-VI-V, i | i-IV | v | v | VI | VI | v | v (the Allan Dellon loop is D | D-G | A | A | F | F | A | A).
 - After writing, check with `analyze_pitches(source='track:<pad>', per_bar=2)`: the loudest three notes per half bar should be the chord you meant.
 
 ## Melody
 
+- With a reference, read its riff before writing one: `analyze_roll` or `notes_from_audio_loop` on its stem, `analyze_melody` with its confidence line (`recreate.md` section 3), and write from what it plays.
 - Build from a 2-4 note motif; repeat it, then vary one thing (last note, rhythm of the tail, transpose by a chord tone).
 - Land long notes on chord tones; use passing tones on weak 16ths.
 - Range: a lead should span about an octave; more reads as random.

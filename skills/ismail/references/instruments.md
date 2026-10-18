@@ -6,7 +6,7 @@ The default failure: every part is a `synth` (basic waves, one filter, an envelo
 
 A sound is designed toward something you can measure. In this order:
 
-1. **The user's example.** Ask: "is there a recording where this instrument sounds the way you want?" A reference song, a YouTube link, a file. Ask even when they did not mention one. A link is fetched as `recreate.md` section 0 says.
+1. **The user's example.** Ask: "is there a recording where this instrument sounds the way you want?" A reference song, a YouTube link, a file. Ask even when they did not mention one, except before a new person's first sound. A link is fetched as `recreate.md` section 0 says. When they say "design it", don't ask: find the examples yourself (2 and 3 below, or two or three tracks of the genre).
 2. **A solo passage in the reference.** When recreating a song, find a few seconds where the instrument plays alone or on top (an intro, a break). `analyze_structure` and `spectrogram` show where. That chunk is the target; the rest of the song waits.
 3. **A free recording of the instrument.** CC0 or permissive: Freesound (filter CC0), VSCO 2 Community Edition, University of Iowa Musical Instrument Samples, the tonejs-instruments set (its strings are VSCO 2 CE, CC0, and a Freesound cello pack by flcellogrl, CC BY 4.0: credit it). A few notes across the range at two dynamics is enough to measure. VSCO 2 CE file names are one octave low (a file named C4 sounds C5), the harp excepted: shift +12 when you import from it, and check one note's pitch first. Log it in the song's `ref/SOURCES.md` before measuring (title, link, recordist or player, licence, what you measure from it) and credit it in the voice's INFO.
 4. **Memory, written down.** With nothing to measure, write a Sound Sheet from what you know of the instrument before coding: how it is excited (pluck, bow, breath, hammer, strike), what resonates (string, body, tube, membrane, room), which partials are strong, how the highs decay against the lows, what the attack sounds like, what noise rides along (bow hair, breath, fingers, fret buzz), how velocity changes the colour, and how two notes in a row differ. Then show it to the user; it is cheaper to correct a sheet than a voice.
@@ -81,7 +81,7 @@ Learned the hard way: a Polyphia recreation had the right notes on the guitar, b
 
 ## 5. Ask the human, every time you play them something
 
-You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='also')`):
+You cannot hear; the user can. Every time you give them an mp3 (how they get it: SKILL.md, the loop's "Hand it over"):
 
 - Say what to listen for: "does the guitar in bars 1-4 sound like the one in the reference? Too clean, too dull, wrong attack, wrong body?" Ask about one or two things, not "what do you think?".
 - Say what you measured, so they can tell you where the numbers and their ears disagree.
@@ -89,8 +89,7 @@ You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='als
 - **A/B one part at a time.** One mp3 per part: the reference part for 4 to 8 bars (its stem, retuned if the record is off pitch, band-limited to drop other parts sharing the stem), a 1 s gap, then yours, both at matched loudness: measure each (pyloudnorm, or ffmpeg `loudnorm` with `print_format=json`) and apply one fixed gain per clip (`volume=<dB>`), never `loudnorm` as the filter itself (see mastering.md). Drums, then bass, then lead. The user answers per part ("beat is good, bass very close, lead not following the melody"), which names the next fix exactly; one mix-level question does not.
 - When a lesson holds across songs, it belongs in this skill (or the voice's INFO), not only in one song's notes.
 
-**When the numbers plateau, give an eye exam.** Put the real sound next to "lenses", versions that each change exactly ONE named thing (body colour, wood ring, room, open strings, bow noise, brightness, attack, vibrato, evenness), all at the same loudness and long enough to include the release. Ask the user to pick the closest and say what is still off in those words ("E, but the vibrato starts slower, more air"). Host it as an exam page with a Submit button that writes the answers to a file you read
-(`references/blind-tests.md`, "Page mechanics"). One round of this found three things no metric had shown (moving vibrato, missing air, sympathetic strings); the metrics were blind to them because they average over time and stop at the release. To know when you are done, follow it with a blind exam (`references/blind-tests.md`).
+**When the numbers plateau, give an eye exam** (lenses that each change one named thing), and to know when you are done, a blind exam: both in `references/blind-tests.md`.
 
 ## Genre palettes
 
