@@ -393,7 +393,7 @@ def test_the_page_ends_with_the_made_with_footer(env):
     url = f'http://127.0.0.1:{srv.port}/f/song-r3/'
     man = json.loads(_get(url + 'manifest')[2])
     assert man['footer']['link'].startswith('https://') and 'ismail' in man['footer']['lead']
-    assert man['footer']['how'].startswith('1 part, every sound synthesized')
+    assert man['footer']['how'] == '1 part, synthesized (designed).'
     assert 'my_private_name' not in json.dumps(man)
     assert b'madewith' in _get(url)[2]
     api.OPS['feedback_page'](str(proj), 'r3', questions=['How is it?'], open=False, footer=False)

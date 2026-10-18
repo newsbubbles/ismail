@@ -402,7 +402,7 @@ def credits_md(root, d, consulted=False):
     return '\n'.join(L) + '\n', warn
 
 
-FOOTER_LEAD = 'Made with ismail, a music studio for AI agents'   # wording reviewed by Marketing (ledger:M254)
+FOOTER_LEAD = 'Made with ismail, an open-source music studio that AI agents play'   # Marketing's wording (ledger:M254)
 
 
 def _how_made(d, root):
@@ -421,17 +421,14 @@ def _how_made(d, root):
         else:
             designed += 1
     n, synth = len(tracks), measured + designed
-
-    def parts(k):
-        return f"{k} part{'' if k == 1 else 's'}"
+    one = n == 1
     how = (f"{measured} modeled on measured recordings, {designed} designed" if measured and designed else
-           'all modeled on measured recordings' if measured else 'all designed')
+           ('' if one else 'all ') + ('modeled on measured recordings' if measured else 'designed'))
     if not audio:
-        return f"{parts(n)}, every sound synthesized ({how}); no recorded audio in the piece."
+        return f"1 part, synthesized ({how})." if one else f"{n} parts, all synthesized ({how})."
     if not synth:
-        return f"{parts(n)}, all playing recorded audio."
-    return (f"{parts(n)}: {len(audio)} play{'s' if len(audio) == 1 else ''} recorded audio, {synth} synthesized "
-            f"({how}).")
+        return "1 part, from recorded audio." if one else f"{n} parts, all from recorded audio."
+    return f"{n} parts: {synth} synthesized ({how}), {len(audio)} from recorded audio."
 
 
 def footer(root=None, d=None):

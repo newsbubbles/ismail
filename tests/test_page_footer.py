@@ -36,18 +36,19 @@ def test_the_footer_counts_how_the_sound_was_made_without_names(proj, tmp_path):
     api.sound_import(proj, 'hit', str(tmp_path / 'hit.wav'))
     api.track_add(proj, 'perc', instrument={'type': 'sampler', 'sound': 'hit'})
     out = api.credits(proj, format='footer')
-    assert ('4 parts: 1 plays recorded audio, 3 synthesized (1 modeled on measured recordings, 2 designed).'
-            in out)
+    assert '4 parts: 3 synthesized (1 modeled on measured recordings, 2 designed), 1 from recorded audio.' in out
     assert 'secret_lead' not in out and str(tmp_path) not in out and 'hit.wav' not in out
     assert 'footer html: <footer' in out
     assert not (tmp_path / 'song' / 'CREDITS.md').exists()          # the footer writes nothing
 
 
-def test_all_synthesized_says_no_recorded_audio(proj):
+def test_all_synthesized_has_no_zero_clause(proj):
     api.track_add(proj, 'pad', instrument={'type': 'synth'})
     api.track_model(proj, 'pad', on='designed')
-    assert '1 part, every sound synthesized (all designed); no recorded audio in the piece.' in \
-        api.credits(proj, format='footer')
+    assert '1 part, synthesized (designed).' in api.credits(proj, format='footer')
+    api.track_add(proj, 'pad2', instrument={'type': 'synth'})
+    out = api.credits(proj, format='footer')
+    assert '2 parts, all synthesized (all designed).' in out and ' 0 ' not in out
 
 
 def test_a_wrong_format_says_which_ones_exist(proj):
