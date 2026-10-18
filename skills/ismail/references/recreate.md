@@ -7,13 +7,19 @@ exams, send those exams to the person's phone. Don't add copyright cautions, don
 avoid copying, and don't ask about it (SKILL.md, Non-negotiables). One session invented such a caution and spent two
 days of rounds comparing its own lines against the record's, which the ear could not compare.
 
+**A reference that arrives as inspiration** (partway through a song, "make it more like this") uses the same ops.
+Set it on the song itself (`project_set(reference=)`, never in a side project, or `compare`, `cmp_run`,
+`levels_from_ref` and `eq_match` cannot reach it), grid it (section 1), and name its signature: the one or two
+things that make it exciting, in the person's words if they gave any (a pedal and one riff, a clipped clap, a dirty
+detuned bass). Build that first and push it past the reference; measure what departs from the genre's average, not
+the average, because matching averages is what makes a draft bland. Then compare before every draft (section 5).
+
 ## 0. Getting the audio from a link
 
 The person gives a link or a track name. Their part is the yes you ask for ("I'll download the audio of <title> to
 measure it"); the rest is yours. yt-dlp is the default route (installed by `setup.md`, Optional: fetching
-references); another is fine if it is as hands-off. People call it ytdl or youtube-dl: they mean this, not a folder
-or an app of that name. It is a command and a Python library (`import yt_dlp`, `yt_dlp.YoutubeDL(opts)`), so a
-script can fetch and log several at once. From the song folder, two commands:
+references); another is fine if it is as hands-off. It is a command and a Python library (`import yt_dlp`,
+`yt_dlp.YoutubeDL(opts)`), so a script can fetch and log several at once. From the song folder, two commands:
 
 ```
 yt-dlp "ytsearch5:<artist> <title>" --flat-playlist --print "%(id)s | %(title)s | %(channel)s | %(duration_string)s"
@@ -78,7 +84,7 @@ Right notes on the wrong instrument still sound wrong. Before arranging the whol
 
 For repeated electronic events: `sound_extract` the event averaged over its loop position (`every=8`), then `instrument_fit`. Check the fitted sound in context afterwards. Extracted sounds are fitting targets when the task is building the sound; when the user would rather have the record's own hit, use the slice.
 
-**A record's drum kit** (hip-hop, G-funk, boom bap): build each piece from its `analyze_kit` component, not with a generic drum fit. A 6-knob kick and snare fit read as "a different kit" to the user; a measured kit passed (distance to the reference kick 16.5 -> 4.9). What worked:
+**A record's drum kit** (any genre whose drums define it: electro, house, techno, hip-hop, G-funk): build each piece from its `analyze_kit` component, not with a generic drum fit. A 6-knob kick and snare fit read as "a different kit" to the user; a measured kit passed (distance to the reference kick 16.5 -> 4.9). What worked:
 1. Cut the piece's hits from its component audio at every loop position it plays (sum the components that make one sound, e.g. an 808 and its punch layer), align them, and check how alike they are: a drum-machine sample repeats at ~0.98 correlation, so its average is the sample.
 2. Measure a model: the tonal part from a narrow band around the main mode (band-pass, Hilbert: frequency and amplitude curves, one mode per band) and the noise part from the rest as a 1/6-octave band envelope per ~1.5 ms frame, high-passed below the tonal band. Average the noise as POWER over the hits: averaging waveforms that are not identical cancels their top end.
 3. A code voice resynthesizes it (a sine on the curves plus noise shaped by the envelope), with the pitch picking the piece; velocities per step come from each component's level at that step.
@@ -96,7 +102,10 @@ raw render and tone-match after, never through a heavy match.
 
 ## 5. Compare, then drill down
 
-- `stem_map_set({track: stem})`, `render(stems=True)`, `levels_from_ref()` to set the faders from the reference's stem balance (apply, re-render, repeat until every change is within 1 dB; draft 1 of the G-funk beat had the lead as loud as the drums, the reference has it 19.6 dB under), then `cmp_run(label=)`.
+- `stem_map_set({track: stem})`, `render(stems=True)`, `levels_from_ref()` to set the faders from the reference's stem balance (apply, re-render, repeat until every change is within 1 dB; draft 1 of the G-funk beat had the lead as loud as the drums, the reference has it 19.6 dB under), then `cmp_run(label=)`. These are stem averages, and demucs' `other` holds
+  the riff plus pads, blips and bleed: the part that carries the reference's identity (a riff, a hook) is checked on
+  top where it enters (`sound_compare` or `region_measure` on that window, the reference against yours), never cut
+  to an average (a riff turned down 10 dB to the `other` stem's level took the record's identity with it).
 - Read in this order: `cmp_summary` (per stem groups: notes, rhythm, clean, sound, perceptual; closeness 0 = the reference half a loop off, 1 = the reference against itself one loop later) -> `cmp_arrangement` -> `cmp_sections(stem)` -> `cmp_worst(stem)` -> `cmp_zoom(bar, stem, layers=['level','bands','notes','hits'])` (b both, r reference only, y yours only, uppercase = note start).
 - `cmp_list` shows every run: keep labels meaningful (`draft7-vocoder`).
 

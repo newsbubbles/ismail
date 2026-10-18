@@ -82,6 +82,11 @@ time**, **blur along pitch**.
 Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track stem is the track after its own effects and fader, scaled by the master chain's gain, so the stems sum to the mix. That means a sidechain duck shows up in `track:<name>`; if it barely dips, the duck depth is small, not the stem pre-fx.
 
 Readings that mislead:
+- A stem is a hint, the full mix is the target. Separation splits one sound across stems: a bass shaped on its
+  demucs stem (rolloff 367 Hz) came out too narrow, because the full mix showed its harmonics running to about
+  1.5 kHz in `other`. Shape a part on a stem only when the same reading on the full mix agrees, and finish with full
+  mix against full mix (band levels, `analyze_envelope` per band, `compare`). Spectrogram colours are relative: check
+  a band's level with numbers before calling it empty.
 - Long-window numbers are blind to fakeness. 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB while the user heard "30% there": what makes a sound fake lives inside single notes (attack, how each partial decays, pitch movement, noise). Report those numbers, never as proof that a sound is convincing.
 - `analyze_drums` on a full mix (`render`, `ref`) is band activity: leads and pads show up as snare and hat hits. Read your drums as `track:<drum track>`.
 - Lengths added up from typical (median) measurements come out short. Durations lean long (a few notes or words
@@ -107,6 +112,7 @@ Harmony:   analyze_pitches bar <n> = <notes> (the chord you meant? yes/no)
 Space:     width (analyze_timbre stereo line) <value>; reverb/delay sends present on <tracks>
 Form:      analyze_structure rows match the form map: yes/no (which section differs)
 Dynamics:  analyze_sections: range <dB> quietest to loudest; the section before the climax <dB> under it (3+)
+Reference: compare / sound_compare on the part you changed, ref vs render (when the song has one): <the numbers>
 Worst:     <the single worst line above> -> next fix
 ```
 
