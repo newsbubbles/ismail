@@ -10,7 +10,7 @@ INFO = {
     "designed": "transition effects designed by ear, not modeled on recordings; built in a song and proven there",
     "summary": "transitions for builds and drops: impact boom, noise uplifter and downlifter, reverse crash; "
                "sweeps last as long as the note",
-    "velocity": "level; the sweeps peak near 1.7 at full velocity (1.0), so give the track -6 dB or play them softer",
+    "velocity": "level; every effect peaks under 1.0 at full velocity",
     "range": "the note picks the effect (C4 = 60, so C1 is MIDI 24): C1 impact, D1 uplifter, E1 downlifter, "
              "any other note (F1) reverse crash. The uplifter, downlifter and reverse crash last the note's length "
              "(at least 0.2 s): a 2-bar note is a 2-bar sweep ending on the next downbeat",
@@ -32,7 +32,7 @@ def impact(t, sr):
     for s in (1, 2):
         nz = dsp.filt(dsp.filt(_nz(n, s), 'lp12', 7000.0, 0.0, sr), 'hp12', 200.0, 0.0, sr)
         out.append(0.8 * boom + 0.35 * nz * np.exp(-t / 0.5))
-    return np.stack(out) * np.clip(t / 0.001, 0, 1) * 0.8
+    return np.stack(out) * np.clip(t / 0.001, 0, 1) * 0.7   # the song had 0.8, a hair over full scale
 
 
 def sweep(t, sr, gate, up=True):
@@ -49,7 +49,7 @@ def sweep(t, sr, gate, up=True):
     for s in (5, 6):
         y = dsp.filt(_nz(n, s), 'bp', cut, 0.55, sr)
         out.append(y * amp)
-    return np.stack(out) * 0.9
+    return np.stack(out) * 0.36   # 0.4 of the song's level: the sweeps peaked near 2.0
 
 
 def reverse_crash(t, sr, gate):
@@ -61,7 +61,7 @@ def reverse_crash(t, sr, gate):
     for s in (9, 10):
         nz = dsp.filt(dsp.filt(_nz(n, s), 'hp12', 3500.0, 0.0, sr), 'lp12', 13000.0, 0.0, sr)
         out.append(nz * env)
-    return np.stack(out) * 0.6
+    return np.stack(out) * 0.3
 
 
 def voice(freq, t, vel, gate, sr):

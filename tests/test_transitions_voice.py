@@ -21,7 +21,7 @@ def _play(m, gate, tail=1.0):
 def test_transitions_voice_renders_each_effect_at_a_sane_level(m):
     y = _play(m, 1.0)
     assert y.shape[0] == 2 and np.all(np.isfinite(y))
-    assert 0.05 < np.max(np.abs(y)) < 2.5        # the sweeps peak near 1.7 at full velocity (INFO says so)
+    assert 0.05 < np.max(np.abs(y)) < 1.0        # every effect peaks under full scale
 
 
 def test_transitions_voice_notes_pick_different_effects():
