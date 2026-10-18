@@ -414,6 +414,7 @@ def moves_line(d):
                                      ('a transitions part' if trans else 'no transitions')))
         return (f"moves: {have}. A full draft without moves sounds static; the effects pass (SKILL.md loop, step 5): "
                 f"a transition into each section (voice 'transitions'), what changes at phrase ends (automation_set on "
-                f"a filter, a send or a volume; a fill; a drop-out), the ducks under the kick")
+                f"a filter, a send or a volume; a fill; a drop-out), the ducks under the kick, and the space (width, a reverb "
+                f"send for depth, fx 'spatial' to place or fly a part, with doppler)")
     except Exception:                    # noqa: BLE001
         return ''

@@ -137,7 +137,10 @@ done), so go to the item their words or the work call for, and keep every item t
 5. **Fix** the worst line, re-render, re-check. Only then move to the next section. Then the **effects pass**, in
    the first draft, never left for later: a transition into every section (the `transitions` voice: impact, riser,
    downlifter, reverse crash), what changes at each phrase end (a fill, a filter dip or sweep, a drop-out, a delay or
-   reverb throw: `automation_set` on a filter, a send or a volume), and the ducks under the kick. With a reference,
+   reverb throw: `automation_set` on a filter, a send or a volume), the ducks under the kick, and the space: where
+   each part sits (width, a reverb or `hall` send for depth) and what moves in it (`spatial`: a place in metres, an
+   orbit or a flyby with doppler, `doppler=0` for pitched parts that must stay in key; sound-design.md "Moving a
+   sound in 3D"). Flat is a choice, not a default. With a reference,
    zoom on the last bar of a phrase against the bar before it (`sound_zoom`, `analyze_bars`) and build the moves it
    makes. A draft without them sounds static, and the person spends their notes on what a pass would have caught.
 6. **Levels, on a full render** (after the effects pass: effects move levels), and the structure check: `analyze_structure(source='render')` must show the form you planned in the Sheet. With a reference, `render(stems=True)` prints each stem's share of the mix against the reference's per 8-bar stretch and any layer you lack: the balance over the song, part by part, comes before loudness and before the master.
@@ -165,6 +168,7 @@ Parts (role, register, rhythm, sound, modeled on):
 Variation plan:    what changes every 8 bars (a part in/out, filter opens, fill in bar 8)
 Moves:             what happens at each phrase end and into each section (transition, fill, filter or send move,
                    drop-out, duck), measured at the reference's phrase ends when there is one
+Space:             where each part sits (wide or mono, near or far) and what moves (spatial: orbit, flyby, doppler)
 Mix targets:       master <LUFS for the genre or reference>, peak -1 dBFS, limiter GR < 4 dB; kick and bass own the sub
 ```
 
