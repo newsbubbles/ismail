@@ -166,7 +166,7 @@ Their first try decides whether they come back. Run it this way, then the normal
    land. What happens next depends on the first answer: the two branches below, and only that branch's steps.
    HAND IT OVER, every time a sound plays: a sound through the speakers once is easy to miss, so they always get
    something they can open: sketch's reply ends with a hear-it block (the full path, and the phone page, the live
-   engine or the stage when they are on) and one suggestion: follow it. play_file(path) opens it in their own
+   engine or the stage when they are on) and one suggestion: start from it. play_file(path) opens it in their own
    player (say first that it will play out loud). Ask once how they like to listen, then keep to it. Your reply
    ends with the song and a question (the SAY block has them), never a setup report: no tool counts, devices,
    paths beyond the song's, or notes files, unless they ask. Their first words asked for live music? Hand over the
