@@ -138,7 +138,8 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     cross-correlation. Sounds that repeat identically (drum samples, stabs) add up; everything else averages down.
     Reports how consistent the occurrences were. Reach for it when a drum in your song sounds dated or generic and
     the genre's own hit is in a reference: extract it (from analyze_kit's component wav, not the full drum stem,
-    which carries the kick) and use it or fit to it."""
+    which carries the kick) and fit your sound to it. The extracted hit is a target, not a part: it plays
+    in the song only when the user asked for samples."""
     P = _load(project)
     path, g = P.source(source, bars)
     y, sr = sf.read(path, dtype='float64', always_2d=True)
@@ -184,7 +185,9 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     return (f"sound {name!r}: average of {len(aligned)} occurrences (bars {used}"
             f"{f'; skipped {skipped}, past the end' if skipped else ''}); consistency {cons:.2f} "
             f"(1 = identical each time, <0.5 = the event varies or is buried; widen/narrow the bar set)\n"
-            f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}")
+            f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}\n"
+            f"a target to fit (instrument_fit target={name!r}), not a part: it plays in the song only when the user "
+            f"asked for samples")
 
 
 def _has_sapi():
