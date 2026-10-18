@@ -17,7 +17,7 @@ called the talker, and three rounds went by before anyone noticed. Nothing check
 
 ### A listener who is not at this computer can answer, by voice too
 
-A friend answering rounds from another country could not send his answers: the feedback page runs on this computer
+A friend answering rounds from elsewhere could not send their answers: the feedback page runs on this computer
 only, the session built its own hosted page, and its Send failed twice (a view-only share cannot save).
 
 - Every feedback page has "Copy my answers": plain text, numbered as the questions, to paste into any chat.
