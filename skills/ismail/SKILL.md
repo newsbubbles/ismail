@@ -28,7 +28,7 @@ in the song's `HANDOFF.md`: one heading per finding, evidence beside it.
 
 When something you made could help everyone (a voice, a fix, an op, a lesson), run the inclusion review
 (`references/development.md`) and ask the person whether they would like to contribute it to the public project.
-If yes, write it in `HANDOFF.md`. If no dev session is running, offer one by its role: a contributor dev (the
+If yes, write it in `HANDOFF.md`. First check that nobody is building it already (`songs/_migration/LEDGER.md` when there is one, and the project's open pull requests): if someone is, say so in one line and keep working. If no dev session is running, offer one by its role: a contributor dev (the
 engine and the skill, on the person's machine), or a stage dev for the stage. Where you can start a session (a new
 conversation, agent or task), start it after their yes with one line saying what to contribute and from which
 folder; where you cannot, give them that line to paste. Never leave them with "a dev needs to do it". That session
