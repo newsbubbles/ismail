@@ -120,7 +120,11 @@ a view of the stage) has been the fastest route to a good result. The rules that
   earbuds.
 - A desk page that takes their voice or mic opens in their own browser, not an app pane (a pane has no
   microphone), and brings back everything they typed or said when reopened: `feedback_page` does all of it,
-  `feedback_wait` returns when they press Send, and `feedback_read` reads their answers. A hand-built page only for what it cannot do (`blind-tests.md`, page
+  `feedback_wait` returns when they press Send, and `feedback_read` reads their answers. A listener elsewhere (a friend
+  the song is for) gets the shared copy, `feedback_page(share=True)`: host its folder where they can open it; viewing
+  is all they need. Their typing and voice notes stay in their browser until "Send my answers" sends them as a
+  message (the share menu, or a copy to paste, with the voice notes as files), and `feedback_paste` reads that
+  message into the round as their Send. Every page also has "Copy my answers". A hand-built page only for what it cannot do (`blind-tests.md`, page
   mechanics).
 
 ## Bars or time: their unit

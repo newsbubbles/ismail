@@ -11,6 +11,10 @@ A round is a folder in the project, <project>/work/feedback/<round>/:
   done.json          written when the person presses Send: every send time, and when they changed something after
                      the last one (a late addition), so an agent acts only on a round they sent (ledger:M246)
   voice/             the voice clips (q<n>_<stamp>.webm, .ogg, .m4a or .wav), each transcript beside it as .txt
+  share/             with share=True: a standalone copy of the page (index.html and the clips beside it) for a
+                     listener who is not at this computer (ledger:M255). It needs no server: it is hosted anywhere,
+                     keeps their answers in their browser, and sends them back as a message (the share menu, or a copy
+                     to paste, with the voice notes as files); feedback_paste reads that message into the round
 
 One shared server serves every round on 127.0.0.1:
 
@@ -196,6 +200,88 @@ def public_manifest(man):
     return out
 
 
+# ------------------------------------------------------------------ a shared copy, and its answers coming back
+
+SHARE_MARK = '<!--SHARED-->'
+
+
+def share(d, man):
+    """Write a round's standalone copy into <round>/share/ (ledger:M255): index.html with the manifest inside it and
+    each clip or picture beside it (item<n><ext>), no path on this computer. -> (folder, [file names], bytes)."""
+    import shutil
+    out = Path(d) / 'share'
+    out.mkdir(parents=True, exist_ok=True)
+    pub = public_manifest(man)
+    files = []
+    for it, src in zip(man.get('items', []), pub['items']):
+        if it.get('path'):
+            name = f"item{it['n']}{os.path.splitext(it['path'])[1].lower()}"
+            shutil.copyfile(it['path'], out / name)
+            src['src'] = name
+            files.append(name)
+    rid = re.sub(r'[^A-Za-z0-9_.-]+', '-', f"{Path(d).parents[2].name}-{Path(d).name}").strip('-.') or 'round'
+    data = json.dumps({'id': rid, 'manifest': pub}, ensure_ascii=False)
+    data = data.replace('<', '\\u003c')                  # no '</script>' or '<!--' can end the script early
+    html = PAGE.read_text(encoding='utf8').replace(SHARE_MARK, f'<script>window.FEEDBACK_SHARED = {data};</script>', 1)
+    (out / 'index.html').write_text(html, encoding='utf8', newline='\n')
+    size = sum((out / f).stat().st_size for f in files + ['index.html'])
+    return out, files, size
+
+
+_NUM = re.compile(r'^\s*(?:q(?:uestion)?\s*)?(\d{1,2})\s*[.):-]\s*(.*)$', re.I)
+_VOICE_LINE = re.compile(r'^\s*\(voice note\b.*\)\s*$', re.I)
+
+
+def _norm(s):
+    return re.sub(r'[^a-z0-9]+', ' ', str(s).lower()).strip()
+
+
+def parse_answers(text, questions):
+    """A pasted message of answers (the page's 'Copy my answers' text, or any numbered reply) -> ({question n:
+    answer}, [lines before the first answer that were left out]). Numbered lines that repeat a question's words head
+    its answer, so a numbered list inside an answer stays in it; with no such line, bare numbers ('1. too loud')
+    head them; one question takes the whole message. Raises ValueError when no numbered answer is found."""
+    qs = {q['n']: _norm(q['text']) for q in questions}
+    lines = str(text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    cands = []
+    for i, ln in enumerate(lines):
+        m = _NUM.match(ln)
+        if m and int(m.group(1)) in qs:
+            n, rest = int(m.group(1)), m.group(2).strip()
+            r, qn = _norm(rest), qs[int(m.group(1))]
+            echo = bool(r) and len(r) >= min(12, len(qn)) and (r[:30] == qn[:30] or qn.startswith(r) or r.startswith(qn))
+            cands.append((i, n, rest, echo))
+
+    def ordered(cs):
+        heads, last = [], 0
+        for c in cs:
+            if c[1] > last:
+                heads.append(c)
+                last = c[1]
+        return heads
+    heads = ordered([c for c in cands if c[3]])
+    echoed = bool(heads)
+    if not heads:
+        heads = ordered(cands)
+    if not heads:
+        if len(qs) == 1 and str(text or '').strip():
+            body = [ln for ln in lines if not _VOICE_LINE.match(ln)]
+            return {next(iter(qs)): '\n'.join(body).strip()}, []
+        raise ValueError("no numbered answers in the text: paste the listener's message as they sent it (the page's "
+                         "'Copy my answers' text numbers each answer as its question, e.g. '2. <the question>' and "
+                         "the answer under it)")
+    out = {}
+    for k, (i, n, rest, _) in enumerate(heads):
+        j = heads[k + 1][0] if k + 1 < len(heads) else len(lines)
+        body = ([] if echoed else [rest]) + lines[i + 1:j]
+        body = [ln for ln in body if not _VOICE_LINE.match(ln)]
+        a = '\n'.join(body).strip()
+        if a and a != '(no answer)':
+            out[n] = a
+    before = [ln.strip() for ln in lines[:heads[0][0]] if ln.strip() and not ln.strip().endswith('my answers')]
+    return out, before
+
+
 # ------------------------------------------------------------------ the registry: which rounds the server serves
 
 def rounds(h=None):
@@ -370,7 +456,7 @@ class Store:
 
     def voice(self, d, q, data, mime, secs):
         ext = ('webm' if 'webm' in mime else 'ogg' if 'ogg' in mime else 'm4a' if 'mp4' in mime or 'm4a' in mime
-               else 'wav' if 'wav' in mime else 'webm')
+               else 'wav' if 'wav' in mime else 'mp3' if 'mpeg' in mime or 'mp3' in mime else 'webm')
         t = time.time()
         vid = f"q{q}_{time.strftime('%Y%m%d-%H%M%S', time.localtime(t))}_{int(t * 1000) % 1000:03d}"
         (d / 'voice').mkdir(exist_ok=True)

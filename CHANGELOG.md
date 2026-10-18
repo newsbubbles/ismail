@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### A listener who is not at this computer can answer, by voice too
+
+A friend answering rounds from another country could not send his answers: the feedback page runs on this computer
+only, the session built its own hosted page, and its Send failed twice (a view-only share cannot save).
+
+- Every feedback page has "Copy my answers": plain text, numbered as the questions, to paste into any chat.
+- `feedback_page(share=True)` also writes a standalone copy (`<round>/share/`: index.html and the clips beside it) to
+  host anywhere. It needs no server and no write access: typing and voice notes stay in the listener's browser, and
+  "Send my answers" sends them as a message (the share menu with the voice notes as files, or a copy to paste and the
+  voice notes to download).
+- `feedback_paste(project, round, text, files)` reads that message into the round: each numbered answer under its
+  question, each voice note (`q<n>_<time>.webm`) as a clip transcribed in the background, then it counts as their
+  Send, so `feedback_read` and `feedback_wait` work as for a page answered here.
+
 ### Shared pages say what made the song
 
 A listening page sent to a friend had no word on what made the song or where to find it.

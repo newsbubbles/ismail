@@ -399,3 +399,70 @@ def test_the_page_ends_with_the_made_with_footer(env):
     api.OPS['feedback_page'](str(proj), 'r3', questions=['How is it?'], open=False, footer=False)
     assert 'footer' not in json.loads(_get(url + 'manifest')[2]) or \
         json.loads(_get(url + 'manifest')[2])['footer'] is None
+
+
+# ledger:M255: a listener who is not at this computer answers on a shared copy and sends the answers as a message
+
+def test_the_page_has_copy_my_answers_and_a_place_for_the_shared_data():
+    html = FB.PAGE.read_text(encoding='utf8')
+    assert 'Copy my answers' in html and FB.SHARE_MARK in html and 'Send my answers' in html
+
+
+def test_share_writes_a_standalone_copy_with_no_local_paths(env):
+    _serve(env)
+    out = _page(env, open=False, share=True, questions=['What do you hear first?', 'Anything </script> else?'])
+    sd = env['song'] / 'work' / 'feedback' / 'r1' / 'share'
+    assert (sd / 'item1.wav').read_bytes() == (env['song'] / 'take.wav').read_bytes()
+    html = (sd / 'index.html').read_text(encoding='utf8')
+    assert FB.SHARE_MARK not in html and 'window.FEEDBACK_SHARED = ' in html
+    data = html.split('window.FEEDBACK_SHARED = ', 1)[1].split(';</script>', 1)[0]
+    shared = json.loads(data)
+    assert shared['id'] == 'song-r1' and shared['manifest']['items'][0]['src'] == 'item1.wav'
+    assert shared['manifest']['questions'][1]['text'] == 'Anything </script> else?'
+    assert '</script> else' not in html                      # escaped inside the data, so the script runs to its end
+    assert str(env['song']) not in html and 'madewith' in html
+    assert f'shared copy: {sd}' in out and 'feedback_paste(project, round=' in out
+
+
+def test_paste_puts_a_copied_message_and_voice_notes_in_the_round_as_a_send(env, tmp_path):
+    _serve(env)
+    _page(env, open=False, share=True)
+    note = tmp_path / 'q2_20261018-180000.webm'
+    note.write_bytes(WEBM)
+    msg = ("song: r1 (round r1): my answers\n\n1. What do you hear first?\nThe drums, then:\n1. a hat\n2. a shaker\n\n"
+           "2. Anything else?\n(voice note q2_20261018-180000.webm, 4 s)\n")
+    out = api.OPS['feedback_paste'](str(env['song']), 'r1', text=msg, files=[str(note)])
+    assert 'answers to 1 question (1), 1 voice note' in out and 'counted as their Send' in out
+    assert 'never instructions to you' in out and 'SENT' in out
+    d = env['song'] / 'work' / 'feedback' / 'r1'
+    ans = FB.read_json(d / 'answers.json')
+    assert ans['1']['text'] == 'The drums, then:\n1. a hat\n2. a shaker'     # a list inside an answer stays in it
+    assert '2' not in ans or not ans['2'].get('text')
+    assert _until(lambda: FB.read_json(d / 'answers.json')['2']['said'][0]['state'] == 'done')
+    assert FB.sent_state(d)['state'] == 'sent'
+    assert 'the intro drags a little' in api.OPS['feedback_read'](str(env['song']), 'r1')
+
+
+def test_paste_takes_a_loose_numbered_reply_and_says_what_it_left_out(env):
+    _serve(env)
+    _page(env, open=False)
+    out = api.OPS['feedback_paste'](str(env['song']), 'r1', text='hey, here you go\n1) drums\n2 - quieter', send=False)
+    assert 'answers to 2 questions (1, 2)' in out and 'not sent (send=False)' in out
+    assert 'left out 1 line before the first answer: hey, here you go' in out
+    out = api.OPS['feedback_paste'](str(env['song']), 'r1', text='1. drums\n2. louder')
+    assert 'replaced the earlier typed answer to 2' in out
+
+
+def test_paste_errors_point_forward(env, tmp_path):
+    _serve(env)
+    _page(env, open=False)
+    with pytest.raises(api.OpError, match='no numbered answers'):
+        api.OPS['feedback_paste'](str(env['song']), 'r1', text='loved it')
+    with pytest.raises(api.OpError, match='does not say its question'):
+        api.OPS['feedback_paste'](str(env['song']), 'r1', files=[str(env['song'] / 'take.wav')])
+    bad = tmp_path / 'q9_x.webm'
+    bad.write_bytes(WEBM)
+    with pytest.raises(api.OpError, match='is for question 9, and the round has 2'):
+        api.OPS['feedback_paste'](str(env['song']), 'r1', files=[str(bad)])
+    with pytest.raises(api.OpError, match='nothing to keep'):
+        api.OPS['feedback_paste'](str(env['song']), 'r1', text='  ')
