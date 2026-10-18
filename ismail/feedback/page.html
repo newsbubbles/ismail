@@ -43,6 +43,9 @@
   .send-card { border-color: var(--accent); }
   button.send { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.send:disabled { opacity: 0.6; cursor: default; }
+  .downloads { display: grid; gap: 6px; margin-top: 10px; }
+  .downloads a { color: var(--accent); }
+  textarea.copy { min-height: 160px; margin-top: 10px; }
   .made-with { color: var(--soft); font-size: 0.85rem; margin: 32px 0 0; text-align: center; }
   .made-with a { color: var(--accent); }
 </style>
@@ -57,6 +60,7 @@
   <section id="send"></section>
   <footer class="made-with" id="madewith" hidden></footer>
 </main>
+<!--SHARED-->
 <script>
 (() => {
   const $ = (s, el) => (el || document).querySelector(s);
@@ -66,11 +70,68 @@
   let manifest = null;
   let voiceOn = false;
   let sent = { state: 'writing', at: null, changed_at: null };
+  let lastState = { answers: {} };
+
+  // A shared copy (feedback_page(share=True), ledger:M255) runs with no server: it is hosted anywhere a listener
+  // can open it, keeps their typing and voice notes in their own browser, and sends them back as a message (the
+  // phone's share menu, or a copy to paste, plus the voice notes as files). feedback_paste reads them into the round.
+  const SHARED = window.FEEDBACK_SHARED || null;
+  const KEY = 'ismail-feedback:' + (SHARED ? SHARED.id || '' : '') + ':';
+  const local = {
+    get(k) { try { return localStorage.getItem(KEY + k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(KEY + k, v); return true; } catch (e) { return false; } },
+  };
+  const memClips = [];
+  function idb() {
+    return new Promise((ok) => {
+      try {
+        const r = indexedDB.open('ismail-feedback', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('clips', { keyPath: 'key' });
+        r.onsuccess = () => ok(r.result); r.onerror = () => ok(null);
+      } catch (e) { ok(null); }
+    });
+  }
+  async function clipsGet() {
+    const db = await idb();
+    let kept = [];
+    if (db) {
+      kept = await new Promise((ok) => {
+        try {
+          const t = db.transaction('clips').objectStore('clips').getAll();
+          t.onsuccess = () => ok((t.result || []).filter((c) => String(c.key).startsWith(KEY)));
+          t.onerror = () => ok([]);
+        } catch (e) { ok([]); }
+      });
+    }
+    const have = new Set(kept.map((c) => c.key));
+    return kept.concat(memClips.filter((c) => !have.has(c.key))).sort((a, b) => (a.at < b.at ? -1 : 1));
+  }
+  async function clipPut(c) {
+    const db = await idb();
+    const ok = db && await new Promise((done) => {
+      try { const tx = db.transaction('clips', 'readwrite'); tx.objectStore('clips').put(c); tx.oncomplete = () => done(true); tx.onerror = () => done(false); }
+      catch (e) { done(false); }
+    });
+    if (!ok) memClips.push(c);
+    return !!ok;
+  }
+  async function sharedState() {
+    const clips = await clipsGet();
+    const answers = {};
+    for (const q of manifest.questions) {
+      answers[String(q.n)] = { text: local.get('t' + q.n) || '', typed_at: local.get('at' + q.n),
+                               said: clips.filter((c) => c.q === q.n) };
+    }
+    const at = local.get('sent');
+    return { answers, sent: { state: at ? (local.get('changed') ? 'changed' : 'sent') : 'writing', at, changed_at: null } };
+  }
 
   function showError(msg) { const e = $('#err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
   function when(iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } }
 
   async function getJSON(url) {
+    if (SHARED && url === 'manifest') return SHARED.manifest;
+    if (SHARED && url === 'state') return sharedState();
     const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error(url + ': ' + r.status);
     return r.json();
@@ -95,6 +156,11 @@
     clearTimeout(timers[n]);
     const text = $('#t' + n).value;
     pending[n] = false;
+    if (SHARED) {
+      const ok = local.set('t' + n, text) && local.set('at' + n, new Date().toISOString());
+      setStatus(n, ok ? 'Kept in this browser' : 'This browser does not keep it: send your answers before you close the page.', ok ? 'ok' : 'bad');
+      return true;
+    }
     try {
       const r = await fetch('text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ q: n, text: text }) });
       if (!r.ok) throw new Error(r.status);
@@ -108,22 +174,111 @@
     }
   }
 
+  // Their answers as plain text, numbered as the questions, to paste into any chat (ledger:M255). feedback_paste
+  // reads this back, so the question lines stay as they are.
+  async function answersText() {
+    const st = SHARED ? await sharedState() : lastState;
+    const L = [(manifest.title || 'Feedback') + (manifest.round ? ' (round ' + manifest.round + ')' : '') + ': my answers', ''];
+    for (const q of manifest.questions) {
+      const t = $('#t' + q.n);
+      const typed = (t ? t.value : '').trim();
+      const said = ((st.answers || {})[String(q.n)] || {}).said || [];
+      L.push(q.n + '. ' + q.text);
+      if (typed) L.push(typed);
+      for (const c of said) {
+        if (SHARED) L.push('(voice note ' + c.file + (c.secs ? ', ' + c.secs + ' s' : '') + ')');
+        else L.push('(voice note' + (c.secs ? ', ' + c.secs + ' s' : '') + ': ' + (c.state === 'done' ? (c.text || 'no words heard') : 'not written down yet') + ')');
+      }
+      if (!typed && !said.length) L.push('(no answer)');
+      L.push('');
+    }
+    return L.join('\n').trim() + '\n';
+  }
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* older browsers: the textarea way */ }
+    const t = make('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t);
+    t.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    t.remove();
+    return ok;
+  }
+
+  function showText(text) {
+    const box = $('#copybox');
+    box.textContent = '';
+    const t = make('textarea', 'copy'); t.readOnly = true; t.value = text; box.appendChild(t);
+    t.focus(); t.select();
+  }
+
+  async function copyAnswers() {
+    const text = await answersText();
+    if (await copyText(text)) { $('#sendst').textContent = 'Copied: your answers are ready to paste anywhere.'; $('#sendst').className = 'status ok'; }
+    else { showText(text); $('#sendst').textContent = 'Select the text below and copy it.'; $('#sendst').className = 'status'; }
+  }
+
   // Send: the person says they are finished (done.json on the computer); typing after it is a late addition, shown
   // here and to the agent, until they press Send again (ledger:M246)
   function showSent() {
     const b = $('#sendbtn'), s = $('#sendst');
     if (!b || !s) return;
     b.disabled = false;
-    if (sent.state === 'sent') { b.textContent = 'Send again'; s.textContent = 'Sent ' + when(sent.at) + '. Thank you. If you add anything, press Send again.'; s.className = 'status ok'; }
-    else if (sent.state === 'changed') { b.textContent = 'Send again'; s.textContent = 'You changed something after sending. Press Send again when you are done.'; s.className = 'status'; }
-    else { b.textContent = 'Send'; s.textContent = 'Not sent yet.'; s.className = 'status'; }
+    const again = SHARED ? 'Send my answers again' : 'Send again';
+    if (sent.state === 'sent') {
+      b.textContent = again;
+      s.textContent = SHARED ? 'You sent your answers ' + when(sent.at) + '. If you add anything, send them again.'
+                             : 'Sent ' + when(sent.at) + '. Thank you. If you add anything, press Send again.';
+      s.className = 'status ok';
+    }
+    else if (sent.state === 'changed') { b.textContent = again; s.textContent = 'You changed something after sending. Press Send again when you are done.'; s.className = 'status'; }
+    else { b.textContent = SHARED ? 'Send my answers' : 'Send'; s.textContent = 'Not sent yet.'; s.className = 'status'; }
   }
 
   function changedAfterSend() {
-    if (sent.state === 'sent') { sent.state = 'changed'; showSent(); }
+    if (sent.state === 'sent') { sent.state = 'changed'; if (SHARED) local.set('changed', '1'); showSent(); }
+  }
+
+  async function sendShared() {
+    const b = $('#sendbtn'), s = $('#sendst');
+    b.disabled = true;
+    const text = await answersText();
+    const clips = (await sharedState()).answers;
+    const all = Object.values(clips).flatMap((a) => a.said || []);
+    const files = all.map((c) => new File([c.blob], c.file, { type: (c.blob && c.blob.type) || 'audio/webm' }));
+    const title = manifest.title || 'My answers';
+    let how = '';
+    try {
+      if (navigator.share && (!files.length || (navigator.canShare && navigator.canShare({ files })))) {
+        await navigator.share(files.length ? { title, text, files } : { title, text });
+        how = 'shared';
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') { s.textContent = 'Not sent: the share menu was closed. Press the button again when you are ready.'; s.className = 'status'; b.disabled = false; return; }
+    }
+    const box = $('#downloads');
+    box.textContent = '';
+    if (!how) {
+      how = (await copyText(text)) ? 'copied' : 'shown';
+      if (how === 'shown') showText(text);
+      for (const c of all) {
+        const a = make('a', null, 'Download the voice note for question ' + c.q + (c.secs ? ' (' + c.secs + ' s)' : ''));
+        a.href = URL.createObjectURL(c.blob); a.download = c.file; box.appendChild(a);
+      }
+    }
+    local.set('sent', new Date().toISOString());
+    local.set('changed', '');
+    sent = { state: 'sent', at: local.get('sent'), changed_at: null };
+    showSent();
+    const notes = all.length ? ' Attach your ' + (all.length === 1 ? 'voice note' : all.length + ' voice notes') + ' too: download ' + (all.length === 1 ? 'it' : 'each one') + ' below.' : '';
+    s.textContent = how === 'shared' ? 'Sent through your share menu. Thank you. If you add anything, send again.'
+      : how === 'copied' ? 'Your answers are copied. Paste them into your chat with the person who sent you this page.' + notes
+      : 'Copy the text below and paste it into your chat with the person who sent you this page.' + notes;
+    s.className = 'status ok';
   }
 
   async function send() {
+    if (SHARED) return sendShared();
     const b = $('#sendbtn');
     b.disabled = true;
     $('#sendst').textContent = 'Sending...';
@@ -151,12 +306,17 @@
 
   function renderSend() {
     const c = make('div', 'card send-card');
-    c.appendChild(make('p', 'label', 'When you have said everything, press Send.'));
+    c.appendChild(make('p', 'label', SHARED ? 'When you have said everything, send your answers to the person who sent you this page.'
+                                            : 'When you have said everything, press Send.'));
     const row = make('div', 'row');
     const b = make('button', 'send', 'Send'); b.type = 'button'; b.id = 'sendbtn'; b.addEventListener('click', send);
     row.appendChild(b);
+    const cp = make('button', null, 'Copy my answers'); cp.type = 'button'; cp.id = 'copybtn'; cp.addEventListener('click', copyAnswers);
+    row.appendChild(cp);
     const st = make('span', 'status'); st.id = 'sendst'; row.appendChild(st);
     c.appendChild(row);
+    const dl = make('div', 'downloads'); dl.id = 'downloads'; c.appendChild(dl);
+    const cb = make('div'); cb.id = 'copybox'; c.appendChild(cb);
     $('#send').appendChild(c);
   }
 
@@ -167,11 +327,18 @@
     for (const c of said || []) {
       const d = make('div', 'clip');
       d.appendChild(make('div', 'when', 'Said ' + when(c.at) + (c.secs ? ', ' + c.secs + ' s' : '')));
-      const a = make('audio'); a.controls = true; a.preload = 'none'; a.src = 'voice/' + encodeURIComponent(c.file); d.appendChild(a);
-      if (c.state === 'done') d.appendChild(make('p', 'words', c.text || '(no words heard)'));
+      const a = make('audio'); a.controls = true; a.preload = 'none';
+      a.src = c.blob ? URL.createObjectURL(c.blob) : 'voice/' + encodeURIComponent(c.file); d.appendChild(a);
+      if (SHARED) d.appendChild(make('p', 'words wait', 'Kept in this browser; it goes with your answers when you send them.'));
+      else if (c.state === 'done') d.appendChild(make('p', 'words', c.text || '(no words heard)'));
       else d.appendChild(make('p', 'words wait', 'Writing down your words... (' + (c.state || 'waiting') + ')'));
       box.appendChild(d);
     }
+  }
+
+  function stamp() {
+    const d = new Date(), p = (x) => String(x).padStart(2, '0');
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
 
   async function record(n, btn) {
@@ -193,6 +360,15 @@
       btn.rec = null; btn.classList.remove('on'); btn.textContent = 'Record';
       const secs = ((Date.now() - t0) / 1000).toFixed(1);
       const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      if (SHARED) {
+        const ext = /ogg/.test(blob.type) ? 'ogg' : /mp4|m4a/.test(blob.type) ? 'm4a' : 'webm';
+        const file = 'q' + n + '_' + stamp() + '.' + ext;
+        const kept = await clipPut({ key: KEY + file, q: n, file, at: new Date().toISOString(), secs: Number(secs), blob });
+        setStatus(n, kept ? 'Voice note kept in this browser.' : 'Voice note kept while this tab is open: send your answers before you close it.', kept ? 'ok' : 'bad');
+        changedAfterSend();
+        refresh();
+        return;
+      }
       setStatus(n, 'Saving your recording...');
       for (let i = 0; i < 6; i++) {
         try {
@@ -218,7 +394,7 @@
       const c = make('div', 'card q');
       const h = make('h2'); h.appendChild(make('span', 'n', q.n + '.')); h.appendChild(document.createTextNode(q.text)); c.appendChild(h);
       const t = make('textarea'); t.id = 't' + q.n; t.setAttribute('aria-label', 'Answer ' + q.n); t.placeholder = voiceOn ? 'Type here, or press Record and say it' : 'Type here';
-      t.addEventListener('input', () => { pending[q.n] = true; changedAfterSend(); setStatus(q.n, 'Typing...'); clearTimeout(timers[q.n]); timers[q.n] = setTimeout(() => saveText(q.n), 600); });
+      t.addEventListener('input', () => { pending[q.n] = true; changedAfterSend(); setStatus(q.n, 'Typing...'); clearTimeout(timers[q.n]); timers[q.n] = setTimeout(() => saveText(q.n), SHARED ? 300 : 600); });
       t.addEventListener('blur', () => { if (pending[q.n]) saveText(q.n); });
       c.appendChild(t);
       const row = make('div', 'row');
@@ -251,14 +427,15 @@
     let st;
     try { st = await getJSON('state'); showError(''); }
     catch (e) { showError('The page server does not answer right now. What you already saved is safe on the computer.'); return; }
+    lastState = st;
     if (first && st.sent) { sent = st.sent; showSent(); }
     let waiting = 0;
     for (const q of manifest.questions) {
       const a = st.answers[String(q.n)] || {};
       const t = $('#t' + q.n);
-      if (first && t && !pending[q.n]) { t.value = a.text || ''; if (a.typed_at) setStatus(q.n, 'Saved ' + when(a.typed_at), 'ok'); }
+      if (first && t && !pending[q.n]) { t.value = a.text || ''; if (a.typed_at) setStatus(q.n, (SHARED ? 'Kept ' : 'Saved ') + when(a.typed_at), 'ok'); }
       renderClips(q.n, a.said);
-      waiting += (a.said || []).filter((c) => c.state !== 'done').length;
+      if (!SHARED) waiting += (a.said || []).filter((c) => c.state !== 'done').length;
     }
     clearTimeout(polling);
     if (waiting) polling = setTimeout(() => refresh(false), 4000);
@@ -267,6 +444,7 @@
   window.addEventListener('beforeunload', () => {
     for (const n of Object.keys(pending)) {
       if (!pending[n]) continue;
+      if (SHARED) { local.set('t' + n, $('#t' + n).value); continue; }
       const body = new Blob([JSON.stringify({ q: Number(n), text: $('#t' + n).value })], { type: 'application/json' });
       navigator.sendBeacon('text', body);
     }
@@ -278,7 +456,8 @@
     voiceOn = !!manifest.voice;
     document.title = manifest.title || 'Feedback';
     $('#title').textContent = manifest.title || 'Feedback';
-    if (!voiceOn) $('#lead').textContent = 'Everything you type here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.';
+    if (SHARED) $('#lead').textContent = 'What you type' + (voiceOn ? ' and record' : '') + ' here stays in this browser until you send it, and is still here if you close the page and open it again. When you have said everything, press Send my answers at the bottom: it opens your share menu, or copies your answers to paste into a chat.';
+    else if (!voiceOn) $('#lead').textContent = 'Everything you type here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.';
     renderItems(manifest.items || []);
     renderQuestions(manifest.questions || []);
     renderSend();
