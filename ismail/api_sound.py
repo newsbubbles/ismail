@@ -197,10 +197,17 @@ def _tts(text, voice, rate, tmp_base):
         tmp = tmp_base + '.wav'
         v = voice or 'David'
         safe = text.replace("'", "''")
+        log = tmp_base + '.txt'        # the engine's word and phone events: true timings (ismail.speech)
         ps = ("Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
               f"$v = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{v}*' }} | Select-Object -First 1; "
-              "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
-              f"$s.Rate = {int(rate)}; $s.SetOutputToWaveFile('{tmp}'); $s.Speak('{safe}'); $s.Dispose()")
+              "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; $global:L = New-Object System.Collections.ArrayList; "
+              "$s.add_SpeakProgress({ param($o, $e) [void]$global:L.Add(\"W`t$($e.AudioPosition.TotalMilliseconds)"
+              "`t$($e.Text)\") }); "
+              "$s.add_PhonemeReached({ param($o, $e) [void]$global:L.Add(\"P`t$($e.AudioPosition.TotalMilliseconds)"
+              "`t$($e.Duration.TotalMilliseconds)`t$((@($e.Phoneme.ToCharArray() | ForEach-Object { [int]$_ })) "
+              "-join '+')\") }); "
+              f"$s.Rate = {int(rate)}; $s.SetOutputToWaveFile('{tmp}'); $s.Speak('{safe}'); $s.Dispose(); "
+              f"[IO.File]::WriteAllLines('{log}', [string[]]$global:L, (New-Object Text.UTF8Encoding $false))")
         r = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=60)
         return tmp, v, r
     wpm = int(round(175 * 1.1 ** max(-10, min(10, rate))))  # SAPI-style rate -10..10 -> words per minute
@@ -224,32 +231,91 @@ def _tts(text, voice, rate, tmp_base):
 
 
 @op(mutates=True)
-def sound_speak(project: str, name: str, text: str, voice: str = None, rate: int = 0, normalize: bool = True) -> str:
+def sound_speak(project: str, name: str, text: str, voice: str = None, rate: int = 0, normalize: bool = True,
+                rhythm: str = None, bpm: float = None) -> str:
     """Text-to-speech into the sound bank with the OS's own engine: Windows SAPI (voices like David, Zira; the
     default is David), macOS `say` (Alex, Samantha ...), Linux espeak-ng (en-us, en-gb ...). A voice the engine
     doesn't have falls back to its default. rate -10..10. Use as a vocoder modulator (vocoder fx,
-    modulator='sound:<name>' or a muted track holding it as audio clips), a sampler source, or an audio clip."""
+    modulator='sound:<name>' or a muted track holding it as audio clips), a sampler source, or an audio clip.
+    On Windows the engine's own word and phone timings are saved next to the sound (sounds/<name>.timings.json);
+    other systems give no timings. Reach for rhythm= when spoken words must land on the beat (a narrator, a chopped
+    vocal line): rhythm='night 0; shift 2; engineer 12 14 16' gives each word one 16th position per syllable
+    (counted from the line's beat 1, negative before it; '-' skips a syllable; one position keeps the word whole),
+    and each syllable is cut where the next one starts and set on its 16th at bpm (default the project's). The
+    sound then starts on its first syllable's slot; the reply says where to place it. Windows SAPI only (the
+    timings come from its events; built in a song and proven there)."""
     import tempfile
     import os
+    import sys
+    from . import speech
+    spec = None
+    if rhythm:
+        if sys.platform != 'win32':
+            raise OpError("rhythm= needs the speech engine's word and phone timings, which only Windows SAPI gives; "
+                          "on this system speak the line without rhythm= and cut it by ear (sound_zoom)")
+        try:
+            spec = speech.parse_rhythm(rhythm)
+        except speech.RhythmError as e:
+            raise OpError(f"rhythm: {e}")
     P = _load(project)
-    tmp, used, r = _tts(text, voice, rate, os.path.join(tempfile.gettempdir(), f"ismail_tts_{os.getpid()}"))
+    base = os.path.join(tempfile.gettempdir(), f"ismail_tts_{os.getpid()}")
+    tmp, used, r = _tts(text, voice, rate, base)
     if r.returncode != 0 or not os.path.exists(tmp):
         raise OpError(f"TTS failed: {(r.stderr or r.stdout).strip()[:300]}")
     voice = used
+    words, end = [], 0.0
+    if os.path.exists(base + '.txt'):
+        with open(base + '.txt', encoding='utf-8-sig') as f:
+            words, end = speech.parse_sapi_log(f.read().splitlines())
+        os.remove(base + '.txt')
     y, sr = sf.read(tmp, dtype='float64', always_2d=True)
     os.remove(tmp)
     y = y.T
     if y.shape[0] == 1:
         y = np.vstack([y, y])
-    a = np.max(np.abs(y), axis=0)
-    nz = np.nonzero(a > 1e-3)[0]
-    if len(nz):
-        y = y[:, nz[0]:nz[-1] + 1]
+    if spec:
+        if not words:
+            raise OpError("the speech engine gave no word timings for this line; try again, or another voice")
+        m = y.mean(0)
+        loud = np.flatnonzero(np.abs(m) > 0.05 * (np.abs(m).max() + 1e-12))
+        bpm = bpm or P.d['bpm']
+        try:
+            m, first = speech.place(words, m, sr, (loud[-1] + 1) / sr if len(loud) else end, spec, bpm)
+        except speech.RhythmError as e:
+            raise OpError(f"rhythm: {e}")
+        y = np.vstack([m, m])
+        nz = np.nonzero(np.abs(m) > 1e-4)[0]
+        y = y[:, :nz[-1] + 1] if len(nz) else y
+        shift = 0.0
+    else:
+        a = np.max(np.abs(y), axis=0)
+        nz = np.nonzero(a > 1e-3)[0]
+        shift = nz[0] / sr if len(nz) else 0.0
+        if len(nz):
+            y = y[:, nz[0]:nz[-1] + 1]
     if normalize:
         y = y / (np.max(np.abs(y)) + 1e-12) * 0.891
-    _write_sound(P, name, y, sr, note=f"tts '{text}' ({voice})")
+    _write_sound(P, name, y, sr, note=f"tts '{text}' ({voice})" + (f" on rhythm '{rhythm}' at {bpm:g} BPM" if spec else ''))
     P.save()
-    return f"sound {name!r}: {y.shape[1] / sr:.2f}s of speech '{text}' ({voice}, {sr} Hz)"
+    out = f"sound {name!r}: {y.shape[1] / sr:.2f}s of speech '{text}' ({voice}, {sr} Hz)"
+    if words:
+        import json
+        with open(os.path.join(P.root, 'sounds', f"{name}.timings.json"), 'w', encoding='utf8') as f:
+            json.dump({"engine": "sapi", "text": text, "note": "seconds in the spoken line" +
+                       (" before rhythm= placed it" if spec else " from the sound's start") +
+                       "; phones are SAPI US English phone ids",
+                       "words": [{"word": w, "start": round(ph[0][0] - shift, 4),
+                                  "phones": [[round(t - shift, 4), i] for t, i in ph]} for w, ph in words]},
+                      f, indent=1)
+        out += f"; word and phone timings in sounds/{name}.timings.json ({len(words)} words)"
+    else:
+        out += "; word timings are not available on this OS (Windows SAPI gives them)"
+    if spec:
+        bar16 = 4 * P.bpb
+        out += (f"\nset on 16ths at {bpm:g} BPM: the sound starts on 16th {first:g} of the line, so place it at "
+                f"<the line's bar> {'+' if first >= 0 else '-'} {abs(first) / bar16:g} bars "
+                f"({abs(first):g}/{bar16} of a bar)")
+    return out
 
 
 def _has(d, path):

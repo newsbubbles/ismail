@@ -558,3 +558,92 @@ def analyze_tuning(project: str, source: str = 'render', stems: list = None, tol
     L.append("verdict:")
     L += ['  ' + v for v in verdicts]
     return '\n'.join(L)
+
+
+HEARD_BANDS = [(300, 1000, 'body'), (1000, 2000, 'words'), (2000, 4000, 'consonants'), (4000, 8000, 'air')]
+
+
+def voice_over_rest(voice, parts, sr, hop_s=0.02, gate_db=-30.0):
+    """(fraction of frames where the voice speaks, [(lo, hi, what, voice over the rest dB, loudest other part,
+    that part over the voice dB)]): mono arrays, the rest is the sum of `parts` ({name: array}), each band's energy
+    averaged over the 20 ms frames where the voice is within gate_db of its loudest frame."""
+    import scipy.signal as ss
+    n = min([len(voice)] + [len(p) for p in parts.values()])
+    hop = int(hop_s * sr)
+    voice = voice[:n]
+    parts = {k: p[:n] for k, p in parts.items()}
+
+    def frames(x):
+        k = (len(x) // hop) * hop
+        return np.mean(x[:k].reshape(-1, hop) ** 2, axis=1)
+
+    e = frames(voice)
+    if not len(e) or e.max() <= 1e-12:
+        return 0.0, []
+    on = e > e.max() * 10 ** (gate_db / 10)
+    rows = []
+    for lo, hi, what in HEARD_BANDS:
+        if hi >= sr / 2:
+            continue
+        b = ss.butter(4, [lo / (sr / 2), hi / (sr / 2)], 'band', output='sos')
+        ve = frames(ss.sosfilt(b, voice))[on].mean() + 1e-20
+        pe = {k: frames(ss.sosfilt(b, p))[on].mean() + 1e-20 for k, p in parts.items()}
+        re_ = frames(ss.sosfilt(b, sum(parts.values())))[on].mean() + 1e-20
+        top = max(pe, key=pe.get) if pe else '-'
+        rows.append((lo, hi, what, 10 * np.log10(ve / re_), top, 10 * np.log10(pe[top] / ve) if pe else 0.0))
+    return float(on.mean()), rows
+
+
+@op()
+def analyze_voice_heard(project: str, voice: str, bars: list = None) -> str:
+    """Is the voice heard over the mix? Reach for it when a spoken or sung line may be buried (a narrator under a
+    drop, a vocal fighting a lead), before asking the person whether they can make out the words. Reads the last
+    render(stems=True): `voice` is the voice's track stem, the rest is the sum of the other track stems that go to
+    the master plus the bus stems (a bus the voice goes through counts without the voice). bars=[a, b] (inclusive)
+    cuts the range. Per band (300-1000 body, 1-2k words, 2-4k consonants, 4-8k air): the voice over the rest in dB
+    over the 20 ms frames where the voice speaks (within 30 dB of its loudest), and the loudest other part there.
+    Ends in a one-line verdict naming the band that masks it most. No transcription (no speech server is assumed).
+    Built in a song and proven there."""
+    P = _load(project)
+    tracks = P.d['tracks']
+    if voice not in tracks:
+        raise OpError(f"no track {voice!r}; tracks: {list(tracks)}")
+    v, sr = _segment(P, f'track:{voice}', bars)
+    rd = os.path.join(P.root, 'renders', 'stems')
+    have = audiofile.listing(rd)
+    parts = {}
+    for n, tr in tracks.items():
+        if n != voice and n in have and not tr.get('mute') and tr.get('output', 'master') == 'master':
+            parts[n] = _segment(P, f'track:{n}', bars)[0].mean(0)
+    vm = v.mean(0)
+    for b in P.d.get('buses', {}):
+        if 'bus_' + b in have:
+            y = _segment(P, f'track:bus_{b}', bars)[0].mean(0)
+            if tracks[voice].get('output') == b:      # the voice went through this bus: count the bus without it
+                k = min(len(y), len(vm))
+                y = y[:k] - vm[:k]
+            parts['bus:' + b] = y
+    if not parts:
+        raise OpError("no other stems to measure the voice against: render(stems=True) with the other parts "
+                      "playing, then call again")
+    frac, rows = voice_over_rest(vm, parts, sr)
+    where = f" bars {bars[0]}-{bars[1]}" if bars else ''
+    if not rows:
+        raise OpError(f"the {voice!r} stem is silent{where}: pick bars where it speaks")
+    L = [f"analyze_voice_heard {voice}{where}: the voice speaks in {frac * 100:.0f}% of the 20 ms frames; "
+         f"rest = {', '.join(parts)}",
+         f"  {'band Hz':<11} {'':<10} {'voice/rest':>10}  loudest other part there"]
+    for lo, hi, what, db, top, tdb in rows:
+        L.append(f"  {f'{lo}-{hi}':<11} {what:<10} {db:>+8.1f} dB  {top} ({tdb:+.1f} dB over the voice)")
+    lo, hi, what, db, top, tdb = min(rows, key=lambda r: r[3])
+    band = f"{lo}-{hi} Hz ({what})"
+    if db >= 0:
+        L.append(f"verdict: heard: the voice is over the rest in every band while it speaks (closest: {band} at "
+                 f"{db:+.1f} dB)")
+    elif all(r[3] >= 0 for r in rows if r[0] in (1000, 2000)):
+        L.append(f"verdict: heard, the words are clear (1-4 kHz over the rest), but {band} masks it ({db:+.1f} dB), "
+                 f"mostly {top}")
+    else:
+        L.append(f"verdict: masked: {band} buries it ({-db:.1f} dB under the rest), mostly {top}: cut that band in "
+                 f"{top} while the voice speaks, or lift the voice there")
+    return '\n'.join(L)

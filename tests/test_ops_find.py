@@ -30,6 +30,8 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('zoom into one word at two resolutions', 'sound_zoom'),
     ('level of one band in one moment of a sound', 'region_measure'),
     ('is every part of my render in tune', 'analyze_tuning'),
+    ('can the narrator be heard over the mix', 'analyze_voice_heard'),
+    ('speech on the beat, each syllable on a 16th', 'sound_speak'),
 ])
 def test_a_need_in_plain_words_finds_its_op_first(need, first):
     out = api.OPS['ops_find'](need=need, n=3)
