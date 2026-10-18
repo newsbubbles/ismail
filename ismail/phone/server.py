@@ -2146,7 +2146,10 @@ class Handler(BaseHTTPRequestHandler):
                     '/icon-maskable.png', '/apple-touch-icon.png'):
             return self._file(PAGE / path[1:])
         if path == '/health':
-            return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
+            now = time.time()                     # devices: when each page last asked for its state (ledger:M247)
+            return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq,
+                                    'devices': [{'kind': v['kind'], 'last_s': round(now - v['at'])}
+                                                for v in list(self.ph.devices.values())]})
         if path == '/api/state':
             self.ph.seen_page(g('dev'), self.headers.get('User-Agent'), g('sid'))
             since, wait = int(g('since', '0') or 0), min(25.0, float(g('wait', '0') or 0))
