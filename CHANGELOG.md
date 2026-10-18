@@ -11,6 +11,7 @@
   job per crew), cheaper models for short narrow tasks with the person's choice winning, and working without
   helpers. SKILL.md (the loop, the table, the reference list), live.md, stage-takes.md, development.md and
   worktrees.md point to it.
+
 ### Skill: fetching a reference from a link
 
 - A new session given a YouTube link had only "yt-dlp; YouTube may bot-wall" to go on, improvised other clients
