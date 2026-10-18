@@ -2070,6 +2070,10 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         L.append(ref_line)
     if stems:
         L += replies.balance_lines(P)
+    if not bars and len(P.d.get('tracks') or {}) >= 3:
+        mv = replies.moves_line(P.d)
+        if mv:
+            L.append(mv)
     heard = (os.path.join(rd, (out or 'latest') + '.mp3') if mp3 != 'none' else
              os.path.join(rd, out + '.wav') if out else None)
     if heard:
