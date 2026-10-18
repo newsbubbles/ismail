@@ -400,3 +400,48 @@ def credits_md(root, d, consulted=False):
         L += ['## Made from', '', 'A version of ' + ', itself a version of '.join(lin) + '.', '']
     L.append('Made with ismail (https://github.com/newsbubbles/ismail).')
     return '\n'.join(L) + '\n', warn
+
+
+FOOTER_LEAD = 'Made with ismail, a music studio for AI agents'   # wording reviewed by Marketing (ledger:M254)
+
+
+def _how_made(d, root):
+    """One sentence on how the piece's sound was made, by counts only (no track names, no paths, no people)."""
+    tracks = d.get('tracks') or {}
+    if not tracks:
+        return ''
+    audio = {t for t, _ in plays_source_audio(d)}
+    measured = designed = 0
+    for name, tr in tracks.items():
+        if name in audio:
+            continue
+        st, _ = provenance.of_track(tr, d, root)
+        if st == provenance.MEASURED:
+            measured += 1
+        else:
+            designed += 1
+    n, synth = len(tracks), measured + designed
+
+    def parts(k):
+        return f"{k} part{'' if k == 1 else 's'}"
+    how = (f"{measured} modeled on measured recordings, {designed} designed" if measured and designed else
+           'all modeled on measured recordings' if measured else 'all designed')
+    if not audio:
+        return f"{parts(n)}, every sound synthesized ({how}); no recorded audio in the piece."
+    if not synth:
+        return f"{parts(n)}, all playing recorded audio."
+    return (f"{parts(n)}: {len(audio)} play{'s' if len(audio) == 1 else ''} recorded audio, {synth} synthesized "
+            f"({how}).")
+
+
+def footer(root=None, d=None):
+    """-> {'text', 'html', 'link', 'how'}: the line a page people may share ends with (ledger:M254): made with
+    ismail, the link back, and how the piece's sound was made (counts of parts measured, designed, playing recorded
+    audio). No names and no paths, so it is safe on a public page. With no project, the first sentence only."""
+    import html as H
+    from .tags import SITE_URL
+    how = _how_made(d or {}, root) if d else ''
+    text = f"{FOOTER_LEAD}: {SITE_URL}" + (f". {how}" if how else '')
+    lead = H.escape(FOOTER_LEAD).replace('ismail', f'<a href="{SITE_URL}" target="_blank" rel="noopener">ismail</a>', 1)
+    markup = f'<footer class="made-with"><p>{lead}.' + (f' {H.escape(how)}' if how else '') + '</p></footer>'
+    return {'text': text, 'html': markup, 'link': SITE_URL, 'how': how}
