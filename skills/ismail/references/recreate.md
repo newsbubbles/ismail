@@ -11,7 +11,9 @@ days of rounds comparing its own lines against the record's, which the ear could
 
 The person gives a link or a track name. Their part is the yes you ask for ("I'll download the audio of <title> to
 measure it"); the rest is yours. yt-dlp is the default route (installed by `setup.md`, Optional: fetching
-references); another is fine if it is as hands-off. From the song folder, two commands:
+references); another is fine if it is as hands-off. People call it ytdl or youtube-dl: they mean this, not a folder
+or an app of that name. It is a command and a Python library (`import yt_dlp`, `yt_dlp.YoutubeDL(opts)`), so a
+script can fetch and log several at once. From the song folder, two commands:
 
 ```
 yt-dlp "ytsearch5:<artist> <title>" --flat-playlist --print "%(id)s | %(title)s | %(channel)s | %(duration_string)s"
