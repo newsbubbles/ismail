@@ -350,6 +350,9 @@ def cmp_run(project: str, label: str = '', stems: str = 'tracks', b: str = 'ref'
     except OSError as e:
         shutil.rmtree(d, ignore_errors=True)  # never leave a half-written run behind as the 'latest'
         raise OpError(f"comparison not stored ({e}); if the disk is full, free space and cmp_run again")
+    from . import replies
+    if replies.is_ref(b):
+        replies.note_compared(P.root, 'cmp_run', cid)
     return f"comparison id {cid}\n" + C.view_summary(rep)
 
 

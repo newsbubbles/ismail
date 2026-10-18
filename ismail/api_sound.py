@@ -40,11 +40,17 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
                   b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0) -> str:
     """A/B two sounds: 1/3-octave bands side by side (with << >> where A is >6 dB off), envelope from onset,
     centroid, stereo width, and one distance number. a/b are sources ('sound:<name>', 'ref:drums', 'track:x',
-    ...); window=[t0, t1] seconds or span=[start_bar, end_bar] (fractional) selects a slice."""
+    ...); window=[t0, t1] seconds or span=[start_bar, end_bar] (fractional) selects a slice. Reach for it when one
+    part or one hit does not sound like the reference or the genre (a snare that sounds dated, a lead that does not
+    sit like the record's): yours against theirs, on the window where it plays."""
     P = _load(project)
     da = SD.descriptor(_audio(P, a, a_window, a_span))
     db = SD.descriptor(_audio(P, b, b_window, b_span))
-    return SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
+    out = SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
+    from . import replies
+    if replies.is_ref(a) or replies.is_ref(b):
+        replies.note_compared(P.root, 'sound_compare', f"{a} vs {b}")
+    return out
 
 
 @op(mutates=True)
@@ -57,7 +63,9 @@ def instrument_fit(project: str, target: str, instrument, params: dict, notes: s
     target: a source like 'sound:refsnare' (cut one first with sound_import); instrument: dict, 'preset:x' or
     'track:<name>' (start from that track's instrument); params: {"path": [lo, hi]} e.g. {"tone_hz": [100, 250],
     "filter.cutoff": [300, 8000], "oscs.0.detune": [0, 40]}; notes: what to play (beats at project tempo; use the
-    target's pitch); fmin/fmax restrict the spectral match to a range (e.g. ignore kick bleed below 70 Hz). Saves the result as sound save_as and/or sets it on apply_to_track."""
+    target's pitch); fmin/fmax restrict the spectral match to a range (e.g. ignore kick bleed below 70 Hz). Saves the result as sound save_as and/or sets it on apply_to_track.
+    Reach for it when a drum or a sound must have the genre's or the reference's character (a snare, kick or bass
+    that sounds dated or generic): fit it to a hit from analyze_kit's components or sound_extract."""
     P = _load(project)
     if isinstance(instrument, str) and instrument.startswith('track:'):
         base = P.track(instrument[6:]).get('instrument')
@@ -128,7 +136,9 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     (0-based within the bar, 16ths by default) over bars [a, b] (which='all'|'odd'|'even'; every=8 takes bars
     a, a+8, a+16... i.e. the same position of an 8-bar loop), aligned by
     cross-correlation. Sounds that repeat identically (drum samples, stabs) add up; everything else averages down.
-    Reports how consistent the occurrences were."""
+    Reports how consistent the occurrences were. Reach for it when a drum in your song sounds dated or generic and
+    the genre's own hit is in a reference: extract it (from analyze_kit's component wav, not the full drum stem,
+    which carries the kick) and use it or fit to it."""
     P = _load(project)
     path, g = P.source(source, bars)
     y, sr = sf.read(path, dtype='float64', always_2d=True)

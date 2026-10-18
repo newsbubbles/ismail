@@ -260,3 +260,123 @@ def test_ports_skip_the_reserved_ones(env, monkeypatch):
     monkeypatch.setattr(FB, 'PORT0', 8886)
     monkeypatch.setattr(FB, 'port_free', lambda p: True)
     assert FB.pick_port(env['home']) == 8888
+
+
+# ------------------------------------------------------------------ Send, SENT / STILL WRITING, feedback_wait (M246)
+
+def _send(srv, rid='song-r1'):
+    return _post(f'http://127.0.0.1:{srv.port}/f/{rid}/done', b'{}')
+
+
+def test_feedback_page_has_a_send_button_and_its_reply_points_to_feedback_wait(env):
+    srv = _serve(env)
+    out = _page(env, open=False)
+    assert "feedback_wait(project, round='r1')" in out and "never ask them to type 'done'" in out
+    assert 'Send' in out and 'older one' not in out
+    html = _get(f'http://127.0.0.1:{srv.port}/f/song-r1/')[2]
+    assert b'sendbtn' in html and b"fetch('done'" in html
+    assert FB.health(srv.port)['send'] is True
+
+
+def test_feedback_read_says_still_writing_until_send_then_sent(env):
+    srv = _serve(env)
+    _page(env, open=False)
+    url = f'http://127.0.0.1:{srv.port}/f/song-r1/'
+    out = api.OPS['feedback_read'](str(env['song']), 'r1')
+    assert out.splitlines()[0] == 'STILL WRITING (last save none yet)'
+    assert "not sent yet: don't act on these answers" in out
+    _post(url + 'text', json.dumps({'q': 1, 'text': 'The kick, then'}).encode())
+    out = api.OPS['feedback_read'](str(env['song']), 'r1')
+    assert out.startswith('STILL WRITING (last save 20') and "don't act on these answers" in out
+    at = _send(srv)['at']
+    d = env['song'] / 'work' / 'feedback' / 'r1'
+    assert FB.read_json(d / 'done.json')['sent'] == [at]
+    out = api.OPS['feedback_read'](str(env['song']), 'r1')
+    assert out.splitlines()[0] == f'SENT {at}' and "don't act" not in out and 'The kick, then' in out
+    assert json.loads(_get(url + 'state')[2])['sent']['state'] == 'sent'
+    assert f'SENT {at}' in api.OPS['feedback_list'](str(env['song']))
+    # a late addition: the old send time stays, the round reads changed until Send again
+    time.sleep(1.1)
+    _post(url + 'text', json.dumps({'q': 2, 'text': 'and the pad is late'}).encode())
+    st = FB.sent_state(d)
+    assert st['state'] == 'changed' and st['at'] == at and st['changed_at']
+    out = api.OPS['feedback_read'](str(env['song']), 'r1')
+    assert out.startswith(f'SENT {at}, then CHANGED') and 'not sent again yet' in out
+    assert json.loads(_get(url + 'state')[2])['sent']['state'] == 'changed'
+    time.sleep(1.1)
+    at2 = _send(srv)['at']
+    assert FB.read_json(d / 'done.json')['sent'] == [at, at2]
+    assert api.OPS['feedback_read'](str(env['song']), 'r1').splitlines()[0] == f'SENT {at2} (sent 2 times; this is the last)'
+
+
+def test_a_voice_clip_after_send_counts_as_a_change(env):
+    srv = _serve(env)
+    _page(env, open=False)
+    _send(srv)
+    _post(f'http://127.0.0.1:{srv.port}/f/song-r1/voice?q=1&secs=1', WEBM, 'audio/webm')
+    assert FB.sent_state(env['song'] / 'work' / 'feedback' / 'r1')['state'] == 'changed'
+
+
+def test_feedback_wait_returns_on_send_and_at_timeout(env):
+    srv = _serve(env)
+    _page(env, open=False)
+    url = f'http://127.0.0.1:{srv.port}/f/song-r1/'
+    _post(url + 'text', json.dumps({'q': 1, 'text': 'half a tho'}).encode())
+    t0 = time.time()
+    out = api.OPS['feedback_wait'](str(env['song']), 'r1', timeout_s=1)
+    assert 0.9 <= time.time() - t0 < 5
+    assert out.startswith('STILL WRITING') and 'half a tho' in out and "don't act on these answers" in out
+    assert "feedback_wait(project, round='r1') again keeps waiting" in out
+    got = {}
+    th = threading.Thread(target=lambda: got.setdefault('out', api.OPS['feedback_wait'](str(env['song']), 'r1',
+                                                                                         timeout_s=20)))
+    th.start()
+    time.sleep(0.8)
+    _post(url + 'text', json.dumps({'q': 1, 'text': 'half a thought, now whole'}).encode())
+    at = _send(srv)['at']
+    th.join(15)
+    out = got['out']
+    assert out.startswith(f'SENT {at}') and 'now whole' in out and f"after='{at}'" in out
+    # already sent: at once; after= that send waits for a later one
+    t0 = time.time()
+    assert api.OPS['feedback_wait'](str(env['song']), 'r1', timeout_s=20).startswith('SENT')
+    assert time.time() - t0 < 2
+    out = api.OPS['feedback_wait'](str(env['song']), 'r1', timeout_s=0.6, after=at)
+    assert f"again after {at}" in out and f"after='{at}'" in out
+    with pytest.raises(api.OpError, match='not a time'):
+        api.OPS['feedback_wait'](str(env['song']), 'r1', after='soon')
+    with pytest.raises(api.OpError, match='rounds there: r1'):
+        api.OPS['feedback_wait'](str(env['song']), 'r9', timeout_s=0)
+
+
+def test_feedback_wait_says_when_the_page_server_is_too_old_for_send(env, monkeypatch):
+    srv = _serve(env)
+    _page(env, open=False)
+    real = FB.health
+    monkeypatch.setattr(FB, 'health', lambda port, timeout=1.5: {k: v for k, v in (real(port, timeout) or {}).items()
+                                                                if k != 'send'} or None)
+    out = api.OPS['feedback_wait'](str(env['song']), 'r1', timeout_s=0)
+    assert 'older one' in out and 'feedback_stop()' in out
+    assert 'older one' in _page(env, open=False)
+
+
+def test_a_songs_proj_writes_its_rounds_in_the_song_folder(env):
+    """electrohouse HANDOFF 3: proj/ is regenerated by the song's build, which took the answers with it."""
+    _serve(env)
+    song = env['song']
+    proj = song / 'proj'
+    api.project_new(str(proj), bpm=120, length_bars=2)
+    (song / 'ref').mkdir()
+    out = api.OPS['feedback_page'](str(proj), 'r2', items=[str(song / 'take.wav')], questions=['How is it?'],
+                                   open=False)
+    d = song / 'work' / 'feedback' / 'r2'
+    assert (d / 'manifest.json').is_file() and not (proj / 'work' / 'feedback' / 'r2').exists()
+    assert 'song folder, which a rebuild of proj/ leaves alone' in out and '/f/song-r2/' in out
+    assert 'nothing has come in yet' in api.OPS['feedback_read'](str(proj), 'r2')
+    assert 'r2:' in api.OPS['feedback_list'](str(proj))
+    # a round made in proj/ before the move stays where it is
+    FB.build(proj, 'old', [], ['Still there?'])
+    assert FB.round_dir(proj, 'old').is_dir()
+    assert 'nothing has come in yet' in api.OPS['feedback_read'](str(proj), 'old')
+    out = api.OPS['feedback_page'](str(proj), 'old', questions=['Still there?'], open=False)
+    assert 'in proj/, which a rebuild replaces' in out and not (song / 'work' / 'feedback' / 'old').exists()
