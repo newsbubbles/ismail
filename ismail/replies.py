@@ -12,6 +12,8 @@ registry file, with a short timeout (a server that does not answer is skipped in
   reference_next()             project_set(reference=)'s lines: what to run next with a reference
   note_compared(root, op, ..)  compare, cmp_run and sound_compare leave a receipt here (renders/compared.json)
   hear_it(root, path, d)       the "hear it" block for render and sketch
+  balance_lines(P)             render(stems=True)'s lines: each stem's share of the mix against the reference's,
+                               over the song and in its worst stretch, and whether a mastering pass comes next
 """
 import json
 import os
@@ -267,3 +269,129 @@ def _hear_it(root, path, d, what):
                "questions and a Send button")
     L.append(f"  one option: {opt}")
     return '\n'.join(L)
+
+
+# ------------------------------------------------------------------ balance against the reference (render, stems)
+
+BALANCE_WIN = 8                          # bars per stretch: a part too loud in the drop only shows per stretch
+BALANCE_SHOW_DB = 1.5                    # a stem whose share over the song is off by this much gets a line
+BALANCE_WORST_DB = 3.0                   # ...or one stretch off by this much
+ABSENT_DB = -35.0                        # a stem this far under the stretch's mix is not playing there
+PRESENT_DB = -20.0                       # ...and this close to it is a layer you hear
+QUIET_DB = -10.0                         # stretches this far under the reference's loudest one are left out
+
+
+def _mono(path):
+    import soundfile as sf
+    y, sr = sf.read(path, always_2d=True, dtype='float32')
+    return y.mean(axis=1), sr
+
+
+def _ms(y, sr, g, a, b):
+    i, j = max(int(g.bar_time(a) * sr), 0), max(int(g.bar_time(b) * sr), 0)
+    seg = y[i:j]
+    return float((seg.astype('float64') ** 2).mean()) if len(seg) else 0.0
+
+
+def balance_lines(P, win=BALANCE_WIN):
+    """Each mapped stem's share of the mix in your render against its share in the reference, per `win`-bar stretch
+    and over the song: the line a too-loud part shows up in (a bass that is right in the intro and 9 dB hot in the
+    drop averages out in a whole-song number). Names the loudest track of the stem in its worst stretch. Then one
+    line on the master: a limiter alone is not a mastering pass. [] when there is no stem map, no reference stems
+    or no rendered track stems. Never raises."""
+    import math
+    try:
+        sm = P.d.get('stem_map') or {}
+        ref = P.d.get('reference') or {}
+        if not sm or not ref.get('stems_dir'):
+            return []
+        groups = {}
+        for t, s in sm.items():
+            if t in P.d.get('tracks', {}):
+                try:
+                    groups.setdefault(s, []).append((t,) + P.source(f'track:{t}')[:2])
+                except Exception:        # noqa: BLE001  a track with no rendered stem is left out
+                    pass
+        rsrc = {}
+        for s in list(groups):
+            try:
+                rsrc[s] = P.source(f'ref:{s}')[:2]
+            except Exception:            # noqa: BLE001
+                groups.pop(s)
+        if len(groups) < 2:
+            return []
+        first = next(iter(groups.values()))[0]
+        w = P.render_window(first[1])
+        y0, sr0 = _mono(first[1])
+        a = w['bars'][0] if w else 1
+        b = w['bars'][1] + 1 if w else int(first[2].time_to_bar(len(y0) / sr0))
+        stretches = [(x, min(x + win, b)) for x in range(a, b, win) if min(x + win, b) - x >= 2]
+        if not stretches:
+            return []
+        own, ref_e, loud = {}, {}, {}
+        for s, trs in groups.items():
+            acc = None
+            for t, path, g in trs:
+                y, sr = _mono(path)
+                loud[t] = [_ms(y, sr, g, x, z) for x, z in stretches]
+                acc = y if acc is None else acc[:len(y)] + y[:len(acc)]
+            own[s] = [_ms(acc, sr, trs[0][2], x, z) for x, z in stretches]
+            y, sr = _mono(rsrc[s][0])
+            ref_e[s] = [_ms(y, sr, rsrc[s][1], x, z) for x, z in stretches]
+        db = lambda e: 10 * math.log10(e + 1e-20)
+        tot_o = [sum(own[q][k] for q in groups) + 1e-20 for k in range(len(stretches))]
+        tot_r = [sum(ref_e[q][k] for q in groups) + 1e-20 for k in range(len(stretches))]
+        top_r = max(tot_r)
+        loud_k = [k for k in range(len(stretches)) if db(tot_r[k] / top_r) > QUIET_DB]   # intros and outros out
+        span = lambda ks: ', '.join(f"{stretches[k][0]}-{stretches[k][1] - 1}" for k in ks)
+        rows, gone, extra = [], [], []
+        for s in sorted(groups):
+            diffs, wsum_o, wsum_r, miss, more = [], 0.0, 0.0, [], []
+            for k in loud_k:
+                so, sr_ = db(own[s][k] / tot_o[k]), db(ref_e[s][k] / tot_r[k])
+                if sr_ > PRESENT_DB and so < ABSENT_DB:
+                    miss.append(k)
+                elif so > PRESENT_DB and sr_ < ABSENT_DB:
+                    more.append(k)
+                if so < ABSENT_DB or sr_ < ABSENT_DB:
+                    continue
+                diffs.append((so - sr_, k))
+                wsum_o += own[s][k] / tot_o[k]
+                wsum_r += ref_e[s][k] / tot_r[k]
+            names = [t for t, _, _ in groups[s]]
+            if miss:
+                gone.append(f"  {s}: silent in bars {span(miss)}, where the reference's {s} plays (" +
+                            f"{db(ref_e[s][miss[0]] / tot_r[miss[0]]):.0f} dB of the mix): a missing layer, or a part "
+                            f"of yours filed under another stem (stem_map_set)")
+            if more:
+                extra.append(f"  {s}: plays in bars {span(more)}, where the reference's {s} is silent")
+            if not diffs:
+                continue
+            whole = db(wsum_o) - db(wsum_r)
+            worst, k = max(diffs, key=lambda d: abs(d[0]))
+            if abs(whole) < BALANCE_SHOW_DB and abs(worst) < BALANCE_WORST_DB:
+                continue
+            x, z = stretches[k]
+            top = max(names, key=lambda t: loud[t][k])
+            word = lambda v: f"{abs(v):.1f} dB {'louder' if v > 0 else 'quieter'}"
+            rows.append((abs(worst), f"  {s}: {word(whole)} than in the reference over its loud stretches; worst bars "
+                                     f"{x}-{z - 1}: {word(worst)}" + (f" (loudest there: {top}, of {', '.join(names)})"
+                                                                      if len(names) > 1 else f" ({top})")))
+        L = []
+        if rows or gone or extra:
+            L.append(f"balance against the reference (each stem's share of the mix, {win}-bar stretches, "
+                     f"quiet stretches left out):")
+            L += [r for _, r in sorted(rows, reverse=True)] + gone + extra
+            L.append("  levels_from_ref(bars=[a, b]) proposes the faders for a stretch; solo the named track before "
+                     "moving a whole stem, then re-render with stems")
+        else:
+            L.append(f"balance against the reference: every stem within {BALANCE_SHOW_DB} dB over the song and "
+                     f"{BALANCE_WORST_DB} dB in every loud {win}-bar stretch")
+        mfx = [f.get('type') for f in (P.d.get('master') or {}).get('fx', [])]
+        if not w and set(mfx) <= {'limiter'}:
+            L.append("master: a limiter only, no mastering pass yet. " + (
+                "Balance first (the lines above), then " if gone or (rows and max(rows)[0] >= BALANCE_WORST_DB) else "Next: ") +
+                "the mastering pass, references/mastering.md (glue, mono low end, loudness for the reference)")
+        return L
+    except Exception:                    # noqa: BLE001  a reply line never breaks the render that made it
+        return []

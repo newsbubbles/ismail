@@ -2068,6 +2068,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     ref_line = replies.reference_line(P.root, P.d)
     if ref_line:
         L.append(ref_line)
+    if stems:
+        L += replies.balance_lines(P)
     heard = (os.path.join(rd, (out or 'latest') + '.mp3') if mp3 != 'none' else
              os.path.join(rd, out + '.wav') if out else None)
     if heard:

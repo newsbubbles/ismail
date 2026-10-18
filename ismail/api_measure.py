@@ -254,7 +254,8 @@ def levels_from_ref(project: str, bars: list = None, apply: bool = False) -> str
     its level against the sum of the mapped stems in the reference (demucs stems) and in your render (track stems),
     and proposes a fader change per track (the same change for every track of one stem). apply=True writes them.
     Needs stem_map_set, separate(source='ref') and render(stems=True) over the same bars. Re-render and re-check
-    after applying: compressors and the limiter move levels again."""
+    after applying: compressors and the limiter move levels again. Reach for it when a part sounds too loud or too quiet,
+    or render(stems=True)'s balance lines name a stem and a stretch (bars=[a, b] for that stretch)."""
     P = _load(project)
     sm = P.d.get('stem_map') or {}
     if not sm:
