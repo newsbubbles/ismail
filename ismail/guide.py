@@ -106,7 +106,8 @@ RECREATE A REFERENCE (what worked; a reference that arrives as inspiration too: 
      instrument_fit(target='sound:x', params={path: [lo, hi]}, fx=[...]) - fx params fit too ('fx.0.depth_db').
   5. stem_map_set({track: stem}) -> render(stems=True) -> levels_from_ref (faders from the reference's stem
      balance, not by feel; the part carrying its identity is checked on top where it enters, sound_compare on
-     that window, never cut to a stem average) -> cmp_run. Read cmp_summary, then drill:
+     that window, never cut to a stem average) -> ear_pass (cmp_run, the worst bars zoomed, crops of yours and
+     the reference side by side) before each draft goes out. Read cmp_summary, then drill:
      cmp_arrangement (macro), cmp_sections, cmp_worst / cmp_bars (per bar), cmp_zoom(bar) (per 16th:
      b both, r reference only, y yours only, UPPERCASE = note start). cmp_list = progress over time.
   6. For fair stem scores use cmp_run(stems='demucs') at checkpoints: your render is separated by the same

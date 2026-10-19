@@ -46,11 +46,7 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
     P = _load(project)
     da = SD.descriptor(_audio(P, a, a_window, a_span))
     db = SD.descriptor(_audio(P, b, b_window, b_span))
-    out = SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
-    from . import replies
-    if replies.is_ref(a) or replies.is_ref(b):
-        replies.note_compared(P.root, 'sound_compare', f"{a} vs {b}")
-    return out
+    return SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
 
 
 @op(mutates=True)

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### One call to look before a draft goes out, and notes that say where to look
+
+Over one song's rounds an agent ran render about 43 times and sound_compare about 30, and never the stored comparison,
+its worst bars, a zoom diff or a region measure, though the playbook names them all. By feedback time the playbook
+was too far back to recall them.
+
+- `ear_pass` runs the stored comparison with the reference, ranks the worst bars, and for each of the top ones names
+  the band that differs most (with the `region_measure` call that sizes it), zooms it step by step and writes a crop
+  of yours and one of the reference at that bar to read side by side. The render reply's "Next:" now points to it.
+- A `sound_compare` alone no longer counts as "compared with the reference" in the render reply; `ear_pass`,
+  `compare` and `cmp_run` do.
+- `feedback_read` (and so `feedback_wait` and `feedback_paste`) turns each note that names a quality ("muddy", "too
+  loud", "fake", "out of time") into its measure step: the tool for that kind of word, with the window filled in
+  when the note gives bars or a time, and the part when the note names one. Words like "dark" or "dry" count only
+  as "too dark", "too dry": alone they are taste.
+
 ### Part names are checked with the person by ear
 
 A listener said the bass overpowered the track. They meant the answering bass; the agent turned down another one it

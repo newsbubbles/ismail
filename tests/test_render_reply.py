@@ -88,7 +88,8 @@ def test_render_reply_names_the_comparison_not_yet_run(tmp_path):
     out = api.project_set(root, reference=ref)
     assert 'next with a reference' in out and 'levels_from_ref' in out and 'never averaged down' in out
     out = api.render(root, cache=False, wait='0')
-    assert 'compared with the reference (ref.wav): never' in out and 'sound_compare on the part the person named' in out
+    assert 'compared with the reference (ref.wav): never' in out and 'Next: ear_pass' in out
+    assert 'sound_compare on the part the person named' in out
     api.compare(root, bars=[1, 2])
     rec = replies.last_compared(root)
     assert rec['op'] == 'compare' and 'render vs ref' in rec['what']

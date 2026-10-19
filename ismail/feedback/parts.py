@@ -138,3 +138,20 @@ def ambiguous(text, d, names=None):
         if not named:
             out.append((w, cands))
     return out
+
+
+def named(text, d, names=None):
+    """The one part a note names (by the agent's name for it, a name the person confirmed, or a family word only one
+    part belongs to), or None when it names none or several."""
+    words = part_words(d)
+    said = set(_tokens(text))
+    low = ' ' + ' '.join(_tokens(text)) + ' '
+    hit = {t for t in words if f" {' '.join(_tokens(t.replace('_', ' ')))} " in low
+           or (names and names.get(t) and f" {' '.join(_tokens(names[t]))} " in low)}
+    for w in FAMILY:
+        if w in said:
+            root = w.rstrip('s')
+            cands = [t for t, ws in words.items() if w in ws or root in ws]
+            if len(cands) == 1:
+                hit.add(cands[0])
+    return next(iter(hit)) if len(hit) == 1 else None

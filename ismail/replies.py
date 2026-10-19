@@ -10,7 +10,7 @@ registry file, with a short timeout (a server that does not answer is skipped in
 
   reference_line(root, d)      render's line: the reference and whether it has been compared since this render
   reference_next()             project_set(reference=)'s lines: what to run next with a reference
-  note_compared(root, op, ..)  compare, cmp_run and sound_compare leave a receipt here (renders/compared.json)
+  note_compared(root, op, ..)  compare, cmp_run and ear_pass leave a receipt here (renders/compared.json)
   hear_it(root, path, d)       the "hear it" block for render and sketch
   moves_line(d)                a full render's line when the song has no moves yet (no automation, no transitions)
   balance_lines(P)             render(stems=True)'s lines: each stem's share of the mix against the reference's,
@@ -121,8 +121,8 @@ def reference_line(root, d):
             when = ('never' if not last else
                     f"not since this render (last: {last.get('op')}{' ' + last['what'] if last.get('what') else ''}, "
                     f"{_ago(time.time() - float(last.get('t') or 0))})")
-            return (f"compared with the reference ({os.path.basename(ref)}): {when}. Next: compare(bars=), then "
-                    f"sound_compare on the part the person named; cmp_run stores a full run")
+            return (f"compared with the reference ({os.path.basename(ref)}): {when}. Next: ear_pass (the worst bars, "
+                    f"each zoomed and cropped beside the reference), then sound_compare on the part the person named")
         files = ref_audio(root)
         if files:
             sr = _song_root(root)
@@ -137,7 +137,7 @@ def reference_line(root, d):
 def reference_next():
     return ["next with a reference: analyze_grid (tempo, bar 1, tuning), separate(source='ref') for its stems, "
             "analyze_structure(source='ref') for its roots (one root throughout is a pedal, not a progression); "
-            "before each draft goes out, compare or cmp_run, and sound_compare on the part the person named",
+            "before each draft goes out, ear_pass, and sound_compare on the part the person named",
             "levels_from_ref sets each stem's average level from it; the part that carries the reference's identity "
             "(the riff, the hook) is checked on top in its own window (sound_compare or region_measure), never "
             "averaged down to its stem"]

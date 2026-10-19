@@ -33,6 +33,12 @@ missed.
 
 ## When to zoom
 
+With a reference, `ear_pass` is the first look before every draft: one call runs `cmp_run`, ranks the worst bars,
+names the band that differs most in each (with the `region_measure` call that sizes it), zooms each bar step by step
+and writes a crop of yours and of the reference at that bar to read side by side. A note that names a quality
+("muddy", "too loud", "fake") comes back from `feedback_read` with its measure step already written: the window, if
+they gave a time or bars, and the tool for that kind of word.
+
 The zoom is a measurement, not only a picture for exams: the sound becomes a large image of time against
 frequency, and you frame any part of it at the resolution the question needs. Reach for it early when:
 
