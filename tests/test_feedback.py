@@ -542,3 +542,35 @@ def test_parts_errors_point_forward(env):
         api.OPS['feedback_page'](str(proj), 'r7', parts=['nope'], questions=['?'], open=False)
     with pytest.raises(api.OpError, match='latest render'):
         api.OPS['feedback_page'](str(proj), 'r7', parts=True, questions=['?'], open=False)
+
+
+def test_a_note_that_names_a_quality_comes_back_as_its_measure_step(env):
+    """ledger:M252: 'muddy at bars 9-12' reads back with the window filled in and the tool for that kind of word."""
+    _serve(env)
+    proj = env['song'] / 'proj'
+    _band(proj)
+    api.OPS['feedback_page'](str(proj), 'r8', questions=['What bothers you?', 'Anything else?'], open=False)
+    msg = ("song: r8 (round r8): my answers\n\n1. What bothers you?\nthe reese gets muddy in bars 9-12\n\n"
+           "2. Anything else?\nlove it\n")
+    out = api.OPS['feedback_paste'](str(proj), 'r8', text=msg)
+    assert 'measure before you change anything' in out, out
+    line = next(ln for ln in out.splitlines() if ln.strip().startswith('1. "muddy"'))
+    assert "(tone): sound_zoom on source='render', bars=[9, 12], the part reese" in line, line
+    assert not any(ln.strip().startswith('2. "') for ln in out.splitlines())
+    assert 'ear_pass' not in out                                      # no reference on this song
+
+
+def test_measure_words_and_windows():
+    from ismail.feedback import measure as M
+    assert M.qualities('Too loud, and the lead sounds fake.') == [('level', 'too loud'), ('sound', 'fake')]
+    assert M.qualities('dark and moody, I love it') == []            # 'dark' alone is a taste, not a fault
+    assert M.qualities('a bit too dark') == [('tone', 'too dark')]
+    assert M.window('around 1:20 to 1:30') == {'seconds': [78.0, 92.0]}
+    assert M.window('bar 5') == {'bars': [5, 5]} and M.window('at 45 seconds') == {'seconds': [43.0, 47.0]}
+    assert M.window('no time here') is None
+    items = [{'label': 'draft 3', 'path': '/x/draft3.mp3'}]
+    step = M.steps(2, 'harsh at 0:45', items, {'reference': {'file': 'r.wav'}})
+    assert step == ["2. \"harsh\" (tone): sound_zoom on source='/x/draft3.mp3', seconds=[43.0, 47.0] (in draft 3), "
+                    "yours and the reference's same window side by side; region_measure on the band that differs"]
+    two = items + [{'label': 'draft 2', 'path': '/x/draft2.mp3'}]
+    assert "seconds=[43.0, 47.0] in the clip they meant ('draft 3', 'draft 2')" in M.steps(1, 'harsh at 0:45', two)[0]

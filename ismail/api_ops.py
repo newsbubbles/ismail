@@ -32,7 +32,7 @@ CATEGORIES = [
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
       'region_measure')),
     ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
-    ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_',)),
+    ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_', 'ear_pass')),
     ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes, '
              'feedback pages they answer by voice or typing', ('exam_', 'feedback_')),
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
