@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Recreating and arranging: lessons from four metal recreations and an electro house vocal
+
+- recreate.md: count a tab's real bar starts through meter changes; render both readings of an ambiguous part;
+  snap click-less drums to the record's own onsets; replace the instrument in fit loops; time drafts stem by stem;
+  judge tremolo guitar by chroma; score the window, not the file.
+- composition.md: a clear buildup with the voice on the drop, a payoff line held until the story earns it, where
+  phrase halves land, spoken lines on the stressed syllable, filling a voiceless stretch with what was said, and a
+  high robot voice from a vocoder carrier.
+
 ### Render reads the true peak; the noise riser stays under it
 
 - render's master line gives the true peak (4x oversampled) beside the sample peak, and says when it is over
