@@ -78,7 +78,7 @@ def _open(url):
 @op()
 def feedback_page(project: str, round: str, items: list = None, questions: list = None, voice: bool = True,
                   title: str = None, open: bool = True, port: int = None, footer: bool = True,
-                  share: bool = False, parts=None, parts_bars: int = 4) -> str:
+                  share: bool = False, parts=None, parts_bars: int = 4, moments=False) -> str:
     """A feedback page for the person, on this computer: the items to look at or listen to, then numbered questions,
     each with a text box and (voice=True) a Record button. Everything they type is saved as it changes and every
     recording is saved as a file and transcribed in the background; when they reopen the page, their text, their
@@ -105,15 +105,24 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
     person's name for it. Use it in the first round of a song, and whenever a note's words could mean more than one
     part ("the bass" with a sub, a reese and a talking bass): you change the part they meant only once you share
     its name. feedback_read shows their names; lexicon_note(said=<their name>, track=<part>, heard=<round>) keeps each.
+    moments=True puts a time strip and a 'Mark this moment' button (or the M key) under the first audio item
+    (moments='<item label or path>' picks another): while it plays, the person marks anything that strikes them with
+    tick boxes (love this, too much, which part) and their words. feedback_read lists each moment with its time and
+    its bars on the song. Offer it for rounds on a whole song's structure.
     Reach for it whenever the person should answer questions by voice or by typing at the desk: notes on a cut, a
     mix, a set of shots or sketches, a round of choices, anything you would otherwise build a page and a server for."""
     proj, rnd = _project(project), _round(round)
     folder, base = _round_dir(project, rnd)
     part_clips, left_out = _parts(proj, base, folder, parts, parts_bars) if parts else (None, [])
     try:
+        its = [FB._item(n, it, proj) for n, it in enumerate(items or [], 1)]
+    except ValueError as e:
+        raise OpError(f"feedback_page: {e}")
+    mo = _moments_setup(proj, base, folder, its, moments) if moments else None
+    try:
         d, man, kept = FB.build(proj, rnd, items, questions, voice=voice, title=title,
                                 folder=folder if folder != FB.round_dir(proj, rnd) else None,
-                                footer=_footer(proj, base) if footer else None, parts=part_clips)
+                                footer=_footer(proj, base) if footer else None, parts=part_clips, moments=mo)
     except (OSError, ValueError) as e:
         raise OpError(f"feedback_page: {e}")
     rid = FB.register(d)
@@ -153,6 +162,15 @@ def feedback_page(project: str, round: str, items: list = None, questions: list 
                  + (f"; left out: {', '.join(f'{t} ({why})' for t, why in left_out)}" if left_out else '')
                  + ". Their names come back in feedback_read; keep each one: lexicon_note(project, said=<their name>, "
                    f"track=<part>, heard='{rnd}')")
+    if mo:
+        it = its[mo['item'] - 1]
+        g = mo['grid']
+        L.append(f"moments: under '{it['label']}', a time strip"
+                 + (f" with bar numbers ({g['bpm']:g} bpm, {g['bpb']} beats a bar"
+                    + (f", the clip starts at {g['start_sec']:g} s in the song" if g.get('start_sec') else '') + ")"
+                    if g else " (no song found, so no bar numbers)")
+                 + f" and 'Mark this moment' (or M); part boxes: {', '.join(p['label'] for p in mo['parts'])}. "
+                   f"feedback_read lists each moment with its time and bars")
     if shared:
         sd, files, size = shared
         L += [f"shared copy: {sd} (index.html + {_n(len(files), 'clip file')}, {size / 1e6:.1f} MB): host the folder where "
@@ -173,6 +191,67 @@ def _song_project(proj, base):
         if (cand / 'project.json').is_file():
             return cand
     return None
+
+
+MOMENT_PARTS_MAX = 10       # part boxes on a moment's card; a song with more tracks groups the rest by its stem map
+
+
+def _moments_setup(proj, base, folder, its, which):
+    """The moments for a round (ledger:M263) -> {'item': n, 'parts': [{label, tracks}], 'grid': {...} or None}."""
+    audio = [it for it in its if it['kind'] == 'audio']
+    if not audio:
+        raise OpError("moments= marks times in a clip that plays: add an audio item to items=, e.g. "
+                      "items=[{'label': 'The song', 'path': 'renders/latest.mp3'}]")
+    if which is True:
+        it = audio[0]
+    else:
+        w = str(which).strip()
+        it = next((a for a in audio if a['label'].lower() == w.lower()), None) or next(
+            (a for a in audio if FB._same(a['path'], w) or FB._same(a['path'], proj / w)
+             or Path(a['path']).name.lower() == Path(w).name.lower()), None)
+        if not it:
+            raise OpError(f"moments={which!r}: no audio item has that label or path; the audio items are "
+                          + ', '.join(repr(a['label']) for a in audio) + " (or moments=True for the first)")
+    cand = _song_project(proj, base)
+    song = (FB.read_json(cand / 'project.json', {}) or {}) if cand else {}
+    grid = None
+    if song.get('bpm'):
+        grid = {'bpm': float(song['bpm']), 'bpb': int(song.get('beats_per_bar') or song.get('bpb') or 4),
+                'offset_sec': float(song.get('offset_sec') or 0.0), 'start_sec': 0.0}
+        try:                                       # a windowed render starts later in the song than t=0
+            from .api import _load
+            P = _load(str(cand))
+            p = Path(it['path'])
+            win = P.render_window(str(p)) or P.render_window(str(p.with_suffix('.wav')))
+        except Exception:                          # noqa: BLE001  no window known: the clip starts the song
+            win = None
+        if win:
+            grid['start_sec'] = round(float(win['start_sec']), 4)
+    return {'item': it['n'], 'parts': _moment_parts(base, folder, song), 'grid': grid}
+
+
+def _moment_parts(base, folder, song):
+    """The part boxes on a moment's card: the person's own names for the parts (names.json in any round of this
+    song, this round's last), else the track names; then 'everything'."""
+    heard = {}
+    for d in [x for x in _round_dirs(base)[1] if not FB._same(x, folder)] + [folder]:
+        heard.update(FB.names(d))
+    tracks = list((song or {}).get('tracks') or {})
+    sm = (song or {}).get('stem_map') or {}
+    rows = []
+    if len(tracks) > MOMENT_PARTS_MAX and sm:
+        rows += [{'label': heard[t], 'tracks': [t]} for t in tracks if t in heard]
+        rest = [t for t in tracks if t not in heard]
+        for stem in dict.fromkeys(sm.get(t) or t for t in rest):
+            rows.append({'label': stem, 'tracks': [t for t in rest if (sm.get(t) or t) == stem]})
+    else:
+        rows = [{'label': heard.get(t) or t, 'tracks': [t]} for t in tracks]
+    seen, out = set(), []
+    for r in rows:
+        if r['label'].lower() not in seen and r['label'].lower() != 'everything':
+            seen.add(r['label'].lower())
+            out.append(r)
+    return out[:MOMENT_PARTS_MAX] + [{'label': 'everything', 'tracks': []}]
 
 
 def _parts(proj, base, folder, parts, span):
@@ -261,15 +340,19 @@ def feedback_paste(project: str, round: str, text: str = None, files: list = Non
     if not man:
         raise _no_round(project, rnd)
     qs = man.get('questions', [])
+    mo = man.get('moments')
+    marked = FB.parse_moments(text, mo.get('tags') or FB.MOMENT_TAGS,
+                              [p['label'] for p in mo.get('parts') or []]) if mo and text else []
     answers, left = {}, []
     if text and str(text).strip():
         try:
             answers, left = FB.parse_answers(text, qs)
         except ValueError as e:
-            raise OpError(f"feedback_paste: {e}")
+            if not marked:
+                raise OpError(f"feedback_paste: {e}")
     voice = _voice_files(files, len(qs))
     named = FB.parse_names(text, [p['track'] for p in man.get('parts') or []]) if text else {}
-    if not answers and not voice and not named:
+    if not answers and not voice and not named and not marked:
         raise OpError("feedback_paste: nothing to keep: pass text= (their message, verbatim) and/or files= (their "
                       "voice notes)")
     try:
@@ -292,6 +375,8 @@ def feedback_paste(project: str, round: str, text: str = None, files: list = Non
             post(f"voice?q={n}", path.read_bytes(), VOICE_TYPES[path.suffix.lower()])
         for t, name in named.items():
             post('name', json.dumps({'track': t, 'text': name}).encode('utf8'), 'application/json')
+        if marked:
+            post('moments', json.dumps({'moments': marked}).encode('utf8'), 'application/json')
         if send:
             post('done', b'{}', 'application/json')
     except OSError as e:
@@ -300,6 +385,7 @@ def feedback_paste(project: str, round: str, text: str = None, files: list = Non
                                         f"({', '.join(str(n) for n in sorted(answers))})" if answers else 'no typed answers')
          + (f", {_n(len(voice), 'voice note')} (written down in the background)" if voice else '')
          + (f", names for {_n(len(named), 'part')}" if named else '')
+         + (f", {_n(len(marked), 'moment')}" if marked else '')
          + ('; counted as their Send' if send else '; not sent (send=False)')]
     if replaced:
         L.append(f"replaced the earlier typed answer to {', '.join(str(n) for n in replaced)} (every earlier wording is "
@@ -383,12 +469,18 @@ def feedback_read(project: str, round: str, since: str = None) -> str:
         for c in new_said:
             L.append(_clip_line(c, d))
             shown += 1
+    marks = FB.moments(d) if man.get('moments') else []
+    latest += [m.get('at') for m in marks]
+    new_marks = [m for m in marks if _after(m.get('at'), cut)]
+    if new_marks:
+        L += _moment_lines(man, marks, new_marks)
+        shown += len(new_marks)
     names = FB.names(d)
     texts = [((ans.get(str(q['n'])) or {}).get('text') or '') + ' ' + ' '.join(
         c.get('text') or '' for c in (ans.get(str(q['n'])) or {}).get('said') or []) for q in man.get('questions', [])]
     song = _song_dict(project)
     L += _names_lines(rnd, man, names, texts, song)
-    L += _measure_lines(man, names, texts, song)
+    L += _measure_lines(man, names, texts, song, marks)
     shown += len(names) if not cut else 0
     state = _state_lines(d, rnd)
     head = f"feedback round {rnd} ({d}), {len(man.get('questions', []))} questions"
@@ -425,13 +517,62 @@ def _song_dict(project):
 MEASURE_MAX = 8
 
 
-def _measure_lines(man, names, texts, d):
-    """Each answer that names a quality (muddy, too loud, fake), as the measure step for it (ledger:M252)."""
+MOMENT_BEFORE_S = 2.0       # people mark a moment just after they hear it: its bars start this much earlier
+
+
+def _moment_parts_map(man):
+    return {p['label']: p.get('tracks') or [] for p in (man.get('moments') or {}).get('parts') or []}
+
+
+def _moment_lines(man, marks, new):
+    """The moments (ledger:M263), in time order: the time in the clip, the bars on the song, ticks and words."""
+    mo = man['moments']
+    it = next((i for i in man.get('items', []) if i['n'] == mo['item']), {})
+    g = mo.get('grid')
+    tracks = _moment_parts_map(man)
+    L = [f"moments marked while '{it.get('label') or 'the clip'}' played ({_n(len(new), 'moment')}"
+         + (f" of {len(marks)}" if len(new) < len(marks) else '') + "), in time order: "
+         + ("the time in the clip, then the song's bars from 2 s before the mark to the mark (people mark just after "
+            "they hear it)" if g else "the time in the clip (not a song, so no bars)") + ':']
+    for i, m in enumerate(marks, 1):
+        if m not in new:
+            continue
+        where = FB.clock(m['t'])
+        if g:
+            a, b = FB.moment_bar(max(0.0, m['t'] - MOMENT_BEFORE_S), g), FB.moment_bar(m['t'], g)
+            where += f" (bar {b})" if a == b else f" (bars {a}-{b})"
+        parts = [p + (f" ({', '.join(tracks[p])})" if tracks.get(p) and tracks[p] != [p] else '')
+                 for p in m.get('parts') or []]
+        bits = ([', '.join(m['tags'])] if m.get('tags') else []) + (['parts: ' + ', '.join(parts)] if parts else [])
+        L.append(f"   m{i} {where}: " + ('; '.join(bits) or 'no boxes ticked')
+                 + (f"; in their words:\n      {_cap(m['text'])}" if m.get('text') else ''))
+    return L
+
+
+def _moment_notes(man, marks):
+    """Each moment as a note for the measure step: (label, text, the part's track or None, [its item])."""
+    mo = man.get('moments') or {}
+    item = [i for i in man.get('items', []) if i['n'] == mo.get('item')]
+    tracks = _moment_parts_map(man)
+    out = []
+    for i, m in enumerate(marks, 1):
+        ticked = sorted({t for p in m.get('parts') or [] for t in tracks.get(p) or []})
+        text = f"at {FB.clock(m['t'])} " + ', '.join(list(m.get('tags') or []) + list(m.get('parts') or [])) \
+            + (f", {m['text']}" if m.get('text') else '')
+        out.append((f"m{i}", text, ticked[0] if len(ticked) == 1 else None, item))
+    return out
+
+
+def _measure_lines(man, names, texts, d, marks=()):
+    """Each answer or moment that names a quality (muddy, too loud, fake), as the measure step for it
+    (ledger:M252)."""
     from .feedback import measure as M
     from .feedback import parts as PT
     L = []
     for q, text in zip(man.get('questions', []), texts):
         L += M.steps(q['n'], text, man.get('items'), d, PT.named(text, d, names) if d else None)
+    for n, text, part, item in _moment_notes(man, marks):
+        L += M.steps(n, text, item, d, part or (PT.named(text, d, names) if d else None))
     if not L:
         return []
     more = len(L) - MEASURE_MAX
@@ -526,8 +667,10 @@ def feedback_list(project: str = None) -> str:
         st = FB.sent_state(d)
         sent = {'sent': f"SENT {st['at']}", 'changed': f"changed after sending {st['at']}"}.get(st['state'],
                                                                                               'not sent yet')
+        marks = len(FB.moments(d)) if man.get('moments') else 0
         L.append(f"{man.get('round', d.name)}: {answered}/{nq} questions answered, {_n(len(said), 'voice clip')}"
-                 + (f" ({wait} waiting for transcription)" if wait else '') + f", {sent}; {link}; {d}")
+                 + (f" ({wait} waiting for transcription)" if wait else '')
+                 + (f", {_n(marks, 'moment')}" if marks else '') + f", {sent}; {link}; {d}")
     srv = (f"page server: running on port {port} (feedback_stop() stops it)" if port
            else "page server: not running (feedback_page starts it)")
     if not L:

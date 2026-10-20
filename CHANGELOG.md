@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Moments marked while the song plays
+
+- `feedback_page(moments=True)` puts a time strip with bar numbers and a "Mark this moment" button (or the M key)
+  under the first audio item (`moments='<label or path>'` picks another). Each moment gets tick boxes (love this,
+  too much, which part, in the person's own part names) and their words.
+- The served page saves moments in the round (`moments.json`); a shared copy keeps them in the browser and puts a
+  "Moments:" block in the message, which `feedback_paste` reads back.
+- `feedback_read` and `feedback_wait` list the moments in time order with their bars (a windowed render counts from
+  where it starts), and a moment that names a quality gets its measure step at that time.
+
 ### Recreating and arranging: lessons from four metal recreations and an electro house vocal
 
 - recreate.md: count a tab's real bar starts through meter changes; render both readings of an ambiguous part;

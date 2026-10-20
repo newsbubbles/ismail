@@ -11,6 +11,8 @@ A round is a folder in the project, <project>/work/feedback/<round>/:
   done.json          written when the person presses Send: every send time, and when they changed something after
                      the last one (a late addition), so an agent acts only on a round they sent (ledger:M246)
   names.json         the person's names for the parts in the parts block, {track: {text, at}} (ledger:M253)
+  moments.json       with moments on: the moments the person marked while a clip played, {'moments': [{id, t (seconds
+                     in the clip), tags, parts, text, at}], 'at'} (ledger:M263)
   parts/             the parts block's clips: each part alone and in the mix at its most exposed bars
   voice/             the voice clips (q<n>_<stamp>.webm, .ogg, .m4a or .wav), each transcript beside it as .txt
   share/             with share=True: a standalone copy of the page (index.html and the clips beside it) for a
@@ -120,6 +122,7 @@ def sent_state(d):
     ans = read_json(d / 'answers.json', {}) or {}
     saves = [a.get('typed_at') for a in ans.values() if a.get('typed_at')]
     saves += [c.get('at') for a in ans.values() for c in a.get('said') or [] if c.get('at')]
+    saves += [m.get('at') for m in moments(d) if m.get('at')]
     last = max(saves, key=parse_time) if saves else None
     sent = list(done.get('sent') or ([done['at']] if done.get('at') else []))
     at = sent[-1] if sent else None
@@ -166,12 +169,14 @@ def _question(n, q):
     return {'n': n, 'text': str(q).strip()}
 
 
-def build(project, rnd, items, questions, voice=True, title=None, folder=None, footer=None, parts=None):
+def build(project, rnd, items, questions, voice=True, title=None, folder=None, footer=None, parts=None,
+          moments=None):
     """Write (or rewrite) a round's manifest; answers already given stay. folder: where the round goes (default
     <project>/work/feedback/<round>; a song's proj/ passes the song folder's, which a rebuild leaves alone).
     footer: sources.footer()'s dict, shown at the bottom of the page (ledger:M254), or None. parts: the parts block,
-    [{track, bars, solo, mix}] from feedback.parts.clips (ledger:M253), or None.
-    -> (folder, manifest, kept answers)."""
+    [{track, bars, solo, mix}] from feedback.parts.clips (ledger:M253), or None. moments: {'item': the audio item's
+    number (1-based), 'parts': [{label, tracks}], 'grid': {bpm, bpb, offset_sec, start_sec} or None} (ledger:M263),
+    or None. -> (folder, manifest, kept answers)."""
     d = Path(folder) if folder else round_dir(project, rnd)
     its = [_item(n, it, project) for n, it in enumerate(items or [], 1)]
     if not questions:
@@ -185,6 +190,12 @@ def build(project, rnd, items, questions, voice=True, title=None, folder=None, f
            'made': old.get('made') or now(), 'updated': now()}
     if parts:
         man['parts'] = [dict(p, n=i) for i, p in enumerate(parts, 1)]
+    if moments:
+        it = next((x for x in its if x['n'] == moments['item']), None)
+        if not it or it['kind'] != 'audio':
+            raise ValueError(f"moments go on an audio item, and item {moments['item']} is not one")
+        man['moments'] = {'item': it['n'], 'tags': list(MOMENT_TAGS), 'parts': list(moments.get('parts') or []),
+                          'grid': moments.get('grid')}
     if footer:
         from ..sources import FOOTER_LEAD
         man['footer'] = {'lead': FOOTER_LEAD, 'link': footer['link'], 'how': footer.get('how') or ''}
@@ -200,10 +211,109 @@ def build(project, rnd, items, questions, voice=True, title=None, folder=None, f
 def public_manifest(man):
     """What the page sees: no paths on this computer, each file by its number."""
     out = {k: man.get(k) for k in ('title', 'round', 'voice', 'questions', 'footer')}
+    mo = man.get('moments')
+    if mo:
+        out['moments'] = {'item': mo['item'], 'tags': mo.get('tags') or list(MOMENT_TAGS),
+                          'parts': [p['label'] for p in mo.get('parts') or []], 'grid': mo.get('grid')}
     out['items'] = [{k: v for k, v in it.items() if k != 'path'} | ({'src': f"item/{it['n']}"} if it.get('path')
                                                                      else {}) for it in man.get('items', [])]
     out['parts'] = [{'n': p['n'], 'track': p['track'], 'bars': p.get('bars'), 'solo': f"part/{p['n']}/solo",
                      'mix': f"part/{p['n']}/mix"} for p in man.get('parts') or []]
+    return out
+
+
+# ------------------------------------------------------------------ moments (ledger:M263)
+# The listener marks a moment while the clip plays: a time in that clip, tick boxes and their words.
+
+MOMENT_TAGS = ('Love this', 'Too much', 'Too empty', 'A sound is off', 'Wants a change here', 'Hit harder')
+MOMENTS_MAX = 500
+MOMENTS_HEAD = 'Moments:'
+
+
+def moments(d):
+    """The moments kept in a round, in time order: [{id, t, tags, parts, text, at}]."""
+    ms = (read_json(Path(d) / 'moments.json', {}) or {}).get('moments') or []
+    return sorted((m for m in ms if isinstance(m, dict)), key=lambda m: float(m.get('t') or 0))
+
+
+def _words(xs):
+    return [str(x).strip()[:80] for x in (xs if isinstance(xs, list) else []) if str(x).strip()][:20]
+
+
+def clean_moments(rows):
+    """Moments from the page or a paste, checked: [{id, t (seconds, >= 0), tags, parts, text}]. Raises ValueError."""
+    if not isinstance(rows, list):
+        raise ValueError('moments: a list of {t, tags, parts, text}')
+    if len(rows) > MOMENTS_MAX:
+        raise ValueError(f'moments: at most {MOMENTS_MAX}')
+    out = []
+    for i, m in enumerate(rows, 1):
+        if not isinstance(m, dict):
+            raise ValueError(f'moment {i}: give {{t, tags, parts, text}}')
+        t = float(m.get('t'))
+        if not 0 <= t <= 24 * 3600:
+            raise ValueError(f'moment {i}: t is the seconds into the clip')
+        out.append({'id': str(m.get('id') or f'm{i}')[:40], 't': round(t, 1), 'tags': _words(m.get('tags')),
+                    'parts': _words(m.get('parts')), 'text': str(m.get('text') or '').strip()[:4000]})
+    return out
+
+
+def clock(t):
+    t = int(float(t or 0))
+    return f"{t // 60}:{t % 60:02d}"
+
+
+def moment_bar(t, grid):
+    """The song bar (1-based) a time in the clip falls in, or None when the round is not on a song."""
+    if not grid or not grid.get('bpm'):
+        return None
+    bar_s = float(grid.get('bpb') or 4) * 60.0 / float(grid['bpm'])
+    song_t = float(grid.get('start_sec') or 0) + float(t)
+    return int((song_t - float(grid.get('offset_sec') or 0)) // bar_s) + 1
+
+
+def moment_line(m, grid=None):
+    """One moment as the page's Copy text writes it: '1:23 (bar 33): Too much, bass. <their words>'."""
+    bar = moment_bar(m['t'], grid)
+    head = ', '.join(list(m.get('tags') or []) + list(m.get('parts') or []))
+    words = ' '.join(str(m.get('text') or '').split())
+    return clock(m['t']) + (f" (bar {bar})" if bar else '') + ': ' + ('. '.join(x for x in (head, words) if x) or '-')
+
+
+_MOMENT_LINE = re.compile(r'^\s*(\d{1,3}):([0-5]\d)(?:\.(\d+))?\s*(?:\([^)]*\))?\s*:\s*(.*?)\s*$')
+
+
+def split_moments(text):
+    """-> (the text without its 'Moments:' block, [the block's moment lines]). The block is the heading and the
+    moment lines under it, up to the first line that is not one."""
+    lines = str(text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    i = next((k for k, ln in enumerate(lines) if ln.strip().lower() == MOMENTS_HEAD.lower()), None)
+    if i is None:
+        return '\n'.join(lines), []
+    j = i + 1
+    while j < len(lines) and (not lines[j].strip() or _MOMENT_LINE.match(lines[j])):
+        j += 1
+    return '\n'.join(lines[:i] + lines[j:]), [ln for ln in lines[i + 1:j] if ln.strip()]
+
+
+def parse_moments(text, tags=MOMENT_TAGS, parts=()):
+    """The 'Moments:' block of a pasted message -> [{id, t, tags, parts, text}]. Before the first '. ', words that
+    are all tick-box names (tags or parts) read as ticks; the rest is their words."""
+    known_t = {str(x).lower(): x for x in tags}
+    known_p = {str(x).lower(): x for x in parts}
+    out = []
+    for k, ln in enumerate(split_moments(text)[1], 1):
+        m = _MOMENT_LINE.match(ln)
+        t = int(m.group(1)) * 60 + int(m.group(2)) + (float('0.' + m.group(3)) if m.group(3) else 0.0)
+        rest = '' if m.group(4).strip() == '-' else m.group(4).strip()
+        head, _, tail = rest.partition('. ')
+        bits = [b.strip().rstrip('.') for b in head.split(',') if b.strip()]
+        tg, pt, words = [], [], rest
+        if bits and all(b.lower() in known_t or b.lower() in known_p for b in bits):
+            tg = [known_t[b.lower()] for b in bits if b.lower() in known_t]
+            pt = [known_p[b.lower()] for b in bits if b.lower() not in known_t]
+            words = tail.strip()
+        out.append({'id': f'p{k}', 't': round(t, 1), 'tags': tg, 'parts': pt, 'text': words})
     return out
 
 
@@ -284,6 +394,8 @@ def parse_answers(text, questions):
     if cut is not None:
         lines = lines[:cut]
         text = '\n'.join(lines)
+    text = split_moments(text)[0]                   # '1:23 (bar 33): ...' is a moment, not answer 1
+    lines = text.split('\n')
     cands = []
     for i, ln in enumerate(lines):
         m = _NUM.match(ln)
@@ -496,6 +608,25 @@ class Store:
             self._changed_after_send(d, nm[track]['at'])
             return nm[track]['at']
 
+    def moments(self, d, rows):
+        """The person's moments, the whole list as the page holds it (ledger:M263). A moment kept unchanged keeps its
+        save time; a new or changed one gets now. -> the time of this save, or of the last one when nothing changed."""
+        rows = clean_moments(rows)
+        same = lambda a, b: all(a.get(k) == b.get(k) for k in ('t', 'tags', 'parts', 'text'))   # noqa: E731
+        with self.lock:
+            old = read_json(d / 'moments.json', {}) or {}
+            before = {m.get('id'): m for m in old.get('moments') or []}
+            if len(rows) == len(before) and all(m['id'] in before and same(before[m['id']], m) for m in rows):
+                return old.get('at')
+            t = now()
+            for m in rows:
+                o = before.get(m['id'])
+                m['at'] = o.get('at') if o and same(o, m) else t
+            write_json(d / 'moments.json', {'moments': rows, 'at': t})
+            self._log(d, {'at': t, 'moments': rows})
+            self._changed_after_send(d, t)
+            return t
+
     def send(self, d):
         """The person pressed Send: one more send time, and no change after it yet. -> the time."""
         with self.lock:
@@ -687,7 +818,7 @@ def handler(store, page_html):
             if rest == 'state':
                 st = sent_state(d)
                 return self._send(200, {'answers': read_json(d / 'answers.json', {}) or {}, 'stt': store.stt,
-                                        'names': read_json(d / 'names.json', {}) or {},
+                                        'names': read_json(d / 'names.json', {}) or {}, 'moments': moments(d),
                                         'sent': {k: st[k] for k in ('state', 'at', 'changed_at')}})
             mi = re.match(r'^item/(\d+)$', rest)
             if mi:
@@ -730,7 +861,7 @@ def handler(store, page_html):
                 store.stopped.set()
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
-            m = re.match(r'^/f/([^/]+)/(text|voice|done|name)$', u.path)
+            m = re.match(r'^/f/([^/]+)/(text|voice|done|name|moments)$', u.path)
             d = m and store.folder(m.group(1))
             if not d:
                 return self._send(404, {'error': 'no such round'})
@@ -739,6 +870,11 @@ def handler(store, page_html):
             man = read_json(d / 'manifest.json', {})
             nq = len(man.get('questions', []))
             try:
+                if m.group(2) == 'moments':                # marked while the clip plays (ledger:M263)
+                    if not man.get('moments'):
+                        raise ValueError('this round has no moments')
+                    r = json.loads(self._body(1 << 20).decode('utf8'))
+                    return self._send(200, {'ok': True, 'at': store.moments(d, r.get('moments'))})
                 if m.group(2) == 'name':
                     r = json.loads(self._body(1 << 16).decode('utf8'))
                     track = str(r.get('track') or '')

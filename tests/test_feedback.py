@@ -574,3 +574,116 @@ def test_measure_words_and_windows():
                     "yours and the reference's same window side by side; region_measure on the band that differs"]
     two = items + [{'label': 'draft 2', 'path': '/x/draft2.mp3'}]
     assert "seconds=[43.0, 47.0] in the clip they meant ('draft 3', 'draft 2')" in M.steps(1, 'harsh at 0:45', two)[0]
+
+
+# ledger:M263: moments marked while the song plays, mapped to the song's bars
+
+def _small_song(env):
+    proj = env['song'] / 'proj'
+    api.project_new(str(proj), bpm=120, length_bars=8)              # 2 s a bar
+    for t in ('drums', 'sub', 'reese'):
+        api.track_add(str(proj), t, instrument={'type': 'synth'})
+    FB.build(env['song'], 'r0', [], ['Name them?'])                   # an earlier round where they named a part
+    FB.write_json(env['song'] / 'work' / 'feedback' / 'r0' / 'names.json', {'reese': {'text': 'the answer bass'}})
+    return proj
+
+
+def test_moments_put_a_strip_and_their_part_names_on_the_page(env):
+    srv = _serve(env)
+    proj = _small_song(env)
+    out = api.OPS['feedback_page'](str(proj), 'm1', items=[{'label': 'The take', 'path': str(env['song'] / 'take.wav')}],
+                                   questions=['How does it flow?'], moments=True, open=False, share=True)
+    assert "moments: under 'The take', a time strip with bar numbers (120 bpm, 4 beats a bar)" in out, out
+    url = f'http://127.0.0.1:{srv.port}/f/song-m1/'
+    mo = json.loads(_get(url + 'manifest')[2])['moments']
+    assert mo['item'] == 1 and mo['tags'] == list(FB.MOMENT_TAGS)
+    assert mo['parts'] == ['drums', 'sub', 'the answer bass', 'everything']
+    assert mo['grid'] == {'bpm': 120.0, 'bpb': 4, 'offset_sec': 0.0, 'start_sec': 0.0}
+    html = _get(url)[2]
+    assert b'Mark this moment' in html and b"fetch('moments'" in html and b'aria-label' in html
+    shared = (env['song'] / 'work' / 'feedback' / 'm1' / 'share' / 'index.html').read_text(encoding='utf8')
+    assert '"the answer bass"' in shared and '"moments"' in shared
+
+
+def test_a_moment_is_saved_read_with_its_bars_and_measured(env):
+    srv = _serve(env)
+    proj = _small_song(env)
+    api.OPS['feedback_page'](str(proj), 'm1', items=[str(env['song'] / 'take.wav')], questions=['Anything?'],
+                             moments=True, open=False)
+    url = f'http://127.0.0.1:{srv.port}/f/song-m1/'
+    marks = [{'id': 'a', 't': 17.5, 'tags': ['Too much'], 'parts': ['the answer bass'], 'text': 'it gets crowded'},
+             {'id': 'b', 't': 3.0, 'tags': ['Love this'], 'parts': [], 'text': ''}]
+    assert _post(url + 'moments', json.dumps({'moments': marks}).encode())['ok']
+    d = env['song'] / 'work' / 'feedback' / 'm1'
+    assert [m['t'] for m in FB.moments(d)] == [3.0, 17.5]
+    assert [m['t'] for m in json.loads(_get(url + 'state')[2])['moments']] == [3.0, 17.5]
+    out = api.OPS['feedback_read'](str(proj), 'm1')
+    assert out.startswith('STILL WRITING (last save 20')
+    assert "   m1 0:03 (bars 1-2): Love this" in out, out
+    assert "   m2 0:17 (bars 8-9): Too much; parts: the answer bass (reese); in their words:\n      it gets crowded" in out
+    step = next(ln for ln in out.splitlines() if ln.strip().startswith('m2. "too much"'))
+    assert 'seconds=[15.0, 19.0]' in step and 'the part reese' in step, step
+    assert '2 moments' in api.OPS['feedback_list'](str(proj))
+    # a change after Send counts as a late addition, as typed answers do; the same list again changes nothing
+    at = _send(srv, 'song-m1')['at']
+    assert _post(url + 'moments', json.dumps({'moments': marks}).encode())['ok']
+    assert FB.sent_state(d)['state'] == 'sent'
+    time.sleep(1.1)
+    _post(url + 'moments', json.dumps({'moments': marks[:1]}).encode())
+    assert FB.sent_state(d)['state'] == 'changed' and FB.sent_state(d)['at'] == at
+    for bad in ({'moments': [{'t': -1}]}, {'moments': 'x'}):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _post(url + 'moments', json.dumps(bad).encode())
+        assert e.value.code == 400
+
+
+def test_moments_on_a_windowed_render_count_bars_from_where_it_starts(env):
+    _serve(env)
+    proj = _small_song(env)
+    rd = proj / 'renders'
+    rd.mkdir(exist_ok=True)
+    _wav(rd / 'chorus.wav')
+    FB.write_json(rd / 'windows.json', {'chorus.wav': {'bars': [5, 8], 'start_sec': 8.0}})
+    api.OPS['feedback_page'](str(proj), 'm2', items=[str(env['song'] / 'take.wav'), {'label': 'Chorus',
+                             'path': str(rd / 'chorus.wav')}], questions=['?'], moments='chorus', open=False)
+    d = env['song'] / 'work' / 'feedback' / 'm2'
+    mo = FB.read_json(d / 'manifest.json')['moments']
+    assert mo['item'] == 2 and mo['grid']['start_sec'] == 8.0
+    assert FB.moment_bar(1.0, mo['grid']) == 5
+
+
+def test_copied_moments_come_back_through_paste(env):
+    _serve(env)
+    proj = _small_song(env)
+    api.OPS['feedback_page'](str(proj), 'm3', items=[str(env['song'] / 'take.wav')],
+                             questions=['What do you hear first?', 'Anything else?'], moments=True, open=False)
+    d = env['song'] / 'work' / 'feedback' / 'm3'
+    grid = FB.read_json(d / 'manifest.json')['moments']['grid']
+    marks = [{'t': 83.0, 'tags': ['Too much'], 'parts': ['the answer bass'], 'text': 'way  too\nloud. really'},
+             {'t': 40.0, 'tags': [], 'parts': [], 'text': 'hmm. this bit'},
+             {'t': 2.0, 'tags': ['Love this', 'Hit harder'], 'parts': [], 'text': ''}]
+    msg = ("song: m3 (round m3): my answers\n\n1. What do you hear first?\nthe drums\n\n2. Anything else?\n(no answer)\n\n"
+           "Moments:\n" + ''.join(f"   {FB.moment_line(m, grid)}\n" for m in marks) + "\n")
+    assert '   1:23 (bar 42): Too much, the answer bass. way too loud. really\n' in msg
+    out = api.OPS['feedback_paste'](str(proj), 'm3', text=msg)
+    assert 'answers to 1 question (1), 3 moments; counted as their Send' in out, out
+    assert FB.read_json(d / 'answers.json')['1']['text'] == 'the drums'
+    got = [{k: m[k] for k in ('t', 'tags', 'parts', 'text')} for m in FB.moments(d)]
+    assert got == [{'t': 2.0, 'tags': ['Love this', 'Hit harder'], 'parts': [], 'text': ''},
+                   {'t': 40.0, 'tags': [], 'parts': [], 'text': 'hmm. this bit'},
+                   {'t': 83.0, 'tags': ['Too much'], 'parts': ['the answer bass'], 'text': 'way too loud. really'}]
+    assert '1:23 (bars 41-42): Too much; parts: the answer bass (reese)' in out
+    # the moments block is never read as numbered answers ('1:23' is not answer 1)
+    qs = [{'n': 1, 'text': 'What do you hear first?'}, {'n': 2, 'text': 'Anything else?'}]
+    assert FB.parse_answers(msg, qs)[0] == {1: 'the drums'}
+
+
+def test_moments_errors_point_forward(env):
+    _serve(env)
+    with pytest.raises(api.OpError, match='add an audio item'):
+        api.OPS['feedback_page'](str(env['song']), 'm4', items=[{'text': 'just words'}], questions=['?'],
+                                 moments=True, open=False)
+    with pytest.raises(api.OpError, match="no audio item has that label or path; the audio items are 'The take'"):
+        _page(env, open=False, moments='the chorus')
+    out = _page(env, open=False, moments=True)                        # not a song: a strip with times, no bars
+    assert 'no song found, so no bar numbers' in out and 'part boxes: everything' in out
