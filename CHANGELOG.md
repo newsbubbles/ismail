@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Live sets: helpers compose, and the mixer's cost is counted
+
+An electro set dropped out for most of its length. Helpers measured references while it played, a priority loop
+cost a core, one deck carried hundreds of per-beat effect ramps, and a deck taken off air was still mixed.
+
+- The live reference says helpers started during a set compose only (notes, patches, effects, from the set's own
+  kit, within a track and effect budget, at most two at a time); measuring happens before the set.
+- A known song goes on air before any helper starts, and a sleeping Bluetooth speaker is named at once.
+- The mixer budget counts automation as well as tracks. A deck off air after a transition is removed or reloaded.
+  Its strip is set back after a new load (a bass kill carried over). Heavy ramps are cleared once a deck lands.
+- Your own live calls are batched rather than polled, and priority tricks never stand in for fewer jobs.
+- A mixer that stays high on a light deck after a long set means restart with `workers=2` (a 20 s gap): one set went
+  from 79-105% to 28% on the same deck. Sets on a shared 8-thread machine start with `workers=2`.
+
 ### One call to look before a draft goes out, and notes that say where to look
 
 Over one song's rounds an agent ran render about 43 times and sound_compare about 30, and never the stored comparison,
