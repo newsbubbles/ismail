@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Live decks: a new song starts clean, and removing a deck no longer stops the set
+
+- `live_load` onto a deck that held a song resets its strip (fader, eq, filter, transpose) even when its tracks
+  were removed one by one, and says what it reset. A blend's bass kill had played the next song with no bass.
+- Removing a deck while a block was mixing stopped the mixer for good (the heard bar froze and underruns climbed).
+  The mixer now reads the decks it started the block with, and a block that fails plays silent and is named in
+  the next reply instead of ending the set.
+- `live_status` says whether each off-air deck is asleep (costs nothing), ringing out, or still playing notes
+  unheard.
+
 ### Live sets: helpers compose, and the mixer's cost is counted
 
 An electro set dropped out for most of its length. Helpers measured references while it played, a priority loop
