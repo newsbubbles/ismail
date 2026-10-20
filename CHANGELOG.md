@@ -13,6 +13,8 @@ cost a core, one deck carried hundreds of per-beat effect ramps, and a deck take
 - The mixer budget counts automation as well as tracks. A deck off air after a transition is removed or reloaded.
   Its strip is set back after a new load (a bass kill carried over). Heavy ramps are cleared once a deck lands.
 - Your own live calls are batched rather than polled, and priority tricks never stand in for fewer jobs.
+- A mixer that stays high on a light deck after a long set means restart with `workers=2` (a 20 s gap): one set went
+  from 79-105% to 28% on the same deck. Sets on a shared 8-thread machine start with `workers=2`.
 
 ### One call to look before a draft goes out, and notes that say where to look
 

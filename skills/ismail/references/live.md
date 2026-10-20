@@ -252,6 +252,12 @@ sessions' renders, Blender and video jobs.
   being sent and 76 to 80% between them, with a bar-wait loop calling `live_status` every 10 to 20 s. Send changes
   in batches (one `live_queue` with many clips, `Set.moves`), keep one tracked guard instead of several loops, and
   do not poll faster than the guard needs.
+- **A long-running engine can degrade; a restart clears it.** After decks were loaded and removed mid-set (one heavy
+  with ramps, then 16 removed tracks) and with 4 render workers on an 8-thread machine under other load, a light
+  7-track deck read 79 to 105% with spikes to 240% and 23,271 underruns. Restarted with `live_start(...,
+  workers=2, priority='high')` and the same deck, it read 28% (peak 37%) with no underruns 45 s later. When the
+  mixer stays over about 70% with a light deck, restart (a 20 s gap, said to the person first) rather than trim
+  more tracks. On a shared 8-thread machine, start sets with `workers=2`.
 - **Never use priority tricks instead of fewer jobs.** A loop that kept helper processes at Idle priority polled
   the process list every 3 s and cost a full core by itself, and Idle priority did not stop a busy machine from
   starving the mixer. Stop the work instead.
