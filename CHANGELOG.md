@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A song's backup moves its project whole or not at all
+
+- `backup.set_aside` (a song build's backup of proj/) renames proj/ in one step. When something holds it open (a
+  terminal working inside it, on Windows), nothing moves and the error says what to close. Before, the move fell
+  back to copy-then-delete, emptied proj/ around the locked folder and left the reference stems in a backup that a
+  later rebuild would trim.
+
 ### Live decks: a new song starts clean, and removing a deck no longer stops the set
 
 - `live_load` onto a deck that held a song resets its strip (fader, eq, filter, transpose) even when its tracks
