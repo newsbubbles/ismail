@@ -137,7 +137,10 @@ a view of the stage) has been the fastest route to a good result. The rules that
   the song is for) gets the shared copy, `feedback_page(share=True)`: host its folder where they can open it; viewing
   is all they need. Their typing and voice notes stay in their browser until "Send my answers" sends them as a
   message (the share menu, or a copy to paste, with the voice notes as files), and `feedback_paste` reads that
-  message into the round as their Send. Every page also has "Copy my answers". A hand-built page only for what it cannot do (`blind-tests.md`, page
+  message into the round as their Send. Every page also has "Copy my answers". For a round on a whole song's
+  structure, offer `feedback_page(..., moments=True)`: "mark anything that strikes you while it plays". A button (or
+  the M key) puts a pin on a time strip under the song, with tick boxes (too much, too empty, which part) and their
+  words, and `feedback_read` lists each moment with its time and its bars. A hand-built page only for what it cannot do (`blind-tests.md`, page
   mechanics).
 
 ## Bars or time: their unit

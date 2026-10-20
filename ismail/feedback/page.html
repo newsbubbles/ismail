@@ -49,6 +49,31 @@
   .part .sub { color: var(--soft); font-size: 0.85rem; margin: 8px 0 4px; }
   .part input { width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
                 border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .moments-box { margin-top: 12px; display: grid; gap: 10px; }
+  .strip { position: relative; height: 34px; margin-top: 6px; border: 1px solid var(--line); border-radius: 6px;
+           background: var(--bg); cursor: pointer; }
+  .strip .tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); pointer-events: none; }
+  .strip .tick span { position: absolute; left: 3px; bottom: 1px; font-size: 0.72rem; color: var(--soft); white-space: nowrap; }
+  .strip .ph { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--ink);
+               opacity: 0.55; pointer-events: none; }
+  .strip .pin { position: absolute; top: -8px; bottom: -2px; width: 22px; min-height: 0; margin-left: -11px; padding: 0;
+                border: 0; border-radius: 0; background: none; cursor: pointer; }
+  .strip .pin::before { content: ""; position: absolute; left: 10px; top: 8px; bottom: 0; width: 2px; background: var(--accent); }
+  .strip .pin::after { content: ""; position: absolute; left: 5px; top: 0; width: 12px; height: 12px; border-radius: 50%;
+                       background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
+  .strip .pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .markedit { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; display: grid; gap: 10px; }
+  .markedit[hidden] { display: none; }
+  .markedit .sub { color: var(--soft); font-size: 0.85rem; margin: 0; }
+  .markedit textarea { min-height: 60px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px;
+          padding: 6px 12px; font-size: 0.9rem; cursor: pointer; }
+  .chip:has(input:checked) { border-color: var(--accent); }
+  .chip input { margin: 0; }
+  .marklist { margin: 0; padding-left: 22px; display: grid; gap: 6px; font-size: 0.95rem; }
+  .marklist li span { margin-right: 6px; }
+  button.small { padding: 4px 12px; min-height: 34px; font-size: 0.85rem; margin: 2px 6px 2px 0; }
   .made-with { color: var(--soft); font-size: 0.85rem; margin: 32px 0 0; text-align: center; }
   .made-with a { color: var(--accent); }
 </style>
@@ -129,7 +154,9 @@
     const names = {};
     for (const p of manifest.parts || []) { const v = local.get('p:' + p.track); if (v) names[p.track] = { text: v }; }
     const at = local.get('sent');
-    return { answers, names, sent: { state: at ? (local.get('changed') ? 'changed' : 'sent') : 'writing', at, changed_at: null } };
+    let moments = [];
+    try { moments = JSON.parse(local.get('moments') || '[]'); } catch (e) { moments = []; }
+    return { answers, names, moments, sent: { state: at ? (local.get('changed') ? 'changed' : 'sent') : 'writing', at, changed_at: null } };
   }
 
   function showError(msg) { const e = $('#err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
@@ -148,13 +175,199 @@
     for (const it of items) {
       const c = make('div', 'card');
       if (it.label) c.appendChild(make('p', 'label', it.label));
-      if (it.kind === 'audio') { const a = make('audio'); a.controls = true; a.preload = 'metadata'; a.src = it.src; c.appendChild(a); }
+      if (it.kind === 'audio') {
+        const a = make('audio'); a.controls = true; a.preload = 'metadata'; a.src = it.src; c.appendChild(a);
+        if (manifest.moments && manifest.moments.item === it.n) renderMoments(c, a);
+      }
       else if (it.kind === 'video') { const v = make('video'); v.controls = true; v.preload = 'metadata'; v.playsInline = true; v.src = it.src; c.appendChild(v); }
       else if (it.kind === 'image') { const i = make('img'); i.src = it.src; i.alt = it.label || 'picture'; c.appendChild(i); }
       else c.appendChild(make('p', 'text-item', it.text || ''));
       box.appendChild(c);
     }
   }
+
+  // Moments (ledger:M263): while the clip plays, the person marks anything that strikes them (the button or M): a pin
+  // on the strip, tick boxes and their words. The served page saves them like typed answers; a shared copy keeps
+  // them in the browser and puts them in the message. feedback_paste reads the 'Moments:' block back, so its lines
+  // stay as momentLine writes them.
+  let MARKS = [];
+  let momentsPending = false;
+  let markAudio = null, markEdit = null, markRender = null;
+  function clock(t) { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+  function barAt(t) {
+    const g = manifest.moments && manifest.moments.grid;
+    if (!g || !g.bpm) return null;
+    return Math.floor(((g.start_sec || 0) + t - (g.offset_sec || 0)) / ((g.bpb || 4) * 60 / g.bpm)) + 1;
+  }
+  function momentLine(m) {
+    const b = barAt(m.t);
+    const head = m.tags.concat(m.parts).join(', ');
+    const words = String(m.text || '').split(/\s+/).filter(Boolean).join(' ');
+    return clock(m.t) + (b ? ' (bar ' + b + ')' : '') + ': ' + ([head, words].filter(Boolean).join('. ') || '-');
+  }
+  function cleanMarks(list) {
+    return (Array.isArray(list) ? list : []).filter((m) => m && typeof m.t === 'number').map((m) => ({
+      id: String(m.id || ('m' + Math.random().toString(36).slice(2, 9))), t: m.t,
+      tags: Array.isArray(m.tags) ? m.tags.map(String) : [], parts: Array.isArray(m.parts) ? m.parts.map(String) : [],
+      text: String(m.text || '') })).sort((a, b) => a.t - b.t);
+  }
+  function momentsStatus(text, cls) { const s = $('#mst'); if (s) { s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); } }
+
+  async function saveMoments() {
+    clearTimeout(timers.moments);
+    if (SHARED) {
+      const ok = local.set('moments', JSON.stringify(MARKS));
+      momentsStatus(ok ? 'Kept in this browser' : 'This browser does not keep it: send your answers before you close the page.', ok ? 'ok' : 'bad');
+      return true;
+    }
+    momentsPending = false;
+    try {
+      const r = await fetch('moments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moments: MARKS }) });
+      if (!r.ok) throw new Error(r.status);
+      momentsStatus('Saved', 'ok');
+      return true;
+    } catch (e) {
+      momentsPending = true;
+      momentsStatus('Not saved yet: the page server does not answer. Keep this tab open; it tries again.', 'bad');
+      timers.moments = setTimeout(saveMoments, 5000);
+      return false;
+    }
+  }
+  function momentsChanged() {
+    changedAfterSend();
+    momentsPending = !SHARED;
+    clearTimeout(timers.moments);
+    timers.moments = setTimeout(saveMoments, 300);
+    if (markRender) markRender();
+  }
+
+  function chips(opts, name) {
+    const row = make('div', 'chips');
+    for (const o of opts) {
+      const l = make('label', 'chip'); const i = make('input'); i.type = 'checkbox'; i.name = name; i.value = o;
+      l.appendChild(i); l.appendChild(make('span', null, o)); row.appendChild(l);
+    }
+    return row;
+  }
+
+  function renderMoments(card, audio) {
+    const mo = manifest.moments;
+    markAudio = audio;
+    const box = make('div', 'moments-box');
+    const strip = make('div', 'strip'); strip.title = 'Tap to jump there';
+    const ticks = make('div'), pins = make('div'), ph = make('div', 'ph');
+    strip.appendChild(ticks); strip.appendChild(pins); strip.appendChild(ph);
+    box.appendChild(strip);
+    const dur = () => (isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0);
+    const pct = (t) => (dur() ? Math.max(0, Math.min(100, t / dur() * 100)) : 0) + '%';
+    function drawTicks() {
+      ticks.textContent = '';
+      const d = dur(), g = mo.grid;
+      if (!d) return;
+      const put = (t, label) => { const k = make('div', 'tick'); k.style.left = pct(t); k.appendChild(make('span', null, label)); ticks.appendChild(k); };
+      if (g && g.bpm) {
+        const bs = (g.bpb || 4) * 60 / g.bpm, b0 = barAt(0), b1 = barAt(d);
+        const step = [1, 2, 4, 8, 16, 32, 64].find((s) => (b1 - b0) / s <= 10) || 128;
+        let first = Math.ceil((b0 - 1) / step) * step + 1;
+        if (first < b0) first += step;
+        for (let b = first; b <= b1; b += step) {
+          const t = (g.offset_sec || 0) + (b - 1) * bs - (g.start_sec || 0);
+          if (t >= 0 && t < d) put(t, (b === first ? 'bar ' : '') + b);
+        }
+      } else {
+        const step = [5, 10, 15, 30, 60, 120, 300].find((s) => d / s <= 8) || 600;
+        for (let t = 0; t < d; t += step) put(t, clock(t));
+      }
+    }
+    function hear(t) { audio.currentTime = Math.max(0, t - 3); audio.play().catch(() => {}); }
+    strip.addEventListener('click', (e) => {
+      if (e.target.closest('.pin') || !dur()) return;
+      const r = strip.getBoundingClientRect();
+      audio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * dur();
+    });
+    audio.addEventListener('timeupdate', () => { ph.style.left = pct(audio.currentTime); });
+    audio.addEventListener('loadedmetadata', () => { drawTicks(); markRender(); });
+    audio.addEventListener('durationchange', () => { drawTicks(); markRender(); });
+
+    const bar = make('div', 'row');
+    const mb = make('button', 'send', 'Mark this moment'); mb.type = 'button'; mb.id = 'markbtn';
+    bar.appendChild(mb);
+    bar.appendChild(make('span', 'status', 'While it plays, mark anything that strikes you (or press M). Each moment lands on the strip above; tap a pin to hear it again.'));
+    box.appendChild(bar);
+
+    const ed = make('div', 'markedit'); ed.hidden = true; ed.id = 'markedit';
+    const head = make('p', 'label'); ed.appendChild(head);
+    ed.appendChild(make('p', 'sub', 'What is it? (tick any)'));
+    const tagRow = chips(mo.tags || [], 'mtag'); ed.appendChild(tagRow);
+    let partRow = null;
+    if ((mo.parts || []).length) { ed.appendChild(make('p', 'sub', 'Which part? (tick any)')); partRow = chips(mo.parts, 'mpart'); ed.appendChild(partRow); }
+    const words = make('textarea'); words.id = 'marktext'; words.placeholder = 'In your words (optional)'; words.setAttribute('aria-label', 'This moment, in your words');
+    ed.appendChild(words);
+    const btns = make('div', 'row');
+    const save = make('button', 'send', 'Save moment'); save.type = 'button';
+    const cancel = make('button', null, 'Cancel'); cancel.type = 'button';
+    btns.appendChild(save); btns.appendChild(cancel); ed.appendChild(btns);
+    box.appendChild(ed);
+
+    const none = make('p', 'status', 'No moments yet.'); box.appendChild(none);
+    const list = make('ol', 'marklist'); list.setAttribute('aria-label', 'Your moments'); box.appendChild(list);
+    const st = make('span', 'status'); st.id = 'mst'; box.appendChild(st);
+    card.appendChild(box);
+
+    let editing = -1, draftT = 0;
+    const ticked = (row) => (row ? [...row.querySelectorAll('input')].filter((i) => i.checked).map((i) => i.value) : []);
+    function openEdit(i) {
+      editing = i;
+      const m = i >= 0 ? MARKS[i] : { t: draftT, tags: [], parts: [], text: '' };
+      const b = barAt(m.t);
+      head.textContent = 'Moment at ' + clock(m.t) + (b ? ', bar ' + b : '');
+      for (const c of tagRow.querySelectorAll('input')) c.checked = m.tags.includes(c.value);
+      if (partRow) for (const c of partRow.querySelectorAll('input')) c.checked = m.parts.includes(c.value);
+      words.value = m.text;
+      ed.hidden = false;
+      words.focus({ preventScroll: true });
+      ed.scrollIntoView({ block: 'nearest' });
+    }
+    markEdit = () => { draftT = Math.round((audio.currentTime || 0) * 10) / 10; openEdit(-1); };
+    function small(label, aria, fn) { const b = make('button', 'small', label); b.type = 'button'; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b; }
+    markRender = () => {
+      MARKS.sort((a, b) => a.t - b.t);
+      pins.textContent = '';
+      list.textContent = '';
+      MARKS.forEach((m, i) => {
+        const p = make('button', 'pin'); p.type = 'button'; p.style.left = pct(m.t); p.title = momentLine(m);
+        p.setAttribute('aria-label', 'Moment at ' + momentLine(m) + '. Play from 3 seconds before and edit it');
+        p.addEventListener('click', () => { hear(m.t); openEdit(i); });
+        pins.appendChild(p);
+        const li = make('li'); li.appendChild(make('span', null, momentLine(m)));
+        li.appendChild(small('Play', 'Play moment ' + clock(m.t) + ' from 3 seconds before', () => hear(m.t)));
+        li.appendChild(small('Edit', 'Edit moment ' + clock(m.t), () => openEdit(i)));
+        li.appendChild(small('Remove', 'Remove moment ' + clock(m.t), () => { MARKS.splice(i, 1); ed.hidden = true; momentsChanged(); }));
+        list.appendChild(li);
+      });
+      none.hidden = MARKS.length > 0;
+    };
+    mb.addEventListener('click', markEdit);
+    save.addEventListener('click', () => {
+      const old = editing >= 0 ? MARKS[editing] : null;
+      const m = { id: old ? old.id : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                  t: old ? old.t : draftT, tags: ticked(tagRow), parts: ticked(partRow), text: words.value.trim() };
+      if (old) MARKS[editing] = m; else MARKS.push(m);
+      ed.hidden = true;
+      momentsChanged();
+    });
+    cancel.addEventListener('click', () => { ed.hidden = true; });
+    drawTicks();
+    markRender();
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (!markEdit || (e.key !== 'm' && e.key !== 'M') || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    e.preventDefault();
+    markEdit();
+  });
 
   function setStatus(n, text, cls) { const s = $('#st' + n); if (s) { s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); } }
 
@@ -196,6 +409,11 @@
         else L.push('(voice note' + (c.secs ? ', ' + c.secs + ' s' : '') + ': ' + (c.state === 'done' ? (c.text || 'no words heard') : 'not written down yet') + ')');
       }
       if (!typed && !said.length) L.push('(no answer)');
+      L.push('');
+    }
+    if (manifest.moments && MARKS.length) {
+      L.push('Moments:');
+      for (const m of MARKS.slice().sort((a, b) => a.t - b.t)) L.push('   ' + momentLine(m));
       L.push('');
     }
     if ((manifest.parts || []).length) {
@@ -300,6 +518,12 @@
         b.disabled = false;
         return;
       }
+    }
+    if (momentsPending && !(await saveMoments())) {
+      $('#sendst').textContent = 'Not sent: your moments could not be saved because the page server does not answer. Try again in a moment.';
+      $('#sendst').className = 'status bad';
+      b.disabled = false;
+      return;
     }
     try {
       const r = await fetch('done', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -481,6 +705,7 @@
     catch (e) { showError('The page server does not answer right now. What you already saved is safe on the computer.'); return; }
     lastState = st;
     if (first && st.sent) { sent = st.sent; showSent(); }
+    if (first && manifest.moments && !MARKS.length) { MARKS = cleanMarks(st.moments); if (markRender) markRender(); }
     if (first) for (const p of manifest.parts || []) { const v = ((st.names || {})[p.track] || {}).text; if (v && $('#pn' + p.n)) $('#pn' + p.n).value = v; }
     let waiting = 0;
     for (const q of manifest.questions) {
@@ -495,6 +720,8 @@
   }
 
   window.addEventListener('beforeunload', () => {
+    if (manifest && manifest.moments && SHARED) local.set('moments', JSON.stringify(MARKS));
+    else if (momentsPending) navigator.sendBeacon('moments', new Blob([JSON.stringify({ moments: MARKS })], { type: 'application/json' }));
     for (const n of Object.keys(pending)) {
       if (!pending[n]) continue;
       if (SHARED) { local.set('t' + n, $('#t' + n).value); continue; }
