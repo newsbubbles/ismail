@@ -2,6 +2,8 @@ import glob
 import json
 import os
 
+import pytest
+
 from ismail import backup, reclaim
 
 
@@ -66,6 +68,31 @@ def test_trim_moves_old_regen_to_reclaim(tmp_path):
                                                                           'proj_20261008_010500']
     assert (b / 'proj_20261008_011500' / 'cache').exists()
     assert backup.trim(str(b), keep_full=2) == []  # the trimmed ones are no longer full
+
+
+def test_set_aside_moves_nothing_when_proj_is_held(tmp_path, monkeypatch):
+    """A shell inside proj/ refused the move; the copy-then-delete fallback emptied proj/ around it and left the
+    reference stems in a backup the next rebuild would trim. Now nothing moves and the error says why."""
+    proj = tmp_path / 'song' / 'proj'
+    _proj(str(proj))
+
+    def held(src, dst):
+        raise PermissionError(32, 'The process cannot access the file because it is being used by another process')
+    monkeypatch.setattr(backup.os, 'rename', held)
+    with pytest.raises(backup.BackupError, match='Nothing was moved.*cd out of proj'):
+        backup.set_aside(str(proj))
+    assert (proj / 'project.json').exists() and (proj / 'cache' / 'c.bin').exists()
+    assert not os.listdir(tmp_path / 'song' / 'backups')
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='only Windows refuses to move a folder a process is working in')
+def test_set_aside_with_the_working_folder_inside_proj(tmp_path, monkeypatch):
+    proj = tmp_path / 'song' / 'proj'
+    _proj(str(proj))
+    monkeypatch.chdir(proj / 'cache')
+    with pytest.raises(backup.BackupError):
+        backup.set_aside(str(proj))
+    assert (proj / 'project.json').exists() and (proj / 'cache' / 'c.bin').exists()
 
 
 def test_set_aside_trims_older_full_backups(tmp_path):
