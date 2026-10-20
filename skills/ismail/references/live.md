@@ -100,7 +100,11 @@ nearest proven instrument and name it.
 
 **First sound within minutes.** Open with a short arc built from proven parts, then build the later sections while it
 plays and the audience reacts. The same blues set spent 40 minutes preparing seven eras before the user heard a
-note, and one sentence of feedback condemned all of it.
+note, and one sentence of feedback condemned all of it. Put a known song on air first (`live_start`, then
+`live_load` straight away) and only then start helpers: an electro set that spawned five helpers before any sound
+had the person waiting 10 minutes. Aim for music within about 2 minutes of
+the ask. After the first clip, check that the heard bar moves: a Bluetooth speaker that went to sleep plays
+nothing while `live_status` says STALLED, so tell the person at once ("tap the speaker to wake it").
 
 **Never downgrade in silence.** When a constraint forces a worse sound (a voice that renders too slowly for the
 set, a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that voice, a
@@ -242,6 +246,34 @@ sessions' renders, Blender and video jobs.
 - **One deck at a time on a busy machine.** A cued deck of a 20-track song costs the mixer as much as one on air,
   and its first section renders in a burst: every breakup in one morning lined up with a deck load. Switch songs
   with a stop and a start (a short gap) until the machine has room.
+- **Your own calls cost the mixer too.** Each `python -m ismail live_*` call starts a new Python process that
+  imports ismail (seconds of a core), and the engine then does the work: `live_load` renders a song, `live_track
+  remove` rebuilds the graph. In one electro set the mixer's peak read 188 to 251% in the windows where ops were
+  being sent and 76 to 80% between them, with a bar-wait loop calling `live_status` every 10 to 20 s. Send changes
+  in batches (one `live_queue` with many clips, `Set.moves`), keep one tracked guard instead of several loops, and
+  do not poll faster than the guard needs.
+- **Never use priority tricks instead of fewer jobs.** A loop that kept helper processes at Idle priority polled
+  the process list every 3 s and cost a full core by itself, and Idle priority did not stop a busy machine from
+  starving the mixer. Stop the work instead.
+
+### Helpers during a set
+
+The same electro set dropped out for most of its length because six helpers each downloaded a reference and
+measured it while it played (`analyze_kit` alone held 1 to 3 cores; the mixer read 178 to 275% of real time).
+Once the engine runs:
+
+- **Helpers compose only:** notes, patches, effects and project data, checked with `notes_read` rolls. The engine
+  renders their songs when they are loaded live. No downloads, no `analyze_*`, `separate`, `mimic_*` or fits, no
+  full renders. Reference research and measuring happen before the set, or in a pause with the engine stopped. The
+  guest-jam rule "reference first" means a reference picked before the set, not measured during it.
+- **Give each helper the kit the set already plays:** its build script, patches and voices to copy. Starting from
+  the kit is fast and sounds like the set, and it is what the person asked for: composing with the kit they
+  already have, not sound engineering.
+- **Give each helper a budget for the deck it writes:** about 7 tracks, about 3 effects each, one shared reverb or
+  delay bus, no per-beat effect ramps (one or two slow sweeps over 8 bars or more), and no vocoder unless its voice
+  source plays live.
+- **At most two helpers at a time**, and read the `mixer:` and `headroom:` lines of `live_status` after each one
+  starts.
 - **The set follows the person's clock.** Read the time at every checkpoint and shape the arc to their day:
   energy, a let-down, a sleep session queued whole so it runs with no agent and ends by itself, silence, a sunrise
   (a dawn chorus entering in the order birds wake), a morning groove. Plans move when they say so.
@@ -399,7 +431,19 @@ air; only you hear it, through `live_listen(deck=...)`.
    `live_status` says `SILENT ON AIR` when a set that has played sounds nothing for 10 s. The reply is the timeline; `live_status` shows each deck's
    fader and eq as they move.
 4. Watch `live_status`'s mixer load (two full songs is about 50%) and its headroom line: the cushion of mixed
-   audio is the real risk, and it reads THIN before a dropout.
+   audio is the real risk, and it reads THIN before a dropout. A deck taken off air by a transition is still
+   mixed, its silent tracks and their effect ramps included: remove it (`live_deck(deck='A', remove=True)`) or
+   load the next song onto it soon, and read the mixer line after every transition.
+
+A studio song is not automatically a light deck. Before `live_load`, look at how much automation the song carries:
+One song's hundreds of per-beat effect ramps (bass cutoff, resonance, drive, pump depth) used 90 to 130% of the
+mixer on their own. Load a lighter section, or clear the moves once it lands (`live_fx(target='B.bass',
+clear=True)`); each effect holds its last values. A track whose source does not come over (a vocoder reading a
+muted voice or placed audio) plays as its bare carrier, a loud synth lead: remove it on load (`live_track(...,
+remove=True)`). A deck's strip stays as the last blend left it: a bass kill from a blend (low_db -40) was still
+on when the next song loaded onto that deck, and it played with no bass. Set the strip back after each load
+(`live_deck(deck='A', volume_db=0, low_db=0, mid_db=0, high_db=0, filter=0, transpose=0)`) and read it in
+`live_status`.
 
 Put the swap where the incoming deck's bass plays: a 16-bar section whose loop restarts on a sparse bar leaves a
 hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
@@ -436,10 +480,13 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   speaker off: the clock, the queue, the phone stream, the recording and `live_listen` carry on, and
   `live_status` says `output off`. `live_device(device='default')` (or a name) turns it back on, no restart. Both
   at once is a speaker on plus the phone stream.
-- **Heavy jobs before the set.** Stem separation during a set caused 1,654 underruns; measurement scripts at idle
-  priority were fine.
-- **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Share reverbs on
-  buses (a reverb per track is expensive) and stop parts you no longer hear; removing tracks barely helps.
+- **Heavy jobs before the set, helpers included.** Stem separation during a set caused 1,654 underruns, and
+  helpers measuring references during an electro set broke it up for most of its length; Idle priority did not
+  save it. A helper started during a set composes only ("Helpers during a set", above).
+- **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Count automation as
+  well as tracks: per-beat effect ramps on two tracks cost more than eight plain tracks. Share reverbs on buses (a
+  reverb per track is expensive) and stop parts you no longer hear; removing a few tracks barely helps, removing a
+  finished deck's tracks and a heavy deck's ramps took one set from 110-130% to 76%.
 - **A new voice's first pass**: check its level at once (a first qraqeb sat 30 dB under the part it answered). A
   single event above +12 dBFS is dropped as a broken voice, and the next reply of any op says so ("NEW since
   your last call"). A code voice's randomness is seeded by pitch and velocity: vary them for stroke variety.
