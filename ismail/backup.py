@@ -27,6 +27,10 @@ REGEN = ('cache', 'renders', 'stems')
 _STAMP = re.compile(r'_(\d{8}_\d{6})(?:_\d+)?$')
 
 
+class BackupError(OSError):
+    pass
+
+
 def _free(path):
     """path, or path_2, path_3, ... whichever does not exist yet."""
     if not os.path.exists(path):
@@ -50,7 +54,8 @@ def _size(path):
 
 def set_aside(proj, backups=None, regen=REGEN, keep_full=2):
     """Move proj/ to backups/<name>_<time> and trim older full backups (see trim). Returns what carry_back needs,
-    or None when there is no proj/ yet."""
+    or None when there is no proj/ yet. proj/ moves whole or not at all: when something holds it open, BackupError
+    says what and nothing has moved."""
     proj = os.path.abspath(proj)
     if not os.path.isdir(proj):
         return None
@@ -58,7 +63,17 @@ def set_aside(proj, backups=None, regen=REGEN, keep_full=2):
     backups = backups or os.path.join(song, 'backups')
     os.makedirs(backups, exist_ok=True)
     dst = _free(os.path.join(backups, os.path.basename(proj) + '_' + time.strftime('%Y%m%d_%H%M%S')))
-    shutil.move(proj, dst)
+    # one rename moves proj/ whole or not at all. shutil.move fell back to copy-then-delete when the rename was
+    # refused (a shell inside proj/: WinError 32), emptied proj/ around the locked folder and failed half done
+    try:
+        os.rename(proj, dst)
+    except OSError as e:
+        raise BackupError(
+            f"could not move {proj} to {backups} ({e}). Nothing was moved and proj/ is as it was. "
+            + ("Keep backups on the same drive as proj/ (the default is the song's backups/ folder)."
+               if os.path.splitdrive(proj)[0].lower() != os.path.splitdrive(os.path.abspath(backups))[0].lower()
+               else "Something holds proj/ or a file in it open: a shell whose working folder is inside it, an "
+                    "editor, a player, or a running render. Close it (cd out of proj/) and run again.")) from e
     trim(backups, regen=regen, keep_full=keep_full)
     return {'backup': dst, 'carry': {d: os.path.join(dst, d) for d in regen if os.path.isdir(os.path.join(dst, d))}}
 
