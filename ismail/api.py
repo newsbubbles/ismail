@@ -2053,6 +2053,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     prune_cache(P.root)
     peak = 20 * np.log10(np.max(np.abs(y)) + 1e-12)
     clip = float(np.mean(np.abs(y) >= 0.999)) * 100
+    from .master import true_peak_db
+    tp = true_peak_db(y.T)      # 4x oversampled: a sample-peak limiter lets bright sounds over between samples
     try:
         import pyloudnorm as pyln
         lufs = pyln.Meter(R.sr).integrated_loudness(y.T)
@@ -2060,7 +2062,10 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         lufs = float('nan')
     L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
-         f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+         f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS, true peak {tp:.1f} dBTP"
+         + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else
+            ", over -1 dBTP: an mp3 of it can clip (lower the master limiter's ceiling_db to -1.5, or master_cue "
+            "for delivery)" if tp > -1.0 else '')]
     if waited >= 5:
         L.append(f"  waited {waited / 60:.1f} min in line for the machine (wait='0' refuses at once instead)")
     if R.full and lufs < -20:

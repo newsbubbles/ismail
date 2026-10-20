@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Render reads the true peak; the noise riser stays under it
+
+- render's master line gives the true peak (4x oversampled) beside the sample peak, and says when it is over
+  -1 dBTP: a sample-peak limiter let a mix read -2 dBFS while it was +0.2 dBTP, and an mp3 of it clips.
+- The noise_riser preset's band-pass tops out at 10.8 kHz instead of 12.8 kHz, which halves its overshoot
+  between samples.
+
 ### A song's backup moves its project whole or not at all
 
 - `backup.set_aside` (a song build's backup of proj/) renames proj/ in one step. When something holds it open (a
