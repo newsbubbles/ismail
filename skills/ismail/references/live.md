@@ -437,19 +437,22 @@ air; only you hear it, through `live_listen(deck=...)`.
    `live_status` says `SILENT ON AIR` when a set that has played sounds nothing for 10 s. The reply is the timeline; `live_status` shows each deck's
    fader and eq as they move.
 4. Watch `live_status`'s mixer load (two full songs is about 50%) and its headroom line: the cushion of mixed
-   audio is the real risk, and it reads THIN before a dropout. A deck taken off air by a transition is still
-   mixed, its silent tracks and their effect ramps included: remove it (`live_deck(deck='A', remove=True)`) or
-   load the next song onto it soon, and read the mixer line after every transition.
+   audio is the real risk, and it reads THIN before a dropout. An off-air deck costs the mixer while its tracks
+   play notes or ring out, and nothing once they are quiet: its `live_status` line says `asleep`, `tails ringing
+   out` or `AWAKE off air` (its tracks still play, unheard). A transition stops the deck it leaves, so that deck
+   is asleep a few seconds after it ends. Load the next song onto it (the load replaces its tracks): no need to
+   remove the deck or its tracks mid-set. If you do clear a deck, do it before queueing its next load, never at
+   the same time: removals made beside a load took the freshly loaded tracks.
 
 A studio song is not automatically a light deck. Before `live_load`, look at how much automation the song carries:
 One song's hundreds of per-beat effect ramps (bass cutoff, resonance, drive, pump depth) used 90 to 130% of the
 mixer on their own. Load a lighter section, or clear the moves once it lands (`live_fx(target='B.bass',
 clear=True)`); each effect holds its last values. A track whose source does not come over (a vocoder reading a
 muted voice or placed audio) plays as its bare carrier, a loud synth lead: remove it on load (`live_track(...,
-remove=True)`). A deck's strip stays as the last blend left it: a bass kill from a blend (low_db -40) was still
-on when the next song loaded onto that deck, and it played with no bass. Set the strip back after each load
-(`live_deck(deck='A', volume_db=0, low_db=0, mid_db=0, high_db=0, filter=0, transpose=0)`) and read it in
-`live_status`.
+remove=True)`). `live_load` onto a deck that held a song starts it from a neutral strip (fader, eq, filter,
+transpose) and its reply names what the last song left there (`strip reset for the new song (the last one left
+it at fader off, eq L KILL)`): a blend's bass kill once played the next song with no bass. A deck set with
+`live_deck` before its first song keeps those settings.
 
 Put the swap where the incoming deck's bass plays: a 16-bar section whose loop restarts on a sparse bar leaves a
 hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.

@@ -623,6 +623,7 @@ class Engine:
             tracks = dict(self.tracks)
             buses = list(self.buses.items())
             order = list(self.order)
+            decks = list(self.decks.items())       # with the tracks: a deck removed mid-block keeps this block
             onsets = {}
             for name in self.duck_sources:
                 o = [s.start for s in self.active if s.track == name and not s.dead and s.start >= p0 - DUCK_LOOKBACK] + \
@@ -645,7 +646,6 @@ class Engine:
         master = np.zeros((2, n))
         post = {}
         bus_in = {b: np.zeros((2, n)) for b, _ in buses}
-        decks = list(self.decks.items())
         streamed = {}                       # bus and deck outputs a stream listens to
         deck_in = {dn: np.zeros((2, n)) for dn, _ in decks}
         bus_fed, deck_fed = set(), set()
@@ -653,9 +653,7 @@ class Engine:
         a = math.exp(-n / SR / 0.3)
         retired = lambda ch: (lambda i: G.LiveBlock(self, 'retired', ch, i, p0, n, post, onsets))  # noqa: E731
         dormant_after = int(DORMANT_S * SR) + G.LAT_BUDGET
-        noisy_after = int(DORMANT_NOISY_S * SR) + G.LAT_BUDGET
-        sleep_after = lambda ch: max(noisy_after if ch.noise else dormant_after,   # noqa: E731
-                                     int(ch.hold_s * SR) + G.LAT_BUDGET)        # a far source's sound is still on its way
+        sleep_after = self._sleep_after
         for name in order:
             t = tracks.get(name)
             if t is None:
@@ -663,8 +661,7 @@ class Engine:
             path = t['path']
             x = bufs.get(name)
             if x is None:
-                if t.get('quiet', 0) > sleep_after(path.chain) and not path.retiring \
-                        and t['cur'] == (t['gl'], t['gr']):
+                if self._asleep(t):
                     t['ms'] *= a               # dormant: no notes, tails died away; costs nothing until a note
                     self._hold(t, p0)
                     continue
@@ -766,7 +763,7 @@ class Engine:
             if dk.master is not None:
                 # the song's own master chain, as in its studio render (live_parity compares the sum before it)
                 x = dk.master.process(x, self._blocks('master:' + dn, dk.master, p0, n, post, onsets))
-            y = dk.strip.process(x, {k: self._deck_param(dn, k, p0, n) for k in D.PARAMS})
+            y = dk.strip.process(x, {k: self._deck_param(dn, k, p0, n, dk) for k in D.PARAMS})
             if self.hub.wants('deck:' + dn):
                 streamed['deck:' + dn] = y.copy()
             dk.quiet = 0 if dn in deck_fed else dk.quiet + n
@@ -817,7 +814,18 @@ class Engine:
         ahead = int(AHEAD_S * SR)
         while self.running:
             if self._fifo_n < ahead:
-                y = self.mix_block()
+                try:
+                    y = self.mix_block()
+                except Exception as e:
+                    # one bad block must not end the set: a deck removed mid-block once stopped the mixer for good
+                    # (heard bar frozen, underruns climbing). The block plays silent and is named.
+                    self.stats['mix_errors'] = self.stats.get('mix_errors', 0) + 1
+                    if self.stats['mix_errors'] <= 3 or self.stats['mix_errors'] % 100 == 0:
+                        self.news.append(f"the mixer hit an error at {fmt_bar(self.beat(self.pos), self.bpb)} "
+                                         f"({type(e).__name__}: {e}); that block played silent. Tell Main Dev, "
+                                         f"with live_status")
+                    y = np.zeros((2, BLOCK), dtype=np.float32)
+                    self.pos += BLOCK
                 with self._fifo_lock:
                     self._fifo.append(y.T.copy())
                     self._fifo_n += y.shape[1]
@@ -1216,9 +1224,20 @@ class Engine:
         t['out_lag'] = F._Lag(G.LAT_BUDGET - lat - self.buses[out]['path'].chain.latency, signal=True) \
             if out in self.buses else None
 
-    def _deck_param(self, deck, k, p0, n):
+    def _deck_param(self, deck, k, p0, n, dk=None):
         sch = self.ramps.get(('deck:' + deck, -1, k))
-        return self.decks[deck].values[k] if sch is None else sch.curve(p0, n)
+        return (dk or self.decks[deck]).values[k] if sch is None else sch.curve(p0, n)
+
+    @staticmethod
+    def _sleep_after(ch):
+        """Samples of quiet before a path stops costing the mixer: a hissing path (amp, tape) keeps hissing through
+        rests, and a far source's sound is still on its way."""
+        return max(int((DORMANT_NOISY_S if ch.noise else DORMANT_S) * SR), int(ch.hold_s * SR)) + G.LAT_BUDGET
+
+    def _asleep(self, t):
+        """A track with no notes whose tails died away: the mixer skips it until its next note."""
+        return t.get('quiet', 0) > self._sleep_after(t['path'].chain) and not t['path'].retiring \
+            and t['cur'] == (t['gl'], t['gr'])
 
     def _check_latency(self, track_lat, sends, where, bus_override=None):
         for b in sends:
@@ -1685,11 +1704,16 @@ class Engine:
             raise LiveError(f"{info['name']} has no notes in bars {info['bars']}")
         with self.lock:
             now = self.beat(self.pos)
-            if deck in self.decks and any(t['deck'] == deck for t in self.tracks.values()):
-                if not self.decks[deck].cue and any(self.tl.playing(k, now) for k, t in self.tracks.items()
-                                                    if t['deck'] == deck):
-                    raise LiveError(f"deck {deck} is on air and playing; load into another deck, or take this one "
-                                    f"off air first (live_transition away from it, or live_deck(cue=True))")
+            reset = ''
+            has = deck in self.decks and any(t['deck'] == deck for t in self.tracks.values())
+            if has and not self.decks[deck].cue and any(self.tl.playing(k, now) for k, t in self.tracks.items()
+                                                        if t['deck'] == deck):
+                raise LiveError(f"deck {deck} is on air and playing; load into another deck, or take this one "
+                                f"off air first (live_transition away from it, or live_deck(cue=True))")
+            # a deck that held a song starts the next one from a neutral strip, even emptied track by track: a
+            # blend's bass kill left on it played the next song with no bass. A fresh deck keeps what live_deck set.
+            if has or (deck in self.decks and self.decks[deck].song is not None):
+                reset = self._strip_left(deck)
                 self.cmd_deck(deck, remove=True)
             dk = self._deck(deck, create=True)
             others = [d for n, d in self.decks.items() if n != deck and (not d.cue or d.held)]
@@ -1775,7 +1799,39 @@ class Engine:
                                          "that bar line" if dk.held else '')
         if sk:
             head += "\n  not live: " + '; '.join(sk)
+        if reset:
+            head += f"\n  strip reset for the new song (the last one left it at {reset}); live_deck sets it again"
         return head + '\n' + '\n'.join(ln for ln in out.splitlines() if ln.startswith('runway'))
+
+    def _off_air_cost(self, deck):
+        """An off-air deck still costs the mixer while its tracks play notes or ring out; asleep, it costs nothing."""
+        mine = {k: t for k, t in self.tracks.items() if t['deck'] == deck}
+        awake = [k for k, t in mine.items() if not self._asleep(t)]
+        if not awake:
+            return "asleep: costs the mixer nothing until its next note"
+        now = self.beat(self.pos)
+        if any(self.tl.playing(k, now) for k in awake):
+            return (f"AWAKE off air: {len(awake)} of {len(mine)} tracks still play notes and are mixed unheard; "
+                    f"load the next song here (it replaces them) or stop them (live_queue stop)")
+        return f"tails ringing out: {len(awake)} of {len(mine)} tracks, asleep within seconds"
+
+    def _strip_left(self, deck):
+        """What a deck's strip holds now that a neutral one does not ('' when neutral): 'fader off, eq L KILL'."""
+        dk = self.decks[deck]
+        v = {k: (lambda x: float(x if np.isscalar(x) else x[0]))(self._deck_param(deck, k, self.pos, 1))
+             for k in D.PARAMS}
+        out = []
+        if v['volume_db'] != D.PARAMS['volume_db']:
+            out.append('fader ' + ('off' if v['volume_db'] <= D.SILENT_DB else f"{v['volume_db']:+g} dB"))
+        bands = [f"{b[0].upper()} " + ('KILL' if v[b + '_db'] <= D.KILL_DB else f"{v[b + '_db']:+g}")
+                 for b in ('low', 'mid', 'high') if v[b + '_db'] != 0]
+        if bands:
+            out.append('eq ' + ' '.join(bands))
+        if abs(v['filter']) > 1e-4:
+            out.append(f"filter {v['filter']:+.2f}")
+        if dk.transpose:
+            out.append(f"transpose {dk.transpose:+d}")
+        return ', '.join(out)
 
     def cmd_transition(self, to, from_deck=None, at='next_8', bars=16, style='blend', stop_from=True):
         with self.lock:
@@ -2378,6 +2434,7 @@ class Engine:
                 now_vals = {k: (lambda v: float(v if np.isscalar(v) else v[0]))(self._deck_param(dn, k, self.pos, 1))
                             for k in D.PARAMS}
                 lines.append(f"deck {dn}: {dk.describe(values=now_vals)} | {n_tr} tracks"
+                             + (f" | {self._off_air_cost(dn)}" if dk.cue and not dk.held and n_tr else '')
                              + (f" | master {dk.master.describe()}" if dk.master is not None else '')
                              + (f", {warming} WARMING" if warming else '')
                              + (f", {errs} ERRORS (live_status(deck='{dn}'))" if errs else ''))
