@@ -46,6 +46,8 @@ yt-dlp -q --no-playlist -f bestaudio -x --audio-format wav -o "ref/<short_name>.
 - Read the **tuning** line of `analyze_grid` before any pitch tool. A sped-up record sat 48 cents sharp and every note read as a pair of semitones in the rolls, chords and transcriptions. At 15 cents or more off, `ref_retune()` writes retuned copies of the reference and its stems and points the project at them; the timing stays.
 - **A played record drifts.** A band without a click can wander a few bpm over a song, and then no single grid fits. Straighten the reference onto a constant grid before transcribing (a phase vocoder with a time map; take the phase advance from the mid channel so the stereo image survives, and keep the time map to put results back). There is no op for this yet.
 - Render a drum track, then `align(a='track:<snare or hats>', b='ref:drums', band='himid' or 'air')` and set `offset_sec` from its answer. A 40 ms offset made onset metrics negative.
+- **A tab with meter changes:** count its real bar starts, the 2/4 bars included. Counted as all 4/4, one tab sat
+  0.6 s off the record; counted bar by bar it read 0.40 s, and kick, snare and loudness agreed on it.
 
 ## 2. Separate and read the whole song before writing
 
@@ -76,6 +78,13 @@ yt-dlp -q --no-playlist -f bestaudio -x --audio-format wav -o "ref/<short_name>.
   phrase and section scale; (e) learn what instrument and setup the player used; (f) compare yours at each scale
   with the same ops before the person hears it. A first blind round should test something already close by the
   numbers.
+- **Measure an ambiguous reading by rendering both.** A gallop could have been 32nd notes or triplets: render
+  each, compare each to the record, keep the closer (the 32nds won, distance 10.76 against 11.44, envelope 2.5
+  against 4.9 dB). The record decides, not the reading.
+- **Drums from a record played without a click:** a per-section grid left hits 22 ms early to 26 ms late. Move each
+  hit to the record's own onset within 35 ms instead: kick matches went from 73-75% to 84-91% and snare from 62-67%
+  to 87-90%. Take velocity from each hit's level. A cymbal still ringing 150 ms after the hit is a crash or a ride
+  (9 in 10 were, in one song): written as closed hats they lost the record's steady hiss above 8 kHz.
 - **Find the phrase length before tiling.** A consensus loop assumes the part repeats every `loop_bars`. A lead over a 2-bar groove was a 16-bar phrase (rests, a run up, different bends each pass): transcribed from 4 bars and tiled, the user heard it "not following the melody" although every note of those 4 bars was right. Read the pitch track over 16 bars or more and compare the blocks before choosing `loop_bars`.
 
 ## 4. Sounds, one instrument and one chunk at a time
@@ -100,6 +109,11 @@ at, the strongest pitch under 250 Hz per beat, and the strums, with a WARNING on
 your clip its own under-part at the right level, then match (the shape score went 8.6 -> 3.2). Fit a voice on the
 raw render and tone-match after, never through a heavy match.
 
+**A fit in a scratch project replaces the instrument each try.** `instrument_set` merges by default, so a key one
+try set and the next left out stays. One drum fit kept `hat_db=8` from an early try in every try after it: three
+different settings read the same distance. In a fit loop call `instrument_set(..., merge=False)` with the whole
+instrument.
+
 ## 5. Compare, then drill down
 
 - `stem_map_set({track: stem})`, `render(stems=True)`, `levels_from_ref()` to set the faders from the reference's stem balance (apply, re-render, repeat until every change is within 1 dB; draft 1 of the G-funk beat had the lead as loud as the drums, the reference has it 19.6 dB under), then `cmp_run(label=)`. These are stem averages, and demucs' `other` holds
@@ -121,6 +135,18 @@ raw render and tone-match after, never through a heavy match.
 - **Round-trip every sensor before it reads the record.** Run it on audio where you know the answer (your own render). A generic onset detector found only 25-54% of a lead's notes inside a dense separated mix, and the "looseness" it reported was the rhythm guitar plus its own matching noise: a humanizer fitted to it sounded like "an amateur trying to play" the record. Measure timing on exposed notes refined one by one, and check the detector's round trip on drums first (within 9 ms after a steady 16 ms delay).
 - **Played instruments need the ear.** For a guitar, horn or voice, single notes decide it: see `references/blind-tests.md` for the eye exam and the blind exam.
 
+- **The mix lag is misled by vocals.** A compare's mix-level lag read -122 ms while the stems read drums -12,
+  guitar +17 and bass +6 ms. Time a draft stem by stem.
+- **Drums transcribed from the record line up by construction.** They say nothing about where a tab's sections sit:
+  check the guitars on their own stem.
+- **Tremolo guitar has no onsets to time.** Its onset and loudness curves are flat on the record and on yours, so
+  onset scores sit at chance and envelope correlation near 0 even when the part is right. Judge it by chroma per
+  section at lags up to about 3 s each way; when the riff repeats every bar, a best lag of exactly one bar is a real
+  answer, not noise.
+- **Score the window, not the file.** A scratch render's stems run past the window into the release tail, and an
+  over-time statistic (band steadiness, pick stripes) read over the whole file counts the silence: 15.7 dB where
+  the window alone read 3.0, and two test rounds drew the wrong conclusion. Trim to the window first, and check a
+  variant's number on a full song render before trusting a scratch project.
 - **Fitting targets carry bleed.** A hat extracted from the full drum stem had the 808's tail as its loudest band, and the fit chased it. Extract from the piece's `analyze_kit` component, or restrict `fmin`/`fmax` in the fit to the piece's own range.
 
 ## When is it done

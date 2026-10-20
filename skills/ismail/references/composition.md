@@ -75,4 +75,19 @@ a movement through melody but different instrument too").
 - Change something every 8 bars: add or drop a part, open a filter (automation), change the hat pattern, add a fill in bar 8 (snare 16ths `....X...X.X.XXXX`, kick drop, reverse swell).
 - Transitions: a 1-2 bar break before a drop (drums out, pad or stab alone, a riser: `preset:noise_riser` note held for the break). Cut the kick in the last bar before a new section.
 - Intro and outro: 8-16 bars that DJs can mix; start with drums or a single pad, fade with master automation over 6-8 bars, not a cliff.
+- Keep a buildup clear and bring the voice in on the drop. Vocal bits in the bars before a drop muddle the buildup
+  and take attention from the drop itself.
+- Hold the hook's payoff line until the story earns it. Sing the lead-in lines first, and give the payoff its first
+  appearance where the song turns (after a refusal, a break, the point where the backing fills out).
+- Where a phrase's halves land matters more than where they were sung. Moving a first half one beat earlier (its
+  last word on beat 4, before the kick) and the second half one beat later, so every half ended on beat 4 into the
+  1, was the take the listener chose from seven timings. Offer a few timings side by side, then check the pick in
+  the whole song.
+- Spoken lines: count the syllables and put the stressed one on the 1. In an intro, about one line a bar; after the
+  drop a line can take its time.
+- A long stretch with no voice is where a song drags (19 bars of one groove did). Fill it with what was already
+  said, repeated and cut up on the beat, not with new material.
+- A robot voice that reads high and female: a vocoder carrier on the root and fifth two to three octaves above the
+  bass note, a nasal peak near 2.8 kHz, asymmetric grit, chorus on the synth side; later in the song add a fourth
+  below and an octave above to fill it out.
 - Verify at the end with `analyze_structure(source='render')`: the arrangement map rows should show your sections and your energy curve. If two sections look the same in the map, they will sound the same.
