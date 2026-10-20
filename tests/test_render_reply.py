@@ -82,6 +82,18 @@ def test_render_reply_without_a_reference_says_nothing_about_one(tmp_path):
     assert 'reference' not in out and 'hear it' not in out          # a plain iteration render: no block either
 
 
+def test_render_reply_reads_the_true_peak(tmp_path):
+    """A sample-peak limiter lets bright sounds over between samples: the master line read -2 dBFS while the mix was
+    +0.2 dBTP, and an mp3 of it clips. The line gives the true peak and says so over -1 dBTP."""
+    root = _song(str(tmp_path / 's'))
+    out = api.render(root, cache=False, wait='0')
+    assert ' dBTP' in out.split('master: ', 1)[1].splitlines()[0] and 'over -1 dBTP' not in out
+    api.track_add(root, 'riser', instrument='preset:noise_riser', volume_db=18)
+    api.notes_write(root, 'riser', 1, '0 C4 8')
+    out = api.render(root, cache=False, wait='0')
+    assert 'over -1 dBTP: an mp3 of it can clip' in out, out
+
+
 def test_render_reply_names_the_comparison_not_yet_run(tmp_path):
     root = _song(str(tmp_path / 's'))
     ref = _wav(str(tmp_path / 'ref.wav'))
