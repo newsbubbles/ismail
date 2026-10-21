@@ -407,6 +407,23 @@ def test_the_mix_loop_survives_a_bad_block(eng):
     assert any('a bad block' in n and 'played silent' in n for n in eng.news)
 
 
+def test_cut_takes_the_old_deck_off_air_at_once(eng, tmp_path):
+    """A cut ignores bars: the old deck stops and is cued on the cut bar, so a load onto it is taken right away
+    (it used to stay on air at fader off for the default 16 bars, rendering and refusing loads)."""
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'C4')
+    b = make_song(str(tmp_path / 'songB'), 'Song B', 'G4')
+    eng.cmd_load('A', a, at='next_bar')
+    run(eng, 3.0)
+    eng.cmd_load('B', b, at='next_bar')
+    run(eng, 4.5)
+    out = eng.cmd_transition('B', at='next_bar', style='cut')
+    assert out.splitlines()[0].startswith('cut from deck A to deck B at bar')
+    run(eng, 4.0)                                              # two bars at 120: well past the cut, far short of 16
+    assert eng.decks['A'].cue and not eng.decks['B'].cue
+    assert not any(eng.tl.playing(k, eng.beat(eng.pos)) for k, t in eng.tracks.items() if t['deck'] == 'A')
+    assert 'loaded Song A' in eng.cmd_load('A', a, at='next_bar')
+
+
 def test_deck_keeps_the_songs_mix(eng, tmp_path):
     """A loaded song sounds like its render: a drum group bus with a reverb insert keeps the dry drums, and
     automation comes over (fx params and volume as ramps, instrument params rendered with the notes, the master
