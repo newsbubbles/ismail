@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### One listener's taste is no longer a rule in the playbook
+
+- Twelve places in SKILL.md, live.md, composition.md, music-video.md and instruments.md stated one person's taste
+  as a rule for every set and song (derived melodies only, a new hook every 2 minutes, an effects pass with a
+  riser into every section, a climax in every form, a VHS look on every video, and more). They now read as
+  examples, scoped to the style they came from or to when the person asks for them.
+
 ### Moments marked while the song plays
 
 - `feedback_page(moments=True)` puts a time strip with bar numbers and a "Mark this moment" button (or the M key)

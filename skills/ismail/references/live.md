@@ -134,10 +134,10 @@ camera, facial expression categories); treat it the same way.
   context reset once missed six of the person's notes in 36 minutes. `phone.md`, "Watching the phone", has the rest.
 - **Read the room.** When the audience is into it, lean in: keep the feel and add an element or two, build, take
   it down, drop. When it goes flat or repetitive, move on: a switch-up, a breakdown, a new song.
-- **Think in energy, not song form.** Bring elements in over time (a percussion layer, 808 slides, string stabs,
-  a riser), strip them for a breakdown (drums and bass out, filter the keys down, a snare roll into the last
-  bar), then drop with more than before (double-time hats, the hook instrument). Every 16 to 32 bars something
-  should change.
+- **In club and electronic sets, think in energy, not song form.** Bring elements in over time (for example a
+  percussion layer, 808 slides, string stabs, a riser), strip them for a breakdown (drums and bass out, filter
+  the keys down, a snare roll into the last bar), then drop with more than before (double-time hats, the hook
+  instrument). Something changing every 16 to 32 bars is a common pace there; other styles move at their own.
 - **Small edits by default.** Steer with one-element changes between bigger moves: `live_track(volume_db=)`,
   `live_fx` sweeps, `{track, stop: true}`, a one-bar roll or fill clip (`loop: 0`), one part's new pattern.
 - **Queue a runway before every question.** Whatever is queued loops while the user answers, and answers can
@@ -160,17 +160,20 @@ began. When a new part must line up with a 16-bar phrase that started on bar 37,
 
 ### Reading the audience
 
-Learned from a one-hour set steered by one listener; the same reading applies to any audience feed.
+Learned from a one-hour set steered by one listener. These are what that listener responded to: examples to test
+against your own listener's notes, not rules for every set.
 
 - **They judge change over time, not static balance.** "It didn't really change much" was about contrast, not the
   mix. A drop lands when the bar before it is emptied: the one that worked measured -27 dB with no sub in the bar
   before, then -19 dB with the sub 30 dB up, plus a silence gap. Meter the bar before a drop against the drop and
   aim for 6 to 8 dB of difference and a clear swing in the sub band.
-- **Dynamics come from effects, not EQ and not more layers:** delay throws, reverb washes, filter sweeps, stutter
-  gates, bitcrush, sidechain pumping, and silence. Faders and EQ are housekeeping; effects are the performance.
-- **Invented melodies fail; derived ones win.** A generic pentatonic acid line was "all over the place". A call
-  taken from the reference's vocal, callbacks to earlier sections' bell, cello and violin lines, and the opening
-  progression reused all worked. New melodic material comes from the reference or from earlier in the set.
+- **For that listener, dynamics came from effects, not EQ or more layers:** delay throws, reverb washes, filter
+  sweeps, stutter gates, bitcrush, sidechain pumping, and silence. Another listener may want the playing or the
+  arrangement to carry it; their notes say which.
+- **For that listener, derived melodies beat invented ones.** A generic pentatonic acid line was "all over the
+  place". A call taken from the reference's vocal, callbacks to earlier sections' bell, cello and violin lines, and
+  the opening progression reused all worked. When a new line falls flat, try material from the reference or from
+  earlier in the set. A set may also need no melody at all; follow what the person asks for.
 - **Measured beats guessed, and the listener hears it.** A guessed gnawa groove (four strokes on clean triplets)
   was "cool"; the measured one (three strokes at 0, 0.32 and 0.74 of a beat, its timbres fitted from the stems)
   was "I love it... closer". Measuring mid-set is fine at idle priority.
@@ -179,8 +182,8 @@ Learned from a one-hour set steered by one listener; the same reading applies to
   acid line was gone within seconds), then the bigger fix follows.
 - **Ask about the culture, not the knobs:** "does it read as gnawa?" got a useful answer where a technical
   question would not.
-- **Endings are emotional arcs** ("full circle", "crescendo", then peace). Plan the last 15 minutes early as an
-  arc, but keep the ending swappable: do not queue it until it is close.
+- **Plan the ending early.** That listener wanted an emotional arc ("full circle", "crescendo", then peace); ask
+  yours what the end should feel like. Keep the ending swappable: do not queue it until it is close.
 
 ### Highlights on praise
 
@@ -280,18 +283,20 @@ Once the engine runs:
   source plays live.
 - **At most two helpers at a time**, and read the `mixer:` and `headroom:` lines of `live_status` after each one
   starts.
-- **The set follows the person's clock.** Read the time at every checkpoint and shape the arc to their day:
-  energy, a let-down, a sleep session queued whole so it runs with no agent and ends by itself, silence, a sunrise
-  (a dawn chorus entering in the order birds wake), a morning groove. Plans move when they say so.
+- **A long set can follow the person's clock.** Read the time at every checkpoint and shape the arc to their day.
+  One 16-hour run went: energy, a let-down, a sleep session queued whole so it runs with no agent and ends by
+  itself, silence, a sunrise (a dawn chorus entering in the order birds wake), a morning groove. Plans move when
+  they say so.
 - **Pause and resume are a performance move.** Snapshot the status to a file, stop the recording, a short fade,
   stop. Resume with a short ease-in at a level that fits the hour, never the exact old state. Each resume is a new
   take file, logged in `notes/feedback.md`.
 - **Keep a runway, always.** Queue 8 to 16 minutes ahead, set a checkpoint timer that fires well before the runway
   ends, and never let a section end into silence.
-- **Change it before they ask.** One chord for an hour read as repetitive. Progressions with every part built from
-  its chord, a new hook every 2 minutes and alternating section forms (full, a drive with no break, a deep one that
-  starts underwater) kept it moving. Builds escalate every 4 bars and drops land louder (`Set.gap` brings each track
-  back to its own level).
+- **When the person says it is repetitive, change more.** One chord for an hour read as repetitive to one
+  listener. What kept that set moving: progressions with every part built from its chord, a new hook every 2
+  minutes, and alternating section forms (full, a drive with no break, a deep one that starts underwater), with
+  builds escalating every 4 bars and drops landing louder (`Set.gap` brings each track back to its own level). A
+  sleep, focus or practice set may want the opposite: steady, with few changes.
 - **Use what the person is doing elsewhere.** Other sessions' work makes material: their birds, a gnawa groove, a
   song's villain, a series on decks, a song built by a background agent while the set plays. Check each borrowed
   voice's blind-test notes and provenance before it goes on air; two unproven voices once had to be pulled.
