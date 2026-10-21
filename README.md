@@ -131,7 +131,7 @@ already use (Claude Code, Codex, Cursor, any MCP client) on one side and to you 
   own behaviour, and when you dance, they put your moves on a character.
 - **The phone page.** The set in your pocket, with the screen off. Talk back through your earbuds; the agent puts
   its own panels on the page for whatever it needs to ask you, from "sample this or play it as a melody?" to a
-  blind listening exam.
+  listening test with the labels hidden.
 
 The agent measures everything it can and asks your ears and eyes only what its measurements can't settle.
 
@@ -206,7 +206,7 @@ Extras and per-client setup are in [docs/reference.md](docs/reference.md).
 - The agent's own changes to a live set land between its turns, 5 to 30 seconds apart (your taps on the phone or
   the stage act at once).
 - The VR stage is tested on one headset (Quest 3) with one person.
-- It needs a capable agent, and your ear stays the final judge. The blind exams so far had one listener.
+- It needs a capable agent, and your ear stays the final judge. The listening tests so far had one listener.
 
 How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the
 [showcase page](https://newsbubbles.github.io/ismail/#compare).
