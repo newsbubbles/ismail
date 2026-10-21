@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### A cut takes the old deck off air at once
+
+- `live_transition(style='cut')` ignores `bars`: the old deck's tracks stop and it goes off air (cued) on the cut's own
+  boundary. It used to stay on air at fader off for the default 16 bars, costing the mixer and refusing a load onto it.
+
 ### Moments marked while the song plays
 
 - `feedback_page(moments=True)` puts a time strip with bar numbers and a "Mark this moment" button (or the M key)
