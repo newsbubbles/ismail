@@ -378,7 +378,8 @@ def live_transition(project: str, to: str, from_deck: str = None, at: str = 'nex
     """Queue a mix from one deck to another as ramps on their strips, starting at `at` (a phrase boundary).
     style: blend (new deck fades up without bass, bass swap half-way, old fades out) | bass_swap (both full, one
     bass at a time, old leaves in the last quarter) | filter (old thins out through a rising high-pass while the
-    new opens from a low-pass) | cut (switch on the boundary). The `to` deck must be playing by then (live_load
+    new opens from a low-pass) | cut (switch on the boundary; bars is ignored, and the old deck stops and goes off air on that same
+    boundary). The `to` deck must be playing by then (live_load
     or live_queue it first, cued); it goes on air at the start. from_deck defaults to the one deck on air. With
     stop_from, the old deck's tracks stop when the transition ends and it goes off air (cued), ready for the next
     live_load. The reply is the timeline of every move."""

@@ -1857,7 +1857,7 @@ class Engine:
                 beat, _ = self.tl.resolve_at(at, ready, ready)
             except QueueError as e:
                 raise LiveError(str(e))
-            L = int(bars) * self.bpb
+            L = 0 if style == 'cut' else int(bars) * self.bpb    # a cut ends where it starts: the old deck leaves
             if not any(self.tl.playing(k, beat) for k in to_tracks):
                 raise LiveError(f"deck {to} plays nothing at {fmt_bar(beat, self.bpb)}: live_load a song onto it or "
                                 f"live_queue its tracks first, starting by then")
@@ -1866,7 +1866,8 @@ class Engine:
             except D.DeckError as e:
                 raise LiveError(str(e))
             names = {'to': to, 'from': from_deck}
-            lines = [f"{style} from deck {from_deck} to deck {to}: {fmt_bar(beat, self.bpb)} to "
+            lines = [f"cut from deck {from_deck} to deck {to} at {fmt_bar(beat, self.bpb)}" if style == 'cut' else
+                     f"{style} from deck {from_deck} to deck {to}: {fmt_bar(beat, self.bpb)} to "
                      f"{fmt_bar(beat + L, self.bpb)} ({bars} bars)"]
             for who, k, v0, v1, st, dur in steps:
                 s0 = self.sample(beat + st)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### A cut takes the old deck off air at once
+
+- `live_transition(style='cut')` ignores `bars`: the old deck's tracks stop and it goes off air (cued) on the cut's own
+  boundary. It used to stay on air at fader off for the default 16 bars, costing the mixer and refusing a load onto it.
+
 ### One listener's taste is no longer a rule in the playbook
 
 - Twelve places in SKILL.md, live.md, composition.md, music-video.md and instruments.md stated one person's taste

@@ -439,6 +439,7 @@ air; only you hear it, through `live_listen(deck=...)`.
 3. `live_transition(to='B', style=..., bars=16, at='next_8')` queues the whole mix: `blend` (B up without bass,
    bass swap half-way, A out), `bass_swap`, `filter`, `cut`. It starts at the first boundary after B is
    playing, puts B on air, and when it ends stops A and takes it off air (cued), ready for the next `live_load`.
+   A `cut` ends where it starts: A stops and goes off air on the same boundary, whatever `bars` says.
    `live_status` says `SILENT ON AIR` when a set that has played sounds nothing for 10 s. The reply is the timeline; `live_status` shows each deck's
    fader and eq as they move.
 4. Watch `live_status`'s mixer load (two full songs is about 50%) and its headroom line: the cushion of mixed
