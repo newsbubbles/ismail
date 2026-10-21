@@ -39,25 +39,27 @@ Rules of thumb: accents (X) on no more than 4 steps per bar per part; a part tha
 - With a reference, read its riff before writing one: `analyze_roll` or `notes_from_audio_loop` on its stem, `analyze_melody` with its confidence line (`recreate.md` section 3), and write from what it plays.
 - Build from a 2-4 note motif; repeat it, then vary one thing (last note, rhythm of the tail, transpose by a chord tone).
 - Land long notes on chord tones; use passing tones on weak 16ths.
-- Range: a lead should span about an octave; more reads as random.
+- Range: about an octave is a common start for a lead (wider leaps read as random to some ears); with a
+  reference, measure its line's range and match that.
 - Space: a lead that plays every bar tires fast. Alternate 2 bars on, 2 bars off, or let a delay (`fx delay time_beats 0.75, feedback 0.4, pingpong`) answer it.
 
 ## Feel and phrasing (played parts)
 
 For parts meant to sound played (guitar, bass, live drums), placement matters more than notes. Learned on a 1970 guitar band pastiche; the per-part checks are in `references/blind-tests.md` section 4.
 
-- **No per-note random jitter.** It is what an amateur sounds like; keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vib, slide, mute, level) and every effect sweep (a wah's
+- **No per-note random jitter** unless the person wants a loose, unschooled feel: on that pastiche it read as
+  amateur, so keep it to a few ms. Place whole phrases instead: landing notes tight to the band (within about 8 ms), phrase entries free (on the grid, 35-75 ms late or 25-50 ms early), and the run between re-spaced evenly (a lazy start rushing into the landing, or a push). Move the notes and every expression lane (bend, vib, slide, mute, level) and every effect sweep (a wah's
 `fx.<i>.pos`) together with one time warp.
 - **The band has a feel too:** a shared slow push and pull per bar, 16ths a little late, a little looseness. That alone moved drums, bass and rhythm guitar from "digital" to "organic".
-- **Bends land on chord tones** of the chord sounding when they land, or on a scale tone that is no semitone from a chord tone (which keeps the blues bend from the minor 3rd to the 4th); never more than a whole step. A half-step bend onto the major 3rd over a minor chord sours it for as long as it is held.
+- **Bends land on chord tones** of the chord sounding when they land, or on a scale tone that is no semitone from a chord tone (which keeps the blues bend from the minor 3rd to the 4th). On that pastiche no bend went past a whole step; when matching a record, measure its player's bends (some bend a minor 3rd or more). A half-step bend onto the major 3rd over a minor chord sours it for as long as it is held.
 - **Each chord its own scale.** One mode over the whole song put a G natural under Ebm9. A double-stop under a held melody note moves by scale steps, as a pair.
 - Vibrato on held lead notes: 28-42 cents peak to peak at 4.5-5 Hz, wandering in rate and depth, starting after the note settles.
 
 ### A melody that travels through instruments
 
-A long chapter with a fixed groove (focus music, a long build) gets a thread the ear can follow when one line moves
-from instrument to instrument instead of new material arriving each section (ledger:S50; asked live: "we should hear
-a movement through melody but different instrument too").
+When the person asks for movement through a long chapter with a fixed groove (focus music, a long build), one way
+is a single line that moves from instrument to instrument instead of new material arriving each section
+(ledger:S50; asked live once: "we should hear a movement through melody but different instrument too").
 - Write one 8-bar line over the chapter's chords. Hand it on at each section: piano, bell, piano, strings, flute, a
   mono synth with glide, strings, bell. Come back to an earlier voice before the end, so it reads as one line.
 - Fit each pass with one helper, never by hand: `line(shift, vel, legato, lo, hi)` moves the whole line by octaves
@@ -72,9 +74,9 @@ a movement through melody but different instrument too").
 ## Arrangement
 
 - Write the form map in the Session Sheet with an energy number per section. Energy comes from: number of parts, filter cutoff, drum density, register spread.
-- Change something every 8 bars: add or drop a part, open a filter (automation), change the hat pattern, add a fill in bar 8 (snare 16ths `....X...X.X.XXXX`, kick drop, reverse swell).
+- In club and EDM forms, change something every 8 bars (other forms follow their reference's pacing): add or drop a part, open a filter (automation), change the hat pattern, add a fill in bar 8 (snare 16ths `....X...X.X.XXXX`, kick drop, reverse swell).
 - Transitions: a 1-2 bar break before a drop (drums out, pad or stab alone, a riser: `preset:noise_riser` note held for the break). Cut the kick in the last bar before a new section.
-- Intro and outro: 8-16 bars that DJs can mix; start with drums or a single pad, fade with master automation over 6-8 bars, not a cliff.
+- Intro and outro, for a track DJs will mix: 8-16 bars; start with drums or a single pad, fade with master automation over 6-8 bars, not a cliff.
 - Keep a buildup clear and bring the voice in on the drop. Vocal bits in the bars before a drop muddle the buildup
   and take attention from the drop itself.
 - Hold the hook's payoff line until the story earns it. Sing the lead-in lines first, and give the payoff its first

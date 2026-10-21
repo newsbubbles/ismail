@@ -101,4 +101,5 @@ Before choosing sounds, list what the genre is actually played on, then check `v
 - rock / metal: electric guitar through amp and cab, bass guitar, acoustic kit
 - jazz: upright bass, piano, brushes, ride cymbal, horn
 
-Anything on that list with no voice yet is a voice to build (route 2 or 3) before the arrangement, not a synth to settle for.
+When the person wants it to sound played, anything on that list with no voice yet is a voice to build (route 2 or 3)
+before the arrangement. A synth or chiptune take is theirs to choose; ask once when it is unclear.

@@ -117,7 +117,9 @@ C.tape_stop(B(134), B(136, 3), 'END', 240); C.crt_off = frame; C.end_title = (B(
 C.auto_fx(); C.text(t0, t1, 'WORD', 96); C.main()
 ```
 
-Sources are decoded on demand (forward reads, a seek on a jump, the last frames kept in memory), so a full-song source costs no disk. Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `palette` maps every pixel to the nearest shade of `C.palette` (a list of RGB colours, dark to light; default four greys), for a limited-colour look. Effects follow the note families (`C.fx_map`; the defaults in `FX_MAP` are keyed to the `growl` voice's families): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. Everything sits under a VHS grade (lifted blacks, scanlines, vignette, grain), and `rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
+Sources are decoded on demand (forward reads, a seek on a jump, the last frames kept in memory), so a full-song source costs no disk. Placed audio clips (speech, samples) sync as events too, with `fam` = the sound's name. `C.hold(effect, t0, t1, amp)` holds an effect over a stretch; `palette` maps every pixel to the nearest shade of `C.palette` (a list of RGB colours, dark to light; default four greys), for a limited-colour look. Effects follow the note families (`C.fx_map`; the defaults in `FX_MAP` are keyed to the `growl` voice's families): wub remap, dive melt, grind datamosh, robot pixelation, screech tear, metal posterize plus edges, zap invert, howl ghost double exposure (`C.ghost_key`), talk chroma roll, chop stutter. Kicks zoom-punch, sub shakes, snares and crashes flash. The engine puts everything under a VHS grade (lifted blacks, scanlines, vignette, grain): that was one series'
+look, and turning it off is a code change for now, so tell the person before using this engine for another look.
+`rain=True` adds a rain layer to a shot. Output: 1080p H.264 crf 18 with maxrate 24M plus the master as AAC 320k. Grain must be in the frames, not from an ffmpeg noise filter, or the file triples in size.
 
 ## What made it work (creative rules)
 
@@ -127,7 +129,8 @@ Sources are decoded on demand (forward reads, a seek on a jump, the last frames 
   one full design, background people the cheap path (stock variation, silhouettes, faces lit away). Reread the
   story before designing anyone; `PROGRESS.md` names who matters.
 
-- **The story comes from the source's own lore**, so each shot means something to someone who knows it. The song's hook words each get one picture, shown exactly for the note's length.
+- **When the video draws on a source (a game, a film, a series), the story comes from its own lore**, so each shot
+  means something to someone who knows it. The song's hook words each get one picture, shown exactly for the note's length.
 - **Cut rate is the arrangement.** Long shots in the intro, snare rolls set the cut rate in builds, triplet hooks cut on every hit, a drop's own rhythm sets its cadence, and a final section can strobe on a few frames.
 - **The dropout bar before a drop** is black, then one held image and the title.
 - **The last bar of the final build** gets its own shot.
