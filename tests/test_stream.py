@@ -9,6 +9,7 @@ import pytest
 
 from ismail.api import OpError
 from ismail.stream import config as C, ops, output, server
+from ismail.stream.adapters.kick import KickAdapter
 from ismail.stream.adapters.twitch import TwitchAdapter
 from ismail.stream.adapters.youtube import YouTubeAdapter
 from ismail.stream.chatlog import ChatLog
@@ -122,6 +123,8 @@ def test_twitch_irc_and_eventsub_lines(tmp_path):
                                        {'type': 'gif', 'text': ''}]}, 'badges': [{'set_id': 'broadcaster'}]})
     a._on('channel.cheer', {'user_id': '8', 'user_login': 'cy', 'user_name': 'Cy', 'bits': 100, 'message': 'go'})
     a._on('channel.chat.notification', {'notice_type': 'unknown', 'chatter_user_id': '1'})     # tolerated, skipped
+    a._irc_line(':bo!bo@bo.tmi.twitch.tv PRIVMSG #somechannel :ACTION waves')
+    assert hub.log.lines.pop()['text'] == 'waves'
     lines = hub.log.after(0)
     assert lines[0]['user'] == {'id': '42', 'name': 'ana_b', 'display': 'Ana_B', 'mod': True, 'sub': True}
     assert lines[0]['text'] == 'play something faster' and lines[0]['id'] == 'abc-1'
@@ -144,6 +147,22 @@ def test_youtube_items(tmp_path):
     assert lines[0]['text'] == 'hi there' and lines[0]['user']['mod'] is True
     assert lines[1]['type'] == 'superchat' and lines[1]['amount'] == '$5.00' and lines[1]['text'] == 'more bass'
     assert len(lines) == 2 and a.reading == 'every 10 s'
+
+
+def test_kick_feed_events(tmp_path):
+    hub = StubHub(tmp_path)
+    a = KickAdapter({'name': 'k', 'platform': 'kick', 'channel': 'somechannel'}, hub)
+    a._on('ChatMessageEvent', {'id': 'u-1', 'content': 'nice [emote:37226:KEKW] set',
+                               'sender': {'id': 5, 'username': 'Fay', 'slug': 'fay',
+                                          'identity': {'badges': [{'type': 'subscriber'}, {'type': 'moderator'}]}},
+                               'metadata': {'original_message': {'id': 'u-0'}}})
+    a._on('GiftedSubscriptionsEvent', {'gifter_username': 'Gus', 'gifted_usernames': ['a', 'b', 'c']})
+    a._on('PinnedMessageCreatedEvent', {})                                                 # unknown: skipped
+    lines = hub.log.after(0)
+    assert lines[0]['text'] == 'nice :KEKW: set' and lines[0]['reply_to'] == 'u-0'
+    assert lines[0]['user'] == {'id': '5', 'name': 'fay', 'display': 'Fay', 'mod': True, 'sub': True}
+    assert lines[1]['type'] == 'gift' and lines[1]['amount'] == 3 and len(lines) == 2
+    assert a.threaded_replies()
 
 
 # ------------------------------------------------------------------ the output

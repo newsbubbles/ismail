@@ -220,7 +220,10 @@ class TwitchAdapter(Adapter):
             badges = [{'set_id': b.split('/')[0]} for b in tags.get('badges', '').split(',') if b]
             u = _user(tags.get('user-id'), login, tags.get('display-name') or login, badges)
             extra = {'bits': int(tags['bits'])} if tags.get('bits') else {}
-            self.chat(u, parts[3][1:] if parts[3].startswith(':') else parts[3], id=tags.get('id'),
+            text = parts[3][1:] if parts[3].startswith(':') else parts[3]
+            if text.startswith('ACTION ') and text.endswith(''):           # a /me line
+                text = text[8:-1]
+            self.chat(u, text, id=tags.get('id'),
                       reply_to=tags.get('reply-parent-msg-id') or None, **extra)
         elif cmd == 'USERNOTICE':
             nt = tags.get('msg-id', '')
