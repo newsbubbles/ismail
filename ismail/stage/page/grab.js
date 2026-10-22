@@ -15,8 +15,8 @@
 //   go into the take (hands.mark) and play back with it, the drop at the moment the hand began to open. A fixed thing
 //   (the bar, a rail) keeps the hand model where it took hold.
 //   Never saved: like a hand anchor, the edits file keeps the thing where it stood before the first grab.
-//   World: world.json grab {on, hold_s, release_s, objects: 'unlocked' | [names, globs], rules: {object: {grab, fixed}}}.
-//   live: grab_mode {on?, hold_s?, release_s?, objects?} (off lets go of everything held), grab_rule {object, grab, fixed}
+//   World: world.json grab {on, hold_s, release_s, regrab_s, objects: 'unlocked' | [names, globs], rules: {object: {grab, fixed}}}.
+//   live: grab_mode {on?, hold_s?, release_s?, regrab_s?, objects?} (off lets go of everything held), grab_rule {object, grab, fixed}
 //   events: grab_counting, grabbed {object, hand, joint, contacts, fixed, pinned}, grab_releasing, grab_released,
 //           grab_landed {object, fell_cm, onto}
 import * as THREE from 'three';
@@ -40,7 +40,8 @@ const FLY_MAX_S = 4, V_MAX = 8, G = 9.81;
 const BASE = new Set(JOINTS.filter((n) => n === 'wrist' || n.endsWith('metacarpal') || n.endsWith('phalanx-proximal')));
 const ORDER = Object.fromEntries(JOINTS.map((n) => [n, n === 'wrist' ? 0 : n.endsWith('metacarpal') ? 1 : n.endsWith('proximal') ? 2
   : n.endsWith('intermediate') ? 3 : n.endsWith('distal') ? 4 : 5]));
-const DEFAULTS = { on: false, hold_s: 1.5, release_s: 1.0, objects: 'unlocked', rules: {} };
+// regrab_s: a thing let go is not taken again for this long (the user's hand, set down on it, took it straight back)
+const DEFAULTS = { on: false, hold_s: 1.5, release_s: 1.0, regrab_s: 0.5, objects: 'unlocked', rules: {} };
 
 // the one-euro filter (Casiez et al. 2012): little smoothing when slow (no jitter), little lag when fast
 class OneEuro {
@@ -245,10 +246,12 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
     const v = a[a.length - 1].p.clone().sub(a[0].p).divideScalar(Math.max(1e-3, a[a.length - 1].t - a[0].t));
     return v.length() > V_MAX ? v.setLength(V_MAX) : v;
   }
+  const letGoAt = new Map();                                 // thing name -> when a hand last let go of it (regrab_s)
   function release(side, why, began, now) {
     const h = H[side], g = h.held;
     if (!g) return null;
     h.held = null; h.rel = null;
+    letGoAt.set(g.it.name, now);
     const s = ctlOf(side);
     if (s) { const model = handModel(s); if (model) model.position.set(0, 0, 0); }
     const it = g.it, v = speedAt(side, began / 1000);
@@ -418,6 +421,7 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
       const touchingNow = new Map();
       for (const th of things) {
         if (heldBy(th.it) || flights.has(th.it.name) || !near(th, wrist.p)) continue;
+        if (now - (letGoAt.get(th.it.name) ?? -Infinity) < (c.regrab_s ?? 0.5) * 1000) continue;   // just let go of
         const r = sweep(js, th);
         const was = h.contacts.get(th.it.name);
         const on = was ? r.best < END_M : r.best < START_M;
@@ -464,7 +468,7 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
   // ---- the page commands
   live.handlers.grab_mode = (cmd) => {
     const w = world(), g = { ...DEFAULTS, ...(w.grab || {}) };
-    for (const k of ['on', 'hold_s', 'release_s', 'objects']) if (cmd[k] != null) g[k] = cmd[k];
+    for (const k of ['on', 'hold_s', 'release_s', 'regrab_s', 'objects']) if (cmd[k] != null) g[k] = cmd[k];
     w.grab = g;
     thingsAt = 0;
     const dropped = g.on ? [] : letGoAll('grab off');

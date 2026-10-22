@@ -32,7 +32,7 @@ from pathlib import Path
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
             'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': [],
             'props': {}, 'faces': {}, 'grab': None, 'gestures': {}}
-GRAB_KEYS = {'on', 'hold_s', 'release_s', 'objects', 'rules'}
+GRAB_KEYS = {'on', 'hold_s', 'release_s', 'regrab_s', 'objects', 'rules'}
 
 
 def NAME_OK(name):
@@ -140,7 +140,7 @@ def check_gestures(g):
 
 
 def check_grab(g):
-    """Problems with world.json grab (grab by touch, page/grab.js): {on, hold_s, release_s, objects, rules}."""
+    """Problems with world.json grab (grab by touch, page/grab.js): {on, hold_s, release_s, regrab_s, objects, rules}."""
     if g is None:
         return []
     if not isinstance(g, dict):
@@ -148,7 +148,7 @@ def check_grab(g):
     out = [f'grab has an unknown key {k!r} (keys: {", ".join(sorted(GRAB_KEYS))})' for k in g if k not in GRAB_KEYS]
     if 'on' in g and not isinstance(g['on'], bool):
         out.append('grab.on must be true or false')
-    for k, lo, hi in (('hold_s', 0.2, 10), ('release_s', 0.1, 10)):
+    for k, lo, hi in (('hold_s', 0.2, 10), ('release_s', 0.1, 10), ('regrab_s', 0, 5)):
         v = g.get(k)
         if k in g and not (isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi):
             out.append(f'grab.{k} must be seconds from {lo} to {hi}')

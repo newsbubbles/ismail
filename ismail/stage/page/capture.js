@@ -165,8 +165,16 @@ function screenKey(ed) {
 // probe: a person's body as numbers each frame (the 2026-10-16 body study: judge feet, hips and balance by measure,
 // not by eye): world positions of the drawn hips, feet and head, the hips the steps follow, the balance point, the
 // planted feet and which foot is stepping; written to the capture's log.txt as 'probe:' lines
+// probe 'a,b': the first person as before, the others (playing or resting in a start pose) under others: {b: ...}, so
+// two bodies' contact can be measured (the 2026-10-22 study: Jo's hands through his partner)
 function probe(actors, person, t) {
-  const st = actors && actors.playing.get(person), rig = st && st.rig;
+  const [main, ...more] = String(person).split(',').map((x) => x.trim()).filter(Boolean);
+  const out = probeOne(actors, main, t);
+  if (more.length) out.others = Object.fromEntries(more.map((p) => [p, probeOne(actors, p, t)]));
+  return out;
+}
+function probeOne(actors, person, t) {
+  const st = (actors && actors.playing.get(person)) || {}, rig = st.rig || (actors && actors.shownRig && actors.shownRig(person));
   if (!rig) return { t, none: true };
   const r = (v) => v && [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)];
   const at = (n) => rig.bones[n] && r(rig.bones[n].getWorldPosition(new THREE.Vector3()));
@@ -180,7 +188,9 @@ function probe(actors, person, t) {
     // turn about the forearm from their rest relation, degrees); the chest's follow (limit, hand cue) where there is one
     ul: at('upperarm_l'), ur: at('upperarm_r'), el: at('lowerarm_l'), er: at('lowerarm_r'), wl: wristTwist(rig, 'l'), wr: wristTwist(rig, 'r'),
     al2: twistOf(rig, 'upperarm_l', 'clavicle_l'), ar2: twistOf(rig, 'upperarm_r', 'clavicle_r'), ll2: twistOf(rig, 'lowerarm_l', 'upperarm_l'), lr2: twistOf(rig, 'lowerarm_r', 'upperarm_r'),
-    ck: st.chest && st.chest.dbg ? st.chest.dbg : null, s: st.s != null ? +st.s.toFixed(4) : null, sy: st.standY != null ? +st.standY.toFixed(3) : null };
+    ck: st.chest && st.chest.dbg ? st.chest.dbg : null, s: st.s != null ? +st.s.toFixed(4) : null, sy: st.standY != null ? +st.standY.toFixed(3) : null,
+    s1: at('spine_01'), s2: at('spine_02'), s3: at('spine_03'), nk: at('neck_01'), resting: !st.rig,
+    ...(actors.clipOf ? { ...actors.clipOf(person), ms: actors.timing() } : {}) };
 }
 // a bone's turn about its own length (+Y) relative to its parent, away from their rest relation, degrees: the upper arm
 // on the clavicle (the shoulder's skin), the forearm on the upper arm (the elbow's)

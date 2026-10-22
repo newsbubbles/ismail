@@ -14,6 +14,7 @@ import { cutout, b2tPos, GIZMO } from './editor.js';
 import { world } from './world.js';
 import { initControl } from './control.js';
 import { mixTake } from './interp.js';
+import { fitBody, newState, bodyNow, solveArm as solveArmMath, newArm, newDepths, limbDepths, overlapOf, CLIP_M, NEAR_M } from './bodycollide.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
@@ -151,6 +152,15 @@ const STAND_HZ = 10, STAND_EVERY_S = 0.5, STAND_EASE_S = 1.5, STAND_N = 3000, RE
 const GAP_S = 0.25;                                  // playback: samples further apart than this are held, not mixed
 const SEAT_ABOVE = 0.09, SEAT_FOOT = 0.42, LEAN_MAX = 0.9, PIN_AWAY_M = 0.7, PIN_AWAY_MS = 600;
 const Y = new THREE.Vector3(0, 1, 0);
+// a reach across with a straight arm turns the chest toward it (bodycollide.js step 3, with the clavicle): up to REACH,
+// as the hand crosses REACH_CROSS of the arm past the body's middle line and the arm is REACH_STRAIGHT of its length
+const REACH = D2R(15), REACH_CROSS = [0.15, 0.5], REACH_STRAIGHT = [0.8, 0.97], REACH_TAU = 0.15;
+// the page's clip counter: a limb CLIP_M or more inside a body goes to the events, the first at once, then at most
+// every CLIP_EVERY_S per limb and body while it lasts (with how many frames and how deep); hips closer than two torsos
+// allow, every OVERLAP_EVERY_S per pair
+const CLIP_EVERY_S = 2, OVERLAP_EVERY_S = 5;
+const realNow = performance.now.bind(performance);   // a capture stops performance.now between frames: the cost is real time
+const smooth01 = (x, [a, b]) => { const k = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
 
 export function initActors(ed, live) {
   const { scene } = ed;
@@ -173,7 +183,7 @@ export function initActors(ed, live) {
         const fwd = rest.ball_l.p.clone().sub(rest.foot_l.p).setY(0).normalize();
         const left = rest.upperarm_l.p.clone().sub(rest.upperarm_r.p).setY(0).normalize();
         return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), hinge: elbowHinges(rest, fwd), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])),
-          localP: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.position.clone()])) };
+          localP: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.position.clone()])), bodyFit: fitFromMesh(root, bones, rest, fwd) };
       }).then(async (rig) => { await readProfile(rig); return rig; }));
     }
     return loaded.get(who);
@@ -282,6 +292,201 @@ export function initActors(ed, live) {
     if (n) rollTo(B, end.clone().sub(E), hinge.b, n);
   }
 
+  // ---- bodies that keep their arms out of themselves and each other (bodycollide.js; the user, 2026-10-22: "arms clip
+  // completely through his body"). The torso's slabs and the limbs' radii come from the skin once, at load (fitFromMesh);
+  // each frame a body's slabs follow its spine (torsoNow, after the spine is posed), and each arm is solved through
+  // armSolve: the hand out of any body near, the elbow swung clear, the clavicle forward, only then the hand pulled
+  const TORSO_BONES = new Set(['pelvis', 'spine_01', 'spine_02', 'spine_03']), LIMB_BONES = new Set(['upperarm_l', 'upperarm_r', 'lowerarm_l', 'lowerarm_r']);
+  function fitFromMesh(root, bones, rest, fwd) {
+    try {
+      const torso = [], head = [], limbs = { upperarm_l: [], upperarm_r: [], lowerarm_l: [], lowerarm_r: [] }, v = new THREE.Vector3();
+      root.updateMatrixWorld(true);
+      root.traverse((o) => {
+        const g = o.isSkinnedMesh && o.geometry, si = g && g.attributes.skinIndex, sw = g && g.attributes.skinWeight;
+        if (!si || !sw) return;
+        o.skeleton.update();
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          let k = 0, w = sw.getComponent(i, 0);
+          for (let j = 1; j < 4; j++) { const wj = sw.getComponent(i, j); if (wj > w) { w = wj; k = j; } }
+          const b = o.skeleton.bones[si.getComponent(i, k)], n = b && b.name;
+          const arr = !n ? null : TORSO_BONES.has(n) ? torso : n === 'head' ? head : LIMB_BONES.has(n) ? limbs[n] : null;
+          if (!arr) continue;
+          v.fromBufferAttribute(pos, i); o.applyBoneTransform(i, v); v.applyMatrix4(o.matrixWorld);
+          arr.push(v.x, v.y, v.z);
+        }
+      });
+      const joints = {}, mats = {};
+      for (const [n, b] of Object.entries(bones)) { joints[n] = rest[n].p.toArray(); mats[n] = Array.from(b.matrixWorld.elements); }
+      const fit = fitBody({ joints, mats, fwd: fwd.toArray(), torso, head, limbs });
+      if (!fit) return null;
+      // the palm's middle, in the hand bone's own frame: halfway from the wrist to the middle finger's base
+      fit.palmL = {};
+      for (const sd of ['l', 'r']) {
+        const h = rest[`hand_${sd}`], m = rest[`middle_01_${sd}`];
+        fit.palmL[sd] = m ? m.p.clone().sub(h.p).multiplyScalar(0.5).applyQuaternion(h.q.clone().invert()) : new THREE.Vector3();
+      }
+      return fit;
+    } catch (e) { console.warn('[actors] body fit', e); return null; }
+  }
+  const bodies = new WeakMap();                              // rig.root -> its body: slabs now, arms, counter
+  function bodyOf(rig, person) {
+    if (!rig.bodyFit) return null;
+    let B = bodies.get(rig.root);
+    if (!B) {
+      B = { rig, person, st: newState(rig.bodyFit, person), arms: { l: newArm(), r: newArm() }, depths: { l: newDepths(), r: newDepths() },
+        others: [], othersRigs: [], matOf: (n) => rig.bones[n].matrixWorld.elements, clip: [], log: new Map(), overlap: [], ms: 0, adjusted: false, moving: false };
+      bodies.set(rig.root, B);
+    }
+    if (person) B.person = B.st.name = person;
+    return B;
+  }
+  function torsoNow(rig, person) {
+    const B = bodyOf(rig, person);
+    if (B) bodyNow(B.st, B.matOf);
+    return B;
+  }
+  // the bodies shown now (playing, following or resting: listed once a frame, update), and those whose hips are
+  // within NEAR_M of B's
+  const shown = [];
+  function listShown() {
+    shown.length = 0;
+    for (const st of playing.values()) { const B = bodies.get(st.rig.root); if (B) shown.push(B); }
+    for (const r of resting.values()) { const B = bodies.get(r.rig.root); if (B) shown.push(B); }
+    return shown;
+  }
+  function othersOf(B) {
+    B.others.length = 0; B.othersRigs.length = 0;
+    const p = B.st.pel;
+    for (let i = 0; i < shown.length; i++) {
+      const O = shown[i];
+      if (O === B || !O.st.on || Math.hypot(O.st.pel[0] - p[0], O.st.pel[2] - p[2]) > NEAR_M) continue;
+      B.others.push(O.st); B.othersRigs.push(O);
+    }
+    return B.others;
+  }
+  // per side, the names the hot path reads (no strings made per frame)
+  const SIDE = Object.fromEntries(['l', 'r'].map((sd) => [sd, { up: `upperarm_${sd}`, lo: `lowerarm_${sd}`, ha: `hand_${sd}`, cl: `clavicle_${sd}`,
+    rU: `upper_${sd}`, rF: `fore_${sd}`, sgn: sd === 'l' ? 1 : -1, limbs: ['upper', 'fore', 'hand'].map((k) => `${k}_${sd}`) }]));
+  const av = new THREE.Vector3(), av2 = new THREE.Vector3(), aq = new THREE.Quaternion();
+  const posOf = (b, o) => { const e = b.matrixWorld.elements; o[0] = e[12]; o[1] = e[13]; o[2] = e[14]; return o; };
+  // one arm to its target: bodycollide's steps, then the two-bone solve (st: the person's state, for the chest's share
+  // of a reach across; null for a resting body). handQ: the hand bone's world turn as it will be set (for the palm)
+  function armSolve(st, rig, sd, target, pole, handQ, t) {
+    const N = SIDE[sd], { up, lo, ha } = N;
+    const B = bodyOf(rig);
+    if (!B || !B.st.on || !bodyOn) { twoBone(rig, up, lo, ha, target, pole, rig.hinge[sd]); return null; }
+    const t0 = realNow(), fit = rig.bodyFit, arm = B.arms[sd], job = arm.job, sgn = N.sgn, clav = rig.bones[N.cl];
+    posOf(rig.bones[up], job.S);
+    posOf(clav || rig.bones[up], job.C);
+    const Z = B.st.secs[2].Z, fl = Math.hypot(Z[0], Z[2]) || 1;
+    job.fwd[0] = Z[0] / fl; job.fwd[1] = 0; job.fwd[2] = Z[2] / fl;
+    job.lat[0] = sgn * job.fwd[2]; job.lat[1] = 0; job.lat[2] = -sgn * job.fwd[0];
+    job.T[0] = target.x; job.T[1] = target.y; job.T[2] = target.z;
+    if (handQ && fit.palmL) av.copy(fit.palmL[sd]).applyQuaternion(handQ);
+    else av.set(job.T[0] - job.S[0], job.T[1] - job.S[1], job.T[2] - job.S[2]).setLength(0.08);
+    job.palm[0] = av.x; job.palm[1] = av.y; job.palm[2] = av.z;
+    job.la = fit.la[sd]; job.lb = fit.lb[sd];
+    job.v0[0] = pole.x - job.S[0]; job.v0[1] = pole.y - job.S[1]; job.v0[2] = pole.z - job.S[2];
+    job.rU = fit.rad[N.rU]; job.rF = fit.rad[N.rF]; job.rH = fit.hand;
+    job.self = B.st; job.others = othersOf(B);
+    job.dt = arm.t == null || t == null ? 0 : THREE.MathUtils.clamp(t - arm.t, 0, 0.1);
+    arm.t = t;
+    // the chest's share of a straight reach across (chestFollow reads it next frame)
+    if (st) {
+      const dx = job.T[0] - job.S[0], dy = job.T[1] - job.S[1], dz = job.T[2] - job.S[2], L = job.la + job.lb;
+      const cross = -(dx * job.lat[0] + dz * job.lat[2]) / L, straight = Math.hypot(dx, dy, dz) / L;
+      st.reachAsk = (st.reachAsk || 0) - sgn * REACH * smooth01(cross, REACH_CROSS) * smooth01(straight, REACH_STRAIGHT);
+    }
+    const out = solveArmMath(arm);
+    if (Math.abs(out.alpha) > 1e-4 && clav) setWorldQ(clav, aq.setFromAxisAngle(Y, out.alpha).multiply(clav.getWorldQuaternion(tq2)));
+    B.ms += realNow() - t0;
+    av.set(out.T[0], out.T[1], out.T[2]);
+    av2.set(out.S[0] + out.v[0], out.S[1] + out.v[1], out.S[2] + out.v[2]);
+    twoBone(rig, up, lo, ha, av, av2, rig.hinge[sd]);
+    return out;
+  }
+  // the clip counter, on the pose as drawn: each limb's depth in its own body and in the bodies near; 2 cm or more goes
+  // to the events (rate-limited) and to clipOf (the capture probe)
+  const cS = new Float64Array(3), cE = new Float64Array(3), cH = new Float64Array(3), cP = new Float64Array(3);
+  const SIDES = ['l', 'r'];
+  function limbsNow(B, sd, self) {
+    const rig = B.rig, fit = rig.bodyFit, N = SIDE[sd];
+    posOf(rig.bones[N.up], cS); posOf(rig.bones[N.lo], cE); posOf(rig.bones[N.ha], cH);
+    av.copy(fit.palmL[sd]).applyMatrix4(rig.bones[N.ha].matrixWorld); cP[0] = av.x; cP[1] = av.y; cP[2] = av.z;
+    return limbDepths(self ? B.st : null, B.others, cS, cE, cH, cP, fit.rad[N.rU], fit.rad[N.rF], fit.hand, B.depths[sd]);
+  }
+  function countClips(B, t) {
+    const t0 = realNow();
+    othersOf(B);
+    B.clip.length = 0;
+    for (const sd of SIDES) {
+      if (!B.rig.bones[SIDE[sd].ha]) continue;
+      const D = limbsNow(B, sd, true), names = SIDE[sd].limbs;
+      for (let k = 0; k < 3; k++) {
+        if (D.self[k] >= CLIP_M) B.clip.push([names[k], 'self', +(D.self[k] * 100).toFixed(1)]);
+        if (D.other[k] >= CLIP_M) B.clip.push([names[k], B.othersRigs[D.who[k]].person || '?', +(D.other[k] * 100).toFixed(1)]);
+      }
+    }
+    if (!B.clip.length && !B.othersRigs.length && !B.overlap.length) { B.ms += realNow() - t0; return; }
+    for (const [limb, w, cm] of B.clip) {
+      const key = `${limb}|${w}`, g = B.log.get(key) || { last: -Infinity, n: 0, max: 0 };
+      g.n++; g.max = Math.max(g.max, cm);
+      if (t == null || t - g.last >= CLIP_EVERY_S || t < g.last) {
+        live.emit('body_clip', { person: B.person, limb, with: w, depth_cm: cm, deepest_cm: g.max, frames: g.n, t: t == null ? null : +t.toFixed(2) });
+        g.last = t ?? 0; g.n = 0; g.max = 0;
+      }
+      B.log.set(key, g);
+    }
+    B.overlap.length = 0;
+    for (const O of B.othersRigs) {
+      const o = overlapOf(B.st, O.st);
+      if (!o) continue;
+      B.overlap.push([O.person, Math.round(o.dist * 100), Math.round(o.need * 100)]);
+      const key = `overlap|${O.person}`, g = B.log.get(key) || { last: -Infinity };
+      if (t == null || t - g.last >= OVERLAP_EVERY_S || t < g.last) {
+        live.emit('body_overlap', { person: B.person, other: O.person, apart_cm: Math.round(o.dist * 100), need_cm: Math.round(o.need * 100),
+          says: 'their hips stand closer than their two bodies allow: a placement to fix in the scene, the feet are not moved', t: t == null ? null : +t.toFixed(2) });
+        g.last = t ?? 0; B.log.set(key, g);
+      }
+    }
+    B.ms += realNow() - t0;
+  }
+  // a body resting in its start pose next to someone moving (the couple: her held arms ended in his chest): each frame
+  // its arms start from the pose again, and an arm through a body near is solved like a moving one, the hand's turn and
+  // the pose's elbow kept; nobody near, the pose as it was
+  const ARM_CHAIN = { l: ['clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l'], r: ['clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r'] };
+  function restContact(r, t) {
+    const B = bodies.get(r.rig.root), S = r.S;
+    if (!B || !B.st.on || !S) return;
+    const t0 = realNow();
+    othersOf(B);
+    const near = B.othersRigs.some((O) => O.moving);
+    if (!near && !B.adjusted) { B.clip.length = 0; return; }
+    const rig = r.rig;
+    for (const sd of SIDES) {
+      const chain = ARM_CHAIN[sd];
+      if (!chain.every((n) => rig.bones[n] && S.locals[n])) continue;
+      for (const n of chain) rig.bones[n].quaternion.copy(S.locals[n]);
+      rig.bones[chain[0]].updateMatrixWorld(true);
+    }
+    B.adjusted = false;
+    if (!near || !bodyOn) { B.clip.length = 0; return; }
+    B.ms += realNow() - t0;
+    for (const sd of SIDES) {
+      if (!S.handW[sd] || !rig.bones[SIDE[sd].ha]) continue;
+      const D = limbsNow(B, sd, false), arm = B.arms[sd];              // the pose as it stands: through a body near?
+      if (Math.max(D.other[0], D.other[1], D.other[2]) < 0.012 && !(arm.prev.phi || arm.prev.alpha)) { arm.t = t; continue; }
+      const hq = S.handQ[sd];
+      armSolve(null, rig, sd, S.handW[sd], S.elbowW[sd], hq, t);
+      setWorldQ(rig.bones[SIDE[sd].ha], hq);
+      B.adjusted = true;
+    }
+    countClips(B, t);
+  }
+  // collision on or off for this page (stage live command body_collide {on}: to compare, and a way out if it misbehaves)
+  let bodyOn = true;
+
   // ---- one frame of the take onto the rig: the built-in human map, then the control map's drives (control.js)
   function prep(st, raw) {                                 // a frame as the person takes it: turned, mirrored
     let f = raw;
@@ -294,6 +499,8 @@ export function initActors(ed, live) {
     const f = prep(st, raw);
     if (st.start) poseRelative(st, f); else poseBase(st, f);
     control.apply(st, f, raw);
+    const B = bodyOn && bodies.get(st.rig.root);
+    if (B && B.st.on) { B.moving = true; countClips(B, f.t); }
   }
   // a look (delta: the head's world turn from rest) over the spine: the body's own facing (base) for the hips, then per
   // bone the turn about the vertical from spineYaw (the chest's follow, the neck between it and the head) and its LOOK
@@ -355,11 +562,14 @@ export function initActors(ed, live) {
       c.h = Math.abs(off) > L ? look0 + look - Math.sign(off) * L : c.h * Math.exp(-dt / CHEST_HOME_S);
       let g = c.h;
       if (cue && cue.w > 0) g += (cue.a - g) * cue.w;
-      g = THREE.MathUtils.clamp(g, -CHEST_MAX, CHEST_MAX);
+      // a straight arm reaching across asks the chest to turn its shoulder after it (armSolve, last frame's arms)
+      c.reach = (c.reach || 0) + ((st.reachAsk || 0) - (c.reach || 0)) * (1 - Math.exp(-dt / REACH_TAU));
+      g = THREE.MathUtils.clamp(g + c.reach, -CHEST_MAX, CHEST_MAX);
       const om = 1 / CHEST_TAU, y = c.x - g, e = Math.exp(-om * dt), j = (c.v + om * y) * dt;
       c.x = g + (y + j) * e; c.v = (c.v - om * j) * e; c.t = t;
-      c.dbg = { L: r1(L), h: r1(c.h), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null };
+      c.dbg = { L: r1(L), h: r1(c.h), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null, reach: r1(c.reach) };
     }
+    st.reachAsk = 0;                                       // the arms ask again this frame
     return c.x;
   }
   // the hands' twist about the vertical through the middle of the hips (the user, 2026-10-22), yaw only (a lean does
@@ -407,7 +617,10 @@ export function initActors(ed, live) {
     const delta = qc.clone().multiply(st.alignInv);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(qc).setY(0);
     const yaw = new THREE.Quaternion().setFromUnitVectors(rig.fwd, fwd.lengthSq() > 1e-6 ? fwd.normalize() : rig.fwd);
-    const head = P(f.head);
+    // the headset is the eyes, not the head bone: the bone sits EYE_UP below and EYE_FWD behind them, turned with the
+    // head (the body hung from the eyes stood 8 cm high and 9 cm forward, every hand landing that much low and back of
+    // it: the 2026-10-22 research; the start-pose half had it right)
+    const head = P(f.head).sub(new THREE.Vector3(0, EYE_UP, -EYE_FWD).applyQuaternion(qc));
     const pin = st.pins && st.pins.hips;
     // the hips under the head, turned with it; or pinned to a seat, facing the person's own way
     const pel = rig.bones.pelvis;
@@ -456,6 +669,9 @@ export function initActors(ed, live) {
       if (ang > LEAN_MAX) lean = new THREE.Quaternion().slerp(lean, LEAN_MAX / ang);
     }
     spreadLook(st, f, base, delta, lean, P, hipDraw);
+    torsoNow(rig, st.person);                               // the torso's slabs where the spine now is (armSolve)
+    // the elbows point from the chest, which turns up to CHEST_MAX from the hips (it pointed them from the hips)
+    const chestQ = new THREE.Quaternion().setFromAxisAngle(Y, st.chest ? st.chest.x : 0).multiply(base);
     // arms and hands, fingers
     const side = (sd, h) => {
       const hd = f[h];
@@ -467,16 +683,16 @@ export function initActors(ed, live) {
           sh0.clone().add(rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1)), rig.hinge[sd]);
         return;
       }
-      const lateral = rig.left.clone().applyQuaternion(base).multiplyScalar(sgn);
-      const back = rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1);
+      const lateral = rig.left.clone().applyQuaternion(chestQ).multiplyScalar(sgn);
+      const back = rig.fwd.clone().applyQuaternion(chestQ).multiplyScalar(-1);
       // the shoulder takes a share of the arm's swing away from hanging relaxed (a raised arm lifts it), as poseRelative does
       const sh0 = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
       shoulderFollow(rig, sd, P(hd.j[0]), sh0.clone().add(new THREE.Vector3(0, -0.55, 0)).addScaledVector(back, -0.12));
       const sh = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
-      twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), elbowPole(rig, sd, sh, P(hd.j[0]), lateral, back), rig.hinge[sd]);
       const jq = (i) => { const a = hd.j[i]; return a ? new THREE.Quaternion(a[3], a[4], a[5], a[6]) : null; };
-      const w = jq(0);
-      if (w && rig.cal[`hand_${sd}`]) setWorldQ(rig.bones[`hand_${sd}`], w.multiply(rig.cal[`hand_${sd}`]));
+      const w = jq(0), hq = w && rig.cal[`hand_${sd}`] ? w.multiply(rig.cal[`hand_${sd}`]) : null;
+      armSolve(st, rig, sd, P(hd.j[0]), elbowPole(rig, sd, sh, P(hd.j[0]), lateral, back), hq, f.t);
+      if (hq) setWorldQ(rig.bones[`hand_${sd}`], hq);
       for (const [fg, names] of Object.entries(FINGER_JOINTS)) {
         names.forEach((jn, k) => {
           const b = rig.bones[`${fg}_0${k + 1}_${sd}`], q = jq(J[jn]);
@@ -800,11 +1016,14 @@ export function initActors(ed, live) {
     const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), r.rig.fwd);
     const tmp = { person, rig: r.rig, s: 1, floor, to: new THREE.Vector3(w.x, floor, w.z), alignInv: align.invert(),
       feet: { l: {}, r: {} }, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
-    await startPose(tmp, spec);
+    const S0 = await startPose(tmp, spec);
     if (busy(person) || unloadedOf(person)) return null;   // a play began, or its set was unloaded, meanwhile
-    r.spec = spec;
+    r.spec = spec; r.S = S0;
     resting.set(person, r);
     scene.add(r.rig.root);
+    r.rig.root.updateMatrixWorld(true);
+    const RB = torsoNow(r.rig, person);                     // its slabs, for the bodies that come near (restContact)
+    if (RB) { RB.moving = false; RB.adjusted = false; for (const sd of ['l', 'r']) { RB.arms[sd].prev.phi = 0; RB.arms[sd].prev.alpha = 0; } }
     it.obj.visible = false;
     fitProxy(person, r.rig);
     live.emit('actor_rest', { person, start: spec });
@@ -871,7 +1090,10 @@ export function initActors(ed, live) {
     live.emit('actor_moved', { person, by: [+d.x.toFixed(2), +d.z.toFixed(2)] });
     return { person, moved: true };
   }
+  let timing = { update_ms: 0, body_ms: 0 };
   function update() {
+    const u0 = realNow();
+    for (const B of listShown()) B.ms = 0;
     for (const st of playing.values()) {
       if (st.live) {
         const f = st.feed ? feedNow(st) : source && source();
@@ -921,7 +1143,11 @@ export function initActors(ed, live) {
       if (fb && fb.t - fa.t < GAP_S && t > fa.t) st.mix = mixTake(fa, fb, (t - fa.t) / (fb.t - fa.t), st.mix);
       pose(st, fb && fb.t - fa.t < GAP_S && t > fa.t ? st.mix : fa);
     }
+    if (bodyOn && playing.size) for (const r of resting.values()) restContact(r, performance.now() / 1000);
     for (const st of playing.values()) fitProxy(st.person, st.rig);
+    let bm = 0;
+    for (const B of shown) bm += B.ms;
+    timing = { update_ms: +(realNow() - u0).toFixed(3), body_ms: +bm.toFixed(3) };
   }
   ed.preRender.push(update);
   const canPlay = (person) => !!world().actors[person];
@@ -1175,6 +1401,8 @@ export function initActors(ed, live) {
       if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
       setWorldQ(rig.bones[n], q.multiply(held[n]));
     }
+    torsoNow(rig, st.person);                               // the torso's slabs where the spine now is (armSolve)
+    const fwdChest = fwdNow.clone().applyAxisAngle(Y, st.chest ? st.chest.x : 0);   // the elbows point from the chest
     // hands and fingers (the user, 2026-10-10, following a drummer posed with sticks: "the starting position of the hands
     // is not reset to what my hands' position is when we start ... that's why the fingers get all messed up"): at GO the
     // person's hands and fingers take the user's own, measured from the eyes and turned to the person's facing, so a
@@ -1193,13 +1421,14 @@ export function initActors(ed, live) {
       // elbow inward: the user, 2026-10-22, following Jo); a start pose's own grip (hands: 'pose', the drummer) keeps its
       // elbow, turned with the body
       const sh = rig.bones[up].getWorldPosition(new THREE.Vector3());
-      const sgn = sd === 'l' ? 1 : -1, lateral = new THREE.Vector3().crossVectors(Y, fwdNow).multiplyScalar(sgn);
+      const sgn = sd === 'l' ? 1 : -1, lateral = new THREE.Vector3().crossVectors(Y, fwdChest).multiplyScalar(sgn);
       const P0 = rig.bones.pelvis.getWorldPosition(new THREE.Vector3());
-      const pole = byUser ? elbowPole(rig, sd, sh, target, lateral, fwdNow.clone().negate())
+      const pole = byUser ? elbowPole(rig, sd, sh, target, lateral, fwdChest.clone().negate())
         : S.elbowW[sd].clone().add(B.off).sub(P0).applyQuaternion(B.yaw).add(P0).add(new THREE.Vector3(0, -0.3, 0));
-      twoBone(rig, up, lo, ha, target, pole, rig.hinge[sd]);
-      if (byUser && rig.cal[ha]) setWorldQ(rig.bones[ha], M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha]));
-      else setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
+      const hq = byUser && rig.cal[ha] ? M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha])
+        : qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone());
+      armSolve(st, rig, sd, target, pole, hq, f.t);
+      setWorldQ(rig.bones[ha], hq);
       for (const [fg, names] of Object.entries(FINGER_JOINTS)) names.forEach((jn, k) => {
         const b = rig.bones[`${fg}_0${k + 1}_${sd}`], i = st.J[jn];
         if (!b || !now.j[i]) return;
@@ -1365,6 +1594,10 @@ export function initActors(ed, live) {
     return { eye, facing, ground };
   }
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
+  // the clip counter's last frame for a person ([limb, with, cm] at 2 cm or more), hips too close ([other, apart, need]
+  // cm), and the last frame's cost (ms, real time)
+  const clipOf = (person) => { const r = shownRig(person), B = r && bodies.get(r.root); return B ? { clip: B.clip, overlap: B.overlap } : null; };
+  live.handlers.body_collide = (c) => { if (c.on != null) bodyOn = !!c.on; return { on: bodyOn, ...timing }; };
   return { play, stop, follow, setSource, setRecent, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
-    rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf };
+    rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf, clipOf, timing: () => timing };
 }

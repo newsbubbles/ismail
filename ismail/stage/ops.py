@@ -1097,14 +1097,16 @@ def _grab_page(scene, typ, fields):
 
 @op(mutates=True)
 def stage_grab_mode(scene: str, on: bool = True, hold_s: float = None, release_s: float = None, objects=None,
-                    scenes: str = None) -> str:
+                    regrab_s: float = None, scenes: str = None) -> str:
     """Grab by touch: in VR a hand takes a thing by resting on it (the palm or the finger bases touching it, the hand
     nearly still) for hold_s seconds (a ring fills), holds it, and lets go when the hand opens past half its grip for
     release_s seconds (a ring empties; closing again keeps it). A let-go thing falls under gravity onto what is under
     it, with the hand's speed (a toss flies). Inside a person (stage_embody) the person's hand holds it, and the grab
     and the drop go into the take. Fingertips alone stay the pinch for menus. objects: "unlocked" (every small thing
     the scene does not lock) or a list of names, globs allowed (["drum_stick_*", "bottle"]). Grabbed things are never
-    saved: the edits file keeps them where they stood. on=False lets go of everything held. Saved in world.json grab;
+    saved: the edits file keeps them where they stood. on=False lets go of everything held. regrab_s (default 0.5, 0
+    to 5): after a hand lets go of a thing, no hand takes that thing again for this long (a set-down hand still
+    resting on it took it straight back). Saved in world.json grab;
     stage_grab_rule sets one object (a fixed bar, a big thing allowed, a thing never taken). Emits: grab_counting,
     grabbed, grab_releasing, grab_released, grab_landed."""
     if isinstance(objects, str) and objects != 'unlocked':
@@ -1116,13 +1118,16 @@ def stage_grab_mode(scene: str, on: bool = True, hold_s: float = None, release_s
             g['hold_s'] = float(hold_s)
         if release_s is not None:
             g['release_s'] = float(release_s)
+        if regrab_s is not None:
+            g['regrab_s'] = float(regrab_s)
         if objects is not None:
             g['objects'] = objects
     g, f = _grab_save(scene, scenes, change)
-    r, later = _grab_page(scene, 'grab_mode', {k: g[k] for k in ('on', 'hold_s', 'release_s', 'objects')})
+    r, later = _grab_page(scene, 'grab_mode', {k: g[k] for k in ('on', 'hold_s', 'release_s', 'regrab_s', 'objects') if k in g})
     objs = g['objects'] if g['objects'] == 'unlocked' else ', '.join(g['objects'])
     head = (f'grab by touch {"on" if g["on"] else "off"} in {scene}: hold {g["hold_s"]} s to take, open for '
-            f'{g["release_s"]} s to let go; objects {objs}; saved in {f}')
+            f'{g["release_s"]} s to let go' + (f', not taken again for {g["regrab_s"]:g} s after' if 'regrab_s' in g else '')
+            + f'; objects {objs}; saved in {f}')
     if later:
         return f'{head}; {later}'
     can, let_go = r.get('takeable') or [], r.get('let_go')
@@ -1530,7 +1535,9 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     audio: the song file, cut to t0..t1 under the video. Out: <scene>/captures/<job>/capture.mp4 (H.264, 4:2:0), frames/f_00000.png with
     keep_frames (or video=False). probe: a person playing a take; each frame's drawn hips, feet and head, the hips the
     steps follow, the balance point and the planted feet go to log.txt as 'probe:' lines (JSON), to judge a body by
-    numbers (foot slide, jitter, balance)."""
+    numbers (foot slide, jitter, balance); also the clip counter's limbs inside a body (clip), hips too close (overlap)
+    and the frame's cost (ms). probe='a,b': the first as before, the others (playing or resting in a start pose) under
+    'others' in the same line, to measure two bodies' contact."""
     import re
     import uuid
     d = (Path(scenes).resolve() / scene) if scenes else _scene_dir(scene)
