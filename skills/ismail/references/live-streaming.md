@@ -32,7 +32,7 @@ What each site's chat can do here:
 | site | read | reply | events | notes |
 |---|---|---|---|---|
 | Twitch | realtime | yes, threaded | follows, subs, gifts, cheers, raids, channel points | reads anonymously with no login (no replies) |
-| YouTube | every 10 s | yes, `@name` in front | Super Chats, members, gifts | reading costs API quota: `poll_s` on the venue, 10 by default; chat exists only while the channel is live |
+| YouTube | realtime (streamList), or every 10 s | yes, `@name` in front | Super Chats, members, gifts | reading costs API quota: streamed, YouTube does not publish the cost (counted as one list call per open, about hourly); polled, 5 units a read with `reader='poll'` (`poll_s`, 10 by default); chat exists only while the channel is live |
 | Kick | realtime | yes, threaded | follows, subs, gifts | its read path is unofficial and can break; replies use Kick's official API |
 | Owncast | realtime | yes | - | self-hosted |
 | fake | realtime | yes | scripted | for practice and tests |

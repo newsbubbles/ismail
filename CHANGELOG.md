@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### YouTube chat in realtime
+
+- YouTube chat is read with streamList: one call held open that hands over each message as it is written, instead of
+  a list call every 10 s. It reopens hourly with a fresh login, lets go when the broadcast ends, and falls back to
+  polling if YouTube refuses the stream. `venue_set(reader='poll', poll_s=...)` picks polling. It needs grpcio and
+  protobuf (the `stream` extra); the messages are built at runtime, nothing is generated.
+
 ### The stream's visual page, drawn from the set
 
 - `stream_visual(mode='page')` streams a page that moves to the set: the master's level and 16 bands, the engine's
