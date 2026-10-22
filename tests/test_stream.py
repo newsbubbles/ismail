@@ -136,7 +136,7 @@ def test_twitch_irc_and_eventsub_lines(tmp_path):
 
 def test_youtube_items(tmp_path):
     hub = StubHub(tmp_path)
-    a = YouTubeAdapter({'name': 'yt', 'platform': 'youtube', 'channel': '@someone'}, hub)
+    a = YouTubeAdapter({'name': 'yt', 'platform': 'youtube', 'channel': '@someone', 'reader': 'poll'}, hub)
     a._on({'id': 'y1', 'snippet': {'type': 'textMessageEvent', 'textMessageDetails': {'messageText': 'hi there'}},
            'authorDetails': {'channelId': 'UC1', 'displayName': 'Dee', 'isChatModerator': True}})
     a._on({'id': 'y2', 'snippet': {'type': 'superChatEvent', 'superChatDetails': {'amountDisplayString': '$5.00',
@@ -147,6 +147,78 @@ def test_youtube_items(tmp_path):
     assert lines[0]['text'] == 'hi there' and lines[0]['user']['mod'] is True
     assert lines[1]['type'] == 'superchat' and lines[1]['amount'] == '$5.00' and lines[1]['text'] == 'more bass'
     assert len(lines) == 2 and a.reading == 'every 10 s'
+
+
+class _StreamList:
+    """A local stand-in for YouTube's StreamList: plays `pages` (lists of response kwargs), or aborts with `abort`."""
+    def __init__(self, pages=None, abort=None):
+        import grpc
+        from concurrent import futures
+        from ismail.stream.adapters import youtube_stream as YS
+        self.seen = []
+
+        def stream_list(req, ctx):
+            self.seen.append((req.live_chat_id, req.page_token, dict(ctx.invocation_metadata()).get('authorization')))
+            if abort:
+                ctx.abort(abort, 'not for this project')
+            for kw in pages or []:
+                yield YS.Response(**kw)
+                time.sleep(0.05)
+            time.sleep(30)                                   # held open, as YouTube does, until cancelled
+
+        svc, meth = YS.METHOD.strip('/').split('/')
+        h = grpc.method_handlers_generic_handler(svc, {meth: grpc.unary_stream_rpc_method_handler(
+            stream_list, request_deserializer=YS.Request.FromString,
+            response_serializer=YS.Response.SerializeToString)})
+        self.srv = grpc.server(futures.ThreadPoolExecutor(4))
+        self.srv.add_generic_rpc_handlers((h,))
+        self.target = f'127.0.0.1:{self.srv.add_insecure_port("127.0.0.1:0")}'
+        self.srv.start()
+
+
+def _yt_msg(mid, kind, name, **snip):
+    from ismail.stream.adapters import youtube_stream as YS
+    return YS.C['LiveChatMessage'](id=mid, snippet=YS.C['LiveChatMessageSnippet'](type=kind, **snip),
+                                   author_details=YS.C['LiveChatMessageAuthorDetails'](channel_id='UC' + mid,
+                                                                                       display_name=name))
+
+
+def test_youtube_streamed_reader(home, tmp_path):
+    pytest.importorskip('grpc')
+    from ismail.stream.adapters import youtube_stream as YS
+    from ismail.stream.adapters.youtube import _Refused
+    said = YS.C['LiveChatTextMessageDetails']
+    sl = _StreamList(pages=[
+        {'next_page_token': 'p1', 'items': [_yt_msg('old', 1, 'Old', text_message_details=said(message_text='before'))]},
+        {'next_page_token': 'p2', 'items': [
+            _yt_msg('m1', 1, 'Dee', text_message_details=said(message_text='hi there')),
+            _yt_msg('m2', 15, 'Eli', super_chat_details=YS.C['LiveChatSuperChatDetails'](
+                amount_display_string='$5.00', user_comment='more bass'))]},
+        {'next_page_token': 'p3', 'offline_at': '2026-01-01T00:00:00Z'}])
+    hub = StubHub(tmp_path)
+    a = YouTubeAdapter({'name': 'yt', 'platform': 'youtube', 'channel': '@someone', '_grpc_target': sl.target}, hub)
+    a._h = lambda: {'Authorization': 'Bearer test-token'}
+    assert a.reader == 'stream' and a.reading == 'streamed (realtime)'
+    a.chat_id = 'chat1'
+    try:
+        th = threading.Thread(target=a._stream, daemon=True)
+        th.start()
+        th.join(10)
+        assert not th.is_alive() and a.chat_id is None and a.page == 'p3'       # the broadcast ended: it let go
+        chat = [d for d in hub.log.after(0) if d['kind'] != 'status']
+        assert [d.get('text') for d in chat] == ['hi there', 'more bass']           # the first page is history
+        assert chat[1]['type'] == 'superchat' and chat[1]['amount'] == '$5.00'
+        assert sl.seen == [('chat1', '', 'Bearer test-token')]
+    finally:
+        sl.srv.stop(0)
+    refused = _StreamList(abort=__import__('grpc').StatusCode.PERMISSION_DENIED)
+    b = YouTubeAdapter({'name': 'yt2', 'platform': 'youtube', '_grpc_target': refused.target}, hub)
+    b._h, b.chat_id = (lambda: {'Authorization': 'Bearer t'}), 'chat2'
+    try:
+        with pytest.raises(_Refused, match='PERMISSION_DENIED'):
+            b._stream()
+    finally:
+        refused.srv.stop(0)
 
 
 def test_kick_feed_events(tmp_path):

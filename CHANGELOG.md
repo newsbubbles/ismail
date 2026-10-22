@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### YouTube chat in realtime
+
+- YouTube chat is read with streamList: one call held open that hands over each message as it is written, instead of
+  a list call every 10 s. It reopens hourly with a fresh login, lets go when the broadcast ends, and falls back to
+  polling if YouTube refuses the stream. `venue_set(reader='poll', poll_s=...)` picks polling. It needs grpcio and
+  protobuf (the `stream` extra); the messages are built at runtime, nothing is generated.
+
 ### Live streaming to several sites, with every site's chat
 
 - A stream server (`stream_start`) sends the live set to Twitch, YouTube, Kick, Owncast or any RTMP site at once:

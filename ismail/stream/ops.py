@@ -122,14 +122,16 @@ def _keys_line(k):
 
 @op(mutates=True)
 def venue_set(name: str, platform: str, channel: str = None, chat: bool = True, output: bool = None,
-              ingest: str = None, script: list = None, loop: bool = None, note: str = None) -> str:
+              ingest: str = None, script: list = None, loop: bool = None, reader: str = None, poll_s: float = None,
+              note: str = None) -> str:
     """Add or change a venue: one channel on one site. No secret ever goes here.
     name: short and lowercase ('yt', 'twitch-main', 'practice'). platform: fake, twitch, youtube, kick, owncast,
     rtmp (output only) or file (a local recording; channel is the .flv path). channel: the channel's login name
     (twitch, kick), handle or channel id (youtube), server address (owncast). chat: read and answer its chat.
     output: send the stream there on stream_go (default: yes where the site takes video). ingest: an RTMP(S) address
     when the default does not fit. script / loop (fake only): a scripted test viewer, [{after_s, user, text} or
-    {after_s, user, event}]. Returns what the venue still needs from the person (a login, a stream key) and the
+    {after_s, user, event}]. reader / poll_s (youtube only): 'stream' (the default: realtime, one call held open) or
+    'poll' (a list call every poll_s seconds, 10 by default, at least 5). Returns what the venue still needs from the person (a login, a stream key) and the
     exact line they type in a terminal for it."""
     name = str(name).strip().lower()
     if not C.NAME_RE.match(name):
@@ -153,10 +155,17 @@ def venue_set(name: str, platform: str, channel: str = None, chat: bool = True, 
     if ingest and any(len(part) > 20 for part in str(ingest).split('/')[3:]):
         raise OpError("ingest looks like it has a stream key in it: give the address only; the person adds the key "
                       "with `python -m ismail.stream key <venue>`")
+    if (reader is not None or poll_s is not None) and platform != 'youtube':
+        raise OpError("reader= and poll_s= are for youtube venues (the other sites' chat is realtime already)")
+    if reader is not None and reader not in ('stream', 'poll'):
+        raise OpError("reader: 'stream' (realtime, the default) or 'poll' (a list call every poll_s seconds)")
+    if poll_s is not None and not 5 <= float(poll_s) <= 600:
+        raise OpError("poll_s: 5 to 600 seconds; each read costs 5 of YouTube's 10,000 units a day")
     note_g = guards.check_private(note) if note else ''
     venues = C.load_venues()
     v = {'name': name, 'platform': platform}
-    for k, val in (('channel', channel), ('ingest', ingest), ('script', script), ('loop', loop), ('note', note)):
+    for k, val in (('channel', channel), ('ingest', ingest), ('script', script), ('loop', loop), ('reader', reader),
+                   ('poll_s', poll_s), ('note', note)):
         if val is not None:
             v[k] = val
     v['chat'] = bool(chat) and caps['chat']

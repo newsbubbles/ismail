@@ -1,9 +1,12 @@
 """YouTube live chat through the Data API (a login is needed for both reading and replies).
 
 The chat belongs to the channel's live broadcast, so while the channel is not live the adapter waits (one cheap
-lookup a minute). Reading polls liveChatMessages.list: each read costs 5 units of the 10,000 a day, so it reads every
-`poll_s` seconds (default 10: about 5,400 units over a 3-hour stream) and never faster than YouTube asks. A reply
-costs 20. The units used today are in stream_status. (The streamed reader, streamList, is gRPC only: ledger.)"""
+lookup a minute). It reads with streamList (`reader='stream'`, the default when grpcio is installed): one call that
+stays open and hands over each message as it is written, reopened every 50 minutes with a fresh login. YouTube does
+not publish its cost; it is counted as one list call (5 units) per open. If the stream is refused, or with
+`reader='poll'`, it polls liveChatMessages.list: 5 units a read of the 10,000 a day, every `poll_s` seconds (default
+10: about 5,400 units over a 3-hour stream), never faster than YouTube asks. A reply costs 20. The units used today
+are in stream_status."""
 import json
 import time
 
@@ -13,6 +16,20 @@ from .base import Adapter, NeedsLogin
 
 API = 'https://www.googleapis.com/youtube/v3'
 COST = {'list': 5, 'insert': 20, 'broadcasts': 1}
+STREAM_S = 3000                     # reopen the streamed reader this often: a login token lasts an hour
+
+
+class _Refused(Exception):
+    """The streamed reader is not available to this login or project: poll instead."""
+
+
+def _grpc():
+    try:
+        import grpc                                 # noqa: F401  (the stream extra)
+        from . import youtube_stream               # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 class YouTubeAdapter(Adapter):
@@ -21,9 +38,12 @@ class YouTubeAdapter(Adapter):
     def __init__(self, venue, hub):
         super().__init__(venue, hub)
         self.poll_s = max(5.0, float(venue.get('poll_s') or 10))
-        self.reading = f'every {int(self.poll_s)} s'
+        self.reader = 'stream' if (venue.get('reader') or 'stream') == 'stream' and _grpc() else 'poll'
+        self.reading = 'streamed (realtime)' if self.reader == 'stream' else f'every {int(self.poll_s)} s'
         self.chat_id = None
         self.page = None
+        self.call = None                                # the open streamList call, cancelled on stop
+        self.target = venue.get('_grpc_target')         # tests point it at a local server
 
     # ---- quota, counted per Pacific-ish day (the reset is at midnight Pacific)
     def _spend(self, what):
@@ -72,15 +92,75 @@ class YouTubeAdapter(Adapter):
     def session(self):
         self._h()
         self.connected()
-        first = True
         while not self.stop_ev.is_set():
             if not self.chat_id:
-                self.chat_id, self.page, first = self._find_chat(), None, True
+                self.chat_id, self.page = self._find_chat(), None
                 if not self.chat_id:
                     self.stop_ev.wait(60)
                     continue
                 self.hub.log.add('status', self.name, platform='youtube', state='reading',
                                  text='the channel is live: reading its chat')
+            if self.reader == 'stream':
+                try:
+                    self._stream()
+                    continue
+                except _Refused as e:
+                    self.reader, self.reading = 'poll', f'every {int(self.poll_s)} s'
+                    self.hub.log.add('status', self.name, platform='youtube', state='reading',
+                                     text=f'the streamed reader was refused ({e}): polling every {int(self.poll_s)} s')
+            self._poll()
+
+    def _take(self, got):
+        """One page of messages, from either reader. The first page is what was said before we came: not replayed."""
+        first, self.page = self.page is None, got.get('nextPageToken') or self.page
+        if not first:
+            for it in got.get('items') or []:
+                self._on(it)
+        if got.get('offlineAt') and self.chat_id:
+            self.chat_id = None
+            self.hub.log.add('status', self.name, platform='youtube', state='reading',
+                             text='the broadcast ended: waiting for the next one')
+
+    def _stream(self):
+        import grpc
+        from . import youtube_stream as YS
+        while self.chat_id and not self.stop_ev.is_set():
+            self._spend('list')
+            tok = self._h()['Authorization'][len('Bearer '):]
+            items, self.call = YS.open_stream(self.chat_id, self.page, tok, STREAM_S,
+                                              target=self.target or YS.TARGET, secure=self.target is None)
+            try:
+                for got in items:
+                    self._take(got)
+                    if not self.chat_id or self.stop_ev.is_set():
+                        break
+            except grpc.RpcError as e:
+                code, why = e.code(), e.details() or ''
+                if self.stop_ev.is_set() or code == grpc.StatusCode.DEADLINE_EXCEEDED:
+                    continue                            # stopping, or the hour is up: reopen with a fresh token
+                if code == grpc.StatusCode.UNAUTHENTICATED:
+                    raise NeedsLogin(f"the YouTube login was refused: run `python -m ismail.stream login {self.name}`")
+                if code == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                    raise RuntimeError('the YouTube API quota for today is used up: chat comes back after midnight '
+                                       'Pacific (or ask Google for more quota)')
+                if code in (grpc.StatusCode.NOT_FOUND, grpc.StatusCode.FAILED_PRECONDITION):
+                    self.chat_id = None                 # the chat ended
+                    return
+                if code in (grpc.StatusCode.UNIMPLEMENTED, grpc.StatusCode.PERMISSION_DENIED,
+                            grpc.StatusCode.INVALID_ARGUMENT):
+                    raise _Refused(f'{code.name}: {why}'[:200])
+                raise RuntimeError(f'streamList {code.name}: {why}'[:300])
+            finally:
+                self.call.cancel()
+                self.call = None
+
+    def close(self):
+        call = self.call
+        if call is not None:
+            call.cancel()
+
+    def _poll(self):
+        while self.chat_id and not self.stop_ev.is_set():
             try:
                 self._spend('list')
                 got = http('GET', f'{API}/liveChat/messages', self._h(), params={
@@ -92,21 +172,13 @@ class YouTubeAdapter(Adapter):
                                        'Pacific (or ask Google for more quota)')
                 if e.status in (403, 404) and ('liveChatEnded' in str(e.body) or 'NotFound' in str(e.body)):
                     self.chat_id = None
-                    continue
+                    return
                 if e.status == 401:
                     raise NeedsLogin(f"the YouTube login was refused: run `python -m ismail.stream login {self.name}`")
                 raise
-            self.page = got.get('nextPageToken')
-            if not first:                           # the first page is what was said before we came: not replayed
-                for it in got.get('items') or []:
-                    self._on(it)
-            first = False
-            if got.get('offlineAt'):
-                self.chat_id = None
-                self.hub.log.add('status', self.name, platform='youtube', state='reading',
-                                 text='the broadcast ended: waiting for the next one')
-                continue
-            self.stop_ev.wait(max(self.poll_s, float(got.get('pollingIntervalMillis') or 0) / 1000))
+            self._take(got)
+            if self.chat_id:
+                self.stop_ev.wait(max(self.poll_s, float(got.get('pollingIntervalMillis') or 0) / 1000))
 
     def _on(self, it):
         s, a = it.get('snippet') or {}, it.get('authorDetails') or {}
