@@ -272,6 +272,7 @@ export function initHands(ed, xrApi, emit) {
     const max = RECENT_S * RECENT_HZ;
     if (recent.frames.length > max * 1.1) recent.frames.splice(0, recent.frames.length - max);
   }
+  const recentHeads = () => recent.frames.map((f) => f.head && f.head[1]).filter(Number.isFinite);   // actors.js: standing height
   const recentInfo = () => {
     const fr = recent.frames;
     return { frames: fr.length, seconds: fr.length ? r4(fr[fr.length - 1].t - fr[0].t) : 0 };
@@ -447,7 +448,7 @@ export function initHands(ed, xrApi, emit) {
   const frameNow = () => makeFrame(performance.now(), 0);
   const api = { update, startTake, stopTake, rec, state: H, aim, frameNow, stickAiming: () => aim.by === 'stick', framing: false,
     shadowStart, shadowStop, mark, keepLast, discardLast, lastFollowInfo, lastFollowData: () => lastFollow, performing: false,
-    keepRecent, recentInfo,
+    keepRecent, recentInfo, recentHeads,
     addUIGuard: (fn) => uiGuards.push(fn) };
   return api;
 }

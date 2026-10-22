@@ -127,6 +127,9 @@ const BAL_MAX = 0.15, BAL_S = 0.12, BAL_STEP = 0.1, UNDER_S = 0.4;   // UNDER_S:
 // toward it (direction only, so sitting lower or higher does not sink or lift him) and the hands drive the arms; the
 // feet plant in front of the seat (a seated pose) or on their own pins. The head clearly away from the seat
 // (PIN_AWAY_M for PIN_AWAY_MS) lets go for that follow.
+// a Follow's standing height (setUp, standNow): samples a second, how often it is re-read and eased in, how many are kept
+// (the median of the last 5 min), and how many of a feed's frames before it stand for the page's 2 min in VR
+const STAND_HZ = 10, STAND_EVERY_S = 0.5, STAND_EASE_S = 1.5, STAND_N = 3000, RECENT_N = 1800;
 const GAP_S = 0.25;                                  // playback: samples further apart than this are held, not mixed
 const SEAT_ABOVE = 0.09, SEAT_FOOT = 0.42, LEAN_MAX = 0.9, PIN_AWAY_M = 0.7, PIN_AWAY_MS = 600;
 const Y = new THREE.Vector3(0, 1, 0);
@@ -437,6 +440,63 @@ export function initActors(ed, live) {
     }
   }
 
+  // ---- one setup for a played take and a Follow (the 2026-10-22 rework: a fix lands once). Where the person stands
+  // and faces, the scale from the user's standing head height, the turn onto the person's facing, the pins, the
+  // standing height the crouch reads and the anchor come from the same rules; only the frames differ: a take's (all of
+  // them known) or the user's of each moment (a Follow: `live`, its standing height running, standNow).
+  //   where     a take borrowed from someone else plays where this person stands (the user, 2026-10-03: "make the
+  //             people that are inside the place who can dance, dance"); since live follow ("they stand where they
+  //             are, and they follow along with my movements") every take plays where its person stands; c.in_place
+  //             plays it where the user stood. A Follow with no stand-in stands where the user is
+  //   facing    the person's own (facingOf); a Follow falls back on facing the user, a take on none (no turn)
+  //   scale     the user's standing head height (the median of `heights`, over the floor) to the actor's
+  //   pins      the take's own (meta.pins, Blender xyz: the user, 2026-10-05, Sam's take played anchored by the feet
+  //             though his hips were pinned to the stool), else this session's (stage_follow_anchor)
+  //   mirror    as it was made (the user, 2026-10-05: a take recorded with Follow's mirror played back the other way):
+  //             the plane is the person's facing through the anchor
+  //   anchor    the first frame's head over the user's floor; inside them (embody) over the person's ground
+  function setUp(c, { person, rig, it, f0, heights, live = false, embodied = false, meta = null, J }) {
+    const floor = world().floor || 0;                      // the user's floor while recording or following
+    const placed = !!it && !c.in_place;
+    const ground = placed ? groundOf(it) : floor;
+    const w = placed ? it.obj.getWorldPosition(new THREE.Vector3()) : null;
+    const to = placed ? new THREE.Vector3(w.x, ground, w.z) : live ? new THREE.Vector3(f0.head[0], ground, f0.head[2]) : null;
+    const h0 = f0.head;
+    const facing = to ? facingOf(ed, person, to, live ? new THREE.Vector3(h0[0], 0, h0[2]) : null) : null;
+    const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), facing) : null;
+    const userH = median(heights) - floor;
+    const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd);
+    const st = { person, rig, J, s: embodied ? 1 : scaleFor(rig, userH), anchor: new THREE.Vector3(h0[0], embodied ? ground : floor, h0[2]),
+      to, floor: ground, standY: floor + userH, alignInv: align.invert(), feet: { l: {}, r: {} }, t0: performance.now(), it, turn,
+      mirror: !!(c.mirror ?? (meta && meta.mirror)), mirrorN: facing ? new THREE.Vector3(facing.z, 0, -facing.x) : null };
+    if (live) st.stand = { floor, embodied, hs: heights.slice(-STAND_N), h: userH, want: userH, lastT: null, readT: null, t: null };
+    const pm = c.pins || (meta && meta.pins);
+    const pins = pm ? pinsFromMeta(pm) : anchors.get(person);
+    if (pins && (pins.hips || pins.foot_l || pins.foot_r)) usePins(st, pins);
+    return st;
+  }
+  const median = (xs) => { const v = [...xs].sort((a, b) => a - b); return v[Math.floor(v.length * 0.5)]; };
+  const scaleFor = (rig, userH) => THREE.MathUtils.clamp((rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08) / Math.max(0.5, userH), 0.6, 1.4);
+  // a Follow's standing height as it goes: the user's head sampled STAND_HZ, the median re-read every STAND_EVERY_S and
+  // eased in over STAND_EASE_S, so a Follow begun seated or crouched (which took that for standing and made a giant)
+  // grows the right size once the user has stood a while; the scale (not inside them) and the crouch's standing height
+  function standNow(st, f) {
+    const k = st.stand;
+    if (!k) return;
+    if (k.lastT == null || f.t - k.lastT >= 1 / STAND_HZ || f.t < k.lastT) {
+      k.hs.push(f.head[1]); k.lastT = f.t;
+      if (k.hs.length > STAND_N) k.hs.splice(0, k.hs.length - STAND_N);
+    }
+    if (k.readT == null || f.t - k.readT >= STAND_EVERY_S || f.t < k.readT) { k.readT = f.t; k.want = median(k.hs) - k.floor; }
+    const dt = k.t == null ? 0 : f.t - k.t;
+    k.t = f.t;
+    if (dt > 0 && dt < 1) k.h += (k.want - k.h) * (1 - Math.exp(-dt / STAND_EASE_S));
+    st.standY = k.floor + k.h;
+    if (!k.embodied) st.s = scaleFor(st.rig, k.h);
+  }
+  let recentHeads = () => [];                               // hands.js: the user's head heights, the last 2 min in VR
+  const setRecent = (fn) => { recentHeads = fn; };
+
   // ---- play / stop
   async function playNow(c) {
     const person = c.person, who = c.actor || world().actors[person];
@@ -461,46 +521,17 @@ export function initActors(ed, live) {
       if (cut.length > 1) frames = cut;
     }
     const rig = playing.size && [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
-    const J = Object.fromEntries((meta.joints || []).map((n, i) => [n, i]));
-    // scale: the user's standing head height to the actor's
-    const floor = world().floor || 0;                       // the user's floor while recording
-    // the median of the whole take, not of the part kept: a part spent dipping took the dip for standing, so the knees
-    // never bent in it (the 2026-10-17 study: head 1.70-1.90 m in a take standing at 1.87 drew 6 cm of bob)
-    const heads = whole.map((f) => f.head[1]).sort((a, b) => a - b);
-    // the median: a take can hold moments raised on the thumbstick, which a high percentile took for standing height
-    const userH = heads[Math.floor(heads.length * 0.5)] - floor, actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
-    const s = THREE.MathUtils.clamp(actorH / Math.max(0.5, userH), 0.6, 1.4);
-    const anchor = new THREE.Vector3(frames[0].head[0], floor, frames[0].head[2]);
-    const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd);
     const it = ed.byName.get(person);
-    // a take borrowed from someone else plays where this person stands (the user, 2026-10-03: "make the people that
-    // are inside the place who can dance, dance"): its start moves onto them; their own take plays where it was made
-    // and since live follow (the user, 2026-10-03: "they stand where they are, and they follow along with my
-    // movements"), every take plays where its person stands, the way it looked while it was recorded; c.in_place
-    // plays it where the user stood
-    let to = null, ground = floor;
-    if (it && !c.in_place) {
-      const w = it.obj.getWorldPosition(new THREE.Vector3());
-      ground = groundOf(it);
-      to = new THREE.Vector3(w.x, ground, w.z);
-    }
     if (it) it.obj.visible = false;
     scene.add(rig.root);
-    const h0 = frames[0].head;
-    const fc = to ? facingOf(ed, person, to) : null;
-    const turn = to && h0.length >= 7 ? turnFor(new THREE.Quaternion(h0[3], h0[4], h0[5], h0[6]), fc) : null;
-    // mirrored as it was made (the user, 2026-10-05: a take recorded with Follow's mirror played back the other way):
-    // the take keeps meta.mirror; the plane is the person's facing through the take's anchor, as in the Follow
-    const mirror = !!(c.mirror ?? meta.mirror);
-    const st = { person, rig, frames, J, s, anchor, to, floor: ground, standY: floor + userH, alignInv: align.clone().invert(), feet: { l: {}, r: {} },
-      t0: performance.now(), loop: c.loop !== false, it, take: c.take, i: 0, rate: c.rate || 1, turn, meta,
-      mirror, mirrorN: fc ? new THREE.Vector3(fc.z, 0, -fc.x) : null,
+    // the median of the whole take, not of the part kept: a part spent dipping took the dip for standing, so the knees
+    // never bent in it (the 2026-10-17 study: head 1.70-1.90 m in a take standing at 1.87 drew 6 cm of bob)
+    const st = setUp(c, { person, rig, it, f0: frames[0], heights: whole.map((f) => f.head[1]), meta,
+      J: Object.fromEntries((meta.joints || []).map((n, i) => [n, i])) });
+    const s = st.s;
+    Object.assign(st, { frames, loop: c.loop !== false, take: c.take, i: 0, rate: c.rate || 1, meta,
       voice: c.voice == null ? null : !!c.voice,           // perform.js: the performance's voice with it
-      atMusic: c.at_music == null ? null : +c.at_music };   // on the music clock: the first frame at this song second
-    // pinned in playback as while recording (the user, 2026-10-05: Sam's take played anchored by the feet, though
-    // his hips were pinned to the stool): the take's own pins (meta.pins, Blender xyz), else this session's
-    const pins = c.pins || meta.pins ? pinsFromMeta(c.pins || meta.pins) : anchors.get(person);
-    if (pins && (pins.hips || pins.foot_l || pins.foot_r)) usePins(st, pins);
+      atMusic: c.at_music == null ? null : +c.at_music });  // on the music clock: the first frame at this song second
     await useStart(st, c);
     playing.set(person, st);
     live.emit('actor_play', { person, actor: who, take: c.take, seconds: +(frames[frames.length - 1].t - frames[0].t).toFixed(1), scale: +s.toFixed(2),
@@ -519,29 +550,21 @@ export function initActors(ed, live) {
     const rig0 = await load(who, `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`);
     stop({ person });
     const rig = [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
-    const f0 = feed ? feed.frames[0] : source(), floor = world().floor || 0;
-    const userH = Math.max(0.5, f0.head[1] - floor), actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
-    // stepping into them (embody.js): the user's view is already at their eyes, so the body is the user's, unscaled
-    const s = c.embody ? 1 : THREE.MathUtils.clamp(actorH / userH, 0.6, 1.4);
+    const f0 = feed ? feed.frames[0] : source();
     const it = ed.byName.get(person);
-    const w = it ? it.obj.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(f0.head[0], floor, f0.head[2]);
-    const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd);
-    const ground = groundOf(it);
     unrest(person);
     if (it) it.obj.visible = false;
     scene.add(rig.root);
-    const toW = new THREE.Vector3(w.x, ground, w.z);
-    const facing = facingOf(ed, person, toW, new THREE.Vector3(f0.head[0], 0, f0.head[2]));
-    const turn = turnFor(new THREE.Quaternion(f0.head[3], f0.head[4], f0.head[5], f0.head[6]), facing);
-    const st = { person, rig, live: true, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])), s, floor: ground,
-      anchor: new THREE.Vector3(f0.head[0], c.embody ? ground : floor, f0.head[2]), to: toW, turn, mode: c.mode || 'place', drift: new THREE.Vector3(),
-      embodied: !!c.embody,
-      mirror: !!c.mirror, mirrorN: facing ? new THREE.Vector3(facing.z, 0, -facing.x) : null,
-      last: new THREE.Vector3(f0.head[0], f0.head[1], f0.head[2]),
-      alignInv: align.clone().invert(), feet: { l: {}, r: {} }, t0: performance.now(), it };
+    // standing height: what the page saw of the user in VR before this Follow (hands.js keeps the last 2 min; a feed:
+    // the take's seconds before it), then running (standNow); inside them (embody), from the frame at GO, as the view
+    // is theirs. Stepping into them (embody.js) also keeps the body unscaled: the user's view is already at their eyes
+    const seen = c.embody ? [] : feed ? feed.before.slice(-RECENT_N).map((f) => f.head[1]) : recentHeads();
+    const st = setUp(c, { person, rig, it, f0, heights: [...seen, f0.head[1]], live: true, embodied: !!c.embody,
+      J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) });
+    const s = st.s;
+    Object.assign(st, { live: true, mode: c.mode || 'place', drift: new THREE.Vector3(), embodied: !!c.embody,
+      last: new THREE.Vector3(f0.head[0], f0.head[1], f0.head[2]) });
     if (feed) { st.feed = feed; st.frames = feed.frames; st.i = 0; }
-    const pins = anchors.get(person);
-    if (pins) usePins(st, pins);
     // the setup from the body, not a button (the user, 2026-10-08: a standing man came up with his feet locked and would
     // not walk): seated (hips on a seat) stays put, a standing person walks with the user
     if (!c.mode) st.mode = st.pins && st.pins.hips ? 'place' : 'walk';
@@ -762,6 +785,7 @@ export function initActors(ed, live) {
         const far = st.mode === 'place' ? Math.hypot(cur.x - st.to.x, cur.z - st.to.z) : Math.hypot(cur.x - st.anchor.x, cur.z - st.anchor.z);
         if (far > WALK_AWAY_M) { stop({ person: st.person, why: 'walked_away' }); continue; }
         f.t = (performance.now() - st.t0) / 1000;
+        standNow(st, f);
         if (st.pins && st.pins.hips) {                   // the user got up and walked off: the seat lets go of him
           const ph = st.to.clone().add(new THREE.Vector3(f.head[0], f.head[1], f.head[2]).sub(st.anchor).multiplyScalar(st.s));
           const away = Math.hypot(ph.x - st.pins.hips.x, ph.z - st.pins.hips.z) > PIN_AWAY_M * st.s;
@@ -1199,6 +1223,6 @@ export function initActors(ed, live) {
     return { eye, facing, ground };
   }
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
-  return { play, stop, follow, setSource, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
+  return { play, stop, follow, setSource, setRecent, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
     rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf };
 }

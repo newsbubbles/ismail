@@ -89,6 +89,7 @@ live.handlers.take_view = (c) => takes4d.show(c);
 live.handlers.take_view_clear = () => takes4d.clear();
 const actors = initActors(ed, live);
 actors.setSource(() => hands.frameNow());   // live follow: the user's body this moment
+actors.setRecent(() => hands.recentHeads());   // a Follow's standing height: the user's head the last 2 min in VR
 const loadSets = initLoadSets(ed, live, () => actors);   // named sets unloaded to keep the Quest light (loadsets.js)
 window.VR_sets = loadSets;
 actors.setUnloaded((p) => loadSets.isUnloadedPerson(p));
