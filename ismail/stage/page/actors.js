@@ -101,9 +101,20 @@ const SPINE = [['spine_01', 0.15], ['spine_02', 0.3], ['spine_03', 0.5], ['neck_
 // head and neck"): a look aside is the neck's (a person turns the head about 70 deg on the neck alone), the chest takes
 // a little of it; a nod or a tilt is mostly the neck and head too. Per bone, the share of the look's turn about the
 // vertical (YAW) and of the rest of it (SWING), as fractions of the whole look in world space. The head takes it all,
-// so it still looks exactly where the user looked. The hands can turn the chest a little more (CHEST_BY_HANDS).
+// so it still looks exactly where the user looked. The turn about the vertical is the chest's own (chestFollow below):
+// the spine takes CHEST of it, the neck NECK of what is left between the chest and the head.
 const LOOK = { spine_01: [0.03, 0.05], spine_02: [0.06, 0.1], spine_03: [0.12, 0.2], neck_01: [0.55, 0.6], head: [1, 1] };
-const CHEST_BY_HANDS = 0.35, CHEST_HANDS_MAX = THREE.MathUtils.degToRad(25), CHEST_REACH = 0.4, CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 };
+const CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 }, NECK = 0.55;
+// the chest follows the head by a limit, not a share (the user's design, 2026-10-22): within CHEST_LIMIT of the head the
+// chest holds still (a look aside is the neck's); past it the chest's target is the head's turn less the limit,
+// reached by a soft critically damped follow (CHEST_TAU), never in one step; a fast head turn brings the shoulders in
+// sooner, the limit shrinking to CHEST_LIMIT_FAST at CHEST_FAST a second; the chest stays within CHEST_MAX of the hips
+const D2R = THREE.MathUtils.degToRad;
+const CHEST_LIMIT = D2R(40), CHEST_LIMIT_FAST = D2R(20), CHEST_FAST = D2R(300), CHEST_TAU = 0.25, CHEST_MAX = D2R(45), HEAD_SPEED_S = 0.08;
+// the hands weigh on it (the user, 2026-10-22; handCue): their swing round the vertical through the middle of the hips,
+// counted with both hands tracked, CUE_SEP apart, CUE_OUT from that vertical and the two ways of reading the swing
+// agreeing within CUE_AGREE; the chest asks HAND_GAIN of the swing
+const CUE_SEP = [0.25, 0.35], CUE_OUT = [0.25, 0.4], CUE_AGREE = D2R(25), HAND_GAIN = 0.7;
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
 // steps lead the body (VRIK's velocityFactor): a foot steps to where the hips will be STEP_LEAD s on (at most
 // STEP_LEAD_MAX m), so it lands as the body arrives instead of trailing it; a planted foot keeps its own facing (it no
@@ -248,9 +259,9 @@ export function initActors(ed, live) {
     control.apply(st, f, raw);
   }
   // a look (delta: the head's world turn from rest) over the spine: the body's own facing (base) for the hips, then per
-  // bone its LOOK share of the turn about the vertical and of the rest (swing-twist), and the lean from the hips on top.
-  // Both hands in front of the chest turn the chest toward them a little (CHEST_BY_HANDS of their bearing, at most
-  // CHEST_HANDS_MAX); the neck and head take that back, so the head's own turn is unchanged
+  // bone the turn about the vertical from spineYaw (the chest's follow, the neck between it and the head) and its LOOK
+  // share of the rest (swing-twist), the lean from the hips on top. The head takes the whole look, so it still looks
+  // exactly where the user looked.
   // q or -q (the same turn), whichever has w >= 0, so its look comes out in -180..180: the other gave about 360 minus the
   // turn, which the head did not show (the same turn) but the spine's shares of it did (the 2026-10-17 study: the chest
   // twisted 40 degrees the wrong way, in some runs only, as the tracking's quaternion sign fell)
@@ -261,29 +272,71 @@ export function initActors(ed, live) {
     const tw = new THREE.Quaternion(0, rel.y, 0, rel.w).normalize();
     const swing = rel.clone().multiply(tw.clone().invert());
     const look = 2 * Math.atan2(tw.y, tw.w);
-    let hands = 0;
     const l = f.left && f.left.j && f.left.j[0], r = f.right && f.right.j && f.right.j[0];
-    if (l && r) {
-      const mid = P(l).add(P(r)).multiplyScalar(0.5).sub(hipAt).setY(0).applyQuaternion(base.clone().invert());
-      const fw = rig.fwd.clone();
-      // only hands reached out in front count, fully from CHEST_REACH: near the body their bearing is noise (the
-      // 2026-10-17 study: hands at the sides twisted the chest 40 degrees, flipping side, while the head looked ahead)
-      const reach = THREE.MathUtils.clamp((fw.dot(mid) / st.s - 0.15) / (CHEST_REACH - 0.15), 0, 1);
-      if (reach > 0) {
-        const a = Math.atan2(fw.clone().cross(mid).y, fw.dot(mid));
-        hands = reach * THREE.MathUtils.clamp(a * CHEST_BY_HANDS, -CHEST_HANDS_MAX, CHEST_HANDS_MAX);
-      }
-    }
-    st.chestHands = st.chestHands === undefined ? hands : st.chestHands + (hands - st.chestHands) * 0.15;   // no snapping
+    const fw = rig.fwd.clone().applyQuaternion(base).setY(0).normalize();
+    const cue = handCue(l && P(l), r && P(r), hipAt, fw);
+    const yaws = spineYaw(st, f, look, cue);
     const I = new THREE.Quaternion();
     for (const [n, k] of SPINE) {
-      const [ky, ks] = LOOK[n];
-      const chest = st.chestHands * (CHEST[n] !== undefined ? CHEST[n] : n === 'neck_01' ? 0.5 : 0);
-      const yaw = n === 'head' ? look : look * ky + chest;
-      const q = base.clone().multiply(new THREE.Quaternion().slerpQuaternions(I, swing, ks)).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaw));
+      const q = base.clone().multiply(new THREE.Quaternion().slerpQuaternions(I, swing, LOOK[n][1])).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaws[n]));
       if (lean) q.premultiply(new THREE.Quaternion().slerp(lean, Math.min(1, k * 1.25)));
       setWorldQ(rig.bones[n], q.multiply(rig.rest[n].q));
     }
+  }
+  // the turn about the vertical per spine bone, relative to the hips: the chest's own (chestFollow), the spine below it
+  // its CHEST share, the neck NECK of the way from the chest to the head, the head the whole look
+  function spineYaw(st, f, look, cue) {
+    const c = chestFollow(st, f, look, cue), out = {};
+    for (const [n] of SPINE) out[n] = n === 'head' ? look : n === 'neck_01' ? c + NECK * (look - c) : c * (CHEST[n] ?? 0);
+    return out;
+  }
+  const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const r1 = (a) => +THREE.MathUtils.radToDeg(a).toFixed(1);
+  // the chest's turn about the vertical, relative to the hips (look: the head's), as the user designed it (CHEST_LIMIT
+  // above): held within the limit, past it eased toward the head's turn less the limit, the limit narrower for a fast
+  // head; the hands' cue pulls the target its way as sure as it is. Critically damped, exact for any frame time:
+  // x'' = -(x - g) / tau^2 - 2 x' / tau. A first frame, a loop or a gap starts it where the limit puts it, at rest.
+  function chestFollow(st, f, look, cue) {
+    const t = f.t, hq = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(f.head[3], f.head[4], f.head[5], f.head[6]));
+    const hw = Math.atan2(hq.x, hq.z);                    // the head's own heading (world), for its speed
+    let c = st.chest;
+    const dt = c ? t - c.t : 0;
+    if (!c || dt < 0 || dt > GAP_S) {
+      const x = THREE.MathUtils.clamp(look - THREE.MathUtils.clamp(look, -CHEST_LIMIT, CHEST_LIMIT), -CHEST_MAX, CHEST_MAX);
+      c = st.chest = { x, v: 0, t, hw, spd: 0, dbg: null };
+    } else if (dt > 1e-5) {
+      c.spd += (Math.abs(wrapPi(hw - c.hw)) / dt - c.spd) * (1 - Math.exp(-dt / HEAD_SPEED_S));
+      c.hw = hw;
+      const L = CHEST_LIMIT - (CHEST_LIMIT - CHEST_LIMIT_FAST) * THREE.MathUtils.clamp(c.spd / CHEST_FAST, 0, 1);
+      const off = look - c.x;
+      let g = Math.abs(off) > L ? look - Math.sign(off) * L : c.x;      // past the limit: the head's turn less it
+      if (cue && cue.w > 0) g += (cue.a - g) * cue.w;
+      g = THREE.MathUtils.clamp(g, -CHEST_MAX, CHEST_MAX);
+      const om = 1 / CHEST_TAU, y = c.x - g, e = Math.exp(-om * dt), j = (c.v + om * y) * dt;
+      c.x = g + (y + j) * e; c.v = (c.v - om * j) * e; c.t = t;
+      c.dbg = { L: r1(L), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null };
+    }
+    return c.x;
+  }
+  // the hands' twist about the vertical through the middle of the hips (the user, 2026-10-22), yaw only (a lean does
+  // not count): the hands swinging round that axis turn the chest, read two ways that must agree, the line from the
+  // right hand to the left turning (seen from above) and the hands' middle bearing round the axis (each hand's bearing
+  // from its own side): one hand coming forward as the other goes back, or both arcing round the same way, turns both;
+  // both hands moving together to one side moves the bearing but not the line, so it does not count. Counted with both
+  // hands tracked, CUE_SEP apart and CUE_OUT from the axis (hands at the sides or close in are noise). L, R: the hands
+  // where the body reaches (world), axis: the hips, fw: the body's forward (flat). {a: the chest turn it asks (rad,
+  // relative to the hips), w: how sure, 0..1}, or null
+  function handCue(L, R, axis, fw) {
+    if (!L || !R) return null;
+    const left = new THREE.Vector3().crossVectors(Y, fw);
+    const l = L.clone().sub(axis).setY(0), r = R.clone().sub(axis).setY(0), d = l.clone().sub(r);
+    const ang = (v, ref) => Math.atan2(new THREE.Vector3().crossVectors(ref, v).y, ref.dot(v));
+    const line = ang(d, left);
+    const bl = ang(l, left), br = ang(r, left.clone().negate());
+    const bear = Math.atan2(Math.sin(bl) + Math.sin(br), Math.cos(bl) + Math.cos(br));
+    const ramp = (x, [a, b]) => THREE.MathUtils.clamp((x - a) / (b - a), 0, 1);
+    const w = ramp(d.length(), CUE_SEP) * ramp(Math.min(l.length(), r.length()), CUE_OUT) * THREE.MathUtils.clamp(1 - Math.abs(wrapPi(line - bear)) / CUE_AGREE, 0, 1);
+    return { a: THREE.MathUtils.clamp(HAND_GAIN * wrapPi(line + wrapPi(bear - line) / 2), -CHEST_MAX, CHEST_MAX), w };
   }
   // where an elbow points (the user, 2026-10-11: arms "clipping ... around the armpits ... into the chest"): down and a
   // little out and back for a hand at the side; a raised hand swings the elbow out to the side (hands up), a hand
@@ -1024,9 +1077,28 @@ export function initActors(ed, live) {
     const held = Object.fromEntries(SPINE.map(([n]) => [n, rig.bones[n].getWorldQuaternion(new THREE.Quaternion())]));
     const tw = new THREE.Quaternion(0, Drel.y, 0, Drel.w).normalize(), swing = Drel.clone().multiply(tw.clone().invert());
     const look = 2 * Math.atan2(tw.y, tw.w);
-    for (const [n, k] of SPINE) {                           // the look over the spine as in poseBase (LOOK)
-      const [ky, ks] = LOOK[n];
-      const q = new THREE.Quaternion().slerpQuaternions(I, swing, ks).multiply(new THREE.Quaternion().setFromAxisAngle(Y, look * ky));
+    // the hands' cue for the chest, from where the arms will reach (below; the eyes before the look turns the head)
+    const byUser = !(S.spec && S.spec.hands === 'pose');
+    if (byUser && !st.armMap) {
+      const fu = new THREE.Vector3(0, 0, -1).applyQuaternion(qA(r.head)).setY(0);
+      const fa = S.fwdW ? S.fwdW.clone() : rig.fwd.clone();
+      st.armMap = { R: new THREE.Quaternion().setFromUnitVectors(fu.lengthSq() > 1e-6 ? fu.normalize() : fa, fa.setY(0).normalize()) };
+    }
+    const M = byUser ? B.yaw.clone().multiply(st.armMap.R) : null;
+    const fwdNow = (S.fwdW ? S.fwdW.clone() : rig.fwd.clone()).applyQuaternion(B.yaw).setY(0).normalize();
+    const reach = (eye, sd, h) => {                                    // where a hand reaches, or null (untracked)
+      const now = f[h], was = r[h];
+      if (!S.handW[sd] || !now || !now.j || !now.j[0] || !was || !was.j || !was.j[0]) return null;
+      return byUser ? eye.clone().add(vA(now.j[0]).sub(vA(f.head)).applyQuaternion(M).multiplyScalar(s))
+        : S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
+    };
+    const eyeAt = () => rig.bones.head.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, EYE_UP, 0)).addScaledVector(fwdNow, EYE_FWD);
+    rig.root.updateMatrixWorld(true);
+    const eye0 = eyeAt();
+    const cue = handCue(reach(eye0, 'l', 'left'), reach(eye0, 'r', 'right'), rig.bones.pelvis.getWorldPosition(new THREE.Vector3()), fwdNow);
+    const yaws = spineYaw(st, f, look, cue);
+    for (const [n, k] of SPINE) {                           // the look over the spine as in poseBase (spineYaw, LOOK)
+      const q = new THREE.Quaternion().slerpQuaternions(I, swing, LOOK[n][1]).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaws[n]));
       if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
       setWorldQ(rig.bones[n], q.multiply(held[n]));
     }
@@ -1035,25 +1107,13 @@ export function initActors(ed, live) {
     // person's hands and fingers take the user's own, measured from the eyes and turned to the person's facing, so a
     // seated body reaches where the user reaches; start.hands = 'pose' keeps the start pose's grip and adds the user's
     // motion to it, as before
-    const byUser = !(S.spec && S.spec.hands === 'pose');
-    if (byUser && !st.armMap) {
-      const fu = new THREE.Vector3(0, 0, -1).applyQuaternion(qA(r.head)).setY(0);
-      const fa = S.fwdW ? S.fwdW.clone() : rig.fwd.clone();
-      st.armMap = { R: new THREE.Quaternion().setFromUnitVectors(fu.lengthSq() > 1e-6 ? fu.normalize() : fa, fa.setY(0).normalize()) };
-    }
-    const M = byUser ? B.yaw.clone().multiply(st.armMap.R) : null;
-    let eye = null;
-    if (byUser) {
-      rig.root.updateMatrixWorld(true);
-      const fwdNow = (S.fwdW ? S.fwdW.clone() : rig.fwd.clone()).applyQuaternion(B.yaw).setY(0).normalize();
-      eye = rig.bones.head.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, EYE_UP, 0)).addScaledVector(fwdNow, EYE_FWD);
-    }
+    rig.root.updateMatrixWorld(true);
+    const eye = eyeAt();
     for (const [sd, h] of [['l', 'left'], ['r', 'right']]) {
       const now = f[h], was = r[h];
-      if (!S.handW[sd] || !now || !now.j || !now.j[0] || !was || !was.j || !was.j[0]) continue;   // untracked: the start pose
+      const target = reach(eye, sd, h);
+      if (!target) continue;                               // untracked: the start pose
       const [up, lo, ha] = ARM[sd];
-      const target = byUser ? eye.clone().add(vA(now.j[0]).sub(vA(f.head)).applyQuaternion(M).multiplyScalar(s))
-        : S.handW[sd].clone().add(vA(now.j[0]).sub(vA(was.j[0])).multiplyScalar(s));
       shoulderFollow(rig, sd, target, S.handW[sd].clone().add(B.draw || B.off));
       twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(B.off).add(new THREE.Vector3(0, -0.3, 0)));
       if (byUser && rig.cal[ha]) setWorldQ(rig.bones[ha], M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha]));
