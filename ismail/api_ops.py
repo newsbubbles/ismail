@@ -40,6 +40,8 @@ CATEGORIES = [
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
     ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
+    ('stream', "live streaming: the set to several sites at once, the picture and its text, every site's chat read "
+               "and answered", ('stream_', 'venue_', 'chat_')),
     ('asks', "before you ask the person: their standing grants, and which agent owns which questions", ('grant_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]
@@ -50,7 +52,8 @@ ROLES = {
              'lexicon', 'together', 'asks'],
     'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon', 'asks'],
     'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render', 'asks'],
-    'dj': ['live', 'phone', 'listen', 'together', 'sounds', 'exam', 'lexicon', 'asks'],
+    'dj': ['live', 'phone', 'stream', 'listen', 'together', 'sounds', 'exam', 'lexicon', 'asks'],
+    'mc': ['stream', 'phone', 'live', 'asks'],
     'stage': ['stage', 'phone', 'exam', 'listen', 'asks'],
     'film': ['stage', 'render', 'listen', 'exam', 'asks'],
     'dev': [c[0] for c in CATEGORIES],
@@ -128,7 +131,7 @@ def ops_find(need: str = None, role: str = None, category: str = None, n: int = 
     """Find the op for what you need, by purpose, from each op's own description (so it is never out of date).
     need: in plain words ("let the person mark the difference between two pictures", "formants of a vowel",
     "match a level to the reference"): the n best ops with their first line and shelf. role: song, voice, sound,
-    dj, stage, film or dev: the ops that role reaches for first, shelf by shelf (with need: the search, the role's
+    dj, mc, stage, film or dev: the ops that role reaches for first, shelf by shelf (with need: the search, the role's
     shelves first). category: every op on one shelf. No arguments: the shelves and the roles. Then read an op's full
     description through your tool list, or call it. Writing an op: a sentence 'Reach for it when ...' in its
     description, in the words a person or agent would ask with, counts as much as its first line here."""

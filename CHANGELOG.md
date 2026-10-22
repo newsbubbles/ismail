@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Live streaming to several sites, with every site's chat
+
+- A stream server (`stream_start`) sends the live set to Twitch, YouTube, Kick, Owncast or any RTMP site at once:
+  the master and a picture drawn from it (`stream_visual`: cqt, spectrum, waves, scope, a still or a captured
+  window, with text lines that change live, `stream_text`) are encoded once (NVENC when the GPU has it) and copied to
+  each site by its own process, so one site dropping never stops the others. Engine restarts carry silence, not a
+  drop. A `file` venue records every set.
+- Every site's chat lands in one numbered log: `chat_watch` (a standing watcher, like phone_watch), `chat_read`,
+  and `chat_say` (one venue, every venue, or a reply where the person wrote). Twitch reads over EventSub (or
+  anonymously, read-only), YouTube through the Data API within its quota, Kick over its public websocket.
+- Venues (`venue_set`, `venue_list`, `venue_remove`) hold no secrets. The person types logins and stream keys in a
+  terminal (`python -m ismail.stream login|key <venue>`); no op ever returns one, and logs blank them.
+- `stream_go` needs the person's words each time it goes live on a public site, and logs them.
+- A practice venue (`platform='fake'`): a local chat page and a scripted test viewer.
+- `references/live-streaming.md`: the setup, going live, chat manners, the DJ and MC roles, chat games.
+
 ### A cut takes the old deck off air at once
 
 - `live_transition(style='cut')` ignores `bars`: the old deck's tracks stop and it goes off air (cued) on the cut's own
