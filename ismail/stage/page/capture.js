@@ -179,7 +179,18 @@ function probe(actors, person, t) {
     // the arms (2026-10-22: the wrists wring, the elbows go in): shoulders, elbows, and each wrist's twist (the hand's
     // turn about the forearm from their rest relation, degrees); the chest's follow (limit, hand cue) where there is one
     ul: at('upperarm_l'), ur: at('upperarm_r'), el: at('lowerarm_l'), er: at('lowerarm_r'), wl: wristTwist(rig, 'l'), wr: wristTwist(rig, 'r'),
+    al2: twistOf(rig, 'upperarm_l', 'clavicle_l'), ar2: twistOf(rig, 'upperarm_r', 'clavicle_r'), ll2: twistOf(rig, 'lowerarm_l', 'upperarm_l'), lr2: twistOf(rig, 'lowerarm_r', 'upperarm_r'),
     ck: st.chest && st.chest.dbg ? st.chest.dbg : null, s: st.s != null ? +st.s.toFixed(4) : null, sy: st.standY != null ? +st.standY.toFixed(3) : null };
+}
+// a bone's turn about its own length (+Y) relative to its parent, away from their rest relation, degrees: the upper arm
+// on the clavicle (the shoulder's skin), the forearm on the upper arm (the elbow's)
+function twistOf(rig, n, parent) {
+  const b = rig.bones[n], pa = rig.bones[parent];
+  if (!b || !pa || !rig.rest[n] || !rig.rest[parent]) return null;
+  const rel = pa.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(b.getWorldQuaternion(new THREE.Quaternion()))
+    .multiply(rig.rest[parent].q.clone().invert().multiply(rig.rest[n].q).invert());
+  const a = 2 * Math.atan2(rel.y, rel.w);
+  return +THREE.MathUtils.radToDeg(Math.atan2(Math.sin(a), Math.cos(a))).toFixed(1);
 }
 // the hand's turn about the forearm's own axis (+Y on these rigs) away from their rest relation, degrees
 function wristTwist(rig, sd) {

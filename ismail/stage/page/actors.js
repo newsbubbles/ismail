@@ -110,12 +110,18 @@ const CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 }, NECK = 0.55;
 // reached by a soft critically damped follow (CHEST_TAU), never in one step; a fast head turn brings the shoulders in
 // sooner, the limit shrinking to CHEST_LIMIT_FAST at CHEST_FAST a second; the chest stays within CHEST_MAX of the hips
 const D2R = THREE.MathUtils.degToRad;
-const CHEST_LIMIT = D2R(40), CHEST_LIMIT_FAST = D2R(20), CHEST_FAST = D2R(300), CHEST_TAU = 0.25, CHEST_MAX = D2R(45), HEAD_SPEED_S = 0.08;
+const CHEST_LIMIT = D2R(40), CHEST_LIMIT_FAST = D2R(20), CHEST_FAST = D2R(300), CHEST_TAU = 0.25, CHEST_MAX = D2R(45), HEAD_SPEED_S = 0.08, CHEST_HOME_S = 1.5;
 // the hands weigh on it (the user, 2026-10-22; handCue): their swing round the vertical through the middle of the hips,
 // counted with both hands tracked, CUE_SEP apart, CUE_OUT from that vertical and the two ways of reading the swing
 // agreeing within CUE_AGREE; the chest asks HAND_GAIN of the swing
 const CUE_SEP = [0.25, 0.35], CUE_OUT = [0.25, 0.4], CUE_AGREE = D2R(25), HAND_GAIN = 0.7;
 const STEP_AT = 0.22, STEP_S = 0.28, LIFT = 0.07;
+// the forearm's roll (the user, 2026-10-22, following Jo: "his wrists are still twisting ... the entire arm just twists
+// around all crazy"). No body here has forearm twist bones (all 53 joints; spreadTwist never ran), so: each arm bone is
+// rolled about its own length so its elbow hinge lies across the arm's bend (it kept whatever roll the shortest turn
+// from rest gave, which swung as the arm moved), and the hand's turn about the forearm is split, LOWER_ROLL of it on the
+// forearm (the elbow end), the wrist keeping at most WRIST_MAX and the forearm at most LOWER_MAX
+const LOWER_ROLL = 0.5, WRIST_MAX = THREE.MathUtils.degToRad(50), LOWER_MAX = THREE.MathUtils.degToRad(90);
 // steps lead the body (VRIK's velocityFactor): a foot steps to where the hips will be STEP_LEAD s on (at most
 // STEP_LEAD_MAX m), so it lands as the body arrives instead of trailing it; a planted foot keeps its own facing (it no
 // longer spins with the body) and steps once the body turns STEP_TURN past it; a step eases in and out (smootherstep)
@@ -165,7 +171,7 @@ export function initActors(ed, live) {
         for (const [n, b] of Object.entries(bones)) rest[n] = { q: b.getWorldQuaternion(new THREE.Quaternion()), p: b.getWorldPosition(new THREE.Vector3()) };
         const fwd = rest.ball_l.p.clone().sub(rest.foot_l.p).setY(0).normalize();
         const left = rest.upperarm_l.p.clone().sub(rest.upperarm_r.p).setY(0).normalize();
-        return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])),
+        return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), hinge: elbowHinges(rest, fwd), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])),
           localP: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.position.clone()])) };
       }).then(async (rig) => { await readProfile(rig); return rig; }));
     }
@@ -216,6 +222,29 @@ export function initActors(ed, live) {
     return cal;
   }
 
+  // ---- the elbow's hinge in each arm bone's own frame: across the arm and the body's forward at rest (an arm bends
+  // its hand forward), so a posed arm can be rolled to put it across the bend (twoBone's hinge)
+  function elbowHinges(rest, fwd) {
+    const out = {};
+    for (const sd of ['l', 'r']) {
+      const up = rest[`upperarm_${sd}`], lo = rest[`lowerarm_${sd}`], ha = rest[`hand_${sd}`];
+      if (!up || !lo || !ha) continue;
+      const n = lo.p.clone().sub(up.p).normalize().cross(fwd).normalize();
+      if (n.lengthSq() < 0.5) continue;
+      out[sd] = { a: n.clone().applyQuaternion(up.q.clone().invert()), b: n.clone().applyQuaternion(lo.q.clone().invert()) };
+    }
+    return out;
+  }
+  // roll a bone about its own length (axis, world) so its hinge (bone frame) lies along n (world), as near as the
+  // length allows; the child's joint is on that length, so it does not move
+  function rollTo(b, axis, hingeLocal, n) {
+    const ax = axis.clone().normalize(), h = hingeLocal.clone().applyQuaternion(b.getWorldQuaternion(tq2));
+    h.addScaledVector(ax, -h.dot(ax)); const m = n.clone().addScaledVector(ax, -n.dot(ax));
+    if (h.lengthSq() < 1e-8 || m.lengthSq() < 1e-8) return;
+    h.normalize(); m.normalize();
+    const ang = Math.atan2(new THREE.Vector3().crossVectors(h, m).dot(ax), h.dot(m));
+    setWorldQ(b, new THREE.Quaternion().setFromAxisAngle(ax, ang).multiply(b.getWorldQuaternion(tq2)));
+  }
   // ---- setting a bone's world rotation / aiming it, parents first
   const tq = new THREE.Quaternion(), tq2 = new THREE.Quaternion(), tv = new THREE.Vector3(), tv2 = new THREE.Vector3();
   function setWorldQ(b, qw) {
@@ -229,7 +258,8 @@ export function initActors(ed, live) {
     const d = new THREE.Quaternion().setFromUnitVectors(cur, want);
     setWorldQ(b, d.multiply(b.getWorldQuaternion(tq2)));
   }
-  function twoBone(rig, a, bn, cn, target, pole) {         // a -> b -> c reaches target, bending toward pole
+  // hinge {a, b} (arms, elbowHinges): each bone is also rolled about its length so the hinge lies across the bend
+  function twoBone(rig, a, bn, cn, target, pole, hinge) {  // a -> b -> c reaches target, bending toward pole
     const A = rig.bones[a], B = rig.bones[bn], C = rig.bones[cn];
     const S = A.getWorldPosition(new THREE.Vector3());
     const la = rig.rest[bn].p.distanceTo(rig.rest[a].p), lb = rig.rest[cn].p.distanceTo(rig.rest[bn].p);
@@ -241,8 +271,14 @@ export function initActors(ed, live) {
     const v = pole.clone().sub(S); v.sub(u.clone().multiplyScalar(v.dot(u))).normalize();
     const ca = THREE.MathUtils.clamp((la * la + d * d - lb * lb) / (2 * la * d), -1, 1);
     const E = S.clone().addScaledVector(u, la * ca).addScaledVector(v, la * Math.sqrt(1 - ca * ca));
+    const end = S.clone().addScaledVector(u, d);
     aim(A, B, E);
-    aim(B, C, S.clone().addScaledVector(u, d));
+    // the bend's hinge is v x u (the upper arm's direction crossed with the forearm's, whatever the bend, a straight arm
+    // too, as v stands across the arm)
+    const n = hinge && v.lengthSq() > 0.5 ? new THREE.Vector3().crossVectors(v, u).normalize() : null;
+    if (n) rollTo(A, E.clone().sub(S), hinge.a, n);
+    aim(B, C, end);
+    if (n) rollTo(B, end.clone().sub(E), hinge.b, n);
   }
 
   // ---- one frame of the take onto the rig: the built-in human map, then the control map's drives (control.js)
@@ -309,7 +345,9 @@ export function initActors(ed, live) {
       c.hw = hw;
       const L = CHEST_LIMIT - (CHEST_LIMIT - CHEST_LIMIT_FAST) * THREE.MathUtils.clamp(c.spd / CHEST_FAST, 0, 1);
       const off = look - c.x;
-      let g = Math.abs(off) > L ? look - Math.sign(off) * L : c.x;      // past the limit: the head's turn less it
+      // past the limit: the head's turn less it; within it the chest does not follow the head, but it comes home to the
+      // hips' facing over CHEST_HOME_S (without that it stayed turned up to the limit after a look aside and back)
+      let g = Math.abs(off) > L ? look - Math.sign(off) * L : c.x * Math.exp(-dt / CHEST_HOME_S);
       if (cue && cue.w > 0) g += (cue.a - g) * cue.w;
       g = THREE.MathUtils.clamp(g, -CHEST_MAX, CHEST_MAX);
       const om = 1 / CHEST_TAU, y = c.x - g, e = Math.exp(-om * dt), j = (c.v + om * y) * dt;
@@ -340,14 +378,19 @@ export function initActors(ed, live) {
   }
   // where an elbow points (the user, 2026-10-11: arms "clipping ... around the armpits ... into the chest"): down and a
   // little out and back for a hand at the side; a raised hand swings the elbow out to the side (hands up), a hand
-  // across the body brings it out and forward, so the upper arm clears the chest
+  // across the body brings it out and forward, so the upper arm clears the chest; a hand pulled back toward the
+  // shoulder's plane or behind it takes the elbow behind (the user, 2026-10-22, following Jo: "when I pull my hand
+  // backwards ... instead of my elbow going behind me ... the elbow is going inwards"): pull runs 0 to 1 from a hand
+  // PULL_FROM of the arm in front of the shoulder to PULL_TO behind it. Both halves (a start pose's arms too)
   function elbowPole(rig, sd, sh, hand, lateral, back) {
     const arm = rig.rest[`upperarm_${sd}`].p.distanceTo(rig.rest[`lowerarm_${sd}`].p) + rig.rest[`lowerarm_${sd}`].p.distanceTo(rig.rest[`hand_${sd}`].p);
     const d = hand.clone().sub(sh);
     const up = THREE.MathUtils.clamp(d.y / arm + 0.3, 0, 1), cross = THREE.MathUtils.clamp(-d.dot(lateral) / arm, 0, 1);
-    return sh.clone().add(new THREE.Vector3(0, -(1 - 0.8 * up), 0)).addScaledVector(lateral, 0.5 + 0.6 * up + 0.3 * cross)
-      .addScaledVector(back, 0.4 - 0.6 * cross);
+    const pull = THREE.MathUtils.clamp((d.dot(back) / arm + PULL_FROM) / (PULL_FROM + PULL_TO), 0, 1);
+    return sh.clone().add(new THREE.Vector3(0, -(1 - 0.8 * up) * (1 - 0.5 * pull), 0)).addScaledVector(lateral, 0.5 + 0.6 * up + 0.3 * cross)
+      .addScaledVector(back, 0.4 - 0.6 * cross + 1.0 * pull);
   }
+  const PULL_FROM = 0.3, PULL_TO = 0.1;
   function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
@@ -415,7 +458,7 @@ export function initActors(ed, live) {
         const sh0 = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
         const lat = rig.left.clone().applyQuaternion(base).multiplyScalar(sgn * 0.12);
         twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, sh0.clone().add(lat).add(new THREE.Vector3(0, -0.6, 0)),
-          sh0.clone().add(rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1)));
+          sh0.clone().add(rig.fwd.clone().applyQuaternion(base).multiplyScalar(-1)), rig.hinge[sd]);
         return;
       }
       const lateral = rig.left.clone().applyQuaternion(base).multiplyScalar(sgn);
@@ -424,7 +467,7 @@ export function initActors(ed, live) {
       const sh0 = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
       shoulderFollow(rig, sd, P(hd.j[0]), sh0.clone().add(new THREE.Vector3(0, -0.55, 0)).addScaledVector(back, -0.12));
       const sh = rig.bones[`upperarm_${sd}`].getWorldPosition(new THREE.Vector3());
-      twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), elbowPole(rig, sd, sh, P(hd.j[0]), lateral, back));
+      twoBone(rig, `upperarm_${sd}`, `lowerarm_${sd}`, `hand_${sd}`, P(hd.j[0]), elbowPole(rig, sd, sh, P(hd.j[0]), lateral, back), rig.hinge[sd]);
       const jq = (i) => { const a = hd.j[i]; return a ? new THREE.Quaternion(a[3], a[4], a[5], a[6]) : null; };
       const w = jq(0);
       if (w && rig.cal[`hand_${sd}`]) setWorldQ(rig.bones[`hand_${sd}`], w.multiply(rig.cal[`hand_${sd}`]));
@@ -1041,11 +1084,13 @@ export function initActors(ed, live) {
     setWorldQ(c, part.multiply(c.getWorldQuaternion(new THREE.Quaternion())));
   }
   // forearm twist bones, where a body has them (lowerarm_twist_01/02_[lr]; film can export them): the hand's turn about
-  // the forearm is spread over them (1/3, 2/3) instead of wringing the wrist
+  // the forearm is spread over them (1/3, 2/3) instead of wringing the wrist; a body without them (all of them so far)
+  // takes LOWER_ROLL of it on the forearm itself, about its own length, the wrist at most WRIST_MAX (forearmRoll)
   function spreadTwist(rig, sd) {
     const t1 = rig.bones[`lowerarm_twist_01_${sd}`], t2 = rig.bones[`lowerarm_twist_02_${sd}`];
     const lo = rig.bones[`lowerarm_${sd}`], ha = rig.bones[`hand_${sd}`];
-    if (!t1 || !lo || !ha || !rig.rest[lo.name] || !rig.rest[ha.name]) return;
+    if (!lo || !ha || !rig.rest[lo.name] || !rig.rest[ha.name]) return;
+    if (!t1) { forearmRoll(rig, sd); return; }
     const Ql = lo.getWorldQuaternion(new THREE.Quaternion()), Qh = ha.getWorldQuaternion(new THREE.Quaternion());
     const restLoInv = rig.rest[lo.name].q.clone().invert();
     const rel = Ql.clone().invert().multiply(Qh).multiply(restLoInv.clone().multiply(rig.rest[ha.name].q).invert());
@@ -1055,6 +1100,18 @@ export function initActors(ed, live) {
       setWorldQ(b, Ql.clone().multiply(new THREE.Quaternion().slerp(tw, k)).multiply(restLoInv.clone().multiply(rig.rest[b.name].q)));
     }
     setWorldQ(ha, Qh);                                             // the hand stays where it was put
+  }
+  function forearmRoll(rig, sd) {
+    const lo = rig.bones[`lowerarm_${sd}`], ha = rig.bones[`hand_${sd}`];
+    const Ql = lo.getWorldQuaternion(new THREE.Quaternion()), Qh = ha.getWorldQuaternion(new THREE.Quaternion());
+    const rel = near(Ql.clone().invert().multiply(Qh).multiply(rig.rest[lo.name].q.clone().invert().multiply(rig.rest[ha.name].q).invert()));
+    const tw = 2 * Math.atan2(rel.y, rel.w);                       // the hand's turn about the forearm (+Y on these rigs)
+    let k = LOWER_ROLL * tw;
+    if (Math.abs(tw - k) > WRIST_MAX) k = tw - Math.sign(tw) * WRIST_MAX;
+    k = THREE.MathUtils.clamp(k, -LOWER_MAX, LOWER_MAX);
+    if (Math.abs(k) < 1e-4) return;
+    setWorldQ(lo, Ql.multiply(new THREE.Quaternion().setFromAxisAngle(Y, k)));
+    setWorldQ(ha, Qh);                                             // the hand stays where it was put (the fingers with it)
   }
   function poseRelative(st, f) {
     const { rig, s } = st, S = st.start;
@@ -1115,7 +1172,16 @@ export function initActors(ed, live) {
       if (!target) continue;                               // untracked: the start pose
       const [up, lo, ha] = ARM[sd];
       shoulderFollow(rig, sd, target, S.handW[sd].clone().add(B.draw || B.off));
-      twoBone(rig, up, lo, ha, target, S.elbowW[sd].clone().add(B.off).add(new THREE.Vector3(0, -0.3, 0)));
+      // the elbow: the user's own hands (byUser) point it as poseBase does, in the body's frame now (it was the start
+      // pose's elbow, held where it was when the body turned, so a turned body or a hand pulled back behind it bent the
+      // elbow inward: the user, 2026-10-22, following Jo); a start pose's own grip (hands: 'pose', the drummer) keeps its
+      // elbow, turned with the body
+      const sh = rig.bones[up].getWorldPosition(new THREE.Vector3());
+      const sgn = sd === 'l' ? 1 : -1, lateral = new THREE.Vector3().crossVectors(Y, fwdNow).multiplyScalar(sgn);
+      const P0 = rig.bones.pelvis.getWorldPosition(new THREE.Vector3());
+      const pole = byUser ? elbowPole(rig, sd, sh, target, lateral, fwdNow.clone().negate())
+        : S.elbowW[sd].clone().add(B.off).sub(P0).applyQuaternion(B.yaw).add(P0).add(new THREE.Vector3(0, -0.3, 0));
+      twoBone(rig, up, lo, ha, target, pole, rig.hinge[sd]);
       if (byUser && rig.cal[ha]) setWorldQ(rig.bones[ha], M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha]));
       else setWorldQ(rig.bones[ha], qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone()));
       for (const [fg, names] of Object.entries(FINGER_JOINTS)) names.forEach((jn, k) => {
