@@ -13,8 +13,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import adapters, config as C
+from . import adapters, config as C, scene as SC
 from .chatlog import ChatLog
+from .levels import Levels
 
 PAGE = Path(__file__).with_name('page')
 
@@ -29,6 +30,14 @@ class Hub:
         self.lock = threading.RLock()
         self.started = time.time()
         self.output = None            # output.Output, made on the first stream_go or preview
+        self.levels = Levels()        # what the visual page moves to, read only while something wants it
+        self.scene_cond = threading.Condition()
+        try:
+            self.scene = SC.check_scene(json.loads((C.HOME / 'scene.json').read_text(encoding='utf8')))
+        except (OSError, ValueError):
+            self.scene = SC.check_scene(SC.DEFAULT)
+        self.scene_v = 1
+        self.page_view = None         # (width, height) in device pixels, as the page last reported its canvas
         self.reload()
 
     # ------------------------------------------------------------ venues
@@ -154,6 +163,32 @@ class Hub:
         a.viewer(user, text)
         return {'ok': True}
 
+    # ------------------------------------------------------------ the visual page (scene.py, levels.py)
+    def op_scene(self, layers=None, background=None, trails=None, replace=True):
+        new = {'background': self.scene['background'], 'trails': self.scene['trails'],
+               'layers': [] if replace else list(self.scene['layers'])}
+        if background is not None:
+            new['background'] = background
+        if trails is not None:
+            new['trails'] = trails
+        if layers is not None:
+            new['layers'] += list(layers)
+        elif replace:
+            new['layers'] = list(self.scene['layers'])
+        checked = SC.check_scene(new)
+        with self.scene_cond:
+            self.scene, self.scene_v = checked, self.scene_v + 1
+            self.scene_cond.notify_all()
+        C.HOME.mkdir(parents=True, exist_ok=True)
+        (C.HOME / 'scene.json').write_text(json.dumps(checked, indent=1), encoding='utf8')
+        return {'v': self.scene_v, 'scene': checked}
+
+    def op_page(self):
+        self.levels.want(5.0)
+        _, f = self.levels.wait(-1, 0.5)
+        return {'url': f'http://127.0.0.1:{self.port}/visual', 'scene': self.scene, 'frame': f,
+                'window': self.output.page_window() if self.output else None}
+
     # ------------------------------------------------------------ output (output.py)
     def _out(self):
         if self.output is None:
@@ -220,6 +255,28 @@ class Handler(BaseHTTPRequestHandler):
                                       lambda d: d['kind'] in ('chat', 'event', 'said')
                                       and self.hub.configs.get(d['venue'], {}).get('platform') == 'fake')
             return self._json(200, {'lines': lines[-200:], 'last': self.hub.log.n})
+        if u.path in ('/visual', '/visual/'):
+            b = (PAGE / 'visual.html').read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(b)))
+            self.end_headers()
+            return self.wfile.write(b)
+        if u.path == '/visual/scene':
+            v, wait = int(q.get('v', ['0'])[0] or 0), min(25.0, float(q.get('wait', ['0'])[0] or 0))
+            end = time.time() + wait
+            with self.hub.scene_cond:
+                while self.hub.scene_v == v and time.time() < end:
+                    self.hub.scene_cond.wait(min(5.0, max(0.01, end - time.time())))
+                return self._json(200, {'v': self.hub.scene_v, 'scene': self.hub.scene})
+        if u.path == '/visual/size':                      # the page says how big it draws, so the capture can crop
+            try:
+                self.hub.page_view = (int(float(q['w'][0])), int(float(q['h'][0])))
+            except (KeyError, ValueError):
+                return self._json(400, {'error': 'w and h: the canvas size in device pixels'})
+            return self._json(200, {'ok': True})
+        if u.path == '/levels':
+            return self._levels()
         if u.path == '/preview.jpg' and self.hub.output:
             p = self.hub.output.preview_path()
             if p and p.exists():
@@ -232,6 +289,22 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/pcm' and self.hub.output:
             return self.hub.output.serve_pcm(self)
         return self._json(404, {'error': 'no such page'})
+
+    def _levels(self):
+        """Server-sent events: one level frame per message, about 30 a second, while the page reads."""
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        lv, seq = self.hub.levels, -1
+        try:
+            while True:
+                lv.want(15.0)
+                seq, f = lv.wait(seq, 1.0)
+                self.wfile.write(b'data: ' + json.dumps(f).encode() + b'\n\n')
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)

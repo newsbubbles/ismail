@@ -216,3 +216,156 @@ def test_a_file_venue_records_the_stream(home, tmp_path):
     finally:
         hub.shutdown()
         srv.shutdown()
+
+
+# ------------------------------------------------------------------ the visual page (scene, levels)
+
+def test_scene_checks_layers_and_points_forward(home):
+    from ismail.stream import scene as SC
+    assert SC.check_scene(SC.DEFAULT)['layers'][0]['kind'] == 'bars'
+    for bad, says in [({'kind': 'lasers'}, 'kind is one of'),
+                      ({'kind': 'bars', 'glow': 1}, "unknown \\['glow'\\]"),
+                      ({'kind': 'bars', 'color': 'red'}, '#rrggbb'),
+                      ({'kind': 'bars', 'bands': [3, 20]}, 'band indices 0-15'),
+                      ({'kind': 'pulse', 'drive': 'loudness'}, "'level', 'beat'"),
+                      ({'kind': 'ring', 'x': 3}, 'x: a number from -0.5 to 1.5'),
+                      ({'kind': 'hits', 'tracks': {'kick': 'pink'}}, '<track name>')]:
+        with pytest.raises(ValueError, match=says):
+            SC.check_layer(0, bad)
+    with pytest.raises(ValueError, match='background'):
+        SC.check_scene({'background': ['#000000'] * 4})
+    hub = server.Hub(port=0)
+    try:
+        v = hub.scene_v
+        hub.op_scene(layers=[{'kind': 'pulse', 'drive': 'track:kick', 'color': '#ff0000'}], trails=0.5)
+        hub.op_scene(layers=[{'kind': 'text', 'text': 'hello', 'x': 0.1, 'y': 0.1}], replace=False)
+        assert [d['kind'] for d in hub.scene['layers']] == ['pulse', 'text'] and hub.scene['trails'] == 0.5
+        assert hub.scene_v == v + 2 and json.loads((home / 'scene.json').read_text())['layers'][1]['text'] == 'hello'
+        with pytest.raises(ValueError):
+            hub.op_scene(layers=[{'kind': 'bars', 'opacity': 2}])
+        assert len(hub.scene['layers']) == 2                       # a bad scene leaves the last good one up
+    finally:
+        hub.shutdown()
+
+
+def test_bands_put_a_tone_in_its_band_at_its_level():
+    import numpy as np
+    from ismail.stream import levels as L
+    t = np.arange(L.N_FFT) / L.SR
+    edges = L.band_edges()
+    for f in (60, 440, 3000, 12000):
+        b = L.analyse(0.5 * np.sin(2 * np.pi * f * t))['bands']
+        k = int(np.argmax(b))
+        assert edges[k] <= f < edges[k + 1] and abs(b[k] - 0.9) < 0.05    # -6 dBFS on a 60 dB scale, within 3 dB
+    quiet = L.analyse(np.zeros(L.N_FFT))
+    assert quiet['level'] == 0 and max(quiet['bands']) == 0
+
+
+class _Engine:
+    """A stand-in live engine: a tone on its master stream, and the clock and onsets ops."""
+    def __init__(self, registry):
+        import numpy as np
+        from http.server import BaseHTTPRequestHandler
+        from ismail.stream.levels import SR
+        t0, tone = time.time(), (0.5 * np.sin(2 * np.pi * 440 * np.arange(SR // 10) / SR) * 32767).astype('<i2')
+        pcm = np.repeat(tone, 2).tobytes()
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                try:
+                    while True:
+                        self.wfile.write(pcm)
+                        time.sleep(0.1)
+                except OSError:
+                    pass
+
+            def do_POST(self):
+                req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                beat = (time.time() - t0) * 2.0                           # 120 bpm
+                res = {'wall': time.time(), 'beat': beat, 'bpm': 120.0, 'bpb': 4}
+                if req['op'] == 'onsets':
+                    res['onsets'] = [{'t': 'kick', 'b': float(k), 'l': -6.0} for k in range(int(beat), int(beat) + 9)]
+                b = json.dumps({'ok': True, 'result': res}).encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        self.srv.daemon_threads = True
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        registry.mkdir(parents=True, exist_ok=True)
+        (registry / 'demo.json').write_text(json.dumps({'port': self.port, 'project': 'demo', 'started': t0}))
+
+
+def test_levels_read_the_engines_master_beat_and_notes(home, tmp_path, monkeypatch):
+    import numpy as np
+    from ismail.stream.levels import Levels, band_edges
+    monkeypatch.setenv('ISMAIL_LIVE_REGISTRY', str(tmp_path / 'engines'))
+    eng = _Engine(tmp_path / 'engines')
+    lv = Levels()
+    lv.want(8.0)
+    seen = []
+
+    def got():
+        seen.append(lv.wait(-1, 0.5)[1])
+        return seen[-1]['engine'] == eng.port and seen[-1]['beat'] is not None and any(x['hits'] for x in seen)
+    try:
+        assert wait_for(got, timeout=7)
+        f = seen[-1]
+        assert f['level'] > 0.8 and max(range(16), key=lambda k: f['bands'][k]) == int(np.searchsorted(band_edges(), 440)) - 1 and f['bpm'] == 120.0
+        assert {h['track'] for x in seen for h in x['hits']} == {'kick'}
+    finally:
+        lv.until = 0
+        eng.srv.shutdown()
+
+
+def test_the_page_its_scene_its_size_and_its_frames(home):
+    import urllib.request
+    hub = server.Hub(port=0)
+    server.Handler.hub = hub
+    srv = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+    srv.daemon_threads = True
+    hub.port = srv.server_address[1]
+    base = f'http://127.0.0.1:{hub.port}'
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def get(p, timeout=5):
+        with urllib.request.urlopen(base + p, timeout=timeout) as r:
+            return r.read()
+    try:
+        assert b'<title>ismail visual</title>' in get('/visual')
+        v = json.loads(get('/visual/scene?v=0'))['v']
+        got = {}
+        th = threading.Thread(target=lambda: got.update(json.loads(get(f'/visual/scene?v={v}&wait=10', 15))))
+        t0 = time.time()
+        th.start()
+        time.sleep(0.3)
+        hub.op_scene(layers=[{'kind': 'pulse'}])
+        th.join(5)
+        assert got['v'] == v + 1 and got['scene']['layers'][0]['kind'] == 'pulse' and time.time() - t0 < 3
+        get('/visual/size?w=1280&h=720')
+        assert hub.page_view == (1280, 720)
+        with urllib.request.urlopen(base + '/levels', timeout=5) as r:
+            line = r.readline()
+        f = json.loads(line[len(b'data: '):])
+        assert line.startswith(b'data: ') and f['engine'] is None and len(f['bands']) == 16
+        p = hub.op_page()
+        assert p['url'].endswith('/visual') and p['scene']['layers'][0]['kind'] == 'pulse'
+    finally:
+        hub.shutdown()
+        srv.shutdown()
+
+
+def test_page_mode_captures_the_page_window_cropped(tmp_path):
+    vis = {**output.DEFAULT_VISUAL, 'mode': 'page', 'crop': [8, 31, 1280, 720]}
+    a = output.build_encoder_args(vis, tmp_path, tmp_path / 'p.jpg', 'http://x/pcm', nvenc=False)
+    g = a[a.index('-filter_complex') + 1]
+    assert 'gdigrab' in a and f'title={output.PAGE_TITLE}' in a and 'crop=1280:720:8:31,' in g
+    assert 'showcqt' not in g and 'overlay' not in g.split('drawtext')[0]
