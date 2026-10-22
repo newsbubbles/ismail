@@ -13,8 +13,11 @@
 //             is pushed out to the surface, its turn kept; (2) an upper arm or forearm through a torso swings the elbow
 //             about the shoulder-hand line to the nearest clear angle (15 degree tries, then halved twice), the hand
 //             exact; (3) none clears (a straight arm has no bend to swing): the clavicle comes forward up to ALPHA_MAX;
-//             only then (4) the hand is pulled out of the way. The swing and the clavicle ease home (HOME_S) once clear.
+//             only then (4) the hand is pulled out of the way. The swing and the clavicle ease home (HOME_S) once clear;
+//             the swing turns at most SWING_RATE
 //   count     limbDepths: how deep each limb is inside a body, for the page's clip counter (actors.js)
+//   reach     softReach / reachIn: a hand target near or past full reach is eased in, so the elbow keeps a bend
+//   relax     relaxedArm: where a resting body's arms hang when they give way to someone moving near
 // Plain math on arrays (no three.js), no allocation per frame: a few hundred ball tests a frame for two bodies.
 // Vectors are [x, y, z] (Float64Array(3)); bone matrices are three's column-major matrixWorld.elements.
 
@@ -26,6 +29,9 @@ const SWING_STEP = Math.PI / 12, SWING_N = 7, SWING_MAX = 2.1;   // 15 degrees, 
 export const ALPHA_MAX = 22 * Math.PI / 180;                       // the clavicle's protraction toward the hand
 const ALPHA_N = 4, PULL_MAX = 0.2, PUSH_PAD = 0.003;
 export const HOME_S = 0.25;          // a swing or a protraction no longer needed eases back over this
+// the swing turns at most this fast (rad/s): the nearest clear angle can lie a radian or more from last frame's, and
+// taken at once the elbow popped up 10 cm in one frame (the 2026-10-22 drummer); a frame or three of touching is the cost
+export const SWING_RATE = 10;
 // where the slabs sit: t runs from the pelvis (0) to the shoulders' middle (1); the bone each rides
 export const SECTIONS = [['pelvis', -0.22, 0.3], ['spine_02', 0.3, 0.62], ['spine_03', 0.62, 0.98]];
 const UP_T = [0.5, 0.75, 1.0], FORE_T = [0.25, 0.5, 0.75, 1.0], SIGNS = [1, -1];
@@ -317,12 +323,61 @@ export function solveArm(arm) {
     phi = r.phi; cost = r.cost;
   }
   circle(job, _S, T);
+  if (job.dt > 0 && Math.abs(phi - prev.phi) > SWING_RATE * job.dt) {
+    phi = prev.phi + Math.sign(phi - prev.phi) * SWING_RATE * job.dt;
+    cost = costAt(job, _S, T, phi);
+  }
   const c = Math.cos(phi), s = Math.sin(phi);
   for (let i = 0; i < 3; i++) out.v[i] = _v[i] * c + _w[i] * s;
   copy(out.S, _S);
   out.alpha = aS; out.phi = phi; out.cost = cost; out.pushed = pushed; out.pulled = pulled;
   prev.alpha = Math.abs(alpha) < 0.005 ? 0 : alpha; prev.phi = Math.abs(phi) < 0.01 ? 0 : phi;   // home: exactly 0, so a resting arm is let be
   return out;
+}
+
+// ---- reach (the user, 2026-10-22, at the drummer's clip: "still pretty bad"): a hand target at or past the arm's full
+// length straightens the arm, and a straight arm has no bend to steer, so it reads stiff and robotic. A seated drummer
+// played from a standing take had his right hand target past reach in about half the frames. softReach eases the
+// target's distance from the shoulder in past REACH_KNEE of the arm toward REACH_MAX, never past it, so the elbow
+// always keeps a bend (about 45 degrees at REACH_MAX); under the knee nothing changes. e: the distance over the arm's
+// length; returns the eased one
+export const REACH_KNEE = 0.85, REACH_MAX = 0.95;
+export function softReach(e, knee = REACH_KNEE, max = REACH_MAX) {
+  if (!(e > knee)) return e;
+  const w = max - knee;
+  return knee + w * (1 - Math.exp(-(e - knee) / w));
+}
+// a job's target T brought in along the shoulder line (S) by softReach; out: [the raw reach, the eased one], both over
+// the arm's length (la + lb)
+export function reachIn(job, out = [0, 0]) {
+  sub(_d, job.T, job.S);
+  const L = job.la + job.lb, dist = len(_d), e = dist / L, k = softReach(e);
+  if (k < e && dist > 1e-9) axpy(job.T, job.S, k / e, _d);
+  out[0] = e; out[1] = k;
+  return out;
+}
+// how deep a ball (q, r) is inside any of the bodies given (0 outside): a resting body asks whether its held arms come
+// near someone moving (r taken large, as a margin)
+export function depthIn(bodies, q, r) {
+  let best = 0;
+  for (let i = 0; i < bodies.length; i++) { const d = ballDepth(bodies[i], q, r, null); if (d > best) best = d; }
+  return best;
+}
+// a relaxed arm for a body that has to give way (the user, 2026-10-22, on the partner holding her arms out stiffly
+// toward the dancer: "You can just soften it of course"): the elbow hangs low under the shoulder, a little forward and
+// out, and the forearm comes forward and in, a little down, so the hand rests in front of the hips. st: the body this
+// frame (its upper-chest slab gives up, forward and left), S the shoulder, sgn +1 left, -1 right; E and H filled
+export const RELAX_ELBOW = [0.15, 0.12], RELAX_FORE = [0.7, -0.3, -0.25];   // elbow forward, out; forearm forward, up, out
+export function relaxedArm(st, S, la, lb, sgn, E, H) {
+  const s = st.secs[st.secs.length - 1], U = s.U, Z = s.Z, X = s.X;
+  const [ef, eo] = RELAX_ELBOW, [ff, fu, fo] = RELAX_FORE;
+  for (let i = 0; i < 3; i++) _q[i] = -U[i] + ef * Z[i] + eo * sgn * X[i];
+  normalize(_q);
+  axpy(E, S, la, _q);
+  for (let i = 0; i < 3; i++) _q[i] = ff * Z[i] + fu * U[i] + fo * sgn * X[i];
+  normalize(_q);
+  axpy(H, E, lb, _q);
+  return H;
 }
 
 // ---- the counter: how deep each limb of an arm is, in itself and in the bodies near. S E H: shoulder, elbow, wrist;

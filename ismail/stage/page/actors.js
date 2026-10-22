@@ -14,7 +14,7 @@ import { cutout, b2tPos, GIZMO } from './editor.js';
 import { world } from './world.js';
 import { initControl } from './control.js';
 import { mixTake } from './interp.js';
-import { fitBody, newState, bodyNow, solveArm as solveArmMath, newArm, newDepths, limbDepths, overlapOf, CLIP_M, NEAR_M } from './bodycollide.js';
+import { fitBody, newState, bodyNow, solveArm as solveArmMath, newArm, newDepths, limbDepths, overlapOf, reachIn, depthIn, relaxedArm, CLIP_M, NEAR_M } from './bodycollide.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
@@ -155,6 +155,11 @@ const Y = new THREE.Vector3(0, 1, 0);
 // a reach across with a straight arm turns the chest toward it (bodycollide.js step 3, with the clavicle): up to REACH,
 // as the hand crosses REACH_CROSS of the arm past the body's middle line and the arm is REACH_STRAIGHT of its length
 const REACH = D2R(15), REACH_CROSS = [0.15, 0.5], REACH_STRAIGHT = [0.8, 0.97], REACH_TAU = 0.15;
+// a hand sent past REACH_LEAN_FROM of the arm leans the chest toward it (the 2026-10-22 drummer: a seated body played
+// from a standing take had its hand target up to 18 cm past reach), the tilt atan(excess / REACH_LEAN_H) at most
+// REACH_LEAN_MAX, spread up the spine (REACH_LEAN_W), the neck and head keeping their turn; the hips do not move
+const REACH_LEAN_FROM = 0.9, REACH_LEAN_H = 0.45, REACH_LEAN_MAX = D2R(15);
+const REACH_LEAN_W = { spine_01: 0.5, spine_02: 0.8, spine_03: 1 };
 // the page's clip counter: a limb CLIP_M or more inside a body goes to the events, the first at once, then at most
 // every CLIP_EVERY_S per limb and body while it lasts (with how many frames and how deep); hips closer than two torsos
 // allow, every OVERLAP_EVERY_S per pair
@@ -335,7 +340,8 @@ export function initActors(ed, live) {
     let B = bodies.get(rig.root);
     if (!B) {
       B = { rig, person, st: newState(rig.bodyFit, person), arms: { l: newArm(), r: newArm() }, depths: { l: newDepths(), r: newDepths() },
-        others: [], othersRigs: [], matOf: (n) => rig.bones[n].matrixWorld.elements, clip: [], log: new Map(), overlap: [], ms: 0, adjusted: false, moving: false };
+        others: [], othersRigs: [], matOf: (n) => rig.bones[n].matrixWorld.elements, clip: [], log: new Map(), overlap: [], ms: 0, adjusted: false, moving: false,
+        rch: { l: [0, 0], r: [0, 0] }, relax: { l: 0, r: 0 }, relaxT: { l: -Infinity, r: -Infinity } };
       bodies.set(rig.root, B);
     }
     if (person) B.person = B.st.name = person;
@@ -383,21 +389,31 @@ export function initActors(ed, live) {
     job.fwd[0] = Z[0] / fl; job.fwd[1] = 0; job.fwd[2] = Z[2] / fl;
     job.lat[0] = sgn * job.fwd[2]; job.lat[1] = 0; job.lat[2] = -sgn * job.fwd[0];
     job.T[0] = target.x; job.T[1] = target.y; job.T[2] = target.z;
-    if (handQ && fit.palmL) av.copy(fit.palmL[sd]).applyQuaternion(handQ);
-    else av.set(job.T[0] - job.S[0], job.T[1] - job.S[1], job.T[2] - job.S[2]).setLength(0.08);
-    job.palm[0] = av.x; job.palm[1] = av.y; job.palm[2] = av.z;
     job.la = fit.la[sd]; job.lb = fit.lb[sd];
-    job.v0[0] = pole.x - job.S[0]; job.v0[1] = pole.y - job.S[1]; job.v0[2] = pole.z - job.S[2];
-    job.rU = fit.rad[N.rU]; job.rF = fit.rad[N.rF]; job.rH = fit.hand;
-    job.self = B.st; job.others = othersOf(B);
-    job.dt = arm.t == null || t == null ? 0 : THREE.MathUtils.clamp(t - arm.t, 0, 0.1);
-    arm.t = t;
-    // the chest's share of a straight reach across (chestFollow reads it next frame)
+    // the chest's share of a straight reach across (chestFollow reads it next frame), from the target as asked
     if (st) {
       const dx = job.T[0] - job.S[0], dy = job.T[1] - job.S[1], dz = job.T[2] - job.S[2], L = job.la + job.lb;
       const cross = -(dx * job.lat[0] + dz * job.lat[2]) / L, straight = Math.hypot(dx, dy, dz) / L;
       st.reachAsk = (st.reachAsk || 0) - sgn * REACH * smooth01(cross, REACH_CROSS) * smooth01(straight, REACH_STRAIGHT);
     }
+    // a moving body's hand near or past full reach eased in, so the elbow keeps a bend (bodycollide.js softReach); rch:
+    // the reach as asked and as drawn, over the arm's length (the capture probe)
+    const rch = B.rch[sd];
+    if (reachOn && st) {
+      const dx = job.T[0] - job.S[0], dz = job.T[2] - job.S[2], dh = Math.hypot(dx, dz), L = job.la + job.lb;
+      reachIn(job, rch);
+      // and the chest leans toward a hand past REACH_LEAN_FROM (chestFollow reads it next frame), level only
+      const ex = (rch[0] - REACH_LEAN_FROM) * L;
+      if (ex > 0 && dh > 1e-6) { st.leanAsk = st.leanAsk || new THREE.Vector3(); st.leanAsk.x += ex * dx / dh; st.leanAsk.z += ex * dz / dh; }
+    } else rch[0] = rch[1] = Math.hypot(job.T[0] - job.S[0], job.T[1] - job.S[1], job.T[2] - job.S[2]) / (job.la + job.lb);
+    if (handQ && fit.palmL) av.copy(fit.palmL[sd]).applyQuaternion(handQ);
+    else av.set(job.T[0] - job.S[0], job.T[1] - job.S[1], job.T[2] - job.S[2]).setLength(0.08);
+    job.palm[0] = av.x; job.palm[1] = av.y; job.palm[2] = av.z;
+    job.v0[0] = pole.x - job.S[0]; job.v0[1] = pole.y - job.S[1]; job.v0[2] = pole.z - job.S[2];
+    job.rU = fit.rad[N.rU]; job.rF = fit.rad[N.rF]; job.rH = fit.hand;
+    job.self = B.st; job.others = othersOf(B);
+    job.dt = arm.t == null || t == null ? 0 : THREE.MathUtils.clamp(t - arm.t, 0, 0.1);
+    arm.t = t;
     const out = solveArmMath(arm);
     if (Math.abs(out.alpha) > 1e-4 && clav) setWorldQ(clav, aq.setFromAxisAngle(Y, out.alpha).multiply(clav.getWorldQuaternion(tq2)));
     B.ms += realNow() - t0;
@@ -453,16 +469,34 @@ export function initActors(ed, live) {
     B.ms += realNow() - t0;
   }
   // a body resting in its start pose next to someone moving (the couple: her held arms ended in his chest): each frame
-  // its arms start from the pose again, and an arm through a body near is solved like a moving one, the hand's turn and
-  // the pose's elbow kept; nobody near, the pose as it was
+  // its arms start from the pose again; once an arm comes within RELAX_NEAR of someone moving, both give way softly (the
+  // user, 2026-10-22, on her arms held out stiffly toward him: "You can just soften it of course"): they ease over
+  // RELAX_IN_S from the pose's toward a relaxed arm (bodycollide.js relaxedArm: elbow low and bent, hand in front of the
+  // hips), each hand turned with its forearm, and are solved like moving arms, so they stay out of both bodies;
+  // RELAX_HOLD_S after nobody is near they ease back over RELAX_OUT_S. Nobody near, the pose as it was
+  const RELAX_NEAR = 0.25, RELAX_IN_S = 0.3, RELAX_OUT_S = 0.8, RELAX_HOLD_S = 1.5;
+  const rE = new Float64Array(3), rH = new Float64Array(3), rS = new Float64Array(3), rQ = new Float64Array(3), movingNear = [];
+  const rT = new THREE.Vector3(), rP = new THREE.Vector3(), rq = new THREE.Quaternion();
+  function relaxWant(B, S, sd) {                              // the pose's arm within RELAX_NEAR of someone moving?
+    movingNear.length = 0;
+    for (let i = 0; i < B.othersRigs.length; i++) if (B.othersRigs[i].moving) movingNear.push(B.others[i]);
+    if (!movingNear.length) return false;
+    const fit = B.rig.bodyFit, N = SIDE[sd], h = S.handW[sd], e = S.elbowW[sd];
+    rQ[0] = h.x; rQ[1] = h.y; rQ[2] = h.z;
+    if (depthIn(movingNear, rQ, fit.hand + RELAX_NEAR) > 0) return true;
+    rQ[0] = (h.x + e.x) / 2; rQ[1] = (h.y + e.y) / 2; rQ[2] = (h.z + e.z) / 2;
+    if (depthIn(movingNear, rQ, fit.rad[N.rF] + RELAX_NEAR) > 0) return true;
+    rQ[0] = e.x; rQ[1] = e.y; rQ[2] = e.z;
+    return depthIn(movingNear, rQ, fit.rad[N.rU] + RELAX_NEAR) > 0;
+  }
   const ARM_CHAIN = { l: ['clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l'], r: ['clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r'] };
   function restContact(r, t) {
     const B = bodies.get(r.rig.root), S = r.S;
     if (!B || !B.st.on || !S) return;
     const t0 = realNow();
     othersOf(B);
-    const near = B.othersRigs.some((O) => O.moving);
-    if (!near && !B.adjusted) { B.clip.length = 0; return; }
+    const near = B.othersRigs.some((O) => O.moving), easing = B.relax.l > 0 || B.relax.r > 0;   // easing: back from a give-way
+    if (!near && !B.adjusted && !easing) { B.clip.length = 0; return; }
     const rig = r.rig;
     for (const sd of SIDES) {
       const chain = ARM_CHAIN[sd];
@@ -471,21 +505,39 @@ export function initActors(ed, live) {
       rig.bones[chain[0]].updateMatrixWorld(true);
     }
     B.adjusted = false;
-    if (!near || !bodyOn) { B.clip.length = 0; return; }
+    if ((!near && !easing) || !bodyOn) { B.clip.length = 0; return; }
     B.ms += realNow() - t0;
+    // the give-way: both arms eased toward the relaxed arm while someone moving is near either of the pose's arms (one
+    // arm dropped and the other held out read as half a hold), held a moment after
+    if (relaxOn && SIDES.some((sd) => S.handW[sd] && rig.bones[SIDE[sd].ha] && relaxWant(B, S, sd))) B.relaxT.l = B.relaxT.r = t;
     for (const sd of SIDES) {
       if (!S.handW[sd] || !rig.bones[SIDE[sd].ha]) continue;
       const D = limbsNow(B, sd, false), arm = B.arms[sd];              // the pose as it stands: through a body near?
-      if (Math.max(D.other[0], D.other[1], D.other[2]) < 0.012 && !(arm.prev.phi || arm.prev.alpha)) { arm.t = t; continue; }
-      const hq = S.handQ[sd];
-      armSolve(null, rig, sd, S.handW[sd], S.elbowW[sd], hq, t);
+      const dt = arm.t == null || t == null ? 0 : THREE.MathUtils.clamp(t - arm.t, 0, 0.1);
+      const up = relaxOn && t - B.relaxT[sd] <= RELAX_HOLD_S;
+      B.relax[sd] += ((up ? 1 : 0) - B.relax[sd]) * (1 - Math.exp(-dt / (up ? RELAX_IN_S : RELAX_OUT_S)));
+      if (B.relax[sd] < 0.002) B.relax[sd] = 0;
+      const w = B.relax[sd];
+      if (!w && Math.max(D.other[0], D.other[1], D.other[2]) < 0.012 && !(arm.prev.phi || arm.prev.alpha)) { arm.t = t; continue; }
+      let hq = S.handQ[sd], target = S.handW[sd], pole = S.elbowW[sd];
+      if (w) {
+        const N = SIDE[sd], fit = rig.bodyFit;
+        posOf(rig.bones[N.up], rS);
+        relaxedArm(B.st, rS, fit.la[sd], fit.lb[sd], N.sgn, rE, rH);
+        target = rT.set(rH[0], rH[1], rH[2]).sub(S.handW[sd]).multiplyScalar(w).add(S.handW[sd]);
+        pole = rP.set(rE[0], rE[1], rE[2]).sub(S.elbowW[sd]).multiplyScalar(w).add(S.elbowW[sd]);
+      }
+      armSolve(null, rig, sd, target, pole, hq, t);
+      // the hand turns with its forearm from the pose's (its grip on the forearm kept)
+      if (w && S.loQ && S.loQ[sd]) hq = rig.bones[SIDE[sd].lo].getWorldQuaternion(rq).multiply(S.loQ[sd].clone().invert()).multiply(S.handQ[sd]);
       setWorldQ(rig.bones[SIDE[sd].ha], hq);
       B.adjusted = true;
     }
     countClips(B, t);
   }
-  // collision on or off for this page (stage live command body_collide {on}: to compare, and a way out if it misbehaves)
-  let bodyOn = true;
+  // collision on or off for this page (stage live command body_collide {on}: to compare, and a way out if it misbehaves);
+  // reach: the hands eased in from full reach; relax: a resting body's arms give way softly (both on by default)
+  let bodyOn = true, reachOn = true, relaxOn = true;
 
   // ---- one frame of the take onto the rig: the built-in human map, then the control map's drives (control.js)
   function prep(st, raw) {                                 // a frame as the person takes it: turned, mirrored
@@ -520,10 +572,12 @@ export function initActors(ed, live) {
     const fw = rig.fwd.clone().applyQuaternion(base).setY(0).normalize();
     const cue = handCue(l && P(l), r && P(r), hipAt, fw);
     const yaws = spineYaw(st, f, look, cue);
-    const I = new THREE.Quaternion();
+    const I = new THREE.Quaternion(), lq = reachLean(st);
     for (const [n, k] of SPINE) {
       const q = base.clone().multiply(new THREE.Quaternion().slerpQuaternions(I, swing, LOOK[n][1])).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaws[n]));
       if (lean) q.premultiply(new THREE.Quaternion().slerp(lean, Math.min(1, k * 1.25)));
+      const rl = leanPart(lq, n);
+      if (rl) q.premultiply(rl);
       setWorldQ(rig.bones[n], q.multiply(rig.rest[n].q));
     }
   }
@@ -549,7 +603,7 @@ export function initActors(ed, live) {
     const dt = c ? t - c.t : 0;
     if (!c || dt < 0 || dt > GAP_S) {
       const tot = look0 + look, x = THREE.MathUtils.clamp(tot - THREE.MathUtils.clamp(tot, -CHEST_LIMIT, CHEST_LIMIT), -CHEST_MAX, CHEST_MAX);
-      c = st.chest = { x, h: x, v: 0, t, hw, spd: 0, dbg: null };
+      c = st.chest = { x, h: x, v: 0, t, hw, spd: 0, dbg: null, lean: new THREE.Vector3() };
     } else if (dt > 1e-5) {
       c.spd += (Math.abs(wrapPi(hw - c.hw)) / dt - c.spd) * (1 - Math.exp(-dt / HEAD_SPEED_S));
       c.hw = hw;
@@ -565,13 +619,28 @@ export function initActors(ed, live) {
       // a straight arm reaching across asks the chest to turn its shoulder after it (armSolve, last frame's arms)
       c.reach = (c.reach || 0) + ((st.reachAsk || 0) - (c.reach || 0)) * (1 - Math.exp(-dt / REACH_TAU));
       g = THREE.MathUtils.clamp(g + c.reach, -CHEST_MAX, CHEST_MAX);
+      // a hand past reach leans the chest toward it (armSolve, last frame's arms; reachLean)
+      if (st.leanAsk || c.lean.lengthSq() > 0) c.lean.lerp(st.leanAsk || tv.set(0, 0, 0), 1 - Math.exp(-dt / REACH_TAU));
+      if (c.lean.lengthSq() < 1e-8) c.lean.set(0, 0, 0);
       const om = 1 / CHEST_TAU, y = c.x - g, e = Math.exp(-om * dt), j = (c.v + om * y) * dt;
       c.x = g + (y + j) * e; c.v = (c.v - om * j) * e; c.t = t;
-      c.dbg = { L: r1(L), h: r1(c.h), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null, reach: r1(c.reach) };
+      c.dbg = { L: r1(L), h: r1(c.h), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null, reach: r1(c.reach),
+        lean: +(Math.hypot(c.lean.x, c.lean.z) * 100).toFixed(1) };
     }
     st.reachAsk = 0;                                       // the arms ask again this frame
+    if (st.leanAsk) st.leanAsk.set(0, 0, 0);
     return c.x;
   }
+  // the chest's lean toward a hand past reach (chestFollow's lean, metres level): the whole tilt, or null; each spine
+  // bone takes REACH_LEAN_W of it
+  const leanQ = new THREE.Quaternion(), leanAx = new THREE.Vector3();
+  function reachLean(st) {
+    const v = st.chest && st.chest.lean, d = v ? Math.hypot(v.x, v.z) : 0;
+    if (d < 1e-4) return null;
+    leanAx.set(v.z / d, 0, -v.x / d);                       // up turned toward v: about (Y x v)
+    return leanQ.setFromAxisAngle(leanAx, Math.min(REACH_LEAN_MAX, Math.atan2(d, REACH_LEAN_H)));
+  }
+  const leanPart = (lq, n) => (lq && REACH_LEAN_W[n] ? new THREE.Quaternion().slerp(lq, REACH_LEAN_W[n]) : null);
   // the hands' twist about the vertical through the middle of the hips (the user, 2026-10-22), yaw only (a lean does
   // not count): the hands swinging round that axis turn the chest, read two ways that must agree, the line from the
   // right hand to the left turning (seen from above) and the hands' middle bearing round the axis (each hand's bearing
@@ -607,6 +676,29 @@ export function initActors(ed, live) {
       .addScaledVector(back, 0.4 - 0.6 * cross + 1.0 * pull);
   }
   const PULL_FROM = 0.3, PULL_TO = 0.1;
+  // the drawn hips no higher than both legs reach their feet (planted, or where a step has them now), LEG_REACH of the
+  // leg's length: the body hangs at the eyes' height, and leaning off its feet a leg fell up to 2.4 cm short, its foot
+  // off the floor, in 8% of a dance's frames (2026-10-22). A foot too far to reach by sinking is left to its step
+  const LEG_REACH = 0.995;
+  function legsReach(st, base, hip, now) {
+    const { rig } = st;
+    let top = Infinity;
+    for (const sd of ['l', 'r']) {
+      const ft = st.feet[sd], th = rig.rest[`thigh_${sd}`], ca = rig.rest[`calf_${sd}`], fo = rig.rest[`foot_${sd}`];
+      if (!ft || !ft.at || !th || !ca || !fo) continue;
+      const at = ft.step ? ft.step.from.clone().lerp(ft.step.to, ease(THREE.MathUtils.clamp((now - ft.step.t0) / STEP_S, 0, 1))) : ft.at;
+      const off = th.p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base);
+      const leg = LEG_REACH * (th.p.distanceTo(ca.p) + ca.p.distanceTo(fo.p));
+      const hx = hip.x + off.x - at.x, hz = hip.z + off.z - at.z, h2 = hx * hx + hz * hz;
+      if (h2 < leg * leg) top = Math.min(top, at.y + Math.sqrt(leg * leg - h2) - off.y);
+    }
+    return hip.y > top ? hip.clone().setY(top) : hip;
+  }
+  // a start pose's own grip (hands: 'pose') points its elbow at the pose's elbow, lowered, and POSE_POLE_OUT out to its
+  // side: lowered only, a hand drawn in under the shoulder put the pole on the arm's own line, where it no longer said
+  // which way, and the elbow flipped from the side to the front between two frames (the 2026-10-22 drummer, 5.8 s into
+  // his clip; out only near that line, the flips stayed)
+  const POSE_POLE_OUT = 0.25;
   function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
@@ -617,10 +709,12 @@ export function initActors(ed, live) {
     const delta = qc.clone().multiply(st.alignInv);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(qc).setY(0);
     const yaw = new THREE.Quaternion().setFromUnitVectors(rig.fwd, fwd.lengthSq() > 1e-6 ? fwd.normalize() : rig.fwd);
-    // the headset is the eyes, not the head bone: the bone sits EYE_UP below and EYE_FWD behind them, turned with the
-    // head (the body hung from the eyes stood 8 cm high and 9 cm forward, every hand landing that much low and back of
-    // it: the 2026-10-22 research; the start-pose half had it right)
-    const head = P(f.head).sub(new THREE.Vector3(0, EYE_UP, -EYE_FWD).applyQuaternion(qc));
+    // the headset is the eyes, not the head bone: the bone sits EYE_FWD behind them, turned with the head (the body
+    // hung from the eyes stood 9 cm forward, every hand landing that much back of it: the 2026-10-22 research). Only
+    // the level part of the offset: the height stays the eyes' (the user, 2026-10-22, on the body 8 cm lower that the
+    // whole offset gave: "Too low, go back")
+    const eyeOff = new THREE.Vector3(0, EYE_UP, -EYE_FWD).applyQuaternion(qc).setY(0);
+    const head = P(f.head).sub(eyeOff);
     const pin = st.pins && st.pins.hips;
     // the hips under the head, turned with it; or pinned to a seat, facing the person's own way
     const pel = rig.bones.pelvis;
@@ -655,6 +749,7 @@ export function initActors(ed, live) {
       b.bal.y = hipAt.y; b.balT = f.t;
       hipDraw = b.bal.clone();
     } else if (st.body) st.body.held = st.body.under = null;
+    if (!pin) hipDraw = legsReach(st, base, hipDraw, f.t);
     st.lastHip = hipAt.clone(); st.lastYaw = base.clone();             // the body's facing, not the head's
     pel.parent.updateMatrixWorld(true);
     pel.position.copy(pel.parent.worldToLocal(hipDraw.clone()));
@@ -1023,7 +1118,7 @@ export function initActors(ed, live) {
     scene.add(r.rig.root);
     r.rig.root.updateMatrixWorld(true);
     const RB = torsoNow(r.rig, person);                     // its slabs, for the bodies that come near (restContact)
-    if (RB) { RB.moving = false; RB.adjusted = false; for (const sd of ['l', 'r']) { RB.arms[sd].prev.phi = 0; RB.arms[sd].prev.alpha = 0; } }
+    if (RB) { RB.moving = false; RB.adjusted = false; for (const sd of ['l', 'r']) { RB.arms[sd].prev.phi = 0; RB.arms[sd].prev.alpha = 0; RB.relax[sd] = 0; RB.relaxT[sd] = -Infinity; } }
     it.obj.visible = false;
     fitProxy(person, r.rig);
     live.emit('actor_rest', { person, start: spec });
@@ -1281,7 +1376,7 @@ export function initActors(ed, live) {
       if (bs.pelvis && bs.pelvis.pose) putPelvis(b2tV(bs.pelvis.pose.head));
     } else throw new Error("start pose is 'rest', {take, frame} or {bones: {...}} from Blender");
     rig.root.updateMatrixWorld(true);
-    const S = { spec, locals: {}, pelvisLocal: pel.position.clone(), handW: {}, handQ: {}, elbowW: {}, fingerQ: {} };
+    const S = { spec, locals: {}, pelvisLocal: pel.position.clone(), handW: {}, handQ: {}, elbowW: {}, loQ: {}, fingerQ: {} };
     // where the start pose faces (the pelvis's turn from rest, flat): the user's hands are turned onto it at GO
     S.fwdW = rig.rest.pelvis ? rig.fwd.clone().applyQuaternion(pel.getWorldQuaternion(new THREE.Quaternion()).multiply(rig.rest.pelvis.q.clone().invert())).setY(0).normalize() : null;
     for (const [n, b] of Object.entries(rig.bones)) S.locals[n] = b.quaternion.clone();
@@ -1291,6 +1386,7 @@ export function initActors(ed, live) {
       S.handW[sd] = rig.bones[ha].getWorldPosition(new THREE.Vector3());
       S.handQ[sd] = rig.bones[ha].getWorldQuaternion(new THREE.Quaternion());
       S.elbowW[sd] = rig.bones[lo].getWorldPosition(new THREE.Vector3());
+      S.loQ[sd] = rig.bones[lo].getWorldQuaternion(new THREE.Quaternion());
       for (const fg of Object.keys(FINGER_JOINTS)) for (let k = 1; k <= 3; k++) {
         const b = rig.bones[`${fg}_0${k}_${sd}`];
         if (b) S.fingerQ[b.name] = b.getWorldQuaternion(new THREE.Quaternion());
@@ -1395,10 +1491,12 @@ export function initActors(ed, live) {
       const a = fw('spine_03'), b = fw('head');
       S.look0 = THREE.MathUtils.clamp(Math.atan2(new THREE.Vector3().crossVectors(a, b).y, a.dot(b)), -LOOK0_MAX, LOOK0_MAX);
     }
-    const yaws = spineYaw(st, f, look, cue, S.look0);
+    const yaws = spineYaw(st, f, look, cue, S.look0), lq = reachLean(st);
     for (const [n, k] of SPINE) {                           // the look over the spine as in poseBase (spineYaw, LOOK)
       const q = new THREE.Quaternion().slerpQuaternions(I, swing, LOOK[n][1]).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaws[n]));
       if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
+      const rl = leanPart(lq, n);
+      if (rl) q.premultiply(rl);
       setWorldQ(rig.bones[n], q.multiply(held[n]));
     }
     torsoNow(rig, st.person);                               // the torso's slabs where the spine now is (armSolve)
@@ -1424,7 +1522,7 @@ export function initActors(ed, live) {
       const sgn = sd === 'l' ? 1 : -1, lateral = new THREE.Vector3().crossVectors(Y, fwdChest).multiplyScalar(sgn);
       const P0 = rig.bones.pelvis.getWorldPosition(new THREE.Vector3());
       const pole = byUser ? elbowPole(rig, sd, sh, target, lateral, fwdChest.clone().negate())
-        : S.elbowW[sd].clone().add(B.off).sub(P0).applyQuaternion(B.yaw).add(P0).add(new THREE.Vector3(0, -0.3, 0));
+        : S.elbowW[sd].clone().add(B.off).sub(P0).applyQuaternion(B.yaw).add(P0).add(new THREE.Vector3(0, -0.3, 0)).addScaledVector(lateral, POSE_POLE_OUT);
       const hq = byUser && rig.cal[ha] ? M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha])
         : qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone());
       armSolve(st, rig, sd, target, pole, hq, f.t);
@@ -1596,8 +1694,20 @@ export function initActors(ed, live) {
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
   // the clip counter's last frame for a person ([limb, with, cm] at 2 cm or more), hips too close ([other, apart, need]
   // cm), and the last frame's cost (ms, real time)
-  const clipOf = (person) => { const r = shownRig(person), B = r && bodies.get(r.root); return B ? { clip: B.clip, overlap: B.overlap } : null; };
-  live.handlers.body_collide = (c) => { if (c.on != null) bodyOn = !!c.on; return { on: bodyOn, ...timing }; };
+  const clipOf = (person) => {
+    const r = shownRig(person), B = r && bodies.get(r.root);
+    if (!B) return null;
+    const rc = (a) => [+a[0].toFixed(3), +a[1].toFixed(3)];
+    const ao = (o) => [+o.phi.toFixed(2), +o.alpha.toFixed(2), +(o.pushed * 100).toFixed(1), +(o.pulled * 100).toFixed(1)];   // swing, clavicle (rad), cm
+    return { clip: B.clip, overlap: B.overlap, rch: { l: rc(B.rch.l), r: rc(B.rch.r) }, relax: { l: +B.relax.l.toFixed(2), r: +B.relax.r.toFixed(2) },
+      arm: { l: ao(B.arms.l.out), r: ao(B.arms.r.out) } };
+  };
+  live.handlers.body_collide = (c) => {
+    if (c.on != null) bodyOn = !!c.on;
+    if (c.reach != null) reachOn = !!c.reach;
+    if (c.relax != null) relaxOn = !!c.relax;
+    return { on: bodyOn, reach: reachOn, relax: relaxOn, ...timing };
+  };
   return { play, stop, follow, setSource, setRecent, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
     rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf, clipOf, timing: () => timing };
 }

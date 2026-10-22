@@ -935,20 +935,25 @@ def stage_actor_pose(scene: str, person: str, t: float = None) -> str:
 
 
 @op()
-def stage_body_collide(scene: str, on: bool = None) -> str:
+def stage_body_collide(scene: str, on: bool = None, reach: bool = None, relax: bool = None) -> str:
     """Bodies keep their arms out of themselves and out of each other (page command: body_collide). Each body's torso
     is three slabs fitted from its own skin at load, riding the spine; each frame a hand target inside a torso or a head
     (its own, or a body whose hips are within 1.5 m) is pushed out to the surface, an upper arm or forearm through a
     torso swings the elbow clear about the shoulder-hand line, a straight arm brings the clavicle forward (up to 22
     degrees) and turns the chest after a reach across, and only then is the hand pulled away. A body resting in its
-    start pose next to someone moving (a dance partner) bends its held arms out of the way. On by default; on=False
-    turns it off on this page until on=True or a reload (to compare); on omitted only reads. The page counts what still
+    start pose next to someone moving (a dance partner) lets its held arms give way softly: once either arm comes within
+    25 cm of the one moving, both ease (0.3 s) toward a relaxed arm, elbow low and bent, hand in front of the hips, and
+    back to the pose 1.5 s after (relax). A moving body's hand sent near or past the arm's full length is eased in from 85%
+    of it toward at most 95%, so the elbow always keeps a bend (reach; a straight arm reads stiff). On by default;
+    on=False turns it all off on this page until on=True or a reload (to compare); reach=False or relax=False turns
+    off only that part; all omitted only reads. The page counts what still
     clips: event body_clip {person, limb (upper_l, fore_r, hand_l ...), with (self or the other person), depth_cm,
     deepest_cm, frames, t} for a limb 2 cm or more inside, the first at once, then at most every 2 s per limb; and
     body_overlap {person, other, apart_cm, need_cm} when two people's hips stand closer than their bodies allow (a
-    placement to fix in the scene; the feet are not moved). Page replies {on, update_ms, body_ms}: the last frame's
-    cost of all the bodies and of the collision part."""
-    return page_cmd(scene, 'body_collide', {} if on is None else {'on': bool(on)}, timeout=20)
+    placement to fix in the scene; the feet are not moved). Page replies {on, reach, relax, update_ms, body_ms}: the
+    last frame's cost of all the bodies and of the collision part."""
+    args = {k: bool(v) for k, v in (('on', on), ('reach', reach), ('relax', relax)) if v is not None}
+    return page_cmd(scene, 'body_collide', args, timeout=20)
 
 
 @op(mutates=True)

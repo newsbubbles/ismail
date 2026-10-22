@@ -182,7 +182,8 @@ function probeOne(actors, person, t) {
   return { t: +t.toFixed(3), pel: at('pelvis'), hd: at('head'), fl: at('foot_l'), fr: at('foot_r'), hip: r(st.lastHip),
     bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: fl.step ? fl.step.why || true : false, sr: fr.step ? fr.step.why || true : false,
     mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]),
-    short: Object.keys(rig.short || {}).filter((k) => rig.short[k]), hy: yawOf(rig, 'head'), cy: yawOf(rig, 'spine_03'), py: yawOf(rig, 'pelvis'),
+    short: Object.keys(rig.short || {}).filter((k) => rig.short[k]),
+    shortcm: Object.fromEntries(Object.entries(rig.short || {}).filter(([, v]) => v > 0).map(([k, v]) => [k, +(v * 100).toFixed(1)])), hy: yawOf(rig, 'head'), cy: yawOf(rig, 'spine_03'), py: yawOf(rig, 'pelvis'),
     hl: at('hand_l'), hr: at('hand_r'), kl: at('calf_l'), kr: at('calf_r'), tl: at('thigh_l'), tr: at('thigh_r'),
     // the arms (2026-10-22: the wrists wring, the elbows go in): shoulders, elbows, and each wrist's twist (the hand's
     // turn about the forearm from their rest relation, degrees); the chest's follow (limit, hand cue) where there is one
