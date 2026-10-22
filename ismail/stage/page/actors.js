@@ -339,20 +339,23 @@ export function initActors(ed, live) {
     const dt = c ? t - c.t : 0;
     if (!c || dt < 0 || dt > GAP_S) {
       const x = THREE.MathUtils.clamp(look - THREE.MathUtils.clamp(look, -CHEST_LIMIT, CHEST_LIMIT), -CHEST_MAX, CHEST_MAX);
-      c = st.chest = { x, v: 0, t, hw, spd: 0, dbg: null };
+      c = st.chest = { x, h: x, v: 0, t, hw, spd: 0, dbg: null };
     } else if (dt > 1e-5) {
       c.spd += (Math.abs(wrapPi(hw - c.hw)) / dt - c.spd) * (1 - Math.exp(-dt / HEAD_SPEED_S));
       c.hw = hw;
       const L = CHEST_LIMIT - (CHEST_LIMIT - CHEST_LIMIT_FAST) * THREE.MathUtils.clamp(c.spd / CHEST_FAST, 0, 1);
-      const off = look - c.x;
-      // past the limit: the head's turn less it; within it the chest does not follow the head, but it comes home to the
-      // hips' facing over CHEST_HOME_S (without that it stayed turned up to the limit after a look aside and back)
-      let g = Math.abs(off) > L ? look - Math.sign(off) * L : c.x * Math.exp(-dt / CHEST_HOME_S);
+      // the head's ask, kept apart from the chest itself (h): past the limit the head's turn less it; within it the
+      // chest does not follow the head, but it comes home to the hips' facing over CHEST_HOME_S (without that it stayed
+      // turned up to the limit after a look aside and back). The hands' cue is blended with that ask, not fed back into
+      // it (fed back, a weak cue held each frame outweighed the slow homing: Sam's chest stayed 10 deg turned for 7 s)
+      const off = look - c.h;
+      c.h = Math.abs(off) > L ? look - Math.sign(off) * L : c.h * Math.exp(-dt / CHEST_HOME_S);
+      let g = c.h;
       if (cue && cue.w > 0) g += (cue.a - g) * cue.w;
       g = THREE.MathUtils.clamp(g, -CHEST_MAX, CHEST_MAX);
       const om = 1 / CHEST_TAU, y = c.x - g, e = Math.exp(-om * dt), j = (c.v + om * y) * dt;
       c.x = g + (y + j) * e; c.v = (c.v - om * j) * e; c.t = t;
-      c.dbg = { L: r1(L), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null };
+      c.dbg = { L: r1(L), h: r1(c.h), g: r1(g), x: r1(c.x), look: r1(look), spd: Math.round(THREE.MathUtils.radToDeg(c.spd)), w: cue ? +cue.w.toFixed(2) : 0, a: cue ? r1(cue.a) : null };
     }
     return c.x;
   }
