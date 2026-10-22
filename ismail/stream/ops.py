@@ -241,7 +241,8 @@ def _cursor_save(who, since):
 @op()
 def chat_watch(who: str, since: int = None, venues: list = None, wait_min: float = 100,
                include_self: bool = False) -> str:
-    """The standing chat watcher: blocks until chat arrives on any venue, returns it, and remembers its place. Run it
+    """The standing chat watcher: blocks until chat arrives on any venue, returns it, and remembers its place. Reach
+    for it when you read a stream's chat: what viewers write on every site, in one place. Run it
     in the background (`python -m ismail chat_watch "who=MC"`), act on what it returns, and re-arm it FIRST after
     every wake. Returns JSON {lines, since}: each line {n, kind (chat, event, status), venue, platform, user {id,
     name, display, mod, sub, owner}, text, id}; events carry type (follow, sub, cheer, raid, superchat, member,
@@ -287,7 +288,8 @@ def chat_read(since: int = 0, venue: str = None, user: str = None, limit: int = 
 
 @op()
 def chat_say(text: str, venue: str = None, reply_to: int = None, who: str = None) -> str:
-    """Say one line in chat. reply_to=<a chat line's n> answers that person where they wrote it (threaded on Twitch
+    """Say one line in chat. Reach for it when you reply to a viewer, answer someone in chat, or greet the room.
+    reply_to=<a chat line's n> answers that person where they wrote it (threaded on Twitch
     and Kick, '@name ...' on YouTube and others). venue='<name>' says it to one venue; venue='all' to every venue
     whose chat is reading. who: your role, logged with the line. Refused with the reason when it is too long for the
     site, the same line was said there in the last 30 s, or the venue is sending too fast."""
