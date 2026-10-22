@@ -84,10 +84,11 @@ class Hub:
                 'watching': sorted(w for w, t in self.watchers.items() if now - t < 120),
                 'venues': rows, 'output': self.output.status() if self.output else {'state': 'off'}}
 
-    def op_listen(self, who, since=None, wait=25.0, venues=None, kinds=None, include_self=False):
+    def op_listen(self, who, since=None, wait=25.0, venues=None, kinds=None, include_self=False, back_s=0):
         self.watchers[who] = time.time()
-        if since is None:
-            since = self.log.n
+        if since is None:                   # a new watcher: from back_s ago, so it sees the room's opening
+            cut = time.time() - float(back_s or 0)
+            since = max([d['n'] for d in self.log.lines if d.get('at', 0) < cut], default=0) if back_s else self.log.n
         venues = set(venues) if venues else None
         kinds = set(kinds) if kinds else {'chat', 'event', 'status'}
 

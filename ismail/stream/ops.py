@@ -256,9 +256,10 @@ def chat_watch(who: str, since: int = None, venues: list = None, wait_min: float
     while True:
         left = end - time.time()
         res = _call('listen', timeout=40, who=who, since=since, wait=min(25.0, max(0.0, left)), venues=venues,
-                    include_self=include_self)
+                    include_self=include_self, back_s=300 if since is None else 0)
         if since is None:
-            note = f"no saved cursor for {who}: started at the end of the chat log (line {res['since']})"
+            note = (f"no saved cursor for {who}: started 5 minutes back, so the room's opening is here; chat_read "
+                    f"shows older lines")
         since = res['since']
         if res['lines']:
             more = _call('listen', timeout=15, who=who, since=since, wait=3.0, venues=venues,
@@ -281,7 +282,8 @@ def chat_watch(who: str, since: int = None, venues: list = None, wait_min: float
 @op()
 def chat_read(since: int = 0, venue: str = None, user: str = None, limit: int = 50) -> str:
     """Chat history from the log, newest `limit` lines after `since`: chat, events and our own replies (kind said,
-    with by and ok). venue / user: only those. Use it to catch up after a gap, or to see what was already answered."""
+    with by and ok; ok false was refused and never shown). venue / user: only those. Use it to catch up after a gap,
+    or to see what was already answered; then chat_watch(who, since=<its last>) so nothing is answered twice."""
     res = _call('read', since=since, venue=venue, user=user, limit=limit)
     return json.dumps(res, ensure_ascii=False)
 

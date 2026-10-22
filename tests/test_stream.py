@@ -216,3 +216,17 @@ def test_a_file_venue_records_the_stream(home, tmp_path):
     finally:
         hub.shutdown()
         srv.shutdown()
+
+
+def test_a_new_watcher_starts_minutes_back(home):
+    hub = server.Hub(port=0)
+    try:
+        for i, ago in enumerate((900, 600, 120, 30)):
+            hub.log.add('chat', 'practice', user={'name': f'v{i}'}, text=f'line {i}')
+            hub.log.lines[-1]['at'] = time.time() - ago
+        hub.log.add('said', 'practice', text='refused', ok=False)
+        got = hub.op_listen('MC', since=None, wait=0, back_s=300)
+        assert [d['text'] for d in got['lines']] == ['line 2', 'line 3']        # the room's opening, not the past
+        assert hub.op_listen('MC2', since=None, wait=0)['lines'] == []          # no back_s: from the end, as before
+    finally:
+        hub.shutdown()
