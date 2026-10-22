@@ -445,7 +445,7 @@ def stage_actor_stop(scene: str, person: str, why: str = 'stopped') -> str:
 
 @op(mutates=True)
 def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = None, mirror: bool = False,
-                 assets: str = None, countdown: int = 0) -> str:
+                 assets: str = None, countdown: int = 0, feed: dict = None) -> str:
     """Make a person move with the person in VR, live, from where they stand (page command: actor_follow). mode:
     left out, it comes from the body: seated (hips pinned to a seat, stage_follow_anchor) stays on the seat, standing
     walks as the user walks; or place (dances on the spot) | walk. A standing body keeps its hips while the user's head
@@ -456,9 +456,11 @@ def stage_actor_follow(scene: str, person: str, actor: str = None, mode: str = N
     setup in a sentence, as the Follow panel shows it)}. Emits: actor_stop (anything
     already on them), actor_follow; later actor_stop {why: walked_away}. countdown= seconds counted down in front of
     the user first (3, 2, 1, GO, with ticks) so they can take the person's pose; the Follow starts from their pose at
-    GO (the menu's Follow and Take count 3). Emits follow_countdown when it begins."""
+    GO (the menu's Follow and Take count 3). Emits follow_countdown when it begins. feed= {"take", "takes"?, "from"?,
+    "to"?} follows a recorded take instead of the live user (the same Follow, run offline: captures and tests; the take's
+    seconds before "from" stand for what the page saw of the user before the Follow)."""
     return page_cmd(scene, 'actor_follow', {'person': person, 'actor': actor, 'mode': mode, 'mirror': mirror, 'assets': assets,
-                                            'countdown': countdown or None}, timeout=30 + (countdown or 0))
+                                            'countdown': countdown or None, 'feed': feed}, timeout=30 + (countdown or 0))
 
 
 @op(mutates=True)

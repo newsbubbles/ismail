@@ -97,7 +97,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     performance.now = () => vt;
     // the body too, as at a loop: its facing and balance from the wait would otherwise carry in, and vary run to run
     // (the 2026-10-17 study: 0-12 degrees of facing at frame 0, 2 steps or 5 in the same clip)
-    for (const st of actors.playing.values()) if (st.frames) { st.t0 = base; st.i = 0; st.feet = { l: {}, r: {} }; st.body = null; st.chestHands = undefined; }
+    for (const st of actors.playing.values()) if (st.frames) { st.t0 = base; st.i = 0; st.feet = { l: {}, r: {} }; st.body = null; st.chestHands = undefined; st.chest = null; st.mix = null; if (st.drift) st.drift.set(0, 0, 0); }
     await post('capture/status', { state: 'rendering', frames: N }, true);
     for (let n = 0; n < N; n++) {
       songT = job.t0 + n / fps;
@@ -175,7 +175,20 @@ function probe(actors, person, t) {
     bal: r(b.bal), over: b.over ? r(b.over.dir) : null, al: r(fl.at), ar: r(fr.at), sl: fl.step ? fl.step.why || true : false, sr: fr.step ? fr.step.why || true : false,
     mode: st.start ? 'start pose' : 'base', pinned: Object.keys(st.pins || {}).filter((k) => st.pins[k]),
     short: Object.keys(rig.short || {}).filter((k) => rig.short[k]), hy: yawOf(rig, 'head'), cy: yawOf(rig, 'spine_03'), py: yawOf(rig, 'pelvis'),
-    hl: at('hand_l'), hr: at('hand_r'), kl: at('calf_l'), kr: at('calf_r'), tl: at('thigh_l'), tr: at('thigh_r'), ch: st.chestHands === undefined ? null : +THREE.MathUtils.radToDeg(st.chestHands).toFixed(1) };
+    hl: at('hand_l'), hr: at('hand_r'), kl: at('calf_l'), kr: at('calf_r'), tl: at('thigh_l'), tr: at('thigh_r'), ch: st.chestHands === undefined ? null : +THREE.MathUtils.radToDeg(st.chestHands).toFixed(1),
+    // the arms (2026-10-22: the wrists wring, the elbows go in): shoulders, elbows, and each wrist's twist (the hand's
+    // turn about the forearm from their rest relation, degrees); the chest's follow (limit, hand cue) where there is one
+    ul: at('upperarm_l'), ur: at('upperarm_r'), el: at('lowerarm_l'), er: at('lowerarm_r'), wl: wristTwist(rig, 'l'), wr: wristTwist(rig, 'r'),
+    ck: st.chest && st.chest.dbg ? st.chest.dbg : null, s: st.s != null ? +st.s.toFixed(4) : null, sy: st.standY != null ? +st.standY.toFixed(3) : null };
+}
+// the hand's turn about the forearm's own axis (+Y on these rigs) away from their rest relation, degrees
+function wristTwist(rig, sd) {
+  const lo = rig.bones[`lowerarm_${sd}`], ha = rig.bones[`hand_${sd}`];
+  if (!lo || !ha || !rig.rest[lo.name] || !rig.rest[ha.name]) return null;
+  const rel = lo.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(ha.getWorldQuaternion(new THREE.Quaternion()))
+    .multiply(rig.rest[lo.name].q.clone().invert().multiply(rig.rest[ha.name].q).invert());
+  const a = 2 * Math.atan2(rel.y, rel.w);
+  return +THREE.MathUtils.radToDeg(Math.atan2(Math.sin(a), Math.cos(a))).toFixed(1);
 }
 // a bone's heading in degrees: its rest forward (the rig's) turned by its turn from rest, about the vertical
 function yawOf(rig, n) {

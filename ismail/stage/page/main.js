@@ -181,9 +181,9 @@ perform.setStopAll(async (person, by) => {
 live.handlers.take_start = (c) => startTake(c.name || '');
 xr.setHandState(hands.state);
 // every Follow is a performance (perform.js) and is buffered in memory on the performance's clock (hands.js); after
-// it stops the user (actions.js) or an agent can keep it as a take
+// it stops the user (actions.js) or an agent can keep it as a take (a Follow fed by a take, actors.js feed, is not one)
 live.onEmit((type, d) => {
-  if (type === 'actor_follow' && d) { const p = perform.start(d.person); hands.shadowStart(d.person, p.t0, p); }
+  if (type === 'actor_follow' && d && !d.feed) { const p = perform.start(d.person); hands.shadowStart(d.person, p.t0, p); }
   else if (type === 'actor_stop' && d && d.live) { hands.shadowStop(); perform.stop(); }
 });
 live.handlers.take_keep_last = (c) => keepLast(c.name || null);

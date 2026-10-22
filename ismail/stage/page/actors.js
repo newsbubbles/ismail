@@ -514,11 +514,12 @@ export function initActors(ed, live) {
     if (!who) throw new Error('no actor for ' + person + ' (world.json actors, or pass actor)');
     const gone = unloadedOf(person);
     if (gone) throw new Error(`${person} is in the unloaded set ${gone}: load it first (stage_set_load)`);
-    if (!source) throw new Error('no live body source');
+    const feed = c.feed ? await loadFeed(c.feed) : null;
+    if (!source && !feed) throw new Error('no live body source');
     const rig0 = await load(who, `scenes/${encodeURIComponent(c.assets || world().assets || scn())}/`);
     stop({ person });
     const rig = [...playing.values()].some((p) => p.rig.who === who) ? await cloneRig(rig0) : rig0;
-    const f0 = source(), floor = world().floor || 0;
+    const f0 = feed ? feed.frames[0] : source(), floor = world().floor || 0;
     const userH = Math.max(0.5, f0.head[1] - floor), actorH = rig.rest.head.p.y - rig.rest.foot_l.p.y + 0.08;
     // stepping into them (embody.js): the user's view is already at their eyes, so the body is the user's, unscaled
     const s = c.embody ? 1 : THREE.MathUtils.clamp(actorH / userH, 0.6, 1.4);
@@ -538,6 +539,7 @@ export function initActors(ed, live) {
       mirror: !!c.mirror, mirrorN: facing ? new THREE.Vector3(facing.z, 0, -facing.x) : null,
       last: new THREE.Vector3(f0.head[0], f0.head[1], f0.head[2]),
       alignInv: align.clone().invert(), feet: { l: {}, r: {} }, t0: performance.now(), it };
+    if (feed) { st.feed = feed; st.frames = feed.frames; st.i = 0; }
     const pins = anchors.get(person);
     if (pins) usePins(st, pins);
     // the setup from the body, not a button (the user, 2026-10-08: a standing man came up with his feet locked and would
@@ -549,8 +551,28 @@ export function initActors(ed, live) {
     lastMirror.set(person, st.mirror);
     await control.onFollow(person);
     live.emit('actor_follow', { person, actor: who, scale: +s.toFixed(2), pinned: pinnedNames(st), drives: control.state(person),
-      start: st.start ? st.start.spec : null, ...setupOf(person) });
+      start: st.start ? st.start.spec : null, ...(feed ? { feed: feed.take } : {}), ...setupOf(person) });
     return { person, actor: who, following: true, scale: +s.toFixed(2), ...setupOf(person) };
+  }
+  // a take as the live source of a Follow (c.feed {take, takes?, from?, to?}): a Follow run offline, for captures and
+  // tests (the 2026-10-17 study could only stand in for following by playing takes, a different setup); the take's
+  // seconds before `from` stand for what the page saw of the user before the Follow began (feed.before)
+  async function loadFeed(fd) {
+    const base = `scenes/${encodeURIComponent(fd.takes || scn())}/takes/${encodeURIComponent(fd.take)}/`;
+    const txt = await fetch(base + 'frames.jsonl', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('no take ' + fd.take); return r.text(); });
+    const all = txt.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((f) => f.head);
+    const from = fd.from != null ? +fd.from : -Infinity, to = fd.to != null ? +fd.to : Infinity;
+    const frames = all.filter((f) => f.t >= from && f.t <= to);
+    if (frames.length < 2) throw new Error(`feed: take ${fd.take} has ${frames.length} frames between ${fd.from} and ${fd.to} s`);
+    return { take: fd.take, frames, before: all.filter((f) => f.t < frames[0].t) };
+  }
+  // the feed's frame now, on the Follow's clock (held at the end), as a copy: update() writes its t
+  function feedNow(st) {
+    const fr = st.frames, t = fr[0].t + (performance.now() - st.t0) / 1000;
+    while (st.i < fr.length - 1 && fr[st.i + 1].t <= t) st.i++;
+    const fa = fr[st.i], fb = fr[st.i + 1];
+    if (fb && fb.t - fa.t < GAP_S && t > fa.t) return (st.mix = mixTake(fa, fb, (t - fa.t) / (fb.t - fa.t), st.mix));
+    return { ...fa };
   }
   async function cloneRig(r) {                              // a second person on the same actor (couple 3)
     const { clone } = await import('three/addons/utils/SkeletonUtils.js');
@@ -607,7 +629,7 @@ export function initActors(ed, live) {
     scene.remove(st.rig.root);
     dropProxy(c.person);
     if (st.it) st.it.obj.visible = true;
-    live.emit('actor_stop', { person: c.person, why: c.why || 'stopped', live: !!st.live });
+    live.emit('actor_stop', { person: c.person, why: c.why || 'stopped', live: !!st.live && !st.feed });   // a fed Follow is no performance
     rest(c.person).catch(() => {});                       // back to their resting pose, if they have one
     return { stopped: true };
   }
@@ -727,7 +749,7 @@ export function initActors(ed, live) {
   function update() {
     for (const st of playing.values()) {
       if (st.live) {
-        const f = source && source();
+        const f = st.feed ? feedNow(st) : source && source();
         if (!f) continue;
         // a teleport (the head jumps a metre in a frame) leaves the person where they are, still following (carrying them
         // along would break a take: the user, 2026-10-03; "Move him here" on the follow panel moves them on purpose)

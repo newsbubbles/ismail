@@ -1512,8 +1512,8 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     shot= a story path from cameras.json (cameras= its file; keys evenly spaced, eased in and out over the shot's
     seconds from t0); path= {"keys": [{"pos", "look", "lens"}], "seconds", "at"} the same inline; view= {"pos",
     "fwd", "up", "vfov"} fixed. All in Blender coordinates (metres, Z up), lens in mm on a 36 mm sensor; "vfov"
-    (degrees) in path or view overrides the lens. Two follow a person playing a take (setup: actor_play), for studying
-    bodies: track= {"person", "bone": "spine_03", "dist": 3, "height": 0.1, "angle": 0, "smooth": 0.4, "vfov": 40}
+    (degrees) in path or view overrides the lens. Two follow a person playing a take (setup: actor_play, or actor_follow
+    with a feed), for studying bodies: track= {"person", "bone": "spine_03", "dist": 3, "height": 0.1, "angle": 0, "smooth": 0.4, "vfov": 40}
     looks at their bone from dist metres, angle degrees round from their front at the first frame (90: their left),
     that bearing then held so their turns show, trailing their moves by smooth seconds; eyes= {"person", "vfov": 90}
     looks out of their eyes as their head turns, the head hidden (what an embodied person sees of their own body).
@@ -1552,9 +1552,9 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
         k = track or eyes
         if not isinstance(k, dict) or not k.get('person'):
             raise OpError(f'{given[0]} is {{"person": <a person playing a take in setup>, ...}}')
-        if not any(c.get('type') == 'actor_play' and c.get('person') == k['person'] for c in setup or [] if isinstance(c, dict)):
+        if not any(c.get('type') in ('actor_play', 'actor_follow') and c.get('person') == k['person'] for c in setup or [] if isinstance(c, dict)):
             raise OpError(f'{given[0]}: {k["person"]} plays nothing; add {{"type": "actor_play", "person": "{k["person"]}", '
-                          f'"take": ...}} to setup')
+                          f'"take": ...}} to setup (or actor_follow with a feed)')
         cam = {given[0]: k}
     elif camera:
         cam = {'object': camera}
