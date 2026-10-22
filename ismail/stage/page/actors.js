@@ -111,6 +111,7 @@ const CHEST = { spine_01: 0.3, spine_02: 0.65, spine_03: 1 }, NECK = 0.55;
 // sooner, the limit shrinking to CHEST_LIMIT_FAST at CHEST_FAST a second; the chest stays within CHEST_MAX of the hips
 const D2R = THREE.MathUtils.degToRad;
 const CHEST_LIMIT = D2R(40), CHEST_LIMIT_FAST = D2R(20), CHEST_FAST = D2R(300), CHEST_TAU = 0.25, CHEST_MAX = D2R(45), HEAD_SPEED_S = 0.08, CHEST_HOME_S = 1.5;
+const LOOK0_MAX = D2R(30);   // a start pose's own head turn from its chest counts toward the limit, up to this
 // the hands weigh on it (the user, 2026-10-22; handCue): their swing round the vertical through the middle of the hips,
 // counted with both hands tracked, CUE_SEP apart, CUE_OUT from that vertical and the two ways of reading the swing
 // agreeing within CUE_AGREE; the chest asks HAND_GAIN of the swing
@@ -321,8 +322,8 @@ export function initActors(ed, live) {
   }
   // the turn about the vertical per spine bone, relative to the hips: the chest's own (chestFollow), the spine below it
   // its CHEST share, the neck NECK of the way from the chest to the head, the head the whole look
-  function spineYaw(st, f, look, cue) {
-    const c = chestFollow(st, f, look, cue), out = {};
+  function spineYaw(st, f, look, cue, look0 = 0) {
+    const c = chestFollow(st, f, look, cue, look0), out = {};
     for (const [n] of SPINE) out[n] = n === 'head' ? look : n === 'neck_01' ? c + NECK * (look - c) : c * (CHEST[n] ?? 0);
     return out;
   }
@@ -332,13 +333,15 @@ export function initActors(ed, live) {
   // above): held within the limit, past it eased toward the head's turn less the limit, the limit narrower for a fast
   // head; the hands' cue pulls the target its way as sure as it is. Critically damped, exact for any frame time:
   // x'' = -(x - g) / tau^2 - 2 x' / tau. A first frame, a loop or a gap starts it where the limit puts it, at rest.
-  function chestFollow(st, f, look, cue) {
+  // look0: the start pose's own head turn from its chest (the neck's limit is the body's, not the user's turn alone:
+  // Sam's pose looks 14 deg aside, his look of -35 took the head 51 deg from a chest that never turned)
+  function chestFollow(st, f, look, cue, look0 = 0) {
     const t = f.t, hq = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(f.head[3], f.head[4], f.head[5], f.head[6]));
     const hw = Math.atan2(hq.x, hq.z);                    // the head's own heading (world), for its speed
     let c = st.chest;
     const dt = c ? t - c.t : 0;
     if (!c || dt < 0 || dt > GAP_S) {
-      const x = THREE.MathUtils.clamp(look - THREE.MathUtils.clamp(look, -CHEST_LIMIT, CHEST_LIMIT), -CHEST_MAX, CHEST_MAX);
+      const tot = look0 + look, x = THREE.MathUtils.clamp(tot - THREE.MathUtils.clamp(tot, -CHEST_LIMIT, CHEST_LIMIT), -CHEST_MAX, CHEST_MAX);
       c = st.chest = { x, h: x, v: 0, t, hw, spd: 0, dbg: null };
     } else if (dt > 1e-5) {
       c.spd += (Math.abs(wrapPi(hw - c.hw)) / dt - c.spd) * (1 - Math.exp(-dt / HEAD_SPEED_S));
@@ -348,8 +351,8 @@ export function initActors(ed, live) {
       // chest does not follow the head, but it comes home to the hips' facing over CHEST_HOME_S (without that it stayed
       // turned up to the limit after a look aside and back). The hands' cue is blended with that ask, not fed back into
       // it (fed back, a weak cue held each frame outweighed the slow homing: Sam's chest stayed 10 deg turned for 7 s)
-      const off = look - c.h;
-      c.h = Math.abs(off) > L ? look - Math.sign(off) * L : c.h * Math.exp(-dt / CHEST_HOME_S);
+      const off = look0 + look - c.h;
+      c.h = Math.abs(off) > L ? look0 + look - Math.sign(off) * L : c.h * Math.exp(-dt / CHEST_HOME_S);
       let g = c.h;
       if (cue && cue.w > 0) g += (cue.a - g) * cue.w;
       g = THREE.MathUtils.clamp(g, -CHEST_MAX, CHEST_MAX);
@@ -1161,7 +1164,12 @@ export function initActors(ed, live) {
     const eye0 = eyeAt();
     const cue = handCue(reach(eye0, 'l', 'left'), reach(eye0, 'r', 'right'), rig.bones.pelvis.getWorldPosition(new THREE.Vector3()), fwdNow);
     if (cue) cue.a = THREE.MathUtils.clamp(wrapPi(cue.a - (S.cue0 || 0)), -CHEST_MAX, CHEST_MAX);   // from the start pose's own
-    const yaws = spineYaw(st, f, look, cue);
+    if (S.look0 === undefined) {                            // the start pose's head turn from its chest (chestFollow)
+      const fw = (n) => rig.fwd.clone().applyQuaternion(held[n].clone().multiply(rig.rest[n].q.clone().invert())).setY(0).normalize();
+      const a = fw('spine_03'), b = fw('head');
+      S.look0 = THREE.MathUtils.clamp(Math.atan2(new THREE.Vector3().crossVectors(a, b).y, a.dot(b)), -LOOK0_MAX, LOOK0_MAX);
+    }
+    const yaws = spineYaw(st, f, look, cue, S.look0);
     for (const [n, k] of SPINE) {                           // the look over the spine as in poseBase (spineYaw, LOOK)
       const q = new THREE.Quaternion().slerpQuaternions(I, swing, LOOK[n][1]).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaws[n]));
       if (B.lean) q.premultiply(new THREE.Quaternion().slerp(B.lean, Math.min(1, k * 1.25)));
