@@ -76,8 +76,11 @@ second; it never touches the mixer. You set what it draws with numbers, and it c
 
 Run the watcher in the background and re-arm it FIRST after every wake:
 `python -m ismail chat_watch "who=MC"`. It returns every venue's lines as JSON, each with its `n`, venue, user and
-text. Answer with `chat_say(text, reply_to=<n>)`: it goes back to that site, threaded where the site threads.
+text. Answer with `chat_say(text, reply_to=<n>)`: it goes back to that site, threaded where the site threads, or
+with `@name` in front where it doesn't, so don't open the line with their name yourself.
 `chat_say(text, venue='all')` speaks to every chat at once (a welcome, a "last track").
+A new MC's first watch starts 5 minutes back, so the room's opening is there. After catching up with `chat_read`,
+arm the watcher with `since=<its last>` so no line is answered twice.
 
 Manners, which viewers feel at once:
 - Greet people by name, and the first message of someone new before anything else. Thank every follow, sub, gift,

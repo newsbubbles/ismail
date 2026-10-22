@@ -38,6 +38,7 @@
 let since = 0;
 const box = document.getElementById('lines');
 function add(d) {
+  if (d.kind === 'said' && d.ok === false) return;      // refused: a real site would never show it
   const div = document.createElement('div');
   div.className = 'l ' + d.kind;
   const t = document.createElement('span');
