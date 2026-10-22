@@ -1067,6 +1067,10 @@ export function initActors(ed, live) {
         if (b) S.fingerQ[b.name] = b.getWorldQuaternion(new THREE.Quaternion());
       }
     }
+    // the start pose's own hands, read as a twist (handCue): the zero for the hands' cue, as the pose is the zero for
+    // the head (a drummer's crossed hands read 42 deg, held: Dell's chest turned 44 deg and stayed)
+    const c0 = handCue(S.handW.l, S.handW.r, pel.getWorldPosition(new THREE.Vector3()), S.fwdW || rig.fwd.clone().setY(0).normalize());
+    S.cue0 = c0 ? c0.a : 0;
     return S;
   }
   const qA = (a) => new THREE.Quaternion(a[3], a[4], a[5], a[6]), vA = (a) => new THREE.Vector3(a[0], a[1], a[2]);
@@ -1156,6 +1160,7 @@ export function initActors(ed, live) {
     rig.root.updateMatrixWorld(true);
     const eye0 = eyeAt();
     const cue = handCue(reach(eye0, 'l', 'left'), reach(eye0, 'r', 'right'), rig.bones.pelvis.getWorldPosition(new THREE.Vector3()), fwdNow);
+    if (cue) cue.a = THREE.MathUtils.clamp(wrapPi(cue.a - (S.cue0 || 0)), -CHEST_MAX, CHEST_MAX);   // from the start pose's own
     const yaws = spineYaw(st, f, look, cue);
     for (const [n, k] of SPINE) {                           // the look over the spine as in poseBase (spineYaw, LOOK)
       const q = new THREE.Quaternion().slerpQuaternions(I, swing, LOOK[n][1]).multiply(new THREE.Quaternion().setFromAxisAngle(Y, yaws[n]));
