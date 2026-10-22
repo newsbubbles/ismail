@@ -23,7 +23,8 @@ from . import config as C
 SR = 44100
 BLOCK = 2048
 FLAGS = (0x08000000 | 0x00004000) if os.name == 'nt' else 0      # no console window, below-normal priority
-MODES = ('cqt', 'spectrum', 'waves', 'scope', 'none')
+MODES = ('cqt', 'spectrum', 'waves', 'scope', 'page', 'none')
+PAGE_TITLE = 'ismail visual'
 SLOTS = ('title', 'now', 'chat', 'note')
 DEFAULT_VISUAL = {'mode': 'cqt', 'width': 1280, 'height': 720, 'fps': 30, 'background': '#0b0d12',
                   'colors': ['#5ec8ff', '#ff6ec7'], 'image': None, 'window': None, 'area': [0.0, 0.18, 1.0, 0.64],
@@ -76,6 +77,40 @@ def has_nvenc():
         return False
 
 
+def fit_window(title, W, H, view, timeout=20.0):
+    """Wait for the page's window, size it so the page draws exactly W x H, and return where that canvas sits in
+    the window's client area, [x, y, w, h] for the capture's crop (an app window draws its own title bar inside
+    its client area). view() is the page's own report of its canvas size. None off Windows or if it never shows."""
+    if os.name != 'nt':
+        return None
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)          # device pixels, as the capture and the page count
+    except (AttributeError, OSError):
+        pass
+    end = time.time() + timeout
+    h = 0
+    while time.time() < end and not (h and view()):
+        h = u.FindWindowW(None, title)
+        time.sleep(0.25)
+    if not h or not view():
+        return None
+    for _ in range(3):                                          # resize, then let the page report its new size
+        wr, cr = wintypes.RECT(), wintypes.RECT()
+        u.GetWindowRect(h, ctypes.byref(wr))
+        u.GetClientRect(h, ctypes.byref(cr))
+        pw, ph = view()
+        if (pw, ph) == (W, H):
+            break
+        u.MoveWindow(h, wr.left, wr.top, wr.right - wr.left + W - pw, wr.bottom - wr.top + H - ph, True)
+        time.sleep(0.6)
+    u.GetClientRect(h, ctypes.byref(cr))
+    pw, ph = view()
+    return [max(0, (cr.right - pw) // 2), max(0, cr.bottom - ph), min(pw, cr.right), min(ph, cr.bottom)]
+
+
 def build_encoder_args(vis, text_dir, preview, pcm_url, nvenc):
     """The encoder's ffmpeg command for a visual config (pure, so tests check it)."""
     W, H, fps = int(vis['width']), int(vis['height']), int(vis['fps'])
@@ -86,10 +121,13 @@ def build_encoder_args(vis, text_dir, preview, pcm_url, nvenc):
     c2 = _hex(vis['colors'][1]) if len(vis.get('colors') or []) > 1 else c1
     args = [ffmpeg(), '-hide_banner', '-loglevel', 'warning', '-nostats',
             '-thread_queue_size', '1024', '-f', 's16le', '-ar', str(SR), '-ac', '2', '-i', pcm_url]
-    if vis.get('window'):
+    window = PAGE_TITLE if vis['mode'] == 'page' else vis.get('window')
+    if window:
         args += ['-thread_queue_size', '64', '-f', 'gdigrab', '-framerate', str(fps), '-draw_mouse', '0',
-                 '-i', f"title={vis['window']}"]
-        bg = f'[1:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={fps}[bg]'
+                 '-i', f"title={window}"]
+        crop = 'crop={2}:{3}:{0}:{1},'.format(*vis['crop']) if vis.get('crop') else ''   # the page's own canvas
+        bg = (f'[1:v]{crop}scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,'
+              f'fps={fps}[bg]')
     elif vis.get('image'):
         args += ['-loop', '1', '-framerate', str(fps), '-i', str(vis['image'])]
         bg = (f'[1:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},format=yuv420p[bg]')
@@ -112,10 +150,10 @@ def build_encoder_args(vis, text_dir, preview, pcm_url, nvenc):
         graph.append(f'[avis]avectorscope=s={vh}x{vh}:r={fps}:zoom=1.5:draw=line:rc=255:gc=110:bc=200:rf=12:gf=12:'
                      f'bf=12,format=yuva420p,colorkey=0x000000:0.05:0.05[vis]')
         vx, vw = vx + (vw - vh) // 2, vh
-    else:
+    else:                                       # none, or the page (it draws its own picture from the levels)
         graph.append('[avis]anullsink')
     last = '[bg]'
-    if mode != 'none':
+    if mode not in ('none', 'page'):
         graph.append(f'[bg][vis]overlay={vx}:{vy}:shortest=0:format=auto[v0]')
         last = '[v0]'
     font = vis.get('font') or _font()
@@ -261,6 +299,7 @@ class Output:
     def __init__(self, hub):
         self.hub = hub
         self.visual = dict(DEFAULT_VISUAL)
+        self.page_box = None                         # [x, y, w, h] of the page's canvas inside its window
         try:
             self.visual.update(json.loads((C.HOME / 'visual.json').read_text(encoding='utf8')))
         except (OSError, ValueError):
@@ -349,12 +388,44 @@ class Output:
     def preview_path(self):
         return C.HOME / 'preview.jpg'
 
+    def page_window(self):
+        p = getattr(self, 'browser', None)
+        return {'open': bool(p and p.poll() is None), 'title': PAGE_TITLE}
+
+    def open_page(self):
+        """The visual page in its own app window (its own browser profile, never the person's), sized to the
+        stream, kept rendering when covered, so the encoder can capture it by its title. It draws only: no sound."""
+        if self.page_window()['open']:
+            return
+        exe = next((x for x in (shutil.which('msedge'), shutil.which('chrome'), shutil.which('chromium'),
+                                'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+                                'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+                                'C:/Program Files/Google/Chrome/Application/chrome.exe') if x and os.path.exists(x)),
+                   None)
+        if not exe:
+            raise ValueError("mode='page' needs Edge or Chrome to show the page (none found); use mode='cqt' etc.")
+        W, H = int(self.visual['width']), int(self.visual['height'])
+        self.browser = subprocess.Popen(
+            [exe, f'--app=http://127.0.0.1:{self.hub.port}/visual?stream=1', f"--user-data-dir={C.HOME / 'browser'}",
+             f'--window-size={W},{H}', '--window-position=40,40', '--no-first-run', '--no-default-browser-check',
+             '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
+             '--disable-background-timer-throttling', '--disable-features=CalculateNativeWinOcclusion',
+             '--disable-gpu',                            # a GPU-composited window captures as a blank white frame
+             '--mute-audio'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=FLAGS & 0x08000000)
+        self.hub.page_view = None
+        self.page_box = fit_window(PAGE_TITLE, W, H, lambda: self.hub.page_view)
+
+    def _visual_now(self):
+        return {**self.visual, 'crop': self.page_box} if self.visual['mode'] == 'page' else self.visual
+
     def _start_encoder(self):
         if not ffmpeg():
             raise ValueError('ffmpeg is not on PATH (or $ISMAIL_FFMPEG): streaming needs it')
+        if self.visual['mode'] == 'page':
+            self.open_page()
         if self.nvenc is None:
             self.nvenc = self.visual['encoder'] in ('auto', 'nvenc') and has_nvenc()
-        args = build_encoder_args(self.visual, self.text_dir, self.preview_path(),
+        args = build_encoder_args(self._visual_now(), self.text_dir, self.preview_path(),
                                   f'http://127.0.0.1:{self.hub.port}/pcm', self.nvenc)
         self.enc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     creationflags=FLAGS)
@@ -467,6 +538,8 @@ class Output:
             if not self.pushers:
                 self._stop_encoder()
                 self.live_since = None
+                if self.page_window()['open']:
+                    self.browser.terminate()
         if names:
             self.hub.log.add('status', 'output', state='end', text=f"stopped streaming to {', '.join(names)}")
         return self.status()

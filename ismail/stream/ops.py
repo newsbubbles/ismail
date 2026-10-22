@@ -330,7 +330,8 @@ def stream_visual(mode: str = None, colors: list = None, background: str = None,
                   chat_overlay: bool = None, width: int = None, height: int = None, fps: int = None,
                   video_kbps: int = None, audio_kbps: int = None, encoder: str = None) -> str:
     """Set the stream's picture with raw numbers. While live this restarts the encoder: a 2-3 s blip on every site,
-    so set everything in one call. mode: cqt (a piano-roll spectrum), spectrum (bars), waves, scope (a stereo
+    so set everything in one call. mode: page (the visual page, drawn from the set's levels as stream_scene sets
+    it: the one to change live with no blip), cqt (a piano-roll spectrum), spectrum (bars), waves, scope (a stereo
     vector scope) or none. colors: ['#rrggbb', '#rrggbb'] for spectrum and waves. background: '#rrggbb', or
     image: a still behind it, or window: the title of a window to capture (a page the agent draws, the VR stage
     mirror). area: [x, y, w, h] of the visualizer, fractions of the frame. chat_overlay: the newest chat line in
@@ -356,6 +357,49 @@ def stream_text(slot: str, text: str) -> str:
     note = guards.check_private(text)
     res = _call('text', slot=slot, text=text)
     return guards.with_note(f"{res['slot']}: {res['text']!r}", note)
+
+
+@op(mutates=True)
+def stream_scene(layers: list = None, background=None, trails: float = None, replace: bool = True) -> str:
+    """Set the visual page's picture with raw numbers; it changes on the page (and on a stream in mode='page') at
+    once, with no blip. Reach for it when you change what viewers see move with the music.
+    layers: a list drawn in order, each {kind, x, y, w, h (fractions of the frame), ...}:
+      bars {bands: [lo, hi], colors, gap, mirror, smooth, gain}: one bar per band;
+      ring {x, y (centre), r, h (bar length), bands, thickness, spin (degrees per beat)};
+      pulse {x, y, r0, r1, drive, decay, fill}: a circle that swells with its drive;
+      line {bands, thickness, fill}: the spectrum as a line;
+      hits {tracks: {'<track>': '#rrggbb'}, shape (circle, square, bar), decay}: a light per track that flashes on
+        each of its notes;
+      particles {x, y, count, speed, size, spawn (what bursts them: beat, track:<name>, band:<i>)};
+      text {text, x, y, size, align, drive}; grid {cols, rows, scroll (rows per beat), drive}.
+    Every layer also takes color or colors (a gradient, '#rrggbb'), opacity, blend (source-over, lighter, screen,
+    multiply, overlay), smooth (0-1) and gain. drive: level, beat, band:<0-15>, bands:<lo>-<hi> or track:<name>.
+    The 16 bands run log-spaced from 40 Hz to 16 kHz: 0-3 sub and bass, 4-7 low mids, 8-11 mids, 12-15 air.
+    background: '#rrggbb' or a 2-3 colour gradient top to bottom. trails: 0-0.98, how long motion lingers.
+    replace=False adds the layers on top of the current ones. A wrong setting is refused with what it takes."""
+    res = _call('scene', layers=layers, background=background, trails=trails, replace=replace)
+    sc = res['scene']
+    kinds = ', '.join(l['kind'] + (f" ({l['drive']})" if l.get('drive') else '') for l in sc['layers'])
+    return (f"scene v{res['v']}: {len(sc['layers'])} layers ({kinds or 'none'}), background {sc['background']}, "
+            f"trails {sc['trails']}. See it: stream_page()")
+
+
+@op()
+def stream_page() -> str:
+    """The visual page: its address (open it in any browser on this machine, or capture it), the scene it draws,
+    and what drives it right now: the level, the 16 bands, the beat and the tracks that just played. Stream it with
+    stream_visual(mode='page') (it opens the page in its own window and captures it)."""
+    res = _call('page', timeout=15)
+    f, sc = res['frame'], res['scene']
+    bands = ' '.join(f'{b:.2f}' for b in f.get('bands', []))
+    hits = ', '.join(h['track'] for h in f.get('hits') or []) or 'none this frame'
+    eng = (f"engine :{f['engine']}, beat {f.get('beat')}, {f.get('bpm')} bpm" if f.get('engine') else
+           'no live engine: the page holds still')
+    win = res.get('window') or {}
+    return '\n'.join([f"page: {res['url']} ({'open in its stream window' if win.get('open') else 'no stream window'})",
+                      f"scene: {len(sc['layers'])} layers, " + ', '.join(l['kind'] for l in sc['layers']),
+                      f"now: {eng}; level {f.get('level')} ({f.get('rms_db')} dB rms)",
+                      f"bands 0-15: {bands}", f"notes just played: {hits}"])
 
 
 @op()
