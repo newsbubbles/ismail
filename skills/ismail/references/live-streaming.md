@@ -42,8 +42,9 @@ What each site's chat can do here:
 1. A live set plays (`references/live.md`). The stream carries the newest engine's master; across an engine
    restart it carries silence and the picture, so a reset never drops a site.
 2. Set the picture first (`stream_visual`), because a change while live is a 2-3 s blip on every site. Use one
-   call with everything: `mode` (cqt, spectrum, waves, scope, none), `colors`, `background` or `image` or `window`
-   (the title of a window to capture: a page you draw, the VR stage's mirror), `area`. Set the text lines, which
+   call with everything: `mode` (cqt, spectrum, waves, scope, page, none), `colors`, `background` or `image` or
+   `window` (the title of a window to capture: the VR stage's mirror), `area`. `page` is the visual page below. Set
+   the text lines, which
    change live with no blip: `stream_text('title', ...)`, `('note', ...)` ("type !request in chat"), `('now', ...)`
    (the piece). `chat_overlay` puts the newest chat line in a corner by itself.
 3. Ask the person: "Go live on Twitch and YouTube now?" Only their answer counts, in their words:
@@ -51,6 +52,25 @@ What each site's chat can do here:
 4. `stream_look` right after, and every few minutes: each site's state (live, or reconnecting with the site's own
    error), MB sent, and a preview frame to Read. A site that drops reconnects on its own; the others carry on.
 5. `stream_end()` stops every site (or `stream_end(['kick'])` one). Chat stays connected for the goodbyes.
+
+## The visual page
+
+`stream_visual(mode='page')` streams a page the stream server draws from the set: the master's level and 16 bands
+(40 Hz to 16 kHz, log-spaced: 0-3 sub and bass, 4-7 low mids, 8-11 mids and presence, 12-15 air), the engine's
+beat, and each track's notes as they sound. It reads the engine's local stream and its clock and onsets, about once a
+second; it never touches the mixer. You set what it draws with numbers, and it changes live with no blip:
+
+- `stream_scene(layers=[...], background=['#07080c', '#1a1030'], trails=0.35)` replaces the layers;
+  `replace=False` adds to them. Kinds: `bars`, `ring`, `line` (bands), `pulse`, `particles`, `hits` (a light per
+  track), `text`, `grid`. Positions and sizes are fractions of the frame. `drive` picks what moves a layer: `level`,
+  `beat`, `band:<i>`, `bands:<lo>-<hi>`, or `track:<name>` (a flash on that track's notes). A wrong field comes back
+  with the fields that layer takes.
+- `stream_page()` gives the page's address, the layers, and what the page sees now (beat, level, bands, the notes
+  just played). Open the address to look at it; it makes no sound. `?debug=1` adds a readout.
+- Keep the page's own text clear of the stream's text lines (the title top left, the piece bottom left): they draw
+  on top.
+- On air, the page opens in its own small browser window (its own profile, muted) that the encoder captures, cropped
+  to the page. Leave that window where it is; covering it is fine.
 
 ## Chat: the MC
 

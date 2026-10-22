@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ismail visual</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07080c; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 8px; bottom: 8px; font: 12px ui-monospace, monospace; color: #9aa3b2;
+    background: rgba(0, 0, 0, .5); padding: 4px 8px; border-radius: 4px; display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script>
+// The stream's visual: draws the scene the agent sets (GET /visual/scene) from the set's levels (/levels, 30 fps).
+// Everything it draws is a number in the scene; nothing here decides a look.
+const cv = document.getElementById('c'), cx = cv.getContext('2d');
+const hud = document.getElementById('hud');
+const QS = new URLSearchParams(location.search), STREAM = QS.has('stream');
+if (QS.get('debug')) hud.style.display = 'block';
+let W = 0, H = 0, scene = {background: ['#07080c'], trails: 0, layers: []}, sceneV = 0;
+let frame = {level: 0, bands: new Array(16).fill(0), beat: null, hits: []};
+let lastBeat = null, beatAt = -1e9, trackAt = {}, state = [], parts = [];
+let t0 = performance.now(), lastT = t0;
+
+function resize() {
+  const r = window.devicePixelRatio || 1;
+  W = cv.width = Math.round(innerWidth * r); H = cv.height = Math.round(innerHeight * r);
+  if (STREAM) fetch(`/visual/size?w=${W}&h=${H}`).catch(() => {});   // the stream's window: its capture crops to this
+}
+addEventListener('resize', resize); resize();
+
+async function pollScene() {
+  for (;;) {
+    try {
+      const j = await (await fetch(`/visual/scene?v=${sceneV}&wait=${sceneV ? 20 : 0}`)).json();
+      if (j.v !== sceneV) { scene = j.scene; sceneV = j.v; state = []; parts = []; }
+    } catch (e) { await new Promise(r => setTimeout(r, 2000)); }
+  }
+}
+function listen() {
+  const es = new EventSource('/levels');
+  es.onmessage = (m) => {
+    const f = JSON.parse(m.data), now = performance.now();
+    if (f.beat != null) {
+      if (lastBeat != null && Math.floor(f.beat) > Math.floor(lastBeat)) beatAt = now;
+      lastBeat = f.beat;
+    }
+    for (const h of f.hits || []) trackAt[h.track] = now;
+    frame = f;
+  };
+  es.onerror = () => { es.close(); setTimeout(listen, 2000); };
+}
+
+function env(at, decay, now) { return Math.max(0, 1 - (now - at) / (1000 * Math.max(0.03, decay))); }
+function drive(d, L, now) {
+  d = d || 'level';
+  if (d === 'level') return frame.level;
+  if (d === 'beat') return env(beatAt, L.decay ?? 0.3, now);
+  if (d.startsWith('band:')) return frame.bands[+d.slice(5)] || 0;
+  if (d.startsWith('bands:')) { const [a, b] = d.slice(6).split('-').map(Number);
+    let s = 0; for (let i = a; i <= b; i++) s += frame.bands[i] || 0; return s / (b - a + 1); }
+  if (d.startsWith('track:')) return env(trackAt[d.slice(6)] ?? -1e9, L.decay ?? 0.3, now);
+  return 0;
+}
+function smooth(i, key, v, s) {
+  const st = state[i] || (state[i] = {});
+  const p = st[key] ?? v; const out = p * (s ?? 0) + v * (1 - (s ?? 0)); st[key] = out; return out;
+}
+function grad(L, x0, y0, x1, y1) {
+  const cs = L.colors || [L.color || '#ffffff'];
+  if (cs.length === 1) return cs[0];
+  const g = cx.createLinearGradient(x0, y0, x1, y1);
+  cs.forEach((c, k) => g.addColorStop(k / (cs.length - 1), c)); return g;
+}
+function bandVals(i, L) {
+  const [a, b] = L.bands || [0, 15], out = [];
+  for (let k = a; k <= b; k++) out.push(smooth(i, 'b' + k, (frame.bands[k] || 0) * (L.gain ?? 1), L.smooth ?? 0.5));
+  return out;
+}
+
+const draw = {
+  bars(i, L, now) {
+    const v = bandVals(i, L), n = v.length, x = L.x * W, y = L.y * H, w = L.w * W, h = L.h * H;
+    const bw = w / n, gap = bw * (L.gap ?? 0.2);
+    cx.fillStyle = grad(L, x, y + h, x, y);
+    v.forEach((a, k) => {
+      const bh = Math.min(1, a) * h, bx = x + k * bw + gap / 2, ww = bw - gap;
+      if (L.mirror) cx.fillRect(bx, y + (h - bh) / 2, ww, bh); else cx.fillRect(bx, y + h - bh, ww, bh);
+    });
+  },
+  ring(i, L, now) {
+    const v = bandVals(i, L), m = Math.min(W, H), r = (L.r ?? 0.2) * m, cxp = L.x * W, cyp = L.y * H;
+    const rot = (L.spin ?? 0) * (frame.beat || 0) * Math.PI / 180, n = v.length * 2;
+    cx.strokeStyle = grad(L, cxp - r, cyp, cxp + r, cyp); cx.lineWidth = (L.thickness ?? 0.01) * m;
+    for (let k = 0; k < n; k++) {
+      const a = v[k < v.length ? k : n - 1 - k], ang = rot + k / n * 2 * Math.PI, len = Math.min(1, a) * (L.h ?? 0.2) * m;
+      cx.beginPath(); cx.moveTo(cxp + Math.cos(ang) * r, cyp + Math.sin(ang) * r);
+      cx.lineTo(cxp + Math.cos(ang) * (r + len), cyp + Math.sin(ang) * (r + len)); cx.stroke();
+    }
+  },
+  pulse(i, L, now) {
+    const m = Math.min(W, H), a = smooth(i, 'p', drive(L.drive || 'beat', L, now) * (L.gain ?? 1), L.smooth ?? 0);
+    const r = ((L.r0 ?? 0.05) + ((L.r1 ?? 0.2) - (L.r0 ?? 0.05)) * Math.min(1, a)) * m;
+    cx.beginPath(); cx.arc(L.x * W, L.y * H, r, 0, 2 * Math.PI);
+    if (L.fill === false) { cx.strokeStyle = L.color || '#fff'; cx.lineWidth = 0.01 * m; cx.stroke(); }
+    else { cx.fillStyle = L.color || '#fff'; cx.fill(); }
+  },
+  line(i, L, now) {
+    const v = bandVals(i, L), x = L.x * W, y = L.y * H, w = L.w * W, h = L.h * H;
+    cx.beginPath();
+    v.forEach((a, k) => { const px = x + k / Math.max(1, v.length - 1) * w, py = y + h - Math.min(1, a) * h;
+      k ? cx.lineTo(px, py) : cx.moveTo(px, py); });
+    if (L.fill) { cx.lineTo(x + w, y + h); cx.lineTo(x, y + h); cx.closePath(); cx.fillStyle = grad(L, x, y + h, x, y); cx.fill(); }
+    else { cx.strokeStyle = grad(L, x, 0, x + w, 0); cx.lineWidth = (L.thickness ?? 0.004) * Math.min(W, H); cx.stroke(); }
+  },
+  hits(i, L, now) {
+    const names = Object.keys(L.tracks || {}), n = names.length, x = L.x * W, y = L.y * H, w = L.w * W, h = L.h * H;
+    names.forEach((t, k) => {
+      const a = env(trackAt[t] ?? -1e9, L.decay ?? 0.25, now), cw = w / n, px = x + k * cw;
+      cx.globalAlpha = (L.opacity ?? 1) * (0.12 + 0.88 * a); cx.fillStyle = L.tracks[t];
+      if ((L.shape || 'circle') === 'circle') { cx.beginPath();
+        cx.arc(px + cw / 2, y + h / 2, Math.min(cw, h) / 2 * (0.6 + 0.4 * a), 0, 2 * Math.PI); cx.fill(); }
+      else if (L.shape === 'square') cx.fillRect(px + cw * 0.1, y, cw * 0.8, h);
+      else cx.fillRect(px + cw * 0.1, y + h * (1 - a), cw * 0.8, h * a);
+    });
+  },
+  particles(i, L, now, dt) {
+    const st = state[i] || (state[i] = {}), m = Math.min(W, H), pool = parts[i] || (parts[i] = []);
+    // A burst on each new beat or note (its timestamp changes), or as a level or band rises past 0.6.
+    const sp_ = L.spawn || 'beat'; let fire = false;
+    if (sp_ === 'beat' || sp_.startsWith('track:')) {
+      const at = sp_ === 'beat' ? beatAt : (trackAt[sp_.slice(6)] ?? -1e9);
+      if (at !== st.last) { fire = st.last !== undefined && at > 0; st.last = at; }
+    } else {
+      const v = drive(sp_, L, now) * (L.gain ?? 1);
+      fire = v > 0.6 && !st.armed; st.armed = v > 0.6 ? true : (v < 0.4 ? false : st.armed);
+    }
+    if (fire)
+      for (let k = 0; k < (L.count ?? 40) / 4; k++) { const ang = Math.random() * 2 * Math.PI, sp = (L.speed ?? 1) * (0.3 + Math.random());
+        pool.push({x: L.x * W, y: L.y * H, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: 1}); }
+    while (pool.length > (L.count ?? 40) * 4) pool.shift();
+    cx.fillStyle = L.color || '#ffffff';
+    const boost = 1 + 2 * frame.level;
+    for (const p of pool) { p.x += p.vx * dt * 0.25 * m * boost; p.y += p.vy * dt * 0.25 * m * boost; p.life -= dt * 0.6;
+      if (p.life <= 0) continue; cx.globalAlpha = (L.opacity ?? 1) * p.life;
+      cx.beginPath(); cx.arc(p.x, p.y, (L.size ?? 0.006) * m, 0, 2 * Math.PI); cx.fill(); }
+    parts[i] = pool.filter(p => p.life > 0);
+  },
+  text(i, L, now) {
+    const a = L.drive ? Math.min(1, drive(L.drive, L, now) * (L.gain ?? 1)) : 1;
+    cx.globalAlpha = (L.opacity ?? 1) * (L.drive ? 0.4 + 0.6 * a : 1);
+    cx.fillStyle = L.color || '#ffffff'; cx.textAlign = L.align || 'left'; cx.textBaseline = 'top';
+    cx.font = `600 ${Math.round((L.size ?? 0.05) * H)}px ${L.font || 'system-ui, sans-serif'}`;
+    cx.fillText(L.text || '', L.x * W, L.y * H);
+  },
+  grid(i, L, now, dt) {
+    const st = state[i] || (state[i] = {off: 0}), x = L.x * W, y = L.y * H, w = L.w * W, h = L.h * H;
+    st.off = (st.off + (L.scroll ?? 0.5) * dt * ((frame.bpm || 120) / 60)) % 1;
+    const a = L.drive ? Math.min(1, drive(L.drive, L, now) * (L.gain ?? 1)) : 1;
+    cx.globalAlpha = (L.opacity ?? 0.5) * (0.3 + 0.7 * a); cx.strokeStyle = L.color || '#5ec8ff';
+    cx.lineWidth = (L.thickness ?? 0.002) * Math.min(W, H);
+    const cols = L.cols ?? 12, rows = L.rows ?? 8;
+    cx.beginPath();
+    for (let k = 0; k <= cols; k++) { const px = x + k / cols * w; cx.moveTo(px, y); cx.lineTo(px, y + h); }
+    for (let k = 0; k <= rows; k++) { const py = y + ((k + st.off) % rows) / rows * h; cx.moveTo(x, py); cx.lineTo(x + w, py); }
+    cx.stroke();
+  },
+};
+
+function render(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  const bg = scene.background || ['#07080c'];
+  let fill = bg[0];
+  if (bg.length > 1) { fill = cx.createLinearGradient(0, 0, 0, H); bg.forEach((c, k) => fill.addColorStop(k / (bg.length - 1), c)); }
+  cx.globalCompositeOperation = 'source-over';
+  cx.globalAlpha = 1 - (scene.trails || 0); cx.fillStyle = fill; cx.fillRect(0, 0, W, H);
+  (scene.layers || []).forEach((L, i) => {
+    cx.save();
+    cx.globalCompositeOperation = L.blend || 'source-over';
+    cx.globalAlpha = L.opacity ?? 1;
+    try { draw[L.kind] && draw[L.kind](i, L, now, dt); } catch (e) { /* one bad layer never stops the picture */ }
+    cx.restore();
+  });
+  if (hud.style.display === 'block')
+    hud.textContent = `level ${frame.level?.toFixed(2)}  beat ${frame.beat ?? '-'}  bpm ${frame.bpm ?? '-'}  engine ${frame.engine ?? 'none'}`;
+  requestAnimationFrame(render);
+}
+pollScene(); listen(); requestAnimationFrame(render);
+</script>
+</body>
+</html>

@@ -9,6 +9,15 @@
   polling if YouTube refuses the stream. `venue_set(reader='poll', poll_s=...)` picks polling. It needs grpcio and
   protobuf (the `stream` extra); the messages are built at runtime, nothing is generated.
 
+### The stream's visual page, drawn from the set
+
+- `stream_visual(mode='page')` streams a page that moves to the set: the master's level and 16 bands, the engine's
+  beat, and each track's notes as they sound. It reads the engine's local stream and its clock and onsets ops, never
+  the mixer.
+- `stream_scene` sets what it draws with raw numbers (bars, ring, line, pulse, particles, per-track hits, text,
+  grid; each driven by the level, a band, the beat or a track), live with no blip; a wrong field says which fields
+  the layer takes. `stream_page` reports the page's address and what it sees now.
+
 ### Live streaming to several sites, with every site's chat
 
 - A stream server (`stream_start`) sends the live set to Twitch, YouTube, Kick, Owncast or any RTMP site at once:
