@@ -43,7 +43,11 @@ What each site's chat can do here:
    restart it carries silence and the picture, so a reset never drops a site.
 2. Set the picture first (`stream_visual`), because a change while live is a 2-3 s blip on every site. Use one
    call with everything: `mode` (cqt, spectrum, waves, scope, page, none), `colors`, `background` or `image` or
-   `window` (the title of a window to capture: the VR stage's mirror), `area`. `page` is the visual page below. Set
+   `window` (the title of a window to capture: the VR stage's mirror, or the stage's on-air page), `capture` (`auto`:
+   Windows Graphics Capture where ffmpeg has it, so a WebGL page drawn on the GPU comes through even when covered;
+   `gdi` is the old grab, which sees a GPU-drawn window as blank; `wgc` asked for by name is refused when ffmpeg has
+   no gfxcapture, never quietly swapped). A plain browser window (tabs and address bar) is cropped to its web content
+   by itself; pass its whole title as the window shows it. `area`. `page` is the visual page below. Set
    the text lines, which
    change live with no blip: `stream_text('title', ...)`, `('note', ...)` ("type !request in chat"), `('now', ...)`
    (the piece). `chat_overlay` puts the newest chat line in a corner by itself.
@@ -71,6 +75,9 @@ second; it never touches the mixer. You set what it draws with numbers, and it c
   on top.
 - On air, the page opens in its own small browser window (its own profile, muted) that the encoder captures, cropped
   to the page. Leave that window where it is; covering it is fine.
+- With `capture='auto'` the page draws on the GPU (WebGL), the same GPU that encodes the stream (NVENC), so both
+  share its heat. On a hot laptop GPU, `capture='gdi'` (the page drawn in software, grabbed the old way) is the manual
+  fallback for long streams until the heat is solved; it costs CPU instead.
 
 ## Chat: the MC
 
