@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fewer MCP tools for harnesses with a cap
+
+- `ismail mcp --roles dj,mc` or `--shelves live,stream` serves only those roles' or shelves' ops (the ones
+  `ops_find` already uses), always with `guide` and `ops_find`. `--list-roles` prints each role's and shelf's tool
+  count without starting; `--max-tools N` refuses to start over N and names the sizes; an unknown role or shelf is
+  refused with the valid ones. `ISMAIL_MCP_ROLES`, `ISMAIL_MCP_SHELVES` and `ISMAIL_MCP_MAX_TOOLS` do the same for a
+  harness that cannot pass arguments. On a filtered server `ops_find` marks the ops it does not serve.
+
 ### MIDI files in and out
 
 - `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,
