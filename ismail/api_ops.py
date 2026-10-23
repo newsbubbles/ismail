@@ -40,7 +40,8 @@ CATEGORIES = [
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
     ('together', 'listening together: record what plays (a mic only with their yes), their words as they say them, '
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
-    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
+    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it, tracks frozen '
+             'into one a deck plays', ('live_', 'midi_', 'track_freeze')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stream', "live streaming: the set to several sites at once, the picture and its text, every site's chat read "
                "and answered", ('stream_', 'venue_', 'chat_')),
