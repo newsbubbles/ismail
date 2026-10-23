@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### A request queue for streams
+
+- `request_add(who, what, venue, note)` puts a chat request in one queue and says its place in line;
+  `request_next` gives the DJ the first waiting one at a phrase end; `request_mark(id, status)` moves it to playing
+  (the one before it is marked done), done, skipped or back to waiting; `request_list` shows the line with
+  positions; `request_where(who)` answers "when does mine play?" with the place and, once requests have played,
+  about how many minutes. The queue is an append-only log (requests.jsonl in the stream home), so it survives a
+  restart and an MC and a DJ in separate sessions see the same line. An unknown id names the ids there are; a bad
+  status lists the valid ones.
+
 ### MIDI files in and out
 
 - `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,

@@ -43,7 +43,8 @@ CATEGORIES = [
     ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stream', "live streaming: the set to several sites at once, the picture and its text, every site's chat read "
-               "and answered", ('stream_', 'venue_', 'chat_')),
+               "and answered, and the request queue the MC fills and the DJ plays from",
+     ('stream_', 'venue_', 'chat_', 'request_')),
     ('asks', "before you ask the person: their standing grants, and which agent owns which questions", ('grant_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]

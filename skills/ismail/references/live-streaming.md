@@ -101,6 +101,17 @@ A stream with chat works as two roles, in two sessions, each with its own helper
   (a style, a song name, "change", "more of this"), gathered at phrase ends, never mid-build. A vote's result is
   fine; raw chat is not. During an engine reset, the MC fills the gap in chat, never with sound.
 
+## The request queue
+
+The MC and the DJ share one queue of requests, kept on disk, so it works across their two sessions and a restart.
+- **The MC** puts each request in as it arrives: `request_add(who='<their name>', what='deep house',
+  venue='<venue>')`, a few words, not the chat line. It returns the place in line; tell the viewer ("you're 3rd").
+  When someone asks "when does mine play?", `request_where(who)` gives the place and, once a few requests have
+  played, about how many minutes. `request_list` shows the whole line.
+- **The DJ** reads `request_next` at each phrase end, never mid-build. When it starts, `request_mark(id,
+  'playing')` (the one before is marked done); `request_mark(id, 'skipped', note='why')` for one that does not fit,
+  so the MC can tell the viewer. The DJ never reads raw chat.
+
 The MC never touches the mixer: chat, the picture and helper renders share the machine, so they stay off the
 mixer's cores.
 
@@ -108,7 +119,7 @@ mixer's cores.
 
 Chat commands are plain chat lines; the MC reads them from `chat_watch` and decides. Keep a few, and put them on
 screen with `stream_text('note', ...)`:
-- `!request <style or song>`: a request for the DJ, queued, one per person per 10 minutes.
+- `!request <style or song>`: a request for the DJ, queued with `request_add`, one per person per 10 minutes.
 - `!vote <a|b>`: the MC opens a vote ("next: faster or deeper? !vote a / !vote b"), counts it for a minute, and
   hands the DJ the result.
 - `!love`: counts like the person's phone love tap: the DJ keeps what plays a little longer.

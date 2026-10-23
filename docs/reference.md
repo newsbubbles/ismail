@@ -132,6 +132,12 @@ Find any tool by what you need or by role with `ops_find`.
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`).
+- **Live streaming** (`ismail/stream`, the `stream_*`, `venue_*` and `chat_*` tools): the set out to several sites
+  at once, with a picture drawn from the music, and every site's chat read and answered in one place. A request
+  queue (`request_*`) carries chat's requests from the MC to the DJ: `request_add` from chat, `request_next` at a
+  phrase end, `request_mark` as it plays, `request_where` for "when does mine play?". It is an append-only log in
+  the stream home, so it survives a restart and both sessions see one line. The guide:
+  [live-streaming.md](../skills/ismail/references/live-streaming.md).
 - **The VR stage** (`ismail/stage`, the `stage_*` tools): a three.js WebXR page for a desktop browser or a headset,
   and a small server that carries the live link between the page and the agent. Scenes live in the song's folder.
   The agent drives the page with ops and reads what the person did and said with `stage_events`. Objects carry

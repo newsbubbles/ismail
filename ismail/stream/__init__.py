@@ -15,6 +15,8 @@ holds three things:
   picture (a visualizer drawn by ffmpeg from the sound, a still or a captured window, with text lines over it), encoded
   once, then copied to every venue that streams. Each destination is its own small process, so one site dropping
   never stops the others, and it is reconnected on its own.
+- **Requests** (request_queue.py). Chat's requests in one queue the MC fills and the DJ plays from, an append-only log
+  (requests.jsonl) that needs no server, so both sessions see one line.
 
 Going live on a public venue is the person's yes, every time: stream_go asks for their words and logs them.
 """
