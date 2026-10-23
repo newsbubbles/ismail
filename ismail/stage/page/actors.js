@@ -694,11 +694,40 @@ export function initActors(ed, live) {
     }
     return hip.y > top ? hip.clone().setY(top) : hip;
   }
-  // a start pose's own grip (hands: 'pose') points its elbow at the pose's elbow, lowered, and POSE_POLE_OUT out to its
-  // side: lowered only, a hand drawn in under the shoulder put the pole on the arm's own line, where it no longer said
-  // which way, and the elbow flipped from the side to the front between two frames (the 2026-10-22 drummer, 5.8 s into
-  // his clip; out only near that line, the flips stayed)
-  const POSE_POLE_OUT = 0.25;
+  // a start pose's own grip (hands: 'pose', sticks, a guitar neck) points its elbow down, POSE_POLE[0] out to its side
+  // and POSE_POLE[1] forward of the chest: low and a little out, as a drummer's. It was the pose's elbow lowered (a
+  // hand drawn in under the shoulder put that on the arm's own line and the elbow flipped between frames: the
+  // 2026-10-22 drummer, 5.8 s into his clip), then that plus 25 cm out to the side, which held the flips but sent the
+  // left elbow out level with the shoulder whenever the hand came up close (16% of frames, from 2%; VR Dev, 2026-10-23,
+  // 4.1 s into the clip). Any fixed direction lies on the arm's line for some hand, so where it says little (under
+  // POSE_POLE_WEAK, the sine of its angle from the arm) the elbow keeps last frame's side (rig.elbowSide), up to
+  // POSE_POLE_KEEP of it as the direction fades: no flip, and the elbow is free again once the hand moves on
+  const POSE_POLE = [0.3, 0.15], POSE_POLE_WEAK = 0.8, POSE_POLE_KEEP = 1;
+  const ppU = new THREE.Vector3(), ppW = new THREE.Vector3(), ppE = new THREE.Vector3();
+  function posePole(rig, sd, sh, target, lateral, fwd) {
+    ppU.copy(target).sub(sh);
+    const ul = ppU.length();
+    const pole = new THREE.Vector3(0, -1, 0).addScaledVector(lateral, POSE_POLE[0]).addScaledVector(fwd, POSE_POLE[1]);
+    const side = rig.elbowSide && rig.elbowSide[sd];
+    if (ul > 1e-6 && side) {
+      ppU.multiplyScalar(1 / ul);
+      const wl = pole.length(), s = ppW.copy(pole).addScaledVector(ppU, -pole.dot(ppU)).length() / wl;
+      const keep = POSE_POLE_KEEP * Math.max(0, 1 - s / POSE_POLE_WEAK);
+      if (keep > 0) pole.addScaledVector(side, keep * wl);
+    }
+    return pole.add(sh);
+  }
+  // after the solve: which way the elbow went from the shoulder-hand line, for posePole next frame
+  function keepElbowSide(rig, sd, sh, target) {
+    const N = SIDE[sd], e = rig.bones[N.lo].getWorldPosition(ppE).sub(sh);
+    ppU.copy(rig.bones[N.ha].getWorldPosition(ppW)).sub(sh);
+    if (ppU.lengthSq() < 1e-10) return;
+    ppU.normalize();
+    e.addScaledVector(ppU, -e.dot(ppU));
+    if (e.lengthSq() < 1e-8) return;
+    rig.elbowSide = rig.elbowSide || {};
+    (rig.elbowSide[sd] = rig.elbowSide[sd] || new THREE.Vector3()).copy(e.normalize());
+  }
   function poseBase(st, f) {
     const { rig, s, anchor, J } = st, to = st.to || anchor;
     const P = (a) => to.clone().add(new THREE.Vector3(a[0], a[1], a[2]).sub(anchor).multiplyScalar(s));
@@ -1516,16 +1545,16 @@ export function initActors(ed, live) {
       shoulderFollow(rig, sd, target, S.handW[sd].clone().add(B.draw || B.off));
       // the elbow: the user's own hands (byUser) point it as poseBase does, in the body's frame now (it was the start
       // pose's elbow, held where it was when the body turned, so a turned body or a hand pulled back behind it bent the
-      // elbow inward: the user, 2026-10-22, following Jo); a start pose's own grip (hands: 'pose', the drummer) keeps its
-      // elbow, turned with the body
+      // elbow inward: the user, 2026-10-22, following Jo); a start pose's own grip (hands: 'pose', the drummer) points it
+      // low and a little out (posePole)
       const sh = rig.bones[up].getWorldPosition(new THREE.Vector3());
       const sgn = sd === 'l' ? 1 : -1, lateral = new THREE.Vector3().crossVectors(Y, fwdChest).multiplyScalar(sgn);
-      const P0 = rig.bones.pelvis.getWorldPosition(new THREE.Vector3());
       const pole = byUser ? elbowPole(rig, sd, sh, target, lateral, fwdChest.clone().negate())
-        : S.elbowW[sd].clone().add(B.off).sub(P0).applyQuaternion(B.yaw).add(P0).add(new THREE.Vector3(0, -0.3, 0)).addScaledVector(lateral, POSE_POLE_OUT);
+        : posePole(rig, sd, sh, target, lateral, fwdChest);
       const hq = byUser && rig.cal[ha] ? M.clone().multiply(qA(now.j[0])).multiply(rig.cal[ha])
         : qA(now.j[0]).multiply(qA(was.j[0]).invert()).multiply(S.handQ[sd].clone());
       armSolve(st, rig, sd, target, pole, hq, f.t);
+      if (!byUser) keepElbowSide(rig, sd, sh, target);
       setWorldQ(rig.bones[ha], hq);
       for (const [fg, names] of Object.entries(FINGER_JOINTS)) names.forEach((jn, k) => {
         const b = rig.bones[`${fg}_0${k + 1}_${sd}`], i = st.J[jn];

@@ -14,7 +14,7 @@
 //             about the shoulder-hand line to the nearest clear angle (15 degree tries, then halved twice), the hand
 //             exact; (3) none clears (a straight arm has no bend to swing): the clavicle comes forward up to ALPHA_MAX;
 //             only then (4) the hand is pulled out of the way. The swing and the clavicle ease home (HOME_S) once clear;
-//             the swing turns at most SWING_RATE
+//             the swing turns at most SWING_RATE, and while the cap holds it back the hand makes way as in (4)
 //   count     limbDepths: how deep each limb is inside a body, for the page's clip counter (actors.js)
 //   reach     softReach / reachIn: a hand target near or past full reach is eased in, so the elbow keeps a bend
 //   relax     relaxedArm: where a resting body's arms hang when they give way to someone moving near
@@ -326,6 +326,19 @@ export function solveArm(arm) {
   if (job.dt > 0 && Math.abs(phi - prev.phi) > SWING_RATE * job.dt) {
     phi = prev.phi + Math.sign(phi - prev.phi) * SWING_RATE * job.dt;
     cost = costAt(job, _S, T, phi);
+    // held back by the cap and still through a body: the hand and forearm make way this frame instead, as in (4) but
+    // at the capped angle, and the swing catches up over the next frames (the 2026-10-22 couple: Jo's forearm 5.8 cm
+    // into Mae for one frame, the clear angle 0.34 rad past the cap)
+    for (let it = 0; it < 2 && cost >= ACT_M; it++) {
+      elbowAt(_E, job, _S, phi);
+      const d = armCost(job, _S, _E, T, _bn);
+      if (d < ACT_M) { cost = d; break; }
+      const m = Math.min(PULL_MAX, (d + PUSH_PAD) / Math.max(deepK, 0.35));
+      axpy(T, T, m, _bn);
+      pulled += m;
+      circle(job, _S, T);
+      cost = costAt(job, _S, T, phi);
+    }
   }
   const c = Math.cos(phi), s = Math.sin(phi);
   for (let i = 0; i < 3; i++) out.v[i] = _v[i] * c + _w[i] * s;
