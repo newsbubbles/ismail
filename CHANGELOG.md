@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Older downloads on the phone
+
+- The Downloads section shows the last 4 as before, with an "Older downloads (n)" button under it that opens the
+  rest, 10 more per tap, and "Show fewer" to fold it back. The phone server keeps the last 200 offers across
+  restarts; `GET /api/offers?skip=&n=` pages them newest first, and the state carries `offers_n`.
+
 ### YouTube chat in realtime
 
 - YouTube chat is read with streamList: one call held open that hands over each message as it is written, instead of

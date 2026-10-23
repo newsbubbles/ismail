@@ -1096,12 +1096,31 @@ async function deviceInfo(pick) {
   } catch (e) {}
   return out;
 }
-function renderOffers() {
-  const os = state.offers || [];
-  $('offerbox').hidden = !os.length;
-  $('offers').innerHTML = os.slice().reverse().map((o) => `<div class="offer"><span>${esc(o.label)}</span><a href="${esc(o.url)}?dl=1" download="${esc(o.name)}">Download</a></div>`).join('');
-  $('offers').querySelectorAll('a[download]').forEach((a) => { a.onclick = () => ev('download', { file: a.getAttribute('download') }); });
+// The last 4 downloads come with the state; older ones page in from api/offers, 10 a tap (Nate 10-23: agents may
+// send 10 downloads and only the last 4 showed).
+const offerHist = { open: false, n: 0, list: [], more: false };
+async function offerPage(n) {
+  try {
+    const r = await fetch(`api/offers?skip=0&n=${n}`, { cache: 'no-store' });
+    const d = await r.json();
+    Object.assign(offerHist, { open: true, n, list: d.offers || [], more: !!d.more });
+  } catch (e) { toast('could not load older downloads'); }
+  renderOffers();
 }
+function renderOffers() {
+  const os = state.offers || [], total = state.offers_n || os.length;
+  $('offerbox').hidden = !os.length;
+  const recent = os.slice().reverse(), seen = new Set(offerHist.list.map((o) => o.url));
+  const shown = offerHist.open ? recent.filter((o) => !seen.has(o.url)).concat(offerHist.list) : recent;   // a new one lands on top
+  $('offers').innerHTML = shown.map((o) => `<div class="offer"><span>${esc(o.label)}</span><a href="${esc(o.url)}?dl=1" download="${esc(o.name)}">Download</a></div>`).join('');
+  $('offers').querySelectorAll('a[download]').forEach((a) => { a.onclick = () => ev('download', { file: a.getAttribute('download') }); });
+  const older = total - shown.length;
+  $('offermore').hidden = !(offerHist.open ? offerHist.more : older > 0);
+  $('offermore').textContent = `Older downloads (${older})`;
+  $('offerless').hidden = !offerHist.open;
+}
+$('offermore').onclick = () => offerPage(Math.max(offerHist.n, 4) + 10);
+$('offerless').onclick = () => { Object.assign(offerHist, { open: false, n: 0, list: [] }); renderOffers(); };
 function render() {
   const e = state.engine || {}, h = state.heard || {}, r = state.rec || {};
   $('top').classList.toggle('live', !!e.playing);
