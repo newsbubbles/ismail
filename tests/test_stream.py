@@ -457,8 +457,15 @@ def test_wgc_captures_a_gpu_window_by_title_cropped_to_its_content(tmp_path, hom
     assert "gfxcapture=window_title='^hall .on air.$':capture_cursor=0:max_framerate=30,hwdownload,format=bgra," in g
     assert 'crop=1280:720:0:31,' in g and '[0:a]asplit' in g
     assert output.title_regex('a:b,c[d]') == '^a.b.c.d.$'
+    assert output.title_regex('hall - Microsoft​ Edge') == '^hall - Microsoft.+ Edge$'   # UTF-8 bytes, not one '.'
     with pytest.raises(ValueError, match='capture'):
         output.Output(StubHub(home)).set_visual({'capture': 'screen'})
+
+
+def test_wgc_asked_for_without_gfxcapture_is_refused_not_downgraded(home, monkeypatch):
+    monkeypatch.setattr(output, '_GFX', False)
+    with pytest.raises(ValueError, match="needs ffmpeg 8 with gfxcapture"):
+        output.Output(StubHub(home)).set_visual({'capture': 'wgc'})
 
 
 def test_page_mode_captures_the_page_window_cropped(tmp_path):

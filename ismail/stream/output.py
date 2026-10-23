@@ -129,8 +129,11 @@ def window_content_box(title):
 
 
 def title_regex(title):
-    """An exact match for a window title as gfxcapture's regex, with no character the filter graph would read."""
-    return '^' + re.sub(r'[^A-Za-z0-9 _-]', '.', title) + '$'
+    """An exact match for a window title as gfxcapture's regex, with no character the filter graph would read. A run
+    of non-ASCII characters becomes '.+': the regex sees UTF-8 bytes, and Edge's own titles hold a zero-width space
+    ("Microsoft​ Edge"), which one '.' never matched."""
+    t = re.sub(r'[^\x00-\x7f]+', '\x00', title)
+    return '^' + re.sub(r'[^A-Za-z0-9 _\x00-]', '.', t).replace('\x00', '.+') + '$'
 
 
 def fit_window(title, W, H, view, timeout=20.0):
@@ -477,10 +480,16 @@ class Output:
         self.page_box = fit_window(PAGE_TITLE, W, H, lambda: self.hub.page_view)
 
     def capture(self):
-        """How a window is captured: wgc where ffmpeg has it (asked for or auto), else gdi."""
+        """How a window is captured: gdi when asked; wgc when asked (set_visual refuses it without gfxcapture);
+        auto: wgc where ffmpeg has it, else gdi."""
         c = self.visual.get('capture') or 'auto'
         if c == 'gdi':
             return 'gdi'
+        if c == 'wgc':
+            if not has_gfxcapture():
+                raise ValueError("capture='wgc' needs ffmpeg 8 with gfxcapture (this ffmpeg has none); use "
+                                 "capture='gdi' or 'auto'")
+            return 'wgc'
         return 'wgc' if has_gfxcapture() else 'gdi'
 
     def _visual_now(self):
@@ -626,6 +635,9 @@ class Output:
             raise ValueError(f"mode {new['mode']!r}: one of {', '.join(MODES)}")
         if new.get('capture', 'auto') not in CAPTURES:
             raise ValueError(f"capture {new['capture']!r}: one of {', '.join(CAPTURES)}")
+        if new.get('capture') == 'wgc' and not has_gfxcapture():
+            raise ValueError("capture='wgc' needs ffmpeg 8 with gfxcapture (this ffmpeg has none); use capture='gdi' "
+                             "or 'auto'")
         for c in list(new.get('colors') or []) + [new['background'], new['text_color']]:
             _hex(c)
         if new.get('image') and not os.path.exists(str(new['image'])):
