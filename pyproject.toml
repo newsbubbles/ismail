@@ -62,6 +62,7 @@ packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ism
             "ismail.stream", "ismail.stream.adapters"]
 
 [tool.setuptools.package-data]
+"ismail" = ["kit_tables.json"]
 "ismail.voices" = ["*.json"]
 "ismail.voices.keys" = ["*.json"]
 "ismail.voices.strings" = ["*.json"]

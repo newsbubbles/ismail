@@ -35,6 +35,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('is every part of my render in tune', 'analyze_tuning'),
     ('can the narrator be heard over the mix', 'analyze_voice_heard'),
     ('speech on the beat, each syllable on a 16th', 'sound_speak'),
+    ('what instruments exist', 'kit'),
 ])
 def test_a_need_in_plain_words_finds_its_op_first(need, first):
     out = api.OPS['ops_find'](need=need, n=3)

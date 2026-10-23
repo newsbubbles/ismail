@@ -189,6 +189,7 @@ nudges you, follow it.
 | you are not sure which tool fits, or you work in one role (voice, sound, DJ, stage, film) | `ops_find(need='<what you want, in plain words>')`; `ops_find(role=...)` lists the tools your role reaches for first. It reads each tool's own description, so it is never out of date |
 | a new person, or a new song with no reference | `sketch` (two or three contrasting sketches in minutes), then `sketch_keep` the one they pick |
 | a number, a cause, a fact about the reference, a reading of their words | the check that backs it before you act (Non-negotiables, "A guess until one check backs it") |
+| what instruments exist, whether there is one for a family (an organ, a sax, a drum machine), which passed a blind test | `kit` (`kit(family=...)` for one family and its open gaps, `kit(voice=...)` for one voice in full); the same data as a page: `docs/KIT.md` |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
 | the numbers plateau, or they say bland, generic, dated | an eye exam: lenses that each change one named thing, at the two ends of the range, never steps around the current value (`references/blind-tests.md`) |
 | you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix; `exam_check` before it reaches the person |

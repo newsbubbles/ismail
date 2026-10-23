@@ -1,0 +1,791 @@
+{
+ "_about": "Hand-kept tables for the kit page (ledger M295), read by ismail/kit.py. The Sound Engineer gardens them: a row per public voice (family, type, engine, modeled_on: an instrument type, never a brand; ear: untested|pending|usable|passed|failed with exam: the exam id, file or ledger row that judged it, and heard: what was heard), a row per effect type, and the open gaps per family. After an edit run python -m ismail.kit to regenerate docs/KIT.md and docs/kit.json.",
+ "voice_families": [
+  "keys",
+  "organs",
+  "guitars",
+  "basses",
+  "bowed strings",
+  "woodwinds",
+  "brass",
+  "mallets",
+  "voices",
+  "drum kits",
+  "hand percussion",
+  "analog synths",
+  "drum machines",
+  "FM",
+  "wavetable",
+  "granular",
+  "fx"
+ ],
+ "fx_families": [
+  "level and tone",
+  "dynamics",
+  "drive",
+  "rig",
+  "time",
+  "modulation",
+  "voice",
+  "space"
+ ],
+ "types": {
+  "sampled": "plays real recorded notes or hits (a sample set fetched on the person's word)",
+  "measured": "a code model (waveguide, modal, additive) whose numbers were fitted to recordings",
+  "mimic": "a profile measured from a few real notes (partials, body, noise, room), rebuilt for any note",
+  "sprite": "the built-in subtractive synth or drum synth, a designed patch with no real machine behind it",
+  "physical": "a code model designed from the physics, not fitted to a recording",
+  "designed": "a code voice designed by ear, not modeled on a recording"
+ },
+ "ear_states": {
+  "passed": "the listener could not tell it from the real thing, blind",
+  "usable": "picked out, but \"good enough\"",
+  "failed": "heard as not the instrument",
+  "pending": "an exam is out or a round is under way, no verdict yet",
+  "untested": "no ear test found"
+ },
+ "never_first": "showcase.json: the sprite synth presets are never a first sketch (\"sounds like a game console\")",
+ "voices": {
+  "grand_piano": {
+   "family": "keys",
+   "type": "measured",
+   "engine": "additive stiff strings",
+   "modeled_on": "concert grand piano",
+   "ear": "untested",
+   "exam": null,
+   "heard": "calibrated from measured notes; no blind exam found. docs/reference.md: closer to real notes than a piano mimic (11.6 vs 16.3 distance), a number, not an ear test"
+  },
+  "grand_piano_halo": {
+   "family": "keys",
+   "type": "measured",
+   "engine": "additive stiff strings",
+   "modeled_on": "grand piano strings ringing in sympathy",
+   "ear": "untested",
+   "exam": null
+  },
+  "additive_piano": {
+   "family": "keys",
+   "type": "physical",
+   "engine": "additive stiff strings",
+   "modeled_on": "acoustic piano (no data file)",
+   "ear": "untested",
+   "exam": null
+  },
+  "rhodes": {
+   "family": "keys",
+   "type": "sampled",
+   "engine": "sample playback",
+   "modeled_on": "1977 tine electric piano, 73 keys, DI",
+   "ear": "untested",
+   "exam": null,
+   "heard": "samples measured in tune (songs/udio_ab_01/HANDOFF.md, M80); never ear-tested on its own"
+  },
+  "organ": {
+   "family": "organs",
+   "type": "sprite",
+   "engine": "additive partials",
+   "modeled_on": "drawbar organ, roughly",
+   "ear": "untested",
+   "exam": null
+  },
+  "strat70_lead": {
+   "family": "guitars",
+   "type": "measured",
+   "engine": "waveguide strings",
+   "modeled_on": "single-coil electric guitar on a late-60s record, lead rig",
+   "ear": "passed",
+   "exam": "songs/paligap/notes/feedback.md (blind single-note exam v4)",
+   "heard": "20 of 22 notes not told from the record",
+   "range": "Eb2-Eb6"
+  },
+  "strat70_clean": {
+   "family": "guitars",
+   "type": "measured",
+   "engine": "waveguide strings",
+   "modeled_on": "single-coil electric guitar, single notes, clean amp",
+   "ear": "untested",
+   "exam": null,
+   "heard": "the same strings as strat70_lead (passed through the lead rig); the clean rig not examined"
+  },
+  "strat70_rhythm": {
+   "family": "guitars",
+   "type": "measured",
+   "engine": "waveguide strings",
+   "modeled_on": "single-coil electric guitar, strummed, phase-vibe rig",
+   "ear": "untested",
+   "exam": null,
+   "heard": "fitted with the lead; strummed chords not examined"
+  },
+  "strat70_rotary": {
+   "family": "guitars",
+   "type": "measured",
+   "engine": "waveguide strings",
+   "modeled_on": "single-coil electric guitar through a rotating speaker",
+   "ear": "untested",
+   "exam": null,
+   "heard": "fitted with the lead; rotary rig not examined",
+   "range": "Eb2-Eb6"
+  },
+  "emily": {
+   "family": "guitars",
+   "type": "sampled",
+   "engine": "sample playback",
+   "modeled_on": "clean electric guitar, DI, with release noise",
+   "ear": "usable",
+   "exam": "songs/tears/HANDOFF.md (round r1g); M79",
+   "heard": "the song copy with its legato layer got the first \"can't tell\" (2 of 3); the public copy not examined itself"
+  },
+  "pbass70": {
+   "family": "basses",
+   "type": "measured",
+   "engine": "waveguide strings",
+   "modeled_on": "split-coil electric bass on a late-60s record",
+   "ear": "untested",
+   "exam": null,
+   "heard": "fitted to the record's bass stem (songs/paligap/HANDOFF.md); no blind exam found"
+  },
+  "sub_bass": {
+   "family": "basses",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "sine sub bass",
+   "ear": "untested",
+   "exam": null
+  },
+  "growl": {
+   "family": "basses",
+   "type": "designed",
+   "engine": "code engine",
+   "modeled_on": "dubstep growl bass (designed, electronic only)",
+   "ear": "untested",
+   "exam": null
+  },
+  "reese_bass": {
+   "family": "basses",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "detuned-saw drum-and-bass bass",
+   "ear": "untested",
+   "exam": null
+  },
+  "distorted_bass": {
+   "family": "basses",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "distorted saw and square bass",
+   "ear": "untested",
+   "exam": null
+  },
+  "violin": {
+   "family": "bowed strings",
+   "type": "mimic",
+   "engine": "mimic profile",
+   "modeled_on": "solo violin, sustained",
+   "ear": "usable",
+   "exam": "docs/reference.md (mimic: four open eye-exam rounds)",
+   "heard": "defaults tuned by ear, open rounds, not blind"
+  },
+  "cello": {
+   "family": "bowed strings",
+   "type": "mimic",
+   "engine": "mimic profile",
+   "modeled_on": "solo cello, sustained",
+   "ear": "usable",
+   "exam": "docs/reference.md (mimic eye-exam rounds); M240",
+   "heard": "D2-F2 heard \"way out of tune\" in a live set (phone note 6404): one profile note drifts 7 c, fix ready"
+  },
+  "contrabass": {
+   "family": "bowed strings",
+   "type": "mimic",
+   "engine": "mimic profile",
+   "modeled_on": "double bass, bowed",
+   "ear": "usable",
+   "exam": "docs/reference.md (mimic: four open eye-exam rounds)",
+   "heard": "defaults tuned by ear, open rounds, not blind"
+  },
+  "clarinet": {
+   "family": "woodwinds",
+   "type": "mimic",
+   "engine": "mimic profile",
+   "modeled_on": "clarinet, sustained",
+   "ear": "passed",
+   "exam": "M169 (songs/_migration/m169_exam/results_w.md)",
+   "heard": "could not tell, both ticked real"
+  },
+  "bassoon": {
+   "family": "woodwinds",
+   "type": "mimic",
+   "engine": "mimic profile",
+   "modeled_on": "bassoon, sustained",
+   "ear": "usable",
+   "exam": "M169 (songs/_migration/m169_exam/results_w.md)",
+   "heard": "picked out, but \"good enough\""
+  },
+  "horn": {
+   "family": "brass",
+   "type": "mimic",
+   "engine": "mimic profile",
+   "modeled_on": "French horn, sustained",
+   "ear": "usable",
+   "exam": "M169 (songs/_migration/m169_exam/results_b.md)",
+   "heard": "picked out, \"good enough, synthy\""
+  },
+  "kit70": {
+   "family": "drum kits",
+   "type": "measured",
+   "engine": "modal resonators",
+   "modeled_on": "1970 acoustic kit fitted to a late-60s record's drum stem",
+   "ear": "usable",
+   "exam": "M149 (moves exam r1)",
+   "heard": "snare good; the crash \"like a cheap drum machine\" (a measured cymbal voice waits on songs/cymbals exam r1)"
+  },
+  "rusty": {
+   "family": "drum kits",
+   "type": "sampled",
+   "engine": "sample playback",
+   "modeled_on": "1980s acoustic kit, multi-velocity, round robins, its own mics",
+   "ear": "usable",
+   "exam": "songs/tears/HANDOFF.md (exam 8, 2026-10-02)",
+   "heard": "\"closest\" of the kits tried, \"drums sound way better\""
+  },
+  "toms": {
+   "family": "drum kits",
+   "type": "sampled",
+   "engine": "sample playback + retune",
+   "modeled_on": "acoustic toms retuned to the note, stick to brush strokes",
+   "ear": "passed",
+   "exam": "songs/percussion/exam/blind1 (se_toms_blind1); LEDGER intake 10-14, pr:#253",
+   "heard": "\"couldn't tell\""
+  },
+  "kit_basic": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "generic electronic kit (kick, snare, clap, hats)",
+   "ear": "untested",
+   "exam": null
+  },
+  "kick": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "synth kick",
+   "ear": "untested",
+   "exam": null
+  },
+  "kick_hard": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "driven synth kick",
+   "ear": "untested",
+   "exam": null
+  },
+  "snare": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "synth snare",
+   "ear": "untested",
+   "exam": null
+  },
+  "clap": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "synth clap",
+   "ear": "untested",
+   "exam": null
+  },
+  "hat_closed": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "synth closed hat",
+   "ear": "untested",
+   "exam": null
+  },
+  "hat_open": {
+   "family": "drum machines",
+   "type": "sprite",
+   "engine": "drum synth",
+   "modeled_on": "synth open hat",
+   "ear": "untested",
+   "exam": null
+  },
+  "saw_lead": {
+   "family": "analog synths",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "generic saw lead",
+   "ear": "untested",
+   "exam": null
+  },
+  "square_lead": {
+   "family": "analog synths",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "generic square lead",
+   "ear": "untested",
+   "exam": null
+  },
+  "supersaw": {
+   "family": "analog synths",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "seven-voice detuned saw",
+   "ear": "untested",
+   "exam": null
+  },
+  "pad": {
+   "family": "analog synths",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "generic saw pad",
+   "ear": "untested",
+   "exam": null
+  },
+  "pluck": {
+   "family": "analog synths",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "generic filter pluck",
+   "ear": "untested",
+   "exam": null
+  },
+  "acid_bass": {
+   "family": "analog synths",
+   "type": "sprite",
+   "engine": "subtractive synth (ladder filter)",
+   "modeled_on": "bass-line acid synth, roughly (no accent or slide model)",
+   "ear": "untested",
+   "exam": null
+  },
+  "fm_bell": {
+   "family": "FM",
+   "type": "sprite",
+   "engine": "2-oscillator FM",
+   "modeled_on": "generic FM bell",
+   "ear": "untested",
+   "exam": null
+  },
+  "fm_bass": {
+   "family": "FM",
+   "type": "sprite",
+   "engine": "2-oscillator FM",
+   "modeled_on": "generic FM bass",
+   "ear": "untested",
+   "exam": null
+  },
+  "crackle": {
+   "family": "fx",
+   "type": "designed",
+   "engine": "code engine",
+   "modeled_on": "vinyl surface noise: clicks and hiss",
+   "ear": "untested",
+   "exam": null
+  },
+  "sfx": {
+   "family": "fx",
+   "type": "designed",
+   "engine": "code engine",
+   "modeled_on": "one-shot effects: shot, reload, casing, crunch, punch, rip, gong",
+   "ear": "untested",
+   "exam": null,
+   "range": "velocity picks the effect, pitch ignored"
+  },
+  "transitions": {
+   "family": "fx",
+   "type": "designed",
+   "engine": "code engine",
+   "modeled_on": "impact, uplifter, downlifter, reverse crash",
+   "ear": "untested",
+   "exam": null,
+   "heard": "proven in a song (songs/electrohouse, M249a), no ear test",
+   "range": "the note picks it: C1 impact, D1 uplifter, E1 downlifter, others reverse crash"
+  },
+  "noise_riser": {
+   "family": "fx",
+   "type": "sprite",
+   "engine": "subtractive synth",
+   "modeled_on": "filtered noise riser",
+   "ear": "untested",
+   "exam": null
+  }
+ },
+ "effects": {
+  "gain": {
+   "family": "level and tone",
+   "what": "level and pan"
+  },
+  "eq": {
+   "family": "level and tone",
+   "what": "parametric EQ: peak, shelves, 12/24 dB cuts, notch, bandpass"
+  },
+  "filter": {
+   "family": "level and tone",
+   "what": "low-, high- and band-pass filter with a tempo LFO"
+  },
+  "width": {
+   "family": "level and tone",
+   "what": "stereo width, mono below a frequency"
+  },
+  "compressor": {
+   "family": "dynamics",
+   "what": "compressor with sidechain, sidechain high-pass and parallel mix"
+  },
+  "duck": {
+   "family": "dynamics",
+   "what": "ducking on another track's notes or every N beats"
+  },
+  "gate": {
+   "family": "dynamics",
+   "what": "step-pattern gate (trance gate)"
+  },
+  "limiter": {
+   "family": "dynamics",
+   "what": "lookahead limiter"
+  },
+  "distortion": {
+   "family": "drive",
+   "what": "waveshaper: tanh, hard, fold, asymmetric, rectify, bitcrush, downsample, oversampled"
+  },
+  "bitcrush": {
+   "family": "drive",
+   "what": "bit depth and sample-rate reduction"
+  },
+  "fuzz": {
+   "family": "drive",
+   "what": "fuzz pedal, silicon or germanium"
+  },
+  "tape": {
+   "family": "drive",
+   "what": "tape: saturation, head bump, top loss, wow, flutter, hiss"
+  },
+  "amp": {
+   "family": "rig",
+   "what": "guitar amp: gain, tone stack, supply sag, power-amp breakup, its own hum and hiss"
+  },
+  "cab": {
+   "family": "rig",
+   "what": "speaker cabinet and mic, close to room, cone breakup"
+  },
+  "wah": {
+   "family": "rig",
+   "what": "wah pedal, by hand or by the input envelope"
+  },
+  "univibe": {
+   "family": "rig",
+   "what": "photo-cell phase vibe, chorus or vibrato mode"
+  },
+  "rotary": {
+   "family": "rig",
+   "what": "rotating speaker: horn and drum, speed ramps, doppler"
+  },
+  "delay": {
+   "family": "time",
+   "what": "delay in beats or ms, ping-pong, filtered feedback"
+  },
+  "reverb": {
+   "family": "time",
+   "what": "algorithmic reverb"
+  },
+  "hall": {
+   "family": "time",
+   "what": "synthetic convolution hall: RT60, early reflections"
+  },
+  "chorus": {
+   "family": "modulation",
+   "what": "chorus"
+  },
+  "flanger": {
+   "family": "modulation",
+   "what": "flanger, tempo-synced"
+  },
+  "phaser": {
+   "family": "modulation",
+   "what": "phaser: stages, feedback, tempo-synced"
+  },
+  "tremolo": {
+   "family": "modulation",
+   "what": "tremolo: shapes, pan mode"
+  },
+  "vocoder": {
+   "family": "voice",
+   "what": "vocoder: a track or a sound as the modulator"
+  },
+  "formant": {
+   "family": "voice",
+   "what": "formant filter: vowels, shift"
+  },
+  "autotune": {
+   "family": "voice",
+   "what": "pitch correction to a key and scale or to another track, formant keep"
+  },
+  "spatial": {
+   "family": "space",
+   "what": "3D position: HRTF, doppler, occlusion, room, trajectories"
+  }
+ },
+ "gaps": [
+  {
+   "family": "keys",
+   "gap": "upright, saloon or honky-tonk piano",
+   "cite": "M171; showcase gap",
+   "under_way": "none measured; the grand stands in"
+  },
+  {
+   "family": "keys",
+   "gap": "electric keys beyond the tine piano: reed electric piano, amplified clavichord, electric grand, toy piano",
+   "cite": "KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "keys",
+   "gap": "tape-replay keyboard (flutes, strings, choir on tape)",
+   "cite": "KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "organs",
+   "gap": "tonewheel organ with rotating speaker",
+   "cite": "showcase gap; M114",
+   "under_way": "organ.py in 4 songs (designed, not measured)"
+  },
+  {
+   "family": "organs",
+   "gap": "pipe organ with stops (principal, flutes, mixture, reed, chiff, tremulant)",
+   "cite": "M114",
+   "under_way": "an organist's contribution expected"
+  },
+  {
+   "family": "organs",
+   "gap": "reed organ / harmonium, transistor combo organ",
+   "cite": "KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "organs",
+   "gap": "bellows and free reeds: accordion, bandoneon, harmonica, melodica",
+   "cite": "KIT_GAPS",
+   "under_way": "none anywhere"
+  },
+  {
+   "family": "guitars",
+   "gap": "acoustic guitars: nylon and steel string",
+   "cite": "KIT_GAPS; M231",
+   "under_way": "nylon, nylon_gestures, acoustic (4), steel_fss song voices, not measured"
+  },
+  {
+   "family": "guitars",
+   "gap": "harp, banjo, mandolin, ukulele",
+   "cite": "KIT_GAPS; M169",
+   "under_way": "harp mimic song-local"
+  },
+  {
+   "family": "guitars",
+   "gap": "world plucked strings: oud, sitar, koto, guembri, tanpura",
+   "cite": "KIT_GAPS",
+   "under_way": "oud, guembri, tanpura song voices"
+  },
+  {
+   "family": "basses",
+   "gap": "fretless and upright jazz bass (plucked)",
+   "cite": "KIT_GAPS; M169",
+   "under_way": "cello/viola pizzicato mimics song-local"
+  },
+  {
+   "family": "bowed strings",
+   "gap": "viola, string sections, pizzicato in the library",
+   "cite": "M169; M180",
+   "under_way": "measured mimics in songs/symphony and songs/proghouse_live"
+  },
+  {
+   "family": "woodwinds",
+   "gap": "saxophones, soprano to baritone",
+   "cite": "KIT_GAPS; M298",
+   "under_way": "tenor sax performer in songs/kit_winds, ear pending"
+  },
+  {
+   "family": "woodwinds",
+   "gap": "flute, piccolo, oboe, cor anglais, recorder, pan pipes",
+   "cite": "M169 (flute, oboe FAILED); M180",
+   "under_way": "flute, oboe, cane_flute, panpipe mimics song-local"
+  },
+  {
+   "family": "brass",
+   "gap": "trumpet, trombone, tuba, brass section",
+   "cite": "M169 (all three FAILED, \"synthetic\"); M180",
+   "under_way": "trumpet next in songs/kit_winds, from performances"
+  },
+  {
+   "family": "mallets",
+   "gap": "vibraphone, marimba, xylophone, glockenspiel, celesta, tubular bells, steel pan",
+   "cite": "M171; KIT_GAPS",
+   "under_way": "vibes.py (from memory), haiku_bell, bowl, gong song-local"
+  },
+  {
+   "family": "voices",
+   "gap": "choir, solo singing, beatbox",
+   "cite": "showcase gap; vox project",
+   "under_way": "choir (3), talker, hum song voices; vox in progress"
+  },
+  {
+   "family": "voices",
+   "gap": "vocoder and talkbox as named voices",
+   "cite": "KIT_GAPS",
+   "under_way": "vocoder and formant effects exist; talkbox in songs/vox/work/fx_trance.py"
+  },
+  {
+   "family": "drum kits",
+   "gap": "brushes jazz kit, 60s kit, modern metal kit",
+   "cite": "showcase gap; KIT_GAPS",
+   "under_way": "metal kits, eh_drums, haiku_kit, feather_kit song-local"
+  },
+  {
+   "family": "drum kits",
+   "gap": "measured cymbals and hats",
+   "cite": "M149",
+   "under_way": "cymbal voice in songs/cymbals, waits on its exam"
+  },
+  {
+   "family": "hand percussion",
+   "gap": "congas, bongos, djembe, cajon, tabla, shakers, tambourine, claves, cowbell",
+   "cite": "KIT_GAPS",
+   "under_way": "salsa_kit, qraqeb, palmas, ganza, xstick song-local"
+  },
+  {
+   "family": "hand percussion",
+   "gap": "samba: tamborim, pandeiro, surdo, agogo",
+   "cite": "M286",
+   "under_way": "none; needs measured hits"
+  },
+  {
+   "family": "hand percussion",
+   "gap": "orchestral: timpani, concert bass drum, snare roll, orchestral hits",
+   "cite": "KIT_GAPS",
+   "under_way": "cymbal, gong song-local"
+  },
+  {
+   "family": "analog synths",
+   "gap": "ladder-filter mono, bass-line acid, chorus poly, brass poly: drift, unison, real envelopes",
+   "cite": "M297",
+   "under_way": "analog engine + 8 patches in songs/kit_families, ear pending"
+  },
+  {
+   "family": "analog synths",
+   "gap": "string machine with ensemble chorus",
+   "cite": "KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "analog synths",
+   "gap": "west-coast modular: wavefolder, lowpass gate",
+   "cite": "KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "drum machines",
+   "gap": "classic analog drum machines and early digital ones",
+   "cite": "M297; KIT_GAPS",
+   "under_way": "'boom' and 'punch' in songs/kit_families, ear pending; the early digital one not built (needs one-shots)"
+  },
+  {
+   "family": "FM",
+   "gap": "6-operator FM with algorithms",
+   "cite": "KIT_GAPS",
+   "under_way": "2-oscillator FM in the sprite synth only"
+  },
+  {
+   "family": "wavetable",
+   "gap": "morphing wavetables (a position to sweep)",
+   "cite": "KIT_GAPS",
+   "under_way": "single-cycle tables, no position"
+  },
+  {
+   "family": "wavetable",
+   "gap": "80s-90s digital and romplers",
+   "cite": "KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "wavetable",
+   "gap": "game-console sound chips, on purpose",
+   "cite": "KIT_GAPS",
+   "under_way": "the sprite engine is close; one honest preset family"
+  },
+  {
+   "family": "granular",
+   "gap": "granular texture and ambient beds, a pad voice",
+   "cite": "showcase gap; KIT_GAPS",
+   "under_way": "none"
+  },
+  {
+   "family": "fx",
+   "gap": "measured old-record and film surface noise",
+   "cite": "M105",
+   "under_way": "crackle78 song-local (held)"
+  }
+ ],
+ "fx_gaps": [
+  {
+   "family": "time",
+   "gap": "real spaces: convolution with a loaded IR, plate, spring tank, gated, shimmer, reverse, freeze",
+   "cite": "KIT_GAPS",
+   "have_now": "only the synthetic hall"
+  },
+  {
+   "family": "time",
+   "gap": "echo machines: tape echo (multi-head, wow, self-oscillation), bucket-brigade, multi-tap, dub delay",
+   "cite": "KIT_GAPS",
+   "have_now": "the delay is clean digital"
+  },
+  {
+   "family": "time",
+   "gap": "glitch and performance: beat repeat, tape stop, reverse, granular delay, half-speed",
+   "cite": "KIT_GAPS",
+   "have_now": "the live DJ kit fakes some with gain gaps"
+  },
+  {
+   "family": "modulation",
+   "gap": "pitch: harmonizer, octaver, pitch-pedal bends, frequency shifter, ring modulator",
+   "cite": "KIT_GAPS",
+   "have_now": "autotune covers voices only"
+  },
+  {
+   "family": "modulation",
+   "gap": "string-machine ensemble chorus",
+   "cite": "KIT_GAPS",
+   "have_now": "none"
+  },
+  {
+   "family": "dynamics",
+   "gap": "multiband compressor, transient shaper, de-esser, expander, soft clipper, dynamic EQ",
+   "cite": "KIT_GAPS; M248",
+   "have_now": "none"
+  },
+  {
+   "family": "dynamics",
+   "gap": "envelope-follower routing (duck any effect parameter)",
+   "cite": "M248",
+   "have_now": "none"
+  },
+  {
+   "family": "drive",
+   "gap": "colour: exciter, console and tube flavours, mid-hump overdrive pedal, vinyl, cassette",
+   "cite": "KIT_GAPS",
+   "have_now": "tape and fuzz only"
+  },
+  {
+   "family": "level and tone",
+   "gap": "resonators: comb filter, tuned resonator bank, step filter",
+   "cite": "KIT_GAPS; M248",
+   "have_now": "none"
+  }
+ ],
+ "generic_words": {
+  "Hammond": "tonewheel",
+  "Leslie": "rotating speaker",
+  "Rhodes": "tine electric piano"
+ }
+}

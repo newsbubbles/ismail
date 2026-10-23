@@ -188,6 +188,7 @@ Extras and per-client setup are in [docs/reference.md](docs/reference.md).
 | to set it up as an agent | [AGENTS.md](AGENTS.md), then [setup.md](skills/ismail/references/setup.md) |
 | how to make music with it (the playbook) | [skills/ismail/SKILL.md](skills/ismail/SKILL.md) |
 | what is built, every tool area, install details | [docs/reference.md](docs/reference.md) |
+| every instrument and effect by family, how each did by ear, what is missing | [docs/KIT.md](docs/KIT.md) |
 | why it works this way, with the numbers | [docs/why.md](docs/why.md) |
 | what is done and what is next | [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md) |
 | to change ismail itself | [development.md](skills/ismail/references/development.md) |

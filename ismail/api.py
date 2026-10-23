@@ -2460,6 +2460,7 @@ from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by p
 from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
 from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
 from . import api_midi  # noqa: E402,F401  (registers midi_write / midi_read: MIDI files in and out, ledger:M113)
+from . import api_kit  # noqa: E402,F401  (registers kit: every public voice and effect by family, ledger:M295)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
