@@ -154,7 +154,7 @@ def _request(d, who, text, rules, reqs, now):
                if rules['max_waiting'] == 1 else f"you have {len(waiting)} waiting already, the most here")
         return why, 'refused', None
     last = max((r['added'] for r in mine), default=None)
-    if not exempt and last is not None and now - last < rules['cooldown_s']:
+    if not exempt and last is not None and rules['cooldown_s'] and now - last < rules['cooldown_s']:
         return f"your next request opens in {Q._ago(rules['cooldown_s'] - (now - last))}", 'refused', None
     rid = Q.add(who, text, venue, user_id=u.get('id') or None, src=_src(d))
     reqs = Q.state()
