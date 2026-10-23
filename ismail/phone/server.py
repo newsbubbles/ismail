@@ -50,6 +50,7 @@ except ImportError:
     import tags
 
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
+OFFERS_KEPT = 200                                # downloads the phone can page back through (/api/offers)
 PAGE = Path(__file__).resolve().parent / 'page'
 # The page's sounds (Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... the same
 # thing applies to everything as like a design philosophy"). An agent makes each one with ismail and attaches it with
@@ -353,7 +354,7 @@ class Phone:
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
-                                                    'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                    'offers', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
                                                     'now_bind_until')
                               if k in saved and saved[k] is not None})
         except (OSError, ValueError):
@@ -905,6 +906,7 @@ class Phone:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
                                                 'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
                                                 'now_bind_until')}
+            st['offers'] = self.view['offers'][-OFFERS_KEPT:]
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
@@ -1367,7 +1369,7 @@ class Phone:
                 'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
-                'offers': self.view['offers'][-4:], 'listening': agents, 'devices': devices, 'deaf': deaf,
+                'offers': self.view['offers'][-4:], 'offers_n': len(self.view['offers']), 'listening': agents, 'devices': devices, 'deaf': deaf,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
@@ -1636,6 +1638,8 @@ class Agent:
         o = {'url': '/files/' + k, 'name': src.name if src.parent == HOME / 'offers' else nice,
              'label': label or Path(path).name, 'auto': bool(auto), 'ts': now_iso()}
         self.ph.view['offers'].append(o)
+        del self.ph.view['offers'][:-OFFERS_KEPT]
+        self.ph.save()
         self.ph.cmd('offer', offer=o)
         return f"offered {o['name']} on the phone" + (" (starts downloading if the page is open)" if auto else '')
 
@@ -2159,6 +2163,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.ph.cond.wait(min(2.0, end - time.time()))
                 cmds = [c for c in self.ph.cmds if c['id'] > since]
             return self._json(200, {**self.ph.state(g('sid'), g('t')), 'cmds': cmds})
+        if path == '/api/offers':                 # the downloads history, newest first, a page at a time
+            os_, skip, n = self.ph.view['offers'], max(0, int(g('skip', '0') or 0)), min(50, max(1, int(g('n', '10') or 10)))
+            page = os_[::-1][skip:skip + n]
+            return self._json(200, {'offers': page, 'total': len(os_), 'more': skip + len(page) < len(os_)})
         if path.startswith('/files/'):
             p = self.ph.files.get(path[7:])
             return self._file(p, download=g('dl') == '1') if p else self._json(404, {'error': 'not offered'})

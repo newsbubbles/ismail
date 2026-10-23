@@ -176,6 +176,22 @@ def test_the_agent_drives_the_page(phone, tmp_path):
         urllib.request.urlopen(base + '/files/notatoken', timeout=5)
 
 
+
+def test_older_downloads_page_back_and_outlive_a_restart(phone, tmp_path):
+    ph, base, _ = phone
+    for i in range(12):
+        f = tmp_path / f'take{i:02d}.txt'
+        f.write_text(f'take {i}')
+        P.phone_offer(str(f), label=f'take {i}')
+    st = get(base, '/api/state?since=0&wait=0')
+    assert [o['label'] for o in st['offers']] == ['take 8', 'take 9', 'take 10', 'take 11'] and st['offers_n'] == 12
+    first = get(base, '/api/offers?skip=0&n=10')
+    assert [o['label'] for o in first['offers']][:2] == ['take 11', 'take 10'] and first['total'] == 12 and first['more']
+    rest = get(base, '/api/offers?skip=10&n=10')
+    assert [o['label'] for o in rest['offers']] == ['take 1', 'take 0'] and not rest['more']
+    assert urllib.request.urlopen(base + rest['offers'][-1]['url'], timeout=5).read() == b'take 0'
+    assert S.Phone().view['offers'][0]['label'] == 'take 0'        # a restarted server still has the history
+
 def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
     ph, base, _ = phone
     import soundfile as sf
