@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ..api import OpError, op
-from . import config as C
+from . import config as C, ops as S
 
 STATUSES = ('waiting', 'playing', 'done', 'skipped')
 MAX_WHAT = 300
@@ -65,7 +65,7 @@ def _events():
 
 
 def _append(ev):
-    ev = {'at': round(time.time(), 2), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()),
+    ev = {'at': round(time.time(), 2), 'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
           **{k: v for k, v in ev.items() if v is not None}}
     p = log_path()
     try:
@@ -85,19 +85,21 @@ def viewer_key(venue, who):
 
 
 def state():
-    """{id: request} replayed from the log: who, what, venue, note, status, added, started, ended, the viewer's key
-    and the keys of everyone who voted for it."""
+    """{id: request} replayed from the log: who, what, venue, note, status, added, started, ended, the UTC time each
+    state was last entered (queued_at, playing_at, done_at, skipped_at, so request-to-air time reads off it), the
+    viewer's key and the keys of everyone who voted for it."""
     reqs = {}
     for e in _events():
         r = reqs.get(e.get('id'))
         if e.get('ev') == 'add':
             reqs[e['id']] = {k: e.get(k) for k in ('id', 'who', 'what', 'venue', 'note')} | {
-                'status': 'waiting', 'added': e['at'], 'started': None, 'ended': None, 'votes': [],
-                'key': viewer_key(e.get('venue'), e.get('who'))}
+                'status': 'waiting', 'added': e['at'], 'started': None, 'ended': None, 'queued_at': e.get('ts'),
+                'votes': [], 'key': viewer_key(e.get('venue'), e.get('who'))}
         elif e.get('ev') == 'vote' and r and e.get('key') not in r['votes']:
             r['votes'].append(e['key'])
         elif e.get('ev') == 'mark' and r:
             r['status'] = e['status']
+            r['queued_at' if e['status'] == 'waiting' else e['status'] + '_at'] = e.get('ts')
             if e.get('note'):
                 r['note'] = e['note']
             if e['status'] == 'playing':
@@ -179,6 +181,12 @@ def _eta(pos, reqs, now):
     return f", about {max(1, round((left + (pos - 1) * per) / 60))} min"
 
 
+def _times(r):
+    """' [queued 12:00:01Z, playing 12:04:10Z]': the UTC time of each state it went through."""
+    got = [f"{k[:-3]} {r[k][11:]}" for k in ('queued_at', 'playing_at', 'done_at', 'skipped_at') if r.get(k)]
+    return f" [{', '.join(got)}]" if got else ''
+
+
 def _now_line(reqs, now):
     p = _playing(reqs)
     return 'playing: ' + ('; '.join(f"{_desc(r)}, for {_ago(now - r['started'])}" for r in p) if p else 'nothing')
@@ -216,19 +224,22 @@ def request_list(status: str = 'waiting') -> str:
         line = line_up(reqs)
         out = [_now_line(reqs, now), f"waiting: {len(line)}"]
         out += [f"  {i}. {_desc(r)}, asked {_ago(now - r['added'])} ago" + (f"; {r['note']}" if r.get('note') else '')
-                for i, r in enumerate(line, 1)]
+                + _times(r) for i, r in enumerate(line, 1)]
         return '\n'.join(out)
     pick = [r for r in sorted(reqs.values(), key=lambda r: r['id']) if status in ('all', r['status'])]
     if not pick:
         return f"no {status} requests" if status != 'all' else 'no requests yet'
     return '\n'.join(f"{_desc(r)}: {r['status']}, asked {_ago(now - r['added'])} ago"
-                     + (f"; {r['note']}" if r.get('note') else '') for r in pick)
+                     + (f"; {r['note']}" if r.get('note') else '') + _times(r) for r in pick)
 
 
 @op(mutates=True)
-def request_mark(id: int, status: str, note: str = None) -> str:
+def request_mark(id: int, status: str, note: str = None, on_screen: bool = True) -> str:
     """Move a request along: playing (the DJ started it; one that was playing is marked done), done, skipped, or
-    waiting (back in line). note: why, for the MC to tell the viewer ("played as a dnb mix")."""
+    waiting (back in line). note: why, for the MC to tell the viewer ("played as a dnb mix"). on_screen: when it
+    starts playing, the stream's `now` line says whose request it is ("request from @name: now playing ..."); the
+    stream server must be up for that, and the mark counts either way. Each state's UTC time is kept
+    (request_list(status='all') shows them)."""
     if status not in STATUSES:
         raise OpError(f"status {status!r}: one of {', '.join(STATUSES)}")
     with _lock():
@@ -244,8 +255,19 @@ def request_mark(id: int, status: str, note: str = None) -> str:
         _append({'ev': 'mark', 'id': rid, 'status': status, 'note': note})
     reqs = state()
     nxt = line_up(reqs)
+    if status == 'playing' and on_screen:
+        said.append(_on_screen(reqs[rid]))
     return '; '.join([f"{_desc(reqs[rid])}: {status}"] + said + [
         f"next: {_desc(nxt[0])}" if nxt else 'nobody waiting'])
+
+
+def _on_screen(r):
+    text = f"request from @{r['who']}: now playing {r['what']}"[:120]
+    try:
+        S.stream_text(slot='now', text=text)
+    except OpError as e:
+        return f"not on screen ({e})"
+    return f"on screen: {text!r}"
 
 
 @op()
@@ -279,12 +301,13 @@ def request_where(who: str, venue: str = None) -> str:
     for r in sorted(mine, key=lambda r: r['id']):
         if r['status'] == 'waiting':
             pos = line.index(r['id']) + 1
-            out.append(f"{_desc(r)}: position {pos} in line, {pos - 1} ahead{_eta(pos, reqs, now)}")
+            where = f"position {pos} in line, {pos - 1} ahead{_eta(pos, reqs, now)}"
         elif r['status'] == 'playing':
-            out.append(f"{_desc(r)}: playing now, for {_ago(now - r['started'])}")
+            where = f"playing now, for {_ago(now - r['started'])}"
         else:
-            out.append(f"{_desc(r)}: {r['status']} {_ago(now - (r['ended'] or r['added']))} ago"
-                       + (f" ({r['note']})" if r.get('note') else ''))
+            where = (f"{r['status']} {_ago(now - (r['ended'] or r['added']))} ago"
+                     + (f" ({r['note']})" if r.get('note') else ''))
+        out.append(f"{_desc(r)}: {where}{_times(r)}")
     return '\n'.join(out)
 
 

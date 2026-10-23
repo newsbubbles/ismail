@@ -114,3 +114,35 @@ def test_ops_are_registered_and_shelved_for_the_dj_and_mc():
     for name in ('request_add', 'request_list', 'request_mark', 'request_next', 'request_where'):
         assert name in api.OPS and category_of(name) == 'stream'
     assert 'stream' in ROLES['dj'] and 'stream' in ROLES['mc']
+
+
+def test_each_state_keeps_its_utc_time(home):
+    R.request_add(who='ViewerA', what='one')
+    R.request_mark(id=1, status='playing', on_screen=False)
+    R.request_mark(id=1, status='done')
+    r = R.state()[1]
+    assert all(r[k] and r[k].endswith('Z') and r[k][10] == 'T' for k in ('queued_at', 'playing_at', 'done_at'))
+    assert r['queued_at'] <= r['playing_at'] <= r['done_at'] and 'skipped_at' not in r
+    shown = R.request_list(status='all')
+    assert f"[queued {r['queued_at'][11:]}, playing {r['playing_at'][11:]}, done {r['done_at'][11:]}]" in shown
+    assert '[queued ' in R.request_where(who='ViewerA')
+
+
+def test_playing_puts_the_viewer_on_screen(home, monkeypatch):
+    said = []
+    monkeypatch.setattr(R.S, '_call', lambda name, **a: said.append((name, a)) or {'slot': a['slot'],
+                                                                                   'text': a['text']})
+    R.request_add(who='ViewerA', what='deep house')
+    R.request_add(who='ViewerB', what='two')
+    out = R.request_mark(id=1, status='playing')
+    assert said == [('text', {'slot': 'now', 'text': 'request from @ViewerA: now playing deep house'})]
+    assert "on screen: 'request from @ViewerA: now playing deep house'" in out
+    R.request_mark(id=2, status='playing', on_screen=False)
+    R.request_mark(id=2, status='done')
+    assert len(said) == 1
+
+
+def test_no_stream_server_still_marks(home):
+    R.request_add(who='ViewerA', what='one')
+    out = R.request_mark(id=1, status='playing')
+    assert 'not on screen (the stream server is not running' in out and R.state()[1]['status'] == 'playing'

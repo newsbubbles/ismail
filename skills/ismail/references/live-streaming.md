@@ -109,7 +109,7 @@ The MC and the DJ share one queue of requests, kept on disk, so it works across 
   When someone asks "when does mine play?", `request_where(who)` gives the place and, once a few requests have
   played, about how many minutes. `request_list` shows the whole line.
 - **The DJ** reads `request_next` at each phrase end, never mid-build. When it starts, `request_mark(id,
-  'playing')` (the one before is marked done); `request_mark(id, 'skipped', note='why')` for one that does not fit,
+  'playing')` (the one before is marked done, and the stream's `now` line says whose request it is); `request_mark(id, 'skipped', note='why')` for one that does not fit,
   so the MC can tell the viewer. The DJ never reads raw chat.
 - **Credit.** When a song is made from what chat asked for, `request_credits(ids=[...], path='<song folder>')` adds
   each viewer (name, venue, what they asked for) to its CREDITS.md. Ask them in chat first ("can I credit you for
