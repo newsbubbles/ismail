@@ -90,6 +90,48 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 
 Any other MCP client works the same way: run `ismail mcp` (or `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
 
+### Fewer tools, for a harness with a tool cap
+
+The server offers every op as a tool, over 300 of them. Many harnesses cap tools near 128, or choose worse with that
+many. Start it with only some roles or shelves (the same ones `ops_find` shows) and it serves just their ops, plus
+`guide` and `ops_find`, so the agent can still find and read about what it lacks. `ops_find` then marks the ops this
+server does not serve.
+
+```bash
+ismail mcp --list-roles                      # each role's and shelf's tool count; starts nothing
+ismail mcp --roles mc                        # one role
+ismail mcp --roles mc --shelves listen       # a role and a shelf: the union
+ismail mcp --shelves live,stream,phone,listen,together,asks --max-tools 128
+```
+
+`--max-tools N` refuses to start when the set has more than N tools, and the error lists every role's and shelf's
+size. An unknown role or shelf is refused with the list of valid ones. At start the server writes how many tools it
+serves to stderr. A harness that cannot pass arguments can set `ISMAIL_MCP_ROLES`, `ISMAIL_MCP_SHELVES` and
+`ISMAIL_MCP_MAX_TOOLS` (comma-separated, like the options); an option wins over its variable.
+
+Run `--list-roles` for the current counts: the roles grow with the ops. Some roles are over 128 on their own (`dj`
+was 143 when this was written), so name shelves for those.
+
+A harness that reads `mcp_servers` with a stdio command and args (Codex's `~/.codex/config.toml`, for example):
+
+```toml
+[mcp_servers.ismail]
+command = "ismail"
+args = ["mcp", "--shelves", "live,stream,phone,listen,together,asks", "--max-tools", "128"]
+
+# or, with no arguments, through the environment
+# [mcp_servers.ismail]
+# command = "ismail"
+# args = ["mcp"]
+# env = { ISMAIL_MCP_ROLES = "mc", ISMAIL_MCP_MAX_TOOLS = "128" }
+```
+
+The same in JSON, for a harness that reads `mcpServers`:
+
+```json
+{"mcpServers": {"ismail": {"command": "ismail", "args": ["mcp", "--roles", "mc"]}}}
+```
+
 ## Quick start (CLI)
 
 Every tool is also a CLI op. Arguments are `key=value` pairs (values parsed as JSON when they can be) or one JSON object.
