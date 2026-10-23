@@ -123,6 +123,26 @@ instrument.
 - Read in this order: `cmp_summary` (per stem groups: notes, rhythm, clean, sound, perceptual; closeness 0 = the reference half a loop off, 1 = the reference against itself one loop later) -> `cmp_arrangement` -> `cmp_sections(stem)` -> `cmp_worst(stem)` -> `cmp_zoom(bar, stem, layers=['level','bands','notes','hits'])` (b both, r reference only, y yours only, uppercase = note start).
 - `cmp_list` shows every run: keep labels meaningful (`draft7-vocoder`).
 
+## 6. Tells: the faults the person keeps hearing
+
+A tell is a fault the person names in a sound, in their words ("boxy", "the distortion type is wrong"). The metal
+song work found one tell named 7 times over 3 days while nothing showed it had stopped improving. The tell ledger
+(`tell_*`, one append-only log per song in `<song>/notes/tells.jsonl`) keeps every naming and the measured gap
+each round:
+
+- When they first name a fault, `tell_add(id=, what=, words=, source=)`, with their words and where they said them
+  (a voice note id, an exam, a picture round). When they name it again, `tell_heard`.
+- **Before every round, run `tell_show`.** It flags NOT MOVING on an open tell named twice or more whose gap did not
+  shrink between its last two measures, or that was never measured.
+- **Each round logs a measured row per open tell**: `tell_measure(id=, metric=, ...)`, the same metric name every
+  round. Pass the measuring op's reply as `reply=` (`sound_compare` with a = yours and b = the reference,
+  `region_measure`, `sound_zoom_diff`) so the number is pulled, not typed.
+- **A tell named twice with no shrinking gap gets a different method, not another try of the same one**: a new
+  sensor, a different model of the sound, a different stage of the chain. Tuning the same knobs again is what kept
+  the metal tell open for 3 days.
+- Their verdict after a blind round is `tell_judged` (passed, failed, better). A tell closes (`tell_status`) only
+  after a passed verdict that came after its last measure; `tell_check` validates the log.
+
 ## Traps (each one fooled the scores at least once)
 
 - **Clutter scores well.** If `cmp_summary` prints a WARNING about extra note starts or less loop self-consistency than the reference, believe it over the F1 numbers.

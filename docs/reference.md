@@ -146,6 +146,12 @@ Find any tool by what you need or by role with `ops_find`.
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
   rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **The tell ledger** (`tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`,
+  `tell_check`, `tell_import`): the faults the person keeps naming in a sound ("boxy"), one append-only log per song
+  (`<song>/notes/tells.jsonl`) with their words, where they said them, and a measured gap each round. `tell_measure`
+  pulls its number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply or a saved report.
+  `tell_show` flags NOT MOVING on an open tell named twice whose gap did not shrink, closing needs a passed verdict
+  after the last measure, and `tell_check` validates the log.
 - **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
   questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
   browser (an app's browser pane has no microphone), with every typed answer and voice clip saved in the song and

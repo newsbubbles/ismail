@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The tell ledger
+
+- `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the
+  person keeps naming in a sound is logged per song in `<song>/notes/tells.jsonl` (append-only, the Sound
+  Engineer's prototype shape from the metal song), with their words, where they said them, and a measured gap each
+  round. `tell_measure(reply=)` pulls the number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply
+  or a saved report. `tell_show` flags NOT MOVING on an open tell named twice or more whose gap did not shrink
+  between its last two measures, or that was never measured. Closing is refused without a passed verdict after the
+  last measure, and `tell_check` names unknown ids, times out of order and malformed rows with what to do next.
+- `tell_import(project, path)` adopts an existing tells.jsonl into an empty ledger. A song whose log is already at
+  `<song>/notes/tells.jsonl` (the metal seed) is read in place.
+- recreate.md: run `tell_show` before every round, log a measured row per open tell each round, and give a NOT
+  MOVING tell a different method.
+
 ### The stage on a stream: an on-air page and GPU window capture
 
 - `?onair=<camera>&fps=30` on a stage page shows that camera full frame with no UI, drawn at a steady rate, the
