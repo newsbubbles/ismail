@@ -29,7 +29,8 @@ SLOTS = ('title', 'now', 'chat', 'note')
 DEFAULT_VISUAL = {'mode': 'cqt', 'width': 1280, 'height': 720, 'fps': 30, 'background': '#0b0d12',
                   'colors': ['#5ec8ff', '#ff6ec7'], 'image': None, 'window': None, 'area': [0.0, 0.18, 1.0, 0.64],
                   'text_color': '#ffffff', 'font': None, 'font_size': 30, 'chat_overlay': True, 'video_kbps': 4500,
-                  'audio_kbps': 160, 'encoder': 'auto'}
+                  'audio_kbps': 160, 'encoder': 'auto', 'capture': 'auto'}
+CAPTURES = ('auto', 'wgc', 'gdi')
 
 
 def ffmpeg():
@@ -75,6 +76,61 @@ def has_nvenc():
         return 'h264_nvenc' in out
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+_GFX = None
+
+
+def has_gfxcapture():
+    """ffmpeg's Windows Graphics Capture source (ffmpeg 8): a window drawn by the GPU comes through, covered or not."""
+    global _GFX
+    if _GFX is None:
+        try:
+            out = subprocess.run([ffmpeg(), '-hide_banner', '-filters'], capture_output=True, text=True, timeout=15,
+                                 creationflags=FLAGS & 0x08000000).stdout
+            _GFX = os.name == 'nt' and ' gfxcapture ' in out
+        except (OSError, subprocess.SubprocessError, TypeError):
+            _GFX = False
+    return _GFX
+
+
+def window_content_box(title):
+    """[x, y, w, h] of a Chrome or Edge window's web content inside its client area (an --app window draws its own
+    title bar there), for the capture's crop. None off Windows, for another kind of window, or if it is not open."""
+    if os.name != 'nt' or not title:
+        return None
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except (AttributeError, OSError):
+        pass
+    h = u.FindWindowW(None, title)
+    if not h:
+        return None
+    found = []
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def cb(c, _):
+        b = ctypes.create_unicode_buffer(64)
+        u.GetClassNameW(c, b, 64)
+        if b.value == 'Chrome_RenderWidgetHostHWND':
+            found.append(c)
+        return True
+    u.EnumChildWindows(h, proc(cb), 0)
+    if not found:
+        return None
+    r = wintypes.RECT()
+    u.GetWindowRect(found[0], ctypes.byref(r))
+    pt = wintypes.POINT(r.left, r.top)
+    u.ScreenToClient(h, ctypes.byref(pt))
+    return [max(0, pt.x), max(0, pt.y), r.right - r.left, r.bottom - r.top]
+
+
+def title_regex(title):
+    """An exact match for a window title as gfxcapture's regex, with no character the filter graph would read."""
+    return '^' + re.sub(r'[^A-Za-z0-9 _-]', '.', title) + '$'
 
 
 def fit_window(title, W, H, view, timeout=20.0):
@@ -123,11 +179,15 @@ def build_encoder_args(vis, text_dir, preview, pcm_url, nvenc):
             '-thread_queue_size', '1024', '-f', 's16le', '-ar', str(SR), '-ac', '2', '-i', pcm_url]
     window = PAGE_TITLE if vis['mode'] == 'page' else vis.get('window')
     if window:
-        args += ['-thread_queue_size', '64', '-f', 'gdigrab', '-framerate', str(fps), '-draw_mouse', '0',
-                 '-i', f"title={window}"]
         crop = 'crop={2}:{3}:{0}:{1},'.format(*vis['crop']) if vis.get('crop') else ''   # the page's own canvas
-        bg = (f'[1:v]{crop}scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,'
-              f'fps={fps}[bg]')
+        fit = f'{crop}scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={fps}[bg]'
+        if vis.get('capture') == 'wgc':          # Windows Graphics Capture: GPU-drawn and covered windows come through
+            bg = (f"gfxcapture=window_title='{title_regex(window)}':capture_cursor=0:max_framerate={fps},"
+                  f"hwdownload,format=bgra,{fit}")
+        else:
+            args += ['-thread_queue_size', '64', '-f', 'gdigrab', '-framerate', str(fps), '-draw_mouse', '0',
+                     '-i', f"title={window}"]
+            bg = f'[1:v]{fit}'
     elif vis.get('image'):
         args += ['-loop', '1', '-framerate', str(fps), '-i', str(vis['image'])]
         bg = (f'[1:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},format=yuv420p[bg]')
@@ -405,18 +465,30 @@ class Output:
         if not exe:
             raise ValueError("mode='page' needs Edge or Chrome to show the page (none found); use mode='cqt' etc.")
         W, H = int(self.visual['width']), int(self.visual['height'])
+        gpu = [] if self.capture() == 'wgc' else ['--disable-gpu']   # gdigrab sees a GPU-composited window as blank
         self.browser = subprocess.Popen(
             [exe, f'--app=http://127.0.0.1:{self.hub.port}/visual?stream=1', f"--user-data-dir={C.HOME / 'browser'}",
              f'--window-size={W},{H}', '--window-position=40,40', '--no-first-run', '--no-default-browser-check',
              '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
              '--disable-background-timer-throttling', '--disable-features=CalculateNativeWinOcclusion',
-             '--disable-gpu',                            # a GPU-composited window captures as a blank white frame
-             '--mute-audio'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=FLAGS & 0x08000000)
+             *gpu, '--mute-audio'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=FLAGS & 0x08000000)
         self.hub.page_view = None
         self.page_box = fit_window(PAGE_TITLE, W, H, lambda: self.hub.page_view)
 
+    def capture(self):
+        """How a window is captured: wgc where ffmpeg has it (asked for or auto), else gdi."""
+        c = self.visual.get('capture') or 'auto'
+        if c == 'gdi':
+            return 'gdi'
+        return 'wgc' if has_gfxcapture() else 'gdi'
+
     def _visual_now(self):
-        return {**self.visual, 'crop': self.page_box} if self.visual['mode'] == 'page' else self.visual
+        if self.visual['mode'] == 'page':
+            return {**self.visual, 'crop': self.page_box, 'capture': self.capture()}
+        if self.visual.get('window'):              # a browser window: its web content only, not its title bar
+            return {**self.visual, 'crop': window_content_box(self.visual['window']), 'capture': self.capture()}
+        return self.visual
 
     def _start_encoder(self):
         if not ffmpeg():
@@ -552,6 +624,8 @@ class Output:
         new = {**self.visual, **params}
         if new['mode'] not in MODES:
             raise ValueError(f"mode {new['mode']!r}: one of {', '.join(MODES)}")
+        if new.get('capture', 'auto') not in CAPTURES:
+            raise ValueError(f"capture {new['capture']!r}: one of {', '.join(CAPTURES)}")
         for c in list(new.get('colors') or []) + [new['background'], new['text_color']]:
             _hex(c)
         if new.get('image') and not os.path.exists(str(new['image'])):
