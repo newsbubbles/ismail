@@ -449,6 +449,25 @@ def test_the_page_its_scene_its_size_and_its_frames(home):
         srv.shutdown()
 
 
+def test_wgc_captures_a_gpu_window_by_title_cropped_to_its_content(tmp_path, home):
+    vis = {**output.DEFAULT_VISUAL, 'window': 'hall (on air)', 'capture': 'wgc', 'crop': [0, 31, 1280, 720]}
+    a = output.build_encoder_args(vis, tmp_path, tmp_path / 'p.jpg', 'http://x/pcm', nvenc=True)
+    g = a[a.index('-filter_complex') + 1]
+    assert 'gdigrab' not in a and a.count('-i') == 1                   # the window is a source filter, not an input
+    assert "gfxcapture=window_title='^hall .on air.$':capture_cursor=0:max_framerate=30,hwdownload,format=bgra," in g
+    assert 'crop=1280:720:0:31,' in g and '[0:a]asplit' in g
+    assert output.title_regex('a:b,c[d]') == '^a.b.c.d.$'
+    assert output.title_regex('hall - Microsoft​ Edge') == '^hall - Microsoft.+ Edge$'   # UTF-8 bytes, not one '.'
+    with pytest.raises(ValueError, match='capture'):
+        output.Output(StubHub(home)).set_visual({'capture': 'screen'})
+
+
+def test_wgc_asked_for_without_gfxcapture_is_refused_not_downgraded(home, monkeypatch):
+    monkeypatch.setattr(output, '_GFX', False)
+    with pytest.raises(ValueError, match="needs ffmpeg 8 with gfxcapture"):
+        output.Output(StubHub(home)).set_visual({'capture': 'wgc'})
+
+
 def test_page_mode_captures_the_page_window_cropped(tmp_path):
     vis = {**output.DEFAULT_VISUAL, 'mode': 'page', 'crop': [8, 31, 1280, 720]}
     a = output.build_encoder_args(vis, tmp_path, tmp_path / 'p.jpg', 'http://x/pcm', nvenc=False)
