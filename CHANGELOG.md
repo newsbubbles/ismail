@@ -11,6 +11,9 @@
   about how many minutes. The queue is an append-only log (requests.jsonl in the stream home), so it survives a
   restart and an MC and a DJ in separate sessions see the same line. An unknown id names the ids there are; a bad
   status lists the valid ones.
+- Each request keeps the UTC time of every state it entered (queued_at, playing_at, done_at, skipped_at), shown by
+  `request_list` and `request_where`, so request-to-air time reads straight off the queue. When one starts playing,
+  the stream's `now` line says whose it is ("request from @name: now playing ..."); `on_screen=False` leaves it.
 
 ### MIDI files in and out
 
