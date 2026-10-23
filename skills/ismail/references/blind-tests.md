@@ -107,6 +107,11 @@ in the band, then the full mix. The guitar study's single-gesture trials climbed
 test pitched too hard was told apart every time, round after round, and its misses never pointed at one thing to
 fix. A round the person always gets, or never gets, gives no direction: make the next one easier or harder.
 
+**Two band rounds the person still wins: climb back to one note.** When the person picks the record in two
+band-level rounds in a row, stop climbing up. Go back to an isolated note of the part they name: one or two notes
+of it alone, the real one and ours, and look at all the harmonics. A tell they have named for a while will not move in a band
+round. In the metal work three band rounds in a row lost to the record while the guitar tell stayed open (10-22).
+
 **Make the test fair, or it measures the wrong thing.**
 - **One gesture per clip, on every side.** Cut at the next onset. When the real clip ran on into the player's next notes, every trial was decided by that and the round was wasted.
 - **The same pipeline on all sides.** Two contexts: in the band (the recording's own backing plus the note) and as a stem (the same separation pass run on R, A and B). If R is a separated stem and A is a clean render, the user hears the separation, not the instrument.
@@ -120,6 +125,10 @@ fix. A round the person always gets, or never gets, gives no direction: make the
   all "can't tell" ("I don't get this test"): at that distance the hall's diffuse sound sat about 9 dB over the
   direct sound. Give the ear contrast (the same note moving between two seats, or a fixed reference seat beside
   the one tested) or a closer listener, and say what to listen for.
+- **Ask "real or fake?" for each clip.** On a page of pairs, every clip gets its own real or fake answer (a chip or
+  a choice per clip). Never ask one "A or B is real?" question for the whole page when the real side moves between
+  pairs: A is the real one in some pairs and B in others, so that one answer names nothing. `exam_check(choices=)`
+  and `phone_exam` refuse that shape (Nate, metal round 3).
 - **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
 
 **The listening device is part of the exam.**
@@ -147,6 +156,11 @@ fix. A round the person always gets, or never gets, gives no direction: make the
 ## 3. Reading the answers
 
 - **The ear beats the stem.** Separated stems are biased dark above about 1.5 kHz. A harmonic correction measured against the stems pointed the wrong way (cut the top), while the user heard "upper harmonics too muted". When the ear and a stem-based measurement disagree about timbre, the ear wins.
+- **Score the window, not the file.** Statistics over time (a per-frame spread, steadiness, an envelope) count
+  everything in the file, release tail included. A scratch render's stems ran past the exam window into the tail:
+  a band's steadiness read 15.7 dB over the file and 3.0 over the window the person heard, and two test rounds drew
+  the wrong conclusion. Cut the measuring window to exactly what is heard (`sound_compare(a_window=, b_window=)`;
+  it says when the lengths or tails differ and no window was given).
 - **Long-window metrics are blind to fakeness.** 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB, while the user heard "30% there". Report those numbers, but never as proof that a sound is convincing.
 - **Every tell is a missing mechanism.** "Too clean" meant pick scrape, air, fret rattle and hum. "Real notes don't start at the hit, but in the middle of the strum" meant the player eases in. "A dip in the middle of the note" meant finger pressure (a level curve). Add the mechanism, not a filter that imitates it.
 - **A fit pinned at the edge of its range is a missing mechanism too.** Three times a tone fit hit a bound; each time the fix was physics (a pickup tone knob's LC resonance, a velocity-sensing pickup, frequency-dependent string loss), not a wider bound.

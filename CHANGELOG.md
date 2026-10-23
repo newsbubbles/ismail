@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Blind tests: real or fake per clip, climb back to one note, score the window
+
+- `exam_check(choices=, question=)` and `phone_exam` read the exam's one overall choice. On pairs labelled 1A, 1B,
+  2A ... whose real side moves between pairs, a choice that asks which side is real ('A is the real band' / 'B is
+  the real band', or bare 'A' / 'B' under a "which is real?" question) fails: it has no answer. A side choice about
+  anything else warns. Choices that name no side ('pair 1', "can't tell", 'A lot'), a single pair, or a real side
+  that never moves pass. `phone_exam(check=False)` still warns in its reply. From Nate's note on metal round 3.
+- `sound_compare` says when the two sounds differ in length or one holds a release tail and no window was given:
+  statistics over time count the whole file, so pass the window the person heard.
+- blind-tests.md: ask "real or fake?" for each clip of a pair; after two band-level rounds the person still wins,
+  climb back to an isolated note of the part they name; score the window, not the file.
+
 ### Fewer MCP tools for harnesses with a cap
 
 - `ismail mcp --roles dj,mc` or `--shelves live,stream` serves only those roles' or shelves' ops (the ones

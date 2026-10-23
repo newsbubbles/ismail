@@ -186,7 +186,8 @@ Find any tool by what you need or by role with `ops_find`.
   standing watch on its inbox with `phone_watch`.
 - **Exams**: blind exams on the phone (`phone_exam`, with floor pairs: the real clip against a 64 or 128 kb/s MP3
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
-  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
+  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown (it also fails one overall
+  "A or B is real" choice on pairs whose real side moves: ask "real or fake?" per clip); and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
 - **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
   questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
