@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### MIDI files in and out
+
+- `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,
+  meter, markers, nudges to the tick, kits on channel 10). `midi_read`: lists a .mid, then writes the parts you pick
+  into tracks at any bar, optionally quantized; it warns on tempo or meter differences and on kit pads a GM drum file
+  would leave silent. Written with no MIDI library; checked against mido on 40 files from other programs.
+
 ### Older downloads on the phone
 
 - The Downloads section shows the last 4 as before, with an "Older downloads (n)" button under it that opens the

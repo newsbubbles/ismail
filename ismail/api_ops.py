@@ -27,6 +27,8 @@ CATEGORIES = [
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
       'levels_from_ref', 'ref_retune')),
     ('render', 'rendering, mastering a finished cue for delivery, and playing', ('render', 'play_file', 'master_cue')),
+    ('midi', 'MIDI files in and out: the song or some tracks to a .mid any DAW opens, a .mid read into tracks',
+     ('midi_write', 'midi_read')),
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
                'and where two takes differ',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
@@ -48,7 +50,7 @@ CATEGORIES = [
 
 # a role -> its shelves, the ones to reach for first first
 ROLES = {
-    'song': ['start', 'sketch', 'write', 'sounds', 'render', 'listen', 'compare', 'transcribe', 'fit', 'exam',
+    'song': ['start', 'sketch', 'write', 'sounds', 'render', 'midi', 'listen', 'compare', 'transcribe', 'fit', 'exam',
              'lexicon', 'together', 'asks'],
     'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon', 'asks'],
     'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render', 'asks'],

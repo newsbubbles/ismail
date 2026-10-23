@@ -209,6 +209,7 @@ nudges you, follow it.
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
 | the person wants to play a part themselves (a jam, a lead over the set) | `midi_sources`, then `live_midi` to patch their keys to a track's sound; `live_played` reads what they played as notes, and `fit=True` snaps a take to loop back; no instrument: `live_keys_page` (on-screen keys) (`references/live.md`, "Played keys") |
+| the person wants the song in their DAW (Ableton, FL Studio, Logic), as sheet music, or brings a .mid | `midi_write` (notes, tempo, markers; `render(stems=True)` for the sound beside it); a .mid in: `midi_read` without `into` lists it, then `into={...}` writes the parts they pick |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
 
 ## Where things are
