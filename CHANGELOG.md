@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Picture rounds from every song on one server
+
+- The exam page server on 8871 (the only port the phone's `/eye/` reaches) served one folder, so a second song's
+  picture round 404ed while another song's exam was up. Now `exam_picture_round` registers its round in a registry
+  file (`~/.ismail/exampage/rounds.json`, or `$ISMAIL_EXAMPAGE_ROUNDS`) that the server reads on each request, after
+  its own folder. A name another song's round holds gets the song's name in front (`/eye/songb-round2`), and the op
+  returns that URL and phone link. It reads the round back through the server and, when it can't be served (no
+  server would start, or the running one is older than the registry), says why instead of returning a link that
+  404s. Old URLs and `python -m ismail.exampage serve <folder>` work as before; `python -m ismail.exampage register
+  <round folder>` registers a round by hand. `/health` now gives the server's folder and `"registry": true`.
+
 ### MIDI files in and out
 
 - `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,
