@@ -154,6 +154,8 @@ def test_a_standing_body_keeps_the_eyes_height_and_a_start_pose_elbow_stays_off_
     # the headset's offset to the head bone is level only: the body hangs at the eyes' height, set back from them
     assert 'new THREE.Vector3(0, EYE_UP, -EYE_FWD).applyQuaternion(qc).setY(0)' in js
     assert 'addScaledVector(lateral, POSE_POLE_OUT)' in js
+    # a person marked by an empty (no box) stands at the empty's height, not on the world floor
+    assert 'b.isEmpty() ? it.obj.getWorldPosition(new THREE.Vector3()).y : b.min.y' in js
 
 
 def test_body_collide_reaches_the_page(stage):
