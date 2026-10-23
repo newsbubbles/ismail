@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Chat commands by rule, votes and credit for requests
+
+- `chat_commands(lines)` takes chat_watch's lines and handles `!request <text>` and `!vote <id>` the same way every
+  time, by each venue's rules: a request is queued, refused (too many waiting, too soon, too long, closed), or
+  counted as a vote when one like it is already waiting ("drum & bass" and "drum n bass" are one). It returns the
+  reply for each line for the MC to say, and acts on a chat line once however often it is handed in. `!vote a` (a
+  vote of the MC's own) is left to the MC.
+- `venue_rules(venue, ...)` sets the rules per venue or for every venue ('*'): requests and votes open or closed,
+  waiting requests per viewer (1), seconds between one viewer's requests (600), duplicates as votes, the longest
+  request (120 characters), the owner and mods exempt.
+- Votes move a request up the line (more votes first, then first asked); `request_vote` counts one that came
+  another way.
+- `request_credits(ids, path)` gives the credit lines for the viewers whose requests shaped a song (name, where they
+  asked, what they asked for) and adds the missing ones to its CREDITS.md under "Requests from chat".
+
 ### A request queue for streams
 
 - `request_add(who, what, venue, note)` puts a chat request in one queue and says its place in line;
