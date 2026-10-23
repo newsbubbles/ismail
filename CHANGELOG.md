@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The stage on a stream: an on-air page and GPU window capture
+
+- `?onair=<camera>&fps=30` on a stage page shows that camera full frame with no UI, drawn at a steady rate, the
+  pointer layer included, in a window titled "ismail on air <scene>". `stage_on_air` now also tells on-air pages to
+  cut; other pages, the headset's included, ignore it.
+- `stream_visual(capture='auto'|'wgc'|'gdi')`: `auto` captures a window with Windows Graphics Capture (ffmpeg 8
+  gfxcapture) where ffmpeg has it, so a WebGL page drawn on the GPU comes through, covered or not, cropped to a
+  browser window's web content. `wgc` asked for by name is refused without gfxcapture. With `auto` the visual page
+  now draws on the GPU instead of in software; `gdi` is the old grab, and the manual fallback on a hot GPU.
+
 ### MIDI files in and out
 
 - `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,
