@@ -43,7 +43,9 @@ What each site's chat can do here:
    restart it carries silence and the picture, so a reset never drops a site.
 2. Set the picture first (`stream_visual`), because a change while live is a 2-3 s blip on every site. Use one
    call with everything: `mode` (cqt, spectrum, waves, scope, page, none), `colors`, `background` or `image` or
-   `window` (the title of a window to capture: the VR stage's mirror), `area`. `page` is the visual page below. Set
+   `window` (the title of a window to capture: the VR stage's mirror, or the stage's on-air page), `capture` (`auto`:
+   Windows Graphics Capture where ffmpeg has it, so a WebGL page drawn on the GPU comes through even when covered;
+   `gdi` is the old grab, which sees a GPU-drawn window as blank), `area`. `page` is the visual page below. Set
    the text lines, which
    change live with no blip: `stream_text('title', ...)`, `('note', ...)` ("type !request in chat"), `('now', ...)`
    (the piece). `chat_overlay` puts the newest chat line in a corner by itself.
