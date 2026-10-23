@@ -79,6 +79,10 @@ person and an agent change the same scene.
   long each stayed on air, for cutting the rendered angles afterwards. `stage_pointer` puts a giant foam finger where a
   person's hand points (shoulder through fingertip), only while it points (`when='point'`), on a layer the headset
   never shows: the monitor feed and `stage_capture` see it (a capture setup command `{"type": "pointer", ...}`).
+  **Streaming the talk:** a page opened as `<stage url>?scene=<scene>&onair=<first camera>&fps=30` is the stream's
+  picture: the camera on air only, full frame, no UI, titled `ismail on air <scene>`, and it follows every
+  `stage_on_air` cut (other pages keep their view). Capture it with `stream_visual(window='ismail on air <scene>',
+  capture='wgc')` (`references/live-streaming.md`).
 - **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
   moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
   `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.
