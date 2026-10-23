@@ -155,3 +155,29 @@ def test_ops_are_shelved_for_the_dj_and_mc():
     from ismail.api_ops import category_of
     for name in ('venue_rules', 'chat_commands', 'request_vote', 'request_credits'):
         assert name in api.OPS and category_of(name) == 'stream'
+
+
+def test_one_vote_or_love_per_viewer_per_window(home, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(V.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(Q.time, 'time', lambda: clock[0])
+    chat = Chat()
+    run(chat('ViewerA', '!request one'), chat('ViewerB', '!request two'), chat('ViewerC', '!request three'))
+    Q.request_mark(id=1, status='playing', on_screen=False)
+    out = run(chat('ViewerD', '!love'), chat('ViewerD', '!love'), chat('ViewerD', '!vote 2'),
+              chat('ViewerE', '!LOVE'))
+    assert [h['result'] for h in out['handled']] == ['loved', 'refused', 'refused', 'loved']
+    assert out['handled'][0]['id'] == 1
+    assert [r['text'] for r in out['replies']] == ['one vote or love per 60 s: yours counts again in 1 min']
+    assert '2 !love' in Q.request_next()
+    clock[0] += 61
+    out = run(chat('ViewerD', '!vote 2'), chat('ViewerD', '!vote 3'), chat('ViewerD', '!request three'))
+    assert [h['result'] for h in out['handled']] == ['voted', 'refused', 'refused']
+    assert out['replies'][2]['text'] == "'three' is already in line as #3"       # too soon to count as a vote
+    V.venue_rules(venue='site2', reward_s=0, love=False)
+    out = run(chat('ViewerD', '!vote 3', venue='site2'), chat('ViewerD', '!vote 2', venue='site2'),
+              chat('ViewerD', '!love', venue='site2'))
+    assert [h['result'] for h in out['handled']] == ['voted', 'voted', 'refused']
+    assert 'one !vote or !love per 0 s' in V.venue_rules(venue='site2') and '!love closed' in V.venue_rules()
+    with pytest.raises(OpError, match='reward_s: 0 to 3600'):
+        V.venue_rules(reward_s=-1)

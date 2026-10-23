@@ -130,7 +130,9 @@ Chat commands are plain chat lines; the MC reads them from `chat_watch`. Keep a 
   during it.
 - `!vote <a|b>`: a vote of your own ("next: faster or deeper? !vote a / !vote b"). `chat_commands` leaves these to
   you in `left`; count them for a minute and hand the DJ the result.
-- `!love`: counts like the person's phone love tap: the DJ keeps what plays a little longer.
+- `!love`: counts like the person's phone love tap: the DJ keeps what plays a little longer. `chat_commands`
+  counts it for the request that plays (`request_next` shows the count) and gives no reply. One `!vote` or `!love`
+  per viewer per minute (`venue_rules(reward_s=)`), so nobody can spam them.
 
 ## When something fails
 

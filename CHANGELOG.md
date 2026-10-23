@@ -8,10 +8,12 @@
   time, by each venue's rules: a request is queued, refused (too many waiting, too soon, too long, closed), or
   counted as a vote when one like it is already waiting ("drum & bass" and "drum n bass" are one). It returns the
   reply for each line for the MC to say, and acts on a chat line once however often it is handed in. `!vote a` (a
-  vote of the MC's own) is left to the MC.
-- `venue_rules(venue, ...)` sets the rules per venue or for every venue ('*'): requests and votes open or closed,
-  waiting requests per viewer (1), seconds between one viewer's requests (600), duplicates as votes, the longest
-  request (120 characters), the owner and mods exempt.
+  vote of the MC's own) is left to the MC. `!love` counts for the request that plays (request_next shows the
+  count), with no reply. One `!vote` or `!love` per viewer per `reward_s` seconds (60), so the reward channel cannot
+  be spammed.
+- `venue_rules(venue, ...)` sets the rules per venue or for every venue ('*'): requests, votes and loves open or
+  closed, waiting requests per viewer (1), seconds between one viewer's requests (600), duplicates as votes, the
+  longest request (120 characters), one vote or love per viewer per `reward_s` (60), the owner and mods exempt.
 - Votes move a request up the line (more votes first, then first asked); `request_vote` counts one that came
   another way.
 - `request_credits(ids, path)` gives the credit lines for the viewers whose requests shaped a song (name, where they

@@ -1,9 +1,9 @@
 """request_* ops: one queue of chat's song requests that the MC fills and the DJ plays from (ledger:M290), with votes
 that move a request up and credit lines for the viewers who asked (ledger:M291).
 
-The queue is an append-only event log, requests.jsonl in the stream home: {ev: add | mark | vote | cmd, id, at, ...},
-replayed on every read. So it needs no server, survives a restart, and an MC and a DJ in separate processes see the
-same line. Writes hold a lock file while an id is chosen and its line appended."""
+The queue is an append-only event log, requests.jsonl in the stream home: {ev: add | mark | vote | love | cmd, id, at,
+...}, replayed on every read. So it needs no server, survives a restart, and an MC and a DJ in separate processes see
+the same line. Writes hold a lock file while an id is chosen and its line appended."""
 import json
 import os
 import statistics
@@ -87,16 +87,18 @@ def viewer_key(venue, who):
 def state():
     """{id: request} replayed from the log: who, what, venue, note, status, added, started, ended, the UTC time each
     state was last entered (queued_at, playing_at, done_at, skipped_at, so request-to-air time reads off it), the
-    viewer's key and the keys of everyone who voted for it."""
+    viewer's key, the keys of everyone who voted for it, and the !love taps while it played."""
     reqs = {}
     for e in _events():
         r = reqs.get(e.get('id'))
         if e.get('ev') == 'add':
             reqs[e['id']] = {k: e.get(k) for k in ('id', 'who', 'what', 'venue', 'note')} | {
                 'status': 'waiting', 'added': e['at'], 'started': None, 'ended': None, 'queued_at': e.get('ts'),
-                'votes': [], 'key': viewer_key(e.get('venue'), e.get('who'))}
+                'votes': [], 'loves': 0, 'key': viewer_key(e.get('venue'), e.get('who'))}
         elif e.get('ev') == 'vote' and r and e.get('key') not in r['votes']:
             r['votes'].append(e['key'])
+        elif e.get('ev') == 'love' and r:
+            r['loves'] += 1
         elif e.get('ev') == 'mark' and r:
             r['status'] = e['status']
             r['queued_at' if e['status'] == 'waiting' else e['status'] + '_at'] = e.get('ts')
@@ -189,7 +191,8 @@ def _times(r):
 
 def _now_line(reqs, now):
     p = _playing(reqs)
-    return 'playing: ' + ('; '.join(f"{_desc(r)}, for {_ago(now - r['started'])}" for r in p) if p else 'nothing')
+    return 'playing: ' + ('; '.join(f"{_desc(r)}, for {_ago(now - r['started'])}"
+                                    + (f", {r['loves']} !love" if r['loves'] else '') for r in p) if p else 'nothing')
 
 
 @op(mutates=True)
@@ -325,6 +328,18 @@ def vote_refused(r, key):
 def vote(rid, key, src=None):
     """Append a vote (the caller holds _lock and checked vote_refused)."""
     _append({'ev': 'vote', 'id': rid, 'key': key, 'src': src})
+
+
+def love(key, src=None):
+    """Append a !love for what plays now (or for the set, when no request plays); returns that request's id."""
+    rid = next((r['id'] for r in _playing(state())), None)
+    _append({'ev': 'love', 'id': rid, 'key': key, 'src': src})
+    return rid
+
+
+def last_reward(key):
+    """When this viewer last voted or loved (chat_commands' window), or None."""
+    return max((e['at'] for e in _events() if e.get('ev') in ('vote', 'love') and e.get('key') == key), default=None)
 
 
 @op(mutates=True)
