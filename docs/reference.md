@@ -124,6 +124,10 @@ Find any tool by what you need or by role with `ops_find`.
   Windows, `songs/_reclaim` elsewhere, `$ISMAIL_RECLAIM` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
   file's path from the drive root, with a `manifest.json` and a `README.txt` line per folder, and `machine_disk`
   lists its folders with their sizes. The person deletes a folder there; nothing in ismail deletes.
+- **MIDI files in and out.** `midi_write` puts the song (or some tracks, or a window of bars) into a type 1 .mid
+  that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
+  tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
+  parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
