@@ -591,6 +591,40 @@ straight to the speakers.
   port (name it, e.g. "ismail keys"); whatever sends MIDI to that port plays through `live_midi` like a real
   keyboard.
 
+## MIDI out: synths and other apps play with the set
+
+When the person wants a part played by their own synth, or by a plugin in their DAW, or wants Ableton, FL Studio or
+a drum machine to run in time with the set, send MIDI out. ismail's notes stay the score; their instrument is the
+sound.
+
+- `midi_ports()` lists the outputs (and inputs). A hardware synth's USB MIDI shows up by name; to reach a DAW on
+  the same computer, a virtual port: loopMIDI on Windows (the person adds a port in its window, e.g. "ismail out"),
+  the IAC Driver on a Mac. 'Microsoft GS Wavetable Synth' is the General MIDI synth built into Windows: it sounds
+  from the speakers at once, so say so before sending to it.
+- `live_midi_out(track='bass', port='ismail out')` sends the track's notes from now (the first beat not yet
+  mixed; `at='next_bar'` and the rest as `live_queue` takes them), on the lowest free channel (10 for a kit or a
+  drum); `channel=` picks one. A deck's part is `track='A.bass'`. Each note leaves when its audio would reach the
+  speakers, so the synth and the set line up; the notes keep their velocity, length and the deck's transpose.
+- `audio=False` takes the track off the speakers (and the render workers): the synth is its sound. Keep `audio`
+  on to layer both, or while the person checks the line-up.
+- **Lining up by ear.** A DAW adds its own buffer, a hardware synth very little. Play the kick from ismail and the
+  routed part together and ask whether the synth is early or late; `offset_ms=` (per port, -500 to 2000) moves
+  that port's messages later, or earlier when negative. Ask in their words ("does the bass sit on the kick, or
+  just after it?"), change it in steps of 10 to 20 ms.
+- `remove=True` stops the route: every held note gets its note-off and All Notes Off on its channel, and the
+  track's audio comes back as its notes render again (a few seconds). A stop and the set's end do the same.
+- **Clock.** `live_midi_clock(port='ismail out')` sends 24 pulses per beat at the set's tempo at once (the other
+  app locks to it) and Start on the next bar line, which becomes its bar 1. `position=True` sends that bar's Song
+  Position first and Continue, so a DAW that follows song position shows the same bar number. `on=False` sends
+  Stop; the set's end sends Stop. The person turns on clock in (sync) for that port in their app: Ableton's
+  Preferences, Link/Tempo/MIDI, the port's Sync, then EXT; FL Studio's MIDI settings, the port as an input with
+  its sync on, then external sync. The tempo is the set's; one tempo per set.
+- `live_status` shows each route (notes sent, audio, offset) and the clock (pulses), with how late the sender put
+  messages out. A port error (unplugged mid-set) shows there too.
+- **Without a set.** `midi_play(project, port=..., bars=[a, b])` plays a song's notes to a port from here, in real
+  time, `clock=True` for clock with it: to try a synth or a channel before a set. It blocks until the last note
+  ends.
+
 ## Playing for a screen recording
 
 When the session itself is the show (the viewer sees your turns and hears the set):

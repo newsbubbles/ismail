@@ -662,6 +662,41 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
 
 
 @op()
+def live_midi_out(project: str, track: str = None, port: str = None, channel: int = None, audio: bool = None,
+                  offset_ms: float = None, at: str = 'now', remove: bool = False) -> str:
+    """Send a live track's notes out as MIDI to a port: a hardware synth, or a loopMIDI port (Windows) or the IAC
+    bus (Mac) into Ableton, FL Studio or any DAW, whose instrument then plays the part. Reach for it when the person
+    wants a set's part played by their own synth or plugin, or ismail's notes in their DAW while the set plays.
+    track: a live track, or a deck's part ('A.bass'); port: an output's name or a unique part of it (midi_ports
+    lists them); channel: 1 to 16 (default: 10 for a kit or drum, else the lowest free one on that port). Every note
+    its clips play from `at` (default 'now': the first beat the mixer has not mixed) goes out with its velocity and
+    length, transposed with its deck, at the moment its audio would reach the speakers, so the synth lines up with
+    the set. audio=False takes the track off the speakers and the render workers (the synth is its sound); True
+    brings it back (from its next renders, a few seconds). offset_ms: moves every message on that port later, or
+    earlier when negative, to meet a synth's or a DAW's own delay (-500 to 2000; set it by ear against the kick).
+    Call again to change channel, audio or offset; another port moves it. remove=True stops it: each held note gets
+    its note-off, then All Notes Off (CC 123) on its channel. A stop or the set's end does the same. With no track:
+    the outputs, the routes and the clock. Clock out: live_midi_clock."""
+    return _call(project, 'midi_out', track=track, port=port, channel=channel, audio=audio, offset_ms=offset_ms,
+                 at=at, remove=remove)
+
+
+@op()
+def live_midi_clock(project: str, port: str = None, on: bool = True, position: bool = False,
+                    offset_ms: float = None) -> str:
+    """Send MIDI clock from the live set to a port, so Ableton, FL Studio or a drum machine follows the set's tempo
+    and starts on its bar line. Reach for it when another app or a hardware box should play in time with the set.
+    24 pulses per quarter note at the set's tempo (one tempo per set) start at once, so the receiver can lock to it;
+    Start goes out right before the first pulse of the next bar line, which becomes the other app's bar 1.
+    position=True sends that bar's Song Position Pointer first and Continue instead of Start, for a DAW that follows
+    song position (it lands on the same bar number). on=False sends Stop; the set's end sends Stop too. offset_ms:
+    as live_midi_out (shared by the port). The other app must take clock in from that port: in Ableton, the
+    port's Sync on (Preferences, Link/Tempo/MIDI), then EXT; in FL Studio, the port enabled as an input in MIDI
+    settings with its sync on, then external sync. With no port: what is sending (live_status says it too)."""
+    return _call(project, 'midi_clock', port=port, on=on, position=position, offset_ms=offset_ms)
+
+
+@op()
 def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None) -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
     bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last

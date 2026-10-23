@@ -128,6 +128,15 @@ Find any tool by what you need or by role with `ops_find`.
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
   parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+- **MIDI out to synths and other apps.** `midi_ports` lists the inputs and outputs (a synth's USB MIDI, a loopMIDI
+  or IAC port into Ableton or FL Studio). `live_midi_out` sends a live track's notes (or a deck's part) to a port
+  and channel while the set plays, kits on channel 10, each note when its audio would reach the speakers, with or
+  without the track's own audio (`audio=False`) and a per-port `offset_ms` for the synth's delay; unrouting, a stop
+  and the set's end send every held note's note-off and All Notes Off. `live_midi_clock` sends MIDI clock (24 per
+  beat at the set's tempo, Start on the next bar line, Song Position with `position=True`, Stop at the end), so a
+  DAW or a drum machine follows the set. `midi_play` plays a song's notes (or some bars) to a port from the command
+  line, with clock if asked, no live set needed. Messages go out from their own thread (a sleep, then a short spin);
+  no new dependency on Windows (winmm), mido with python-rtmidi elsewhere.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
