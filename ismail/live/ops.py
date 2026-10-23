@@ -225,9 +225,12 @@ def live_status(project: str, deck: str = None) -> str:
     not on a deck (instrument, fader, level now and the loudest over the last 10 s, playing/next clip, render
     cost, errors), the safety chain's gain reduction since the last status, runway (the last scheduled change and
     what loops after it) and render health (backlog, late events, underruns). A STALLED line means the audio
-    device stopped asking for audio. deck='B' lists that deck's tracks and buses instead. Problems that arrive
-    between calls (a dropped note, a stall) are added to the next reply of any live op. The last line is the
-    machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
+    device stopped asking for audio. `mixer:` is the time a block takes to mix against its length (it climbs when
+    other programs load the machine); `headroom:` is the real risk: the mixed audio still waiting when the device
+    pulled, at its thinnest since the previous status, out of the 500 ms kept ahead (0 = a dropout, THIN under
+    125 ms). Judge a pause by headroom, not by the mixer %. deck='B' lists that deck's tracks and buses instead.
+    Problems that arrive between calls (a dropped note, a stall) are added to the next reply of any live op. The
+    last line is the machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
     out = _call(project, 'status', deck=deck)
     try:
         from .. import machine
@@ -376,7 +379,8 @@ def live_transition(project: str, to: str, from_deck: str = None, at: str = 'nex
     """Queue a mix from one deck to another as ramps on their strips, starting at `at` (a phrase boundary).
     style: blend (new deck fades up without bass, bass swap half-way, old fades out) | bass_swap (both full, one
     bass at a time, old leaves in the last quarter) | filter (old thins out through a rising high-pass while the
-    new opens from a low-pass) | cut (switch on the boundary). The `to` deck must be playing by then (live_load
+    new opens from a low-pass) | cut (switch on the boundary; bars is ignored, and the old deck stops and goes off air on that same
+    boundary). The `to` deck must be playing by then (live_load
     or live_queue it first, cued); it goes on air at the start. from_deck defaults to the one deck on air. With
     stop_from, the old deck's tracks stop when the transition ends and it goes off air (cued), ready for the next
     live_load. The reply is the timeline of every move."""
@@ -397,9 +401,20 @@ def live_bus(project: str, bus: str, fx=None, volume_db: float = None, remove: b
     return _call(project, 'bus', bus=bus, fx=fx, volume_db=volume_db, remove=remove, at=at)
 
 
+def _older_engine(call):
+    """A running engine started before section= and cancel_section= refuses them: say what to do."""
+    try:
+        return call()
+    except OpError as e:
+        if 'unexpected keyword' not in str(e):
+            raise
+        raise OpError(f"{e}. This engine was started before section= and cancel_section=: live_stop and live_start "
+                      f"again to use them (a plain live_queue or live_fx still works on it)") from None
+
+
 @op()
 def live_fx(project: str, target: str = None, index=None, params: dict = None, ramp_beats: float = 0,
-            at: str = 'now', clear: bool = False, moves: list = None) -> str:
+            at: str = 'now', clear: bool = False, moves: list = None, section: str = None) -> str:
     """Change params of one effect in a live chain. target: a track, or 'bus:<name>'; index: 0-based position in
     its chain (live_status lists chains), or the effect's type ('filter'; 'filter:2' = the second filter), which
     survives edits to the chain. Automatable params (fx_help lists them: cutoff, mix, gain_db, depth ...)
@@ -412,15 +427,21 @@ def live_fx(project: str, target: str = None, index=None, params: dict = None, r
     the volume without it): each param holds where it is. Use it before a section reuses a track whose old
     choreography is still scheduled.
     moves: a list of these calls as dicts, [{target, index, params, ramp_beats, at}, ...], scheduled in one call
-    (a whole cycle of throws, sweeps and gaps; ismail.live.djkit builds them)."""
+    (a whole cycle of throws, sweeps and gaps; ismail.live.djkit builds them).
+    section: a set section's name on the glides (or 'section' in each move): live_queue(cancel_section=) then
+    takes them back with that section's clips."""
     if moves is not None:
+        if section:
+            moves = [dict(m, section=section) if isinstance(m, dict) and 'section' not in m else m for m in moves]
         return _call(project, 'moves', moves=moves)
     if target is None:
         raise OpError("live_fx needs a target (or moves=[...])")
     if not clear and (index is None or not params):
         raise OpError("live_fx needs index and params (or clear=True to cancel scheduled moves)")
-    return _call(project, 'fx', target=target, index=index, params=params, ramp_beats=ramp_beats, at=at,
-                 clear=clear)
+    # section is sent only when given: an engine started before it existed still takes every other call
+    return _older_engine(lambda: _call(project, 'fx', target=target, index=index, params=params,
+                                       ramp_beats=ramp_beats, at=at, clear=clear,
+                                       **({'section': section} if section else {})))
 
 
 @op()
@@ -437,7 +458,8 @@ def live_tempo(project: str, bpm: float, at: str = 'next_bar', ramp_beats: float
 
 
 @op()
-def live_queue(project: str, clips: list) -> str:
+def live_queue(project: str, clips: list = None, section: str = None, cancel_section: str = None,
+               cancel_at: str = None) -> str:
     """Queue clips (a batch; all or nothing). Each clip: {track, notes and/or lanes, bars, loop, at}.
       notes: '<beat> <pitch> <dur_beats> [vel]; ...' with beats from the clip start (same as notes_write).
       lanes: {pitch: 'x...x...'} step strings (same as pattern_write), step = beats per char (0.25).
@@ -451,8 +473,18 @@ def live_queue(project: str, clips: list) -> str:
     A clip on a track replaces whatever that track would play from its start (a playing clip is cut there; its
     last notes ring out). {track, stop: true, at} silences a track. The reply gives each clip's id and the exact
     bar it lands on (moved later when its first notes cannot render in time) and the runway: how long until the
-    queue stops changing. Before a long job (sound design, fitting), queue enough that the runway covers it."""
-    return _call(project, 'queue', clips=clips)
+    queue stops changing. Before a long job (sound design, fitting), queue enough that the runway covers it.
+    section: a name for the set section (chapter) these clips and stops belong to; a clip's own 'section' key wins.
+    cancel_section: cut over mid-chapter. Takes back what that section still has to do from cancel_at (a live_queue
+    `at` value; default where this batch's first clip lands, or the next bar when clips is empty): its clips that
+    start then or later are removed, the ones still playing are cut there (last notes ring out), its stops after
+    it and its effect moves sent with section= are dropped (a glide in progress holds where it is). The batch's own
+    clips are kept even when they reuse the name. Clips queued without a section are never touched."""
+    args = {'clips': clips if clips is not None else []}
+    # the new arguments go only when given: an engine started before them still takes a plain queue
+    args.update({k: v for k, v in (('section', section), ('cancel_section', cancel_section),
+                                   ('cancel_at', cancel_at)) if v is not None})
+    return _older_engine(lambda: _call(project, 'queue', **args))
 
 
 @op()
@@ -554,7 +586,9 @@ def live_device(project: str, device: str = 'default', follow: bool = None, reop
     connecting a Bluetooth speaker), a name or part of one ('JBL'), an index, or 'none'. With device 'default' the
     engine also follows the system default by itself (checked every few seconds; follow=False stops that), and a
     device that stops taking audio (a speaker switched off) falls back to the default. reopen=False only sets
-    follow and stays on the output it has (no gap); the phone page's Output switch does the same."""
+    follow and stays on the output it has (no gap); the phone page's Output switch does the same.
+    device='none' turns the room speaker off mid-set (listening on the phone instead): the clock, the queue, streams,
+    recording and live_listen carry on, and device='default' (or a name) turns it back on, no restart."""
     if not reopen:
         return _call(project, 'device', follow=follow, reopen=False, timeout=20)
     return _call(project, 'device', device=device, follow=follow, timeout=20)
@@ -623,7 +657,8 @@ def midi_sources() -> str:
     names = midi.sources()
     if not names:
         return ("no MIDI inputs. A keyboard plugged in over USB shows up here; on Windows, loopMIDI makes a "
-                "virtual one (a port named for it, e.g. 'ismail keys').")
+                "virtual one (a port named for it, e.g. 'ismail keys'). With no instrument at all, live_keys_page "
+                "puts keys on a screen.")
     return "MIDI inputs:\n" + '\n'.join(f"  {n}" for n in names)
 
 
@@ -631,16 +666,16 @@ def midi_sources() -> str:
 def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
               transpose: int = None, channel: int = None, remove: bool = False) -> str:
     """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
-    same speakers. source: the input's name or a unique part of it (midi_sources); with no source, says what is
-    plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
+    same speakers. source: the input's name or a unique part of it (midi_sources), or 'screen keys' (the on-screen
+    keys page, live_keys_page); with no source, says what is plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
     included) or instrument=... (as live_track takes it: 'preset:<name>', a dict, a code voice). Call again with
     another track or instrument to swap: the old sound plays until the new notes land. The notes render once on
     the render workers (C2 to C7, or a kit's pads; a few seconds to a minute); a key then sounds one output buffer
     after the press (live_status says how long). Played keys skip the track's effects and the safety limiter (a
     soft clip guards them). volume_db: the keys' level, at most +6 (default: the track's fader, or -6 dB for an
     instrument). transpose: semitones; channel: 1 to 16 (0 = every channel, the
-    default). Every key is logged with the bar heard to <project>/live/midi/<source>.jsonl (live_played reads it
-    back as notes). remove=True unpatches.
+    default). Every key is logged with the beat it sounded against to <project>/live/midi/<source>.jsonl
+    (live_played reads it back as notes). remove=True unpatches.
     Tell the person before their keys first sound."""
     if instrument is not None:
         instrument = _check_instrument(project, instrument)
@@ -649,10 +684,60 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
 
 
 @op()
-def live_played(project: str, source: str = None, bars: int = 8) -> str:
+def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None) -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
-    bars, the same notes format tracks take (note-offs held while the sustain pedal was down). The last `bars` bars
-    that had keys, per input (source: one input). Read it to answer what they played, to quote a phrase back, or to
-    turn a phrase into a track: edit the lines (fix a note, quantize, move it to bar 1) and give them to live_track
-    or a studio track."""
-    return _call(project, 'played', source=source, bars=bars)
+    bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last
+    `bars` bars that had keys, or [a, b] for those bars (ask the player which part; never guess). Per input
+    (source: one input). Read it to answer what they played or to quote a phrase back.
+    Clock: each note is where it sounded against the beat the player heard (the press plus the keys' delay to the
+    speakers, which the header names in ms), because a player by ear lines up what they hear with the kick.
+    To loop a take back, use fit=True rather than rounding the lines to the grid: it groups the hits (keys within
+    0.15 beat are one), fits a 16th grid with a free offset, says the offset, the rms error in ms, the drift per
+    bar and the rhythm's shape in 16ths (3-3-2), and prints the snapped notes twice as live_queue notes (beats from
+    the clip start, bar 1 = the take's first bar, or from_bar): A as played, B with the first hit on a downbeat.
+    Where the take sits against the kick is a musical choice the data cannot make: play both and let the player
+    pick by ear. When every key has the same velocity (a keyboard that sends one), the reply says so and suggests
+    an accent shape; the lines keep the velocity."""
+    return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
+
+
+@op()
+def live_keys_page(project: str, phone: bool = False, sender: str = None) -> str:
+    """Optional: an on-screen keyboard for someone with no MIDI instrument who wants to play a part (a jam, a lead
+    over the set). A real keyboard needs none of this (midi_sources, live_midi). The page plays straight into this
+    project's running engine as the input 'screen keys', with no virtual MIDI port: patch it like any input,
+    live_midi(source='screen keys', track=... or instrument=...), and live_played(source='screen keys') reads back
+    what they played. It has two to three octaves (two rows on a phone held upright), octave shift, a sustain
+    toggle, velocity from where the key is pressed (near the top is soft), multi-touch chords, the mouse, and the
+    computer keyboard (Z and Q rows, arrows for octave, Space for the pedal); it says whether it is connected and
+    what it plays. The reply gives the address on this computer (the engine serves it) and, while the phone server
+    runs, the phone's. phone=True also puts a panel on the phone page with a button that opens the keys (sender:
+    your name, as phone_panel_show takes it). The keys sound from this computer's speakers, not in the phone's
+    stream, and opening them leaves the phone page (its stream stops): for someone in the room. Tell the person
+    before their keys first sound."""
+    st = _call(project, 'keys')
+    port = (_engine_record(project) or {}).get('port')
+    L = [f"keys page here: http://127.0.0.1:{port}/keys (this computer's browser: mouse, touch screen or the "
+         f"computer keyboard)"]
+    from ..phone import ops as PO
+    pport = PO._port()
+    if pport is None:
+        if phone:
+            raise OpError("the phone server is not running: phone_start() first, then live_keys_page(phone=True)")
+        L.append("on a phone: phone_start(), then live_keys_page(phone=True)")
+    else:
+        url, hint = PO._tailnet(pport)
+        L.append(f"on the phone: {url}keys" if url else f"on the phone: not reachable yet ({hint})")
+        if phone:
+            PO._call('panel_show', title='Play along', link='/keys?from=phone', link_label='Open the keys',
+                     text='Keys on the screen that play into the set from the speakers in the room. Near the top '
+                          'of a key is soft, near the bottom is loud.', who=sender)
+            L.append("posted a panel on the phone page with a button that opens the keys")
+    if st.get('patched'):
+        ready = '' if st['ready'] >= st['of'] else f" ({st['ready']} of {st['of']} notes ready)"
+        L.append(f"the keys play {st['what']}{ready}")
+    else:
+        L.append(f"the keys play nothing yet: live_midi(project={project!r}, source='screen keys', track='<a live "
+                 f"track>' or instrument=...) first; until then the page says no sound is chosen")
+    L.append("they sound from this computer's speakers; live_played(source='screen keys') reads what was played")
+    return '\n'.join(L)

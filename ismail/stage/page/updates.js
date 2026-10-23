@@ -86,7 +86,7 @@ export function initUpdates(ed, live, hands, voice) {
     shown.forEach((t, i) => g.fillText('• ' + t, 22, HEAD + ROW * i + ROW / 2, 468));
     if (more > 0) { g.fillStyle = 'rgba(255,255,255,0.75)'; g.fillText(`+${more} more`, 22, HEAD + ROW * shown.length + ROW / 2, 468); }
     g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = '24px system-ui, sans-serif';
-    g.fillText('left thumbs up to reload (leaves VR)', 256, h - FOOT / 2 - 2);
+    g.fillText((hands.gestures ? hands.gestures.words('reload') : 'left thumbs up') + ' to reload (leaves VR)', 256, h - FOOT / 2 - 2);
     tex.needsUpdate = true;
   }
 
@@ -187,16 +187,16 @@ export function initUpdates(ed, live, hands, voice) {
       ed.camera.getWorldPosition(tmpV); ed.camera.getWorldDirection(fwd);
       vcard.position.copy(tmpV).addScaledVector(fwd, 0.7).y -= 0.12;
     }
-    const h = hands.state.left;
+    const G = hands.gestures, h = hands.state[G.handOf('reload')];   // the card sits over the reload's hand (gestures.js)
     card.visible = st.ready && !!(h && h.f);
     if (!card.visible) { st.thumbSince = 0; return; }
     card.position.copy(h.f.wrist).addScaledVector(up, 0.2);
     const now = performance.now();
-    if (h.g === 'thumbs_up' && !hands.performing) {          // perform.js: gestures off while performing
+    if (G.on('reload') && !hands.performing) {          // perform.js: gestures off while performing
       if (!st.thumbSince) st.thumbSince = now;
-      const k = Math.min(1, (now - st.thumbSince) / THUMB_HOLD_MS);
+      const k = Math.min(1, (now - st.thumbSince) / G.hold('reload', THUMB_HOLD_MS));
       drawCard(k);
-      if (k >= 1) reload('left thumbs up');
+      if (k >= 1) reload(G.words('reload'));
     } else if (st.thumbSince) { st.thumbSince = 0; drawCard(0); }
   }
 

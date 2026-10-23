@@ -269,10 +269,7 @@ export function initVoice(ed, hands, live) {
       return;
     }
     let phone = false;
-    for (const side of ['left', 'right']) {
-      const h = hands.state[side];
-      if (h && h.f && (h.g === 'phone' || h.cand === 'phone')) phone = true;
-    }
+    if (hands.gestures.on('voice_note', { cand: true })) phone = true;   // gestures.js: a locked row (either hand phone)
     note.lockProgress = 0;
     if (phone) {
       if (!phoneSince) phoneSince = now;
@@ -367,11 +364,12 @@ export function initVoice(ed, hands, live) {
   }
   function askUpdate(now) {
     if (!asking.q) return;
-    const g = hands.state.right && hands.state.right.f ? hands.state.right.g : null;
-    const v = g === 'thumbs_up' ? 'yes' : g === 'thumbs_down' ? 'no' : null;
+    const G = hands.gestures;                            // the answer rows of the gesture map (gestures.js)
+    const v = G.on('answer_yes') ? 'yes' : G.on('answer_no') ? 'no' : null;
+    const hold = G.hold(v === 'no' ? 'answer_no' : 'answer_yes', ASK_HOLD_MS);
     if (v !== asking.g) { asking.g = v; asking.since = now; }
-    if (prompt.by === 'ask') { prompt.g = v; prompt.fill = v ? Math.min(1, (now - asking.since) / ASK_HOLD_MS) : 0; }
-    if (v && now - asking.since >= ASK_HOLD_MS && asking.resolve) asking.resolve(v);
+    if (prompt.by === 'ask') { prompt.g = v; prompt.fill = v ? Math.min(1, (now - asking.since) / hold) : 0; }
+    if (v && now - asking.since >= hold && asking.resolve) asking.resolve(v);
   }
 
   // ---- what the user sees: the gesture over each hand, and a REC / mic badge in front of them
@@ -395,10 +393,11 @@ export function initVoice(ed, hands, live) {
     g.fillText(text, cv.width / 2, cv.height / 2 + 2);
     t.needsUpdate = true;
   }
-  // ---- the thumbs prompt: over the RIGHT hand, the hand that answers, what a thumbs up and a thumbs down will say
-  // and who asks (the user, 2026-10-04: show it "above the hand that answers ... so I see what I'm agreeing to where
-  // I'm looking when I give the gesture"). A spoken question (ask) shows it the whole time; a panel answered by thumbs
-  // shows it while the right hand forms the gesture (panels.js). It fills as the gesture is held.
+  // ---- the thumbs prompt: over the hand that answers (the right, unless the gesture map moves answer_yes), what a
+  // thumbs up and a thumbs down will say and who asks (the user, 2026-10-04: show it "above the hand that answers
+  // ... so I see what I'm agreeing to where I'm looking when I give the gesture"). A spoken question (ask) shows it
+  // the whole time; a panel answered by thumbs shows it while the hand forms the gesture (panels.js). It fills as the
+  // gesture is held.
   const prompt = { by: null, q: '', yes: 'Yes', no: 'No', from: null, g: null, fill: 0 };
   const qcard = sprite(560, 210);
   qcard.scale.set(0.17, 0.064, 1);
@@ -462,7 +461,7 @@ export function initVoice(ed, hands, live) {
       else if (h.g === 'phone' && note.rec) draw(sp, note.lockProgress > 0.05 ? 'hold to lock' : 'phone', 'rgba(185,28,28,0.85)', '#fff', note.lockProgress);
       else draw(sp, h.g === 'none' ? '·' : h.g.replace('_', ' '), h.g === 'phone' ? 'rgba(185,28,28,0.85)' : 'rgba(20,24,30,0.7)');
     }
-    const rh = hands.state.right;
+    const rh = hands.state[hands.gestures.handOf('answer_yes')];   // over the hand that answers (gestures.js)
     qcard.visible = !!(prompt.by && rh && rh.f && !rh.resting);
     if (qcard.visible) { qcard.position.copy(rh.f.wrist).y += 0.22; drawPrompt(); }
     const rec = !!note.rec, takeOn = !!take.rec, warn = micState.s !== 'on', pf = self.perfHud && self.perfHud();

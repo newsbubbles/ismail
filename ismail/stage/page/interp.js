@@ -108,3 +108,85 @@ export function mixTake(a, b, u, out) {
   for (const k of POSED) if (k in a) o[k] = k in b ? mixFrame(a[k], b[k], u, o[k]) : a[k];
   return o;
 }
+
+// ---- a recorded move made into keys (camrec.js; Nate, 2026-10-14: hold a camera while the song plays and the move
+// becomes its keys). Samples [{t, location, quaternion}] (Blender, quaternion [w, x, y, z]) are first eased over
+// smooth_s (a hand's tremor is not a camera move), then thinned: keys start at the first and last sample and the
+// sample the keys miss by most is added, until every sample is within pos metres and ang degrees of what the keys
+// play back with `mode` (the same vec and slerp the clock uses), or max_keys is reached. Returns {keys, err_m, err_deg}.
+export function quatAt(ks, t, mode = 'stop') {
+  if (t <= ks[0].t) return ks[0].quaternion.slice();
+  if (t >= ks[ks.length - 1].t) return ks[ks.length - 1].quaternion.slice();
+  const { i, u } = segment(ks, t);
+  return slerpQ(ks[i].quaternion, ks[i + 1].quaternion, slerpK(u, mode));
+}
+export function slerpQ(a, b, k) {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const s = d < 0 ? -1 : 1;
+  d = Math.min(1, Math.abs(d));
+  if (d > 0.9995) { const q = a.map((x, j) => x + (s * b[j] - x) * k), n = Math.hypot(...q); return q.map((x) => x / n); }
+  const th = Math.acos(d), sn = Math.sin(th), wa = Math.sin((1 - k) * th) / sn, wb = Math.sin(k * th) / sn;
+  return a.map((x, j) => wa * x + wb * s * b[j]);
+}
+export const quatAngleDeg = (a, b) => 2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]))) * 180 / Math.PI;
+
+// a recorded move without the shake of a hand or a head and the frame-to-frame jitter of the samples' timing. The
+// place: a local quadratic fit over smooth_s either side of each sample (tricube weights), which follows a curve
+// without cutting inside it and needs no one-sided window at the ends (a moving average pulled the first and last
+// samples back along the move, and its leftover noise near the 2 cm tolerance made the thinning chase the shake:
+// 56 keys for a 4 s arc, 9 without it). The turn: the average of the quaternions inside the same window.
+export function easeSamples(samples, smooth_s = 0.15) {
+  const n = samples.length;
+  if (!(smooth_s > 0) || n < 5) return samples.map((s) => ({ t: s.t, location: s.location.slice(), quaternion: s.quaternion.slice() }));
+  const h = smooth_s, T0 = samples[0].t, T1 = samples[n - 1].t;
+  let lo = 0, hi = 0;
+  return samples.map((s) => {
+    const a = Math.max(T0, Math.min(s.t - h, T1 - 2 * h)), b = Math.min(T1, Math.max(s.t + h, T0 + 2 * h));
+    while (lo < n - 1 && samples[lo].t < a - 1e-9) lo++;
+    while (lo > 0 && samples[lo - 1].t >= a - 1e-9) lo--;
+    while (hi < n - 1 && samples[hi + 1].t <= b + 1e-9) hi++;
+    while (hi > lo && samples[hi].t > b + 1e-9) hi--;
+    const R = Math.max(s.t - a, b - s.t, 1e-6);
+    // weighted sums for the normal equations of x(τ) = c0 + c1 τ + c2 τ², τ = t_i - t
+    const S = [0, 0, 0, 0, 0], Y = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], q = [0, 0, 0, 0], q0 = s.quaternion;
+    for (let i = lo; i <= hi; i++) {
+      const p = samples[i], tau = p.t - s.t, u = Math.min(1, Math.abs(tau) / (R * 1.0001)), w = (1 - u ** 3) ** 3;
+      let tp = w;
+      for (let k = 0; k < 5; k++) { S[k] += tp; if (k < 3) for (let d = 0; d < 3; d++) Y[k][d] += tp * p.location[d]; tp *= tau; }
+      const sg = p.quaternion[0] * q0[0] + p.quaternion[1] * q0[1] + p.quaternion[2] * q0[2] + p.quaternion[3] * q0[3] < 0 ? -1 : 1;
+      for (let k = 0; k < 4; k++) q[k] += w * sg * p.quaternion[k];
+    }
+    const M = [[S[0], S[1], S[2]], [S[1], S[2], S[3]], [S[2], S[3], S[4]]];
+    const det3 = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+      + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    const D = det3(M), qn = Math.hypot(...q) || 1;
+    const location = [0, 1, 2].map((d) => {
+      if (hi - lo < 4 || !(Math.abs(D) > 1e-18)) return s.location[d];
+      return det3([[Y[0][d], M[0][1], M[0][2]], [Y[1][d], M[1][1], M[1][2]], [Y[2][d], M[2][1], M[2][2]]]) / D;   // Cramer: c0
+    });
+    return { t: s.t, location, quaternion: q.map((x) => x / qn) };
+  });
+}
+
+export function thinKeys(samples, { pos = 0.02, ang = 2, mode = 'smooth', smooth_s = 0.15, max_keys = 300 } = {}) {
+  const sm = easeSamples(samples, smooth_s);
+  if (sm.length <= 2) return { keys: sm, err_m: 0, err_deg: 0 };
+  const idx = [0, sm.length - 1];
+  let errM = 0, errD = 0;
+  for (;;) {
+    const ks = idx.map((i) => sm[i]);
+    let worst = -1, wErr = 0;
+    errM = 0; errD = 0;
+    for (let j = 0; j < sm.length; j++) {
+      const s = sm[j], p = vec(ks, s.t, 'location', mode);
+      const dm = Math.hypot(p[0] - s.location[0], p[1] - s.location[1], p[2] - s.location[2]);
+      const dd = quatAngleDeg(quatAt(ks, s.t, mode), s.quaternion);
+      errM = Math.max(errM, dm); errD = Math.max(errD, dd);
+      const e = Math.max(dm / pos, dd / ang);
+      if (e > wErr) { wErr = e; worst = j; }
+    }
+    if (wErr <= 1 || idx.length >= max_keys || idx.includes(worst)) break;
+    idx.push(worst); idx.sort((a, b) => a - b);
+  }
+  return { keys: idx.map((i) => sm[i]), err_m: errM, err_deg: errD };
+}

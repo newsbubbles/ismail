@@ -306,9 +306,13 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
   let verdict = { g: null, since: 0 };
   const thumbAnswers = (p) => (p.buttons.length ? [p.buttons[0], p.buttons[p.buttons.length - 1]] : ['thumbs up', 'thumbs down']);
   function thumbs(now) {
-    const r = hands.performing ? null : hands.state.right;    // perform.js: no thumbs while performing (pokes still press)
-    const g = r && r.f && (r.g === 'thumbs_up' || r.g === 'thumbs_down') ? r.g : null;
-    const forming = r && r.f && (g || r.cand === 'thumbs_up' || r.cand === 'thumbs_down');
+    // the answer rows of the gesture map (gestures.js; right thumbs up / down by default). g stays 'thumbs_up' for
+    // yes and 'thumbs_down' for no whatever the shape, as voice.js's prompt reads it
+    const G = hands.gestures, off = hands.performing;    // perform.js: no thumbs while performing (pokes still press)
+    const yes = off ? null : G.on('answer_yes'), no = off || yes ? null : G.on('answer_no');
+    const g = yes ? 'thumbs_up' : no ? 'thumbs_down' : null;
+    const forming = !off && !!(g || G.on('answer_yes', { cand: true }) || G.on('answer_no', { cand: true }));
+    const hold = G.hold(g === 'thumbs_down' ? 'answer_no' : 'answer_yes', VERDICT_HOLD_MS);
     if (g !== verdict.g) verdict = { g, since: now };
     let target = null;
     if (panels.size && forming) {
@@ -325,13 +329,13 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
       if (target) {
         const [yes, no] = thumbAnswers(target);
         voice.thumbPrompt({ by: 'panel', q: target.title || String(target.text).slice(0, 90) || target.id, yes, no, from: target.from });
-        voice.prompt.g = g; voice.prompt.fill = g ? Math.min(1, (now - verdict.since) / VERDICT_HOLD_MS) : 0;
+        voice.prompt.g = g; voice.prompt.fill = g ? Math.min(1, (now - verdict.since) / hold) : 0;
       } else if (voice.prompt.by === 'panel') voice.thumbPrompt(null);
     }
-    if (!g || now - verdict.since < VERDICT_HOLD_MS || !target) return;
+    if (!g || now - verdict.since < hold || !target) return;
     verdict.since = Infinity;                                   // one verdict per gesture
     const a = target.buttons.length ? thumbAnswers(target)[g === 'thumbs_up' ? 0 : 1] : g.replace('_', ' ');
-    answer(target, a, 'right ' + g.replace('_', ' '));
+    answer(target, a, G.words(yes ? 'answer_yes' : 'answer_no'));
   }
 
   const drag = { left: null, right: null };

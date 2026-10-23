@@ -93,6 +93,10 @@ def vr_export(out_dir):
             man['world'] = {'color': list(bg.inputs['Color'].default_value)[:3], 'strength': bg.inputs['Strength'].default_value}
     if S_.get('vr_sky'):
         man['sky'] = S_['vr_sky']
+    # pieces the Quest diet joined into one mesh (quest.py merge_groups): the page splits one back out by name
+    mg = {n: e for n, e in json.loads(S_.get('vr_merged') or '{}').items() if e['into'] in man['objects'] and n not in man['objects']}
+    if mg:
+        man['merged'] = mg
     bpy.ops.export_scene.gltf(filepath=os.path.join(out_dir, 'scene.glb'), export_format='GLB', export_apply=True,
                               export_lights=True, export_cameras=True, export_yup=True,
                               export_rest_position_armature=False,   # skinned characters in their posed state, not the T-pose

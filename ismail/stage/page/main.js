@@ -6,6 +6,7 @@ import { initDesktop } from './desktop.js';
 import { initXR } from './xr.js';
 import { initLive } from './live.js';
 import { initHands } from './hands.js';
+import { initGestures } from './gestures.js';
 import { initVoice } from './voice.js';
 import { initTouch } from './touch.js';
 import { initUpdates } from './updates.js';
@@ -29,14 +30,20 @@ import { initCues } from './cues.js';
 import { initAnchors } from './anchor.js';
 import { initProps } from './props.js';
 import { initGrab } from './grab.js';
+import { initReplay } from './replay.js';
 import { initParts } from './parts.js';
 import { initFaces } from './faces.js';
 import { initPerform } from './perform.js';
-import { loadWorld } from './world.js';
+import { loadWorld, world } from './world.js';
 import { initLoadSets } from './loadsets.js';
 import { initBehaviours } from './behaviours.js';
 import { setPickEmit } from './pickcycle.js';
 import { CAPTURE, runCapture } from './capture.js';
+import { initTrails } from './trails.js';
+import { initCamRec } from './camrec.js';
+import { initSurfaces } from './surfaces.js';
+import { initPointer } from './pointer.js';
+import { ONAIR, ONAIR_FPS, initOnAir } from './onair.js';
 
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
@@ -62,6 +69,9 @@ const desktop = initDesktop(ed);
 const xr = initXR(ed, desktop);
 const live = initLive(ed, desktop, xr);
 const hands = initHands(ed, xr, live.emit);
+hands.gestures = initGestures(hands, () => ed.sceneName);   // the gesture map (gestures.js): what each hand shape means
+ed.addEventListener('switched', () => hands.gestures.reload().catch(() => {}));   // a scene's own rows come with it
+live.handlers.gestures_reload = () => hands.gestures.reload();
 const voice = initVoice(ed, hands, live);
 const touch = initTouch(ed, xr, hands, live.emit);
 setPickEmit(live.emit);   // pickcycle.js: pick_cycle events when a pinch again takes the next thing under it
@@ -102,11 +112,16 @@ const music = initMusic(ed, live);
 window.VR_music = music;
 actors.setMusicClock(() => music.now());            // takes played on the music (stage_actor_play at_music)
 initStream(ed, live);
+const surfaces = initSurfaces(ed, live, () => (music.now() || {}).t || 0);   // slides, video, text, a live camera on a material
+initPointer(ed, live, actors);                     // a foam finger where a person points, for the cameras only
+initOnAir(ed, desktop, live);                      // ?onair: the stream's picture, the camera on air only (onair.js)
 // a re-exported room comes in without the grown trees (they hang under the old scene's tree_k items): grow them again
 live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reload) setTimeout(() => live.handlers.trees_reload({}).catch(() => {}), 500); });
 const stageClock = initClock(ed, live, xr, panels);   // the 4D timeline: keyed objects, tree growth
 window.VR_clock = stageClock;
 window.VR_trees = initTrees(ed, live, stageClock);   // grow_tree.py's trees, grown on the clock
+const trails = initTrails(ed, live, stageClock, xr);   // a keyed object's path on the clock, its keys to pick and move
+window.VR_trails = trails;
 fetch(`scenes/${encodeURIComponent(name)}/names.json`, { cache: 'no-store' })
   .then((r) => (r.ok ? r.json() : {})).then((n) => { ed.names = n; }).catch(() => {});
 ed.preRender.push(() => { if (actors.playing.size) wake(); });   // a playing actor keeps the desktop view drawing
@@ -178,12 +193,16 @@ live.onEmit((type, d) => {
   else if (type === 'actor_stop' && d && d.live) { hands.shadowStop(); perform.stop(); }
 });
 live.handlers.take_keep_last = (c) => keepLast(c.name || null);
+live.handlers.take_keep_recent = (c) => (c.info ? hands.recentInfo() : hands.keepRecent(c.seconds, c.name || ''));   // hands.js: the last 2 min in VR
 // things that do things: a scene's own small functions, run on a press, a menu item or a wire (behaviours.js)
-window.VR_behaviours = initBehaviours(ed, live, panels, hands);
+window.VR_behaviours = initBehaviours(ed, live, panels, hands, { clock: stageClock, actors });
 const actions = initActions(ed, hands, panels, live, { start: (n) => startTake(n), stop: () => stopTake(), recording: () => hands.rec.on,
   keepLast: (n) => keepLast(n), discardLast: () => hands.discardLast(), lastFollow: () => hands.lastFollowInfo(),
   lastFollowData: () => hands.lastFollowData(), perform,
-  get actors() { return actors; }, get embody() { return embody; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; } });   // defined below; used on a menu press
+  get actors() { return actors; }, get embody() { return embody; }, get view() { return takes4d; }, get ear() { return voice.EAR; }, get clock() { return stageClock; }, trails, get camrec() { return camrec; } });   // defined below; used on a menu press
+// a camera move recorded like a take: the user's head or a carried camera while the clock plays (camrec.js)
+const camrec = initCamRec(ed, live, stageClock, panels, { countdown: actions.countdown, trails, follows: window.VR_behaviours.follows });
+window.VR_camrec = camrec;
 live.handlers.take_stop = () => stopTake();
 const sayText = live.handlers.say;                 // in VR there is no caption to read: speak it (or with --voice)
 // a line queued while the page was away is old news by the time it connects: caption it, do not speak it (the user
@@ -249,11 +268,22 @@ ed.renderer.xr.addEventListener('sessionstart', () => {
   setTimeout(() => live.emit('headset', { state: 'entered VR' }), 3000);   // cues can greet the user (cues.js)
 });
 ed.renderer.xr.addEventListener('sessionend', () => console.log(`[xr] session ended after ${xrFrames} frames`));
+let replay = null;                                 // replay.js: a take drives the head and hands while nobody is in VR
+let onAirLast = 0;
 ed.renderer.setAnimationLoop(() => {
+  if (ONAIR && !ed.renderer.xr.isPresenting) {     // the on-air page draws at the stream's rate, no faster
+    const t = performance.now();
+    if (t - onAirLast < 1000 / ONAIR_FPS - 2) return;
+    onAirLast = t;
+  }
   const dt = Math.min(clock.getDelta(), 0.1);
   guard('xr', () => xr.update(dt));
+  const replaying = !!(replay && guard('replay', () => replay.update()));
+  if (ed.renderer.xr.isPresenting || replaying) {
+    guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('grab', () => grab.update());
+  }
   if (ed.renderer.xr.isPresenting) {
-    guard('hands', () => hands.update()); guard('touch', () => touch.update()); guard('grab', () => grab.update()); guard('voice', () => voice.update());
+    guard('voice', () => voice.update());
     guard('body', () => body.update());
     if (!guard('exitVR', () => exitVR.update())) { guard('updates', () => updates.update()); guard('panels', () => panels.update()); }
     guard('gallery', () => gallery.update()); guard('actions', () => actions.update());
@@ -268,7 +298,7 @@ ed.renderer.setAnimationLoop(() => {
   const now = performance.now(), cam = desktop.viewCamera();
   const pose = cam.matrixWorld.elements.map((x) => x.toFixed(5)).join(',');
   if (pose !== lastPose) { lastPose = pose; wake(); }
-  if (now < awakeUntil || now - lastDraw > 1000) { lastDraw = now; desktop.render(); }
+  if (ONAIR || now < awakeUntil || now - lastDraw > 1000) { lastDraw = now; desktop.render(); }
 });
 
 window.VR = {
@@ -360,10 +390,43 @@ window.VR_waypoints = waypoints;
 window.VR_cues = initCues(ed, live, panels);
 window.VR_anchors = initAnchors(ed, xr, live);   // objects pinned to a hand joint, session only
 window.VR_props = initProps(ed, live, actors);   // props pinned to a person's bone, saved with the scene (props.js)
+
+// world.json changed under an open page (stage_world writes it, then sends world_reload): read it again and bring what
+// was built from it up to date, so the room is never reloaded for it (the user, 2026-10-13: "I'm getting sick of
+// reloading entire scenes"). Facings, partners, floor, grab and actors are read when used, so they apply at once;
+// what was built from them is redone here. Replies {changed, applied}.
+live.handlers.world_reload = async () => {
+  const old = JSON.parse(JSON.stringify(world()));
+  await loadWorld(ed.sceneName);
+  const W = world(), same = (k) => JSON.stringify(old[k] ?? null) === JSON.stringify(W[k] ?? null);
+  const changed = [...new Set([...Object.keys(old), ...Object.keys(W)])].filter((k) => !same(k)), applied = [];
+  if (!same('unloaded') || !same('sets')) {
+    const was = new Set(old.unloaded || []), now = new Set(W.unloaded || []);
+    for (const n of now) if (!was.has(n) && (W.sets || {})[n]) loadSets.unload(n, W.sets[n]);
+    for (const n of was) if (!now.has(n)) await loadSets.load(n);
+    applied.push('unloaded');
+  }
+  if (!same('actors')) {                          // a new or changed body: rest it again from its own glb
+    for (const p of new Set([...Object.keys(old.actors || {}), ...Object.keys(W.actors || {})])) {
+      if ((old.actors || {})[p] === (W.actors || {})[p]) continue;
+      actors.unrest(p);
+      const it = ed.byName.get(p);
+      if (it) it.obj.visible = true;
+      await actors.rest(p).catch((e) => console.warn('[world] rest', p, e));
+    }
+    applied.push('actors');
+  }
+  if (!same('props')) { window.VR_props.reload(); applied.push('props'); }
+  if (!same('faces') && live.handlers.face_reload) { live.handlers.face_reload({}); applied.push('faces'); }
+  if (!same('keep_out') && live.handlers.trees_reload) { await live.handlers.trees_reload({}); applied.push('keep_out'); }
+  return { changed, applied };
+};
 // grab by touch: a hand holds a thing it rests on, a release lets it fall (grab.js); the fist grab of touch.js steps aside
 const grab = initGrab(ed, live, xr, hands, () => actors, window.VR_props);
 touch.skip = (it, how) => !!grab.heldBy(it) || (how === 'fist' && grab.takeable(it));
 window.VR_grab = grab;
+replay = initReplay(ed, live, xr, hands, grab, desktop);
+window.VR_replay = replay;
 window.VR_parts = initParts(ed, live, () => actors);   // worn parts: glasses off, a mask down (parts.js)
 window.VR_faces = initFaces(ed, live, actors, () => music.now());   // mouth tracks on the music clock (faces.js); capture swaps music.now
 live.emit('page_boot', { scene: name, in_construct: true });
@@ -384,4 +447,4 @@ wake();
 const st0 = ed.selftest();
 console.log('[vr] ready:', ed.items.length, 'objects; selftest on load:', st0.pass ? 'PASS' : 'FAIL');
 live.pageLoaded(st0);
-if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets });   // a frame-locked capture (capture.js)
+if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets, surfaces });   // a frame-locked capture (capture.js)

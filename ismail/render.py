@@ -422,7 +422,7 @@ def _code_hash():
     # any change to the synthesis/effect code invalidates cached track renders
     h = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py'):
+    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py'):
         with open(os.path.join(here, f), 'rb') as fh:
             h.update(fh.read())
     return h.hexdigest()[:12]
@@ -437,8 +437,7 @@ def _sounds_used(tr):
     def walk(inst):
         if not inst:
             return
-        if inst.get('type') == 'sampler' and inst.get('sound'):
-            out.add(inst['sound'])
+        out.update(instruments.sampler_sound_names(inst))
         if inst.get('type') == 'kit':
             for v in inst['map'].values():
                 walk(v)
@@ -480,6 +479,77 @@ def write_mp3(wav_path, mp3_path, bitrate='320k'):
     return mp3_path
 
 
+def _nlinks(path):
+    try:
+        return os.stat(path).st_nlink
+    except OSError:
+        return 0
+
+
+def _replace(tmp, path, tries=20):
+    """os.replace, retried for about two seconds: on Windows a reader holding `path` open makes it fail a moment."""
+    for i in range(tries):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
 def write_wav(path, y, sr):
+    """24-bit WAV. A name that shares its file with another (latest.wav is a hard link to the named render,
+    ledger:M221) is never written through: the new audio goes to `<path>.writing`, which then replaces the name, so
+    the other name keeps its own sound. A file with one name is written in place, as always."""
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    sf.write(path, np.clip(y.T, -1, 1).astype(np.float32), sr, subtype='PCM_24')
+    data = np.clip(y.T, -1, 1).astype(np.float32)
+    if _nlinks(path) <= 1:
+        sf.write(path, data, sr, subtype='PCM_24')
+        return path
+    tmp = path + '.writing'
+    sf.write(tmp, data, sr, subtype='PCM_24', format='WAV')
+    try:
+        _replace(tmp, path)
+    except OSError as e:
+        raise RuntimeError(f"{path} is open in another program, so the new audio is in {tmp}; close it and render "
+                           f"again ({e})")
+    return path
+
+
+def link_wav(src, dst, y, sr):
+    """Make `dst` a second name for `src`, the WAV just written (renders/latest.wav and renders/<out>.wav: one copy
+    on disk, ledger:M221). A later write to either name replaces that name only (write_wav). Where no link can be
+    made (a drive without hard links, `dst` open in another program), `dst` is written as its own file, as before.
+    -> 'linked' or 'written'."""
+    try:
+        if os.path.exists(dst) and os.path.samefile(src, dst):
+            return 'linked'
+    except OSError:
+        pass
+    tmp = dst + '.link'
+    if not os.path.lexists(tmp):       # one left by a failed swap is a second name for an older render: song_compress
+        try:                           # moves it to _reclaim; until then dst is written as its own file
+            os.link(src, tmp)
+        except OSError:
+            pass
+        else:
+            try:
+                _replace(tmp, dst)
+                return 'linked'
+            except OSError:
+                pass
+    write_wav(dst, y, sr)
+    return 'written'
+
+
+def write_renders(rd, y, sr, out=None):
+    """A render's files in renders/: `<out>.wav` when the render is named, with latest.wav a hard link to it (one
+    copy on disk, ledger:M221); latest.wav alone when it is not. -> {name: 'written' | 'linked'}."""
+    latest = os.path.join(rd, 'latest.wav')
+    named = os.path.join(rd, out + '.wav') if out else None
+    if not named or os.path.abspath(named) == os.path.abspath(latest):
+        write_wav(latest, y, sr)
+        return {'latest.wav': 'written'}
+    write_wav(named, y, sr)
+    return {out + '.wav': 'written', 'latest.wav': link_wav(named, latest, y, sr)}

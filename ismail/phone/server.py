@@ -21,6 +21,7 @@ import argparse
 import bisect
 import collections
 import datetime
+import hashlib
 import http.client
 import io
 import json
@@ -49,6 +50,7 @@ except ImportError:
     import tags
 
 HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
+OFFERS_KEPT = 200                                # downloads the phone can page back through (/api/offers)
 PAGE = Path(__file__).resolve().parent / 'page'
 # The page's sounds (Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... the same
 # thing applies to everything as like a design philosophy"). An agent makes each one with ismail and attaches it with
@@ -106,6 +108,20 @@ MOODS = ('calm', 'steady', 'lift', 'peak')
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
 MARKS = ('loved', 'replay', 'new')   # a piece they loved before, one the DJ plays again, one just made
 PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
+LABEL_GRACE_BARS = 2        # a phone_now label also takes the clips that start this soon after it (queued next)
+AGENT_SEEN_S = 90.0         # an agent that called this recently is listening (phone_watch calls every 25 s)
+CLAIM_GRACE_S = 180.0       # an untagged note nobody claimed this long after it came is the lead's by default
+# Who has a phone note (Nate 10-16, n5737 and n5776): untagged notes went to nobody, or to six agents at once, because
+# every watcher guessed what the others would do. A list of who is listening alone is still a race, so the first agent
+# to call phone_claim on a note owns it (decided here, under one lock) and every other watcher sees "claimed".
+NOTE_KINDS = ('voice_text', 'text')     # what the person says or types: the lines an agent passes on
+# The watcher heartbeat (ledger:M211; qa intent_rules 10-16 cluster 3, "be reachable": a DJ whose watcher died left the
+# person asking "you watching phone?" while live, four times in five days). While the person is live (the Quest page
+# open, a phone on the stream, or an agent's phone_expect), an agent that watched and went quiet is DOWN: one alarm
+# line goes to the lead's watcher, the page names it, phone_status and phone_presence show it. A server cannot wake a
+# session; the lead can (a message to it). phone_signoff is the clean stop that raises nothing.
+DOWN_S = 120.0              # a watcher that has not polled this long is down (phone_watch polls every 25 s, re-arms in seconds)
+RECENT_S = 1800.0           # it watched within this long, so while the person is live it is expected to still be there
 VOICE_CMDS = [(r'stop (?:listening|the stream|streaming)', 'stop_listening'), (r'(?:i )?love (?:this|that|it)', 'love'),
               (r'change it up', 'change'), (r'more energy', 'energy_up'), (r'calmer|calm (?:it )?down', 'energy_down'),
               (r'louder', 'louder'), (r'quieter|softer', 'quieter'), (r'pause the set', 'pause'),
@@ -153,6 +169,21 @@ def clip_seconds(path):
         return float(sf.info(path).duration)
     except Exception:
         return None
+
+
+def _ago(s):
+    return f"{s:.0f} s ago" if s < 120 else f"{s / 60:.0f} min ago" if s < 7200 else f"{s / 3600:.0f} h ago"
+
+
+def device_kind(ua):
+    """(kind, browser) from a User-Agent: the person's phone, a computer, a tablet or the Quest."""
+    kind = ('Quest' if re.search(r'OculusBrowser|Quest', ua) else
+            'phone' if re.search(r'iPhone|Android.*Mobile|Mobile.*Android', ua) else
+            'tablet' if re.search(r'iPad|Android', ua) else 'computer')
+    browser = next((name for pat, name in ((r'OculusBrowser', 'Quest Browser'), (r'Edg/', 'Edge'),
+                                           (r'Firefox/', 'Firefox'), (r'Chrome/', 'Chrome'), (r'Safari/', 'Safari'))
+                    if re.search(pat, ua)), 'a browser')
+    return kind, browser
 
 
 def now_iso(at=None):
@@ -234,6 +265,7 @@ def parse_status(text):
             'output': out.group(1) if out else None, 'follow': bool(out and out.group(2)),
             'recording': rec.group(1) if rec else None,
             'playing': [f"{c} ({t})" for t, c in playing[:3]],
+            'clips': [[t, c] for t, c in playing],
             'sounding': bool(playing or re.search(r'^deck \S+: on air', text, re.M)) and 'SILENT ON AIR' not in text,
             'next': f"{nxt.group(1)} at {nxt.group(2)}" if nxt else None}
 
@@ -322,7 +354,8 @@ class Phone:
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
-                                                    'shape', 'sounds', 'vibe_moves', 'scenes')
+                                                    'offers', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                    'now_bind_until')
                               if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
@@ -349,6 +382,15 @@ class Phone:
         self.page_seen = 0.0                       # the last time an open page asked for its state
         self.engine = None                         # the playing engine's parsed status
         self.agents = {}                           # who -> last time an agent called
+        self.listened = {}                         # who -> last time it called phone_listen (phone_watch loops it)
+        self.waiting = collections.Counter()       # who -> phone_listen calls waiting right now
+        self.devices = {}                          # page id -> {kind, browser, first, at, stream}: the person's side
+        self.claims = self._load_claims()          # inbox n -> {by, at, ts, why}: who passes a note on
+        self.noted = {}                            # voice id -> (n, for): the person's notes, for "taken by" on the page
+        self.expect = {}                           # who -> {until, why, by}: phone_expect, a watcher that must stay up
+        self.signed_off = {}                       # who -> when it called phone_signoff (a clean stop raises nothing)
+        self.alarmed = {}                          # who -> when its down alarm went out (one per stretch down)
+        self.lead = None                           # (who, at): the watcher that gets the alarms (phone_watch lead=true)
         self.encoders = {}
         self.fed = 0                               # frames fed since the server started
         self.timeline = collections.deque()        # (pcm_s, wall, beat or None, bpm, bpb, ahead)
@@ -385,11 +427,13 @@ class Phone:
             return time.time()
 
     def _recent_rounds(self):
-        """After a restart: the exam round and the panel on screen, read back from the last inbox lines."""
+        """After a restart: the exam round, the panel on screen and the person's notes, read back from the last inbox
+        lines."""
         try:
             with open(HOME / 'inbox.jsonl', 'rb') as f:
-                f.seek(max(0, os.path.getsize(f.name) - 200_000))
-                lines = f.read().decode('utf8', 'replace').splitlines()[1:]
+                at = max(0, os.path.getsize(f.name) - 200_000)
+                f.seek(at)
+                lines = f.read().decode('utf8', 'replace').splitlines()[1 if at else 0:]   # only a cut line is dropped
         except OSError:
             return
         open_ids = {x['id'] for x in self.view['panels']}
@@ -410,6 +454,9 @@ class Phone:
                 self.showing = None
             elif r.get('kind') in ('answer', 'exam') and self.showing and self.showing['id'] == r.get('id'):
                 self.showing = None
+            elif r.get('kind') == 'voice_text' and r.get('id'):
+                self.noted[r['id']] = (r.get('n'), r.get('for'))
+        self.noted = dict(list(self.noted.items())[-60:])
         self.rounds = {k: v for k, v in self.rounds.items() if k in open_ids}
         if self.showing and self.showing['id'] not in open_ids:
             self.showing = None
@@ -516,6 +563,50 @@ class Phone:
                 'of': (r.get('heard') or {}).get('of') or (r.get('room') or {}).get('of'), 'now': r.get('now'),
                 'into_s': r.get('into_s')}
 
+    @staticmethod
+    def _label_plays(name, clips):
+        """A phone_now label's name still sounds: a clip ('clip (track)', a clip id or a track) or a deck (a deck's
+        tracks are '<deck>.<track>') among the engine's [track, clip] pairs."""
+        return any(name in (c, t, f"{c} ({t})") or t.startswith(name + '.') for t, c in clips)
+
+    def bind_label(self, now_of=None):
+        """Tie the 'now' label to what it describes (ledger:M218): now_of names clips, tracks or decks; None takes
+        the clips playing now and those that start within LABEL_GRACE_BARS (a label put up just before its music is
+        queued); [] or '' leaves it unbound (it stays until replaced or cleared)."""
+        v, e = self.view, self.engine
+        if not v['now'] or now_of in ([], ''):
+            v['now_of'], v['now_bind_until'] = None, None
+            return
+        if now_of is not None:
+            v['now_of'] = [now_of] if isinstance(now_of, str) else [str(x) for x in now_of]
+            v['now_bind_until'] = None
+            return
+        bpm, bpb = (e['bpm'], e.get('bpb') or 4) if e else (120.0, 4)
+        v['now_of'] = [f"{c} ({t})" for t, c in (e.get('clips') or [])] if e else []
+        v['now_bind_until'] = time.time() + LABEL_GRACE_BARS * bpb * 60.0 / bpm
+
+    def track_label(self, e):
+        """Each engine poll: a label still in its grace takes the clips that started; one whose clips, tracks or
+        decks have all stopped expires, so the page shows the engine's own playing list again instead of a stale
+        name. An engine that does not answer changes nothing (a pause or a missed poll keeps the label)."""
+        v = self.view
+        if not v.get('now') or v.get('now_of') is None or e is None:
+            return
+        clips = e.get('clips') or []
+        if v.get('now_bind_until'):
+            if time.time() < v['now_bind_until']:
+                v['now_of'] = list(dict.fromkeys(v['now_of'] + [f"{c} ({t})" for t, c in clips]))
+                return
+            v['now_bind_until'] = None
+            if not v['now_of']:                    # nothing played under it: unbound, as before
+                v['now_of'] = None
+                self.save()
+                return
+        if not any(self._label_plays(n, clips) for n in v['now_of']):
+            v['now'], v['now_of'] = None, None
+            self.save()
+            self.cmd('view')
+
     def now_text(self):
         e = self.engine
         t = self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
@@ -582,6 +673,10 @@ class Phone:
         with self.cond:
             self.seq += 1
             rec = {'n': self.seq, 'ts': now_iso(time.time() - age), **rec}
+            if rec.get('kind') == 'voice_text' and rec.get('id'):
+                self.noted[rec['id']] = (rec['n'], rec.get('for'))
+                for k in list(self.noted)[:-60]:
+                    del self.noted[k]
             line = json.dumps(rec, ensure_ascii=False) + '\n'
             for p in self.routes():
                 try:
@@ -650,6 +745,137 @@ class Phone:
             except OSError as e:
                 print(f'[phone] hook {cmd!r}: {e}', flush=True)
 
+    # ---- who passes a note on (phone_claim), and who is here (phone_presence)
+    def _load_claims(self):
+        try:
+            return {int(k): v for k, v in json.loads((HOME / 'claims.json').read_text(encoding='utf8')).items()}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def _save_claims(self):
+        keep = dict(sorted(self.claims.items())[-500:])
+        tmp = HOME / f'claims.json.{os.getpid()}.tmp'
+        try:
+            tmp.write_text(json.dumps(keep), encoding='utf8')
+            os.replace(tmp, HOME / 'claims.json')
+        except OSError as e:
+            print(f'[phone] claims: {e}', flush=True)
+
+    def claimed(self, rows):
+        """The lines with their claim on them (phone_listen and phone_watch carry it)."""
+        out = []
+        for r in rows:
+            c = self.claims.get(r.get('n'))
+            out.append({**r, 'claimed': {'by': c['by'], 'at': c['ts']}} if c else r)
+        return out
+
+    def taken(self):
+        """Who has each of the person's notes (ledger:M219, hq:D-179): the agent it was said to, then its claimer.
+        voice id -> [names]; [] is nobody yet. The page writes it under the note."""
+        out = {}
+        for vid, (n, to) in self.noted.items():
+            c = self.claims.get(n)
+            out[vid] = [to] if to else []
+            if c and c['by'] not in out[vid]:
+                out[vid].append(c['by'])
+        return out
+
+    def seen_page(self, dev, ua, sid):
+        """An open page asked for its state: remember which of the person's devices it is."""
+        now = time.time()
+        self.page_seen = now
+        ua = ua or ''
+        dev = re.sub(r'[^A-Za-z0-9_-]', '', dev or '')[:24] or 'ua-' + hashlib.sha1(ua.encode()).hexdigest()[:6]
+        kind, browser = device_kind(ua)
+        d = self.devices.get(dev) or {'first': now}
+        d.update(kind=kind, browser=browser, at=now, stream=bool(sid))
+        self.devices[dev] = d
+        for k in [k for k, v in self.devices.items() if now - v['at'] > 86400]:
+            del self.devices[k]
+        self.heartbeat()                           # the page polls every 20 s: a down watcher is seen within a poll
+
+    def presence(self):
+        """Both sides, many to many: the agents listening and the person's devices with the page open."""
+        now = time.time()
+        agents = []
+        for who, at in sorted(self.agents.items(), key=lambda x: -x[1]):
+            if now - at < AGENT_SEEN_S:
+                agents.append({'who': who, 'last_s': round(now - at),
+                               'watching': bool(self.waiting.get(who)) or now - self.listened.get(who, 0) < 40})
+        devices = [{'id': k, 'kind': v['kind'], 'browser': v['browser'], 'stream': v['stream'],
+                    'open': now - v['at'] < PAGE_OPEN_S, 'last_s': round(now - v['at']), 'first': now_iso(v['first'])}
+                   for k, v in sorted(self.devices.items(), key=lambda x: -x[1]['at'])]
+        return agents, devices
+
+    # ---- the watcher heartbeat (phone_expect, phone_signoff, the alarm line)
+    def live_reasons(self):
+        """Why the person counts as live now: in VR (the Quest page open) or on the stream."""
+        now, out = time.time(), []
+        if any(v['kind'] == 'Quest' and now - v['at'] < PAGE_OPEN_S for v in self.devices.values()):
+            out.append('in VR (the Quest page is open)')
+        if sum(x.listeners for x in self.encoders.values()):
+            out.append('on the stream')
+        return out
+
+    def lead_who(self):
+        """The lead's name while its watcher is up, else None (then an alarm is for everyone)."""
+        if self.lead and time.time() - self.listened.get(self.lead[0], 0) < DOWN_S:
+            return self.lead[0]
+        return None
+
+    def heartbeat(self, post=True):
+        """The expected watchers that are down: [{who, down_s, why}]. Posts one alarm per agent per stretch down, and
+        a 'back' line for the lead when one that was alarmed watches again."""
+        now = time.time()
+        live = self.live_reasons()
+        for w, e in list(self.expect.items()):
+            if e['until'] < now:
+                del self.expect[w]
+        down = []
+        for who, at in list(self.listened.items()):         # page and agent threads add to it
+            if self.waiting.get(who) or now - at < DOWN_S:
+                continue
+            e = self.expect.get(who)
+            if e:
+                why = e['why']
+            elif live and now - at < RECENT_S and self.signed_off.get(who, 0) < at:
+                why = ' and '.join(live)
+            else:
+                continue
+            down.append({'who': who, 'down_s': round(now - at), 'down_since': round(at, 1), 'why': why})
+        if post:
+            for d in down:
+                if self.alarmed.get(d['who'], 0) < self.listened[d['who']]:
+                    self.alarmed[d['who']] = now
+                    lead = self.lead_who()
+                    self.post({'kind': 'alarm', 'what': 'watcher_down', 'agent': d['who'], 'for': lead,
+                               'down_since': d['down_since'],                  # epoch s of its last poll
+                               'text': f"{d['who']}'s phone watcher stopped {_ago(d['down_s'])} while the person is "
+                                       f"{d['why']}: the person is not heard. Wake {d['who']} (a message to its "
+                                       f"session) so it re-arms phone_watch"})
+        return down
+
+    def watch_back(self, who):
+        """An alarmed watcher polled again: say so once, to the lead."""
+        if self.alarmed.pop(who, None):
+            self.post({'kind': 'alarm', 'what': 'watcher_back', 'agent': who, 'for': self.lead_who(),
+                       'text': f"{who}'s phone watcher is back"})
+
+    def unclaimed(self, minutes=60):
+        """The person's untagged notes in the last `minutes` that nobody claimed, oldest first."""
+        now = time.time()
+        out = []
+        for r in self.read_inbox(max(0, self.seq - 400)):
+            if r.get('kind') not in NOTE_KINDS or r.get('for') or r.get('n') in self.claims:
+                continue
+            try:
+                age = now - datetime.datetime.fromisoformat(r['ts']).timestamp()
+            except (KeyError, ValueError, TypeError):
+                continue
+            if age <= minutes * 60:
+                out.append({'n': r['n'], 'ts': r['ts'], 'age_s': round(age), 'text': (r.get('text') or '')[:80]})
+        return out
+
     def read_inbox(self, since):
         out = []
         try:
@@ -678,7 +904,9 @@ class Phone:
     def save(self):
         try:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
-                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes')}
+                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                'now_bind_until')}
+            st['offers'] = self.view['offers'][-OFFERS_KEPT:]
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
@@ -710,6 +938,7 @@ class Phone:
                 self.engine = got
                 self.cmd('engine', sounding=on)           # wakes the page's long poll: its background stills or moves now
             self.engine = got
+            self.track_label(got)
             if got and got.get('playing') and KEEP_MASTER:  # the music under a note heard from the room speaker too
                 with self.cond:
                     if self.feeder is None or not self.feeder.is_alive():
@@ -1122,7 +1351,10 @@ class Phone:
     def state(self, sid=None, t=None):
         e = self.engine
         now = time.time()
-        agents = sorted(w for w, at in self.agents.items() if now - at < 90)
+        agents = sorted(w for w, at in self.agents.items() if now - at < AGENT_SEEN_S)
+        devices = [{'kind': d['kind'], 'browser': d['browser'], 'stream': d['stream']}
+                   for d in self.devices.values() if now - d['at'] < PAGE_OPEN_S]
+        deaf = [{'who': d['who'], 'min': round(d['down_s'] / 60)} for d in self.heartbeat(post=False)]
         rec = {'on': bool(e and e.get('recording')), 'file': e.get('recording') if e else None,
                'why': self.view['rec_why']}
         now_t, next_t = self.now_text(), self.view['next'] or (e['next'] if e else None)
@@ -1137,13 +1369,13 @@ class Phone:
                 'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
-                'offers': self.view['offers'][-4:], 'listening': agents,
+                'offers': self.view['offers'][-4:], 'offers_n': len(self.view['offers']), 'listening': agents, 'devices': devices, 'deaf': deaf,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
                 'onsets': self.onsets if (self.view.get('vibe') or {}).get('react') else [],
                 'sounds': self.view.get('sounds') or {}, 'into_s': self.into_s(), 'clock': time.strftime('%H:%M:%S'),
-                'shape': self.view.get('shape') or {},
+                'shape': self.view.get('shape') or {}, 'taken': self.taken(),
                 'boot': BOOT, 'build': BUILD}
 
 
@@ -1184,6 +1416,16 @@ class Agent:
             if time.time() - s.get('at', 0) < 60:
                 h = ph.heard(sid, s.get('t'))
                 L.append(f"  a phone hears {h.get('of', 'a gap')}, {h.get('behind_s', '?')} s behind the room")
+        agents, devices = ph.presence()
+        L.append('agents listening: ' + (', '.join(a['who'] + ('' if a['watching'] else ' (not watching)')
+                                                   for a in agents) or 'nobody') +
+                 '; devices open: ' + (', '.join(f"{d['kind']} ({d['browser']}{', stream' if d['stream'] else ''})"
+                                                for d in devices if d['open']) or 'none') +
+                 ' (phone_presence has both sides and the unclaimed notes)')
+        down = ph.heartbeat()
+        if down:
+            L.append('WATCHER DOWN: ' + '; '.join(f"{d['who']}, stopped {_ago(d['down_s'])} (the person is {d['why']})"
+                                                  for d in down) + ': wake it')
         ago = time.time() - ph.page_seen
         listening = sum(x.listeners for x in ph.encoders.values())
         L.append('page: ' + ('never opened since the server started' if not ph.page_seen else
@@ -1248,11 +1490,15 @@ class Agent:
         return out
 
     def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, length=None,
-               sections=None, into=None, who=None):
+               sections=None, into=None, who=None, now_of=None):
         v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
                 v[k] = val or None
+        if now is not None:
+            ph.bind_label(now_of)
+        elif now_of is not None and v['now']:
+            ph.bind_label(now_of)
         for text, m in ((ph.now_text(), now_mark), (v['next'], next_mark)):
             if m is None or not text:
                 continue
@@ -1277,8 +1523,13 @@ class Agent:
             v['shape'] = sh
         ph.save()
         ph.cmd('view')
+        tied = ''
+        if v['now'] and v.get('now_of') is not None:
+            what = ', '.join(v['now_of']) or 'nothing yet'
+            tied = f"; the now label stays while {what} plays" + (
+                f" (and what starts in the next {LABEL_GRACE_BARS} bars)" if v.get('now_bind_until') else '')
         return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
-                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}")
+                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}{tied}")
 
     def _wait_answer(self, pid, wait):
         if not wait:
@@ -1387,6 +1638,8 @@ class Agent:
         o = {'url': '/files/' + k, 'name': src.name if src.parent == HOME / 'offers' else nice,
              'label': label or Path(path).name, 'auto': bool(auto), 'ts': now_iso()}
         self.ph.view['offers'].append(o)
+        del self.ph.view['offers'][:-OFFERS_KEPT]
+        self.ph.save()
         self.ph.cmd('offer', offer=o)
         return f"offered {o['name']} on the phone" + (" (starts downloading if the page is open)" if auto else '')
 
@@ -1572,21 +1825,108 @@ class Agent:
         self.ph.cmd('buzz', pattern=pattern or [200, 100, 200])
         return 'buzzed (if the page is open)'
 
-    def op_listen(self, who, since=None, wait=25, page=False):
+    def op_listen(self, who, since=None, wait=25, page=False, lead=False):
         ph = self.ph
-        ph.agents[who] = time.time()
+        ph.agents[who] = ph.listened[who] = time.time()
+        if lead:
+            ph.lead = (who, time.time())
+        ph.watch_back(who)
+        ph.heartbeat()                                       # anyone else gone quiet: the alarm goes out now
         since = ph.seq if since is None else int(since)
         end = time.time() + float(wait or 0)
         keep = (lambda r: True) if page else (lambda r: r.get('kind') != 'page')
         rows = [r for r in ph.read_inbox(since) if keep(r)]
-        while not rows and time.time() < end:          # the page's own actions (scrolls, opens) do not wake you
-            seen = ph.seq
-            with ph.cond:
-                while ph.seq <= seen and time.time() < end:
-                    ph.cond.wait(min(5.0, end - time.time()))
-                    ph.agents[who] = time.time()
-            rows = [r for r in ph.read_inbox(since) if keep(r)]
-        return json.dumps({'since': ph.seq, 'lines': rows}, ensure_ascii=False)
+        ph.waiting[who] += 1
+        try:
+            while not rows and time.time() < end:          # the page's own actions (scrolls, opens) do not wake you
+                seen = ph.seq
+                with ph.cond:
+                    while ph.seq <= seen and time.time() < end:
+                        ph.cond.wait(min(5.0, end - time.time()))
+                        ph.agents[who] = ph.listened[who] = time.time()
+                rows = [r for r in ph.read_inbox(since) if keep(r)]
+        finally:
+            ph.waiting[who] -= 1
+            if ph.waiting[who] <= 0:
+                del ph.waiting[who]
+        out = {'since': ph.seq, 'lines': ph.claimed(rows)}
+        if rows:                                             # who else got these lines: they are not only yours
+            out['watching'] = [a['who'] for a in ph.presence()[0] if a['watching'] and a['who'] != who]
+        return json.dumps(out, ensure_ascii=False)
+
+    def op_claim(self, n, by, why=None):
+        """First caller wins, under the server's one lock: two agents claiming at once cannot both get "yours"."""
+        ph = self.ph
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            raise ValueError(f"n is the note's inbox line number (its 'n'), got {n!r}")
+        if not by:
+            raise ValueError("by: your name, the same `who` your phone_watch uses")
+        with ph.cond:
+            if not 1 <= n <= ph.seq:
+                raise ValueError(f"no inbox line {n} (the inbox has {ph.seq}): pass the 'n' of the line phone_watch "
+                                 f"returned")
+            c = ph.claims.get(n)
+            if c is None:
+                ph.claims[n] = {'by': by, 'at': time.time(), 'ts': now_iso(), 'why': why}
+                ph._save_claims()
+                ph.cmd('view')                       # the page writes "taken by" under the note now
+                return f"yours: note {n} is yours to pass on; every other watcher now sees it claimed by {by}"
+        when = f"{c['ts'][11:16]} ({time.time() - c['at']:.0f} s ago)"
+        if c['by'] == by:
+            return f"yours: you claimed note {n} at {when}"
+        return (f"taken: {c['by']} claimed note {n} at {when}: leave it to them"
+                + (f" ({c['why']})" if c.get('why') else ''))
+
+    def op_expect(self, who, why, minutes=180, by=None):
+        if not who or not str(why or '').strip():
+            raise ValueError("who: the agent whose watcher must stay up; why: 'a set', 'VR session', 'a jam' ...")
+        m = float(minutes)
+        if not 0 < m <= 24 * 60:
+            raise ValueError(f"minutes is 1 to 1440 (got {minutes}); phone_signoff ends it sooner")
+        ph = self.ph
+        ph.expect[who] = {'until': time.time() + m * 60, 'why': str(why).strip(), 'by': by or who}
+        ph.signed_off.pop(who, None)
+        up = time.time() - ph.listened.get(who, 0) < DOWN_S or bool(ph.waiting.get(who))
+        return (f"expecting {who}'s watcher for {m:.0f} min ({why}): if it stops polling for {DOWN_S:.0f} s an alarm "
+                f"goes to the lead" + ('' if up else f"; it is NOT watching now: arm python -m ismail phone_watch "
+                                                      f"\"who={who}\""))
+
+    def op_signoff(self, who, why=None):
+        ph = self.ph
+        ph.signed_off[who] = time.time()
+        gone = ph.expect.pop(who, None)
+        ph.alarmed.pop(who, None)
+        return (f"{who} signed off" + (f" ({why})" if why else '') + ": no alarm when its watcher stops"
+                + (f"; its phone_expect ({gone['why']}) ended" if gone else ''))
+
+    def op_presence(self, minutes=60):
+        ph = self.ph
+        agents, devices = ph.presence()
+        L = ['agents (each one calling the phone server; watching = its phone_watch is waiting now):']
+        L += [f"  {a['who']}: {'watching' if a['watching'] else 'not watching'}, last call {a['last_s']} s ago"
+              for a in agents] or ['  nobody: notes wait in the inbox until an agent reads them']
+        L.append(f"the person's devices (one per page; open = asked for its state in the last {PAGE_OPEN_S:.0f} s):")
+        L += [f"  {d['kind']} ({d['browser']}): {'open' if d['open'] else 'closed or asleep'}, last seen "
+              f"{_ago(d['last_s'])}, {'on the stream' if d['stream'] else 'not on the stream'}"
+              for d in devices] or ['  none since the server started']
+        un = ph.unclaimed(float(minutes))
+        L.append(f"untagged notes nobody claimed (last {float(minutes):.0f} min; LEAD = past "
+                 f"{CLAIM_GRACE_S / 60:.0f} min, the team lead's by default):")
+        L += [f"  {u['n']} at {u['ts'][11:16]} ({_ago(u['age_s'])}){' LEAD' if u['age_s'] >= CLAIM_GRACE_S else ''}: "
+              f"{u['text']!r}" for u in un] or ['  none']
+        live = ph.live_reasons()
+        L.append('the person is ' + (' and '.join(live) if live else 'not live (not in VR, not on the stream)')
+                 + '; lead: ' + (ph.lead_who() or 'none watching (alarms go to every watcher)'))
+        for w, e in list(ph.expect.items()):
+            L.append(f"  expected: {w} until {now_iso(e['until'])[11:16]} ({e['why']}, set by {e['by']})")
+        L += [f"  WATCHER DOWN: {d['who']}, stopped {_ago(d['down_s'])} (the person is {d['why']}): wake it"
+              for d in ph.heartbeat()]
+        recent = sorted((k, v) for k, v in ph.claims.items() if time.time() - v['at'] < float(minutes) * 60)[-10:]
+        if recent:
+            L.append('claims: ' + '; '.join(f"{k} by {v['by']} at {v['ts'][11:16]}" for k, v in recent))
+        return '\n'.join(L)
 
     def op_timeline(self, minutes=15, kinds=None, limit=200):
         """Everything from the phone in the last `minutes` on one clock, oldest first, one line each: time, the bar
@@ -1649,10 +1989,13 @@ class Handler(BaseHTTPRequestHandler):
              '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
              '.png': 'image/png', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
              '.flac': 'audio/flac', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf':
-             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8'}
+             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8',
+             # a plan or a log linked from a panel opens as text on the phone; unknown types download, and a phone
+             # has nothing to open a .md with (Nate 10-17, "Read the plan" downloaded)
+             '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8'}
 
     def log_message(self, fmt, *a):
-        if '/api/state' not in (a[0] if a else ''):
+        if not any(x in (a[0] if a else '') for x in ('/api/state', '/api/keys')):   # a poll, or a key: no line each
             sys.stderr.write('[phone] ' + (fmt % a) + '\n')
 
     def _json(self, code, obj):
@@ -1799,15 +2142,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._eye()
         if path in ('/', '/index.html'):
             return self._file(PAGE / 'index.html')
+        if path == '/keys':                       # the on-screen keys page (live_keys_page)
+            return self._file(PAGE / 'keys.html')
         if re.fullmatch(r'/cues/(start|end|sent|error)\.mp3', path):
             return self._file(PAGE / path[1:])
         if path in ('/app.js', '/sw.js', '/icon.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png',
                     '/icon-maskable.png', '/apple-touch-icon.png'):
             return self._file(PAGE / path[1:])
         if path == '/health':
-            return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
+            now = time.time()                     # devices: when each page last asked for its state (ledger:M247)
+            return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq,
+                                    'devices': [{'kind': v['kind'], 'last_s': round(now - v['at'])}
+                                                for v in list(self.ph.devices.values())]})
         if path == '/api/state':
-            self.ph.page_seen = time.time()
+            self.ph.seen_page(g('dev'), self.headers.get('User-Agent'), g('sid'))
             since, wait = int(g('since', '0') or 0), min(25.0, float(g('wait', '0') or 0))
             end = time.time() + wait
             with self.ph.cond:
@@ -1815,6 +2163,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.ph.cond.wait(min(2.0, end - time.time()))
                 cmds = [c for c in self.ph.cmds if c['id'] > since]
             return self._json(200, {**self.ph.state(g('sid'), g('t')), 'cmds': cmds})
+        if path == '/api/offers':                 # the downloads history, newest first, a page at a time
+            os_, skip, n = self.ph.view['offers'], max(0, int(g('skip', '0') or 0)), min(50, max(1, int(g('n', '10') or 10)))
+            page = os_[::-1][skip:skip + n]
+            return self._json(200, {'offers': page, 'total': len(os_), 'more': skip + len(page) < len(os_)})
         if path.startswith('/files/'):
             p = self.ph.files.get(path[7:])
             return self._file(p, download=g('dl') == '1') if p else self._json(404, {'error': 'not offered'})
@@ -1934,6 +2286,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {'error': f'what: one of {sorted(TAPS)}, mood, button:<id>'})
                 ph.cmd('view')
                 return self._json(200, {'ok': True, 'n': rec['n'], 'heard': rec['heard']})
+            if u.path == '/api/keys':           # the on-screen keys page: one small message per key, to the playing engine
+                e = ph.engine
+                if not e:
+                    return self._json(200, {'ok': True, 'result': {'connected': False}})
+                try:
+                    r = engine_call(e['port'], 'keys', timeout=3, events=body.get('events') or [], sid=sid)
+                except RuntimeError as ex:                     # the engine refused the message
+                    return self._json(400, {'ok': False, 'error': str(ex)})
+                except (OSError, ValueError) as ex:            # it stopped since the last poll
+                    return self._json(200, {'ok': True, 'result': {'connected': False, 'error': str(ex)}})
+                return self._json(200, {'ok': True, 'result': r})
             if u.path == '/api/output':                       # ledger:M179: he sets it, no agent needed
                 e = ph.engine
                 if not e:
@@ -1977,6 +2340,7 @@ class Handler(BaseHTTPRequestHandler):
                     rec['answer'] = body.get('answer')
                     if p.get('inputs'):
                         rec['values'] = body.get('values') or {}
+                        rec['typed'] = [x['id'] for x in p['inputs'] if x.get('kind') == 'text']   # their own words
                         vv = {k: ph.voice_files(v) for k, v in (body.get('values_voice') or {}).items() if v}
                         if vv:
                             rec['values_audio'] = vv

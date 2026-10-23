@@ -7,9 +7,17 @@ key adds its note where the audio goes to the device: it sounds one output buffe
 skip the track's effects and the safety limiter; a soft clip guards the sum. live_listen hears them; a recording
 started with live_record and the streams (the phone) do not yet.
 
-Every key is logged with the bar of the music heard when it was pressed (live/midi/<source>.jsonl), for turning a
-performance into a part later. The engine also watches for inputs plugged in or removed and says so in its news.
+Every key is logged (live/midi/<source>.jsonl) for turning a performance into a part later, on two clocks of the
+music heard: 'press', the beat heard at the press, and 'beat', the beat the key sounded against (the press plus the
+output buffer). A player playing by ear lines up the note they hear with the beat they hear, so 'beat' is where they
+meant it; live_played reads that one (logs from before 'press' existed hold the press in 'beat'). The engine also
+watches for inputs plugged in or removed and says so in its news.
+
+One input needs no driver: 'screen keys', the on-screen keyboard page (live_keys_page), for someone with no MIDI
+instrument. Its keys arrive as small HTTP messages (the engine's /api/keys, or the phone server's, which relays them)
+and are fed to the patch here exactly as a driver's would be.
 """
+import collections
 import json
 import os
 import re
@@ -27,6 +35,10 @@ ONESHOT_S = 0.2             # a drum's or a kit pad's gate (note-offs are ignore
 MAX_VOICES = 48
 POLL_S = 2.0
 KNEE = 0.9                  # the keys plus the set above this are soft-clipped (they skip the safety limiter)
+SCREEN = 'screen keys'      # the on-screen keys page, an input that is always there (live_keys_page)
+MAX_EVENTS = 64             # messages in one request from the page
+HIT = 0.15                  # live_played(fit=True): onsets this close (two hands, a rolled chord) are one hit, beats
+STEP = 0.25                 # the grid it fits: 16ths
 
 
 class Voice:
@@ -40,8 +52,63 @@ class Voice:
             self.rel = self.left = max(1, n)
 
 
+def fit_grid(t, step=STEP, min_span=4.0):
+    """The grid of `step` that fits hit times t (beats, ascending) best with a free continuous offset: the offset
+    with the least squared distance to the nearest line, then a straight-line drift when the hits span min_span
+    beats or more. Returns {'offset': beats from the nearest line at the first hit (-step/2 to step/2), 'drift':
+    beats per beat, 't0', 'k': each hit's line number, 'rms': beats}. Rounding raw times to the grid without the
+    offset goes wrong when the take sits near half a step off (a played take, 2026-10-13)."""
+    t = np.asarray(t, dtype=float)
+    t0 = float(t[0])
+    res = lambda x: x - step * np.round(x / step)                   # noqa: E731
+    a = float(min(np.arange(-step / 2, step / 2, step / 250), key=lambda o: float(np.sum(res(t - o) ** 2))))
+    b = 0.0
+    for _ in range(4):
+        k = np.round((t - a - b * (t - t0)) / step)
+        r = t - k * step
+        if len(t) >= 4 and t[-1] - t0 >= min_span:
+            b, a = (float(c) for c in np.polyfit(t - t0, r, 1))
+        else:
+            a = float(np.mean(r))
+    k = np.round((t - a - b * (t - t0)) / step)
+    shift = round(a / step)                                          # the offset back within half a step
+    a, k = a - shift * step, k + shift
+    rms = float(np.sqrt(np.mean((t - a - b * (t - t0) - k * step) ** 2)))
+    return {'offset': a, 'drift': b, 't0': t0, 'k': k.astype(int), 'rms': rms}
+
+
+def rhythm_shape(ks, bpb=4):
+    """Hits on 16th lines (ints) -> ('3-3-2', 8, 5): the groups in 16ths over the shortest cycle that repeats (4 in
+    5 of the hits that have a next cycle land again a cycle later), turned to start with its longest groups (3-3-2,
+    not 3-2-3), and how many 16ths after the first hit such a cycle starts. With no repeat: every gap from the
+    first hit, None, 0."""
+    ks = sorted(set(int(k) for k in ks))
+    rel = [k - ks[0] for k in ks]
+    s, span = set(rel), rel[-1]
+    for P in sorted({2, 4, 8, 16, 32, 64, 2 * bpb, 4 * bpb, 8 * bpb, 16 * bpb}):
+        have = [h for h in rel if h + P <= span]
+        if len(have) >= 2 and sum(h + P in s for h in have) >= 0.8 * len(have):
+            cyc = [h for h in rel if h < P]
+            gaps = [b - a for a, b in zip(cyc, cyc[1:] + [P])]
+            i = max(range(len(gaps)), key=lambda i: (gaps[i:] + gaps[:i], -i))
+            return '-'.join(map(str, gaps[i:] + gaps[:i])), P, cyc[i]
+    gaps = [b - a for a, b in zip(rel, rel[1:])]
+    return ('-'.join(map(str, gaps[:24])) + ('-...' if len(gaps) > 24 else '')) or 'one hit', None, 0
+
+
 def _slug(name):
     return re.sub(r'[^A-Za-z0-9]+', '_', name).strip('_').lower() or 'midi'
+
+
+class ScreenInput:
+    """The on-screen keys page as an input: open while it is patched, fed by MidiPlay.screen instead of a driver."""
+
+    def __init__(self, play, name, on_msg):
+        self.play, self.name = play, name
+        play.feeds[name] = on_msg
+
+    def close(self):
+        self.play.feeds.pop(self.name, None)
 
 
 class MidiPlay:
@@ -56,17 +123,20 @@ class MidiPlay:
         self.known = None
         self.clipped = 0
         self._log = []
+        self.feeds = {}                     # an open screen input -> its message handler
+        self.seqs = collections.OrderedDict()   # page id -> {key: (last seq, was a note-off)}
 
     # ------------------------------------------------------------------ the command
     def find(self, source):
         names = self.sources()
-        if source in names:
+        if source in names or source == SCREEN:
             return source
-        hits = [n for n in names if source.lower() in n.lower()]
+        hits = [n for n in names if source.lower() in n.lower()] or ([SCREEN] if source.lower() in SCREEN else [])
         if len(hits) == 1:
             return hits[0]
         raise ValueError(f"MIDI input {source!r}: " + (f"matches {hits}, name one" if hits else
-                         f"no such input; inputs: {names or 'none (plug a keyboard in, or add a loopMIDI port)'}"))
+                         f"no such input; inputs: {names or 'none (plug a keyboard in, or add a loopMIDI port)'}, "
+                         f"and {SCREEN!r} (the on-screen keys page, live_keys_page)"))
 
     def cmd(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
             remove=False):
@@ -107,7 +177,7 @@ class MidiPlay:
             p['channel'] = int(channel) or None
         msg = []
         if new:
-            p['input'] = self.opener(name, self._on(name))
+            p['input'] = (self._screen if name == SCREEN else self.opener)(name, self._on(name))
             self.patches[name] = p
             msg.append(f"{name}: patched")
         if track is not None or instrument is not None:
@@ -167,6 +237,51 @@ class MidiPlay:
             p['prev'] = {}
             self.e.news.append(f"keys {name}: all {len(p['want'])} notes of {p['what']} are ready")
 
+    def _screen(self, name, on_msg):
+        return ScreenInput(self, name, on_msg)
+
+    # ------------------------------------------------------------------ the on-screen keys page
+    def screen(self, events=(), sid=None):
+        """Messages from the on-screen keys page: events [[seq, status, data1, data2], ...], numbered by the page
+        `sid` in the order it made them, fed to the 'screen keys' patch as a driver would. Each key is its own
+        request and requests travel side by side, so one can overtake another: an event older than the last one
+        for its key (or controller) from that page is dropped, except a note-on overtaken by its own note-off,
+        which plays as a short tap rather than not at all. With no events, only says what the page shows."""
+        if not isinstance(events, (list, tuple)) or len(events) > MAX_EVENTS:
+            raise ValueError(f"events: a list of at most {MAX_EVENTS} [seq, status, data1, data2]")
+        ok = []
+        for ev in events:
+            if not (isinstance(ev, (list, tuple)) and len(ev) == 4 and all(isinstance(x, int) for x in ev)
+                    and 0x80 <= ev[1] <= 0xBF and 0 <= ev[2] <= 127 and 0 <= ev[3] <= 127):
+                raise ValueError(f"event {ev!r}: [seq, status, data1, data2], status a note-off, note-on or "
+                                 f"controller (0x80 to 0xBF), data 0 to 127")
+            ok.append(ev)
+        on = self.feeds.get(SCREEN)
+        if on is not None and ok:
+            last = self.seqs.setdefault(str(sid), {})
+            self.seqs.move_to_end(str(sid))
+            while len(self.seqs) > 8:
+                self.seqs.popitem(last=False)
+            for seq, st, d1, d2 in ok:
+                kind = st & 0xF0
+                is_off = kind == 0x80 or (kind == 0x90 and not d2)
+                k = ('c' if kind == 0xB0 else 'n', st & 0x0F, d1)
+                prev = last.get(k)
+                if prev is not None and seq <= prev[0]:
+                    if kind == 0x90 and d2 and prev[1]:      # its note-off came first: a quick tap
+                        on(time.time(), st, d1, d2)
+                        on(time.time(), 0x80 | (st & 0x0F), d1, 0)
+                    continue
+                last[k] = (seq, is_off)
+                on(time.time(), st, d1, d2)
+        p = self.patches.get(SCREEN)
+        if p is None:
+            return {'patched': False}
+        keys = None if p['oneshot'] and len(p['want']) == 1 else [m - p['transpose'] for m in p['want']]
+        return {'patched': True, 'what': p['what'], 'ready': len(p['bank']), 'of': len(p['want']),
+                'keys': sorted(keys) if keys is not None else None, 'sustain': p['sustain'],
+                'out_ms': self.out_latency() * 1000 // SR}
+
     # ------------------------------------------------------------------ keys (the driver's thread)
     def _on(self, name):
         def on(t, st, d1, d2):
@@ -191,8 +306,8 @@ class MidiPlay:
                 self.release_all(p)
             else:
                 return
-            self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.heard_beat(), 4),
-                                         'st': st, 'd1': d1, 'd2': d2}))
+            self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
+                                         'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}))
         return on
 
     def heard_beat(self):
@@ -201,6 +316,14 @@ class MidiPlay:
         from . import graph as G
         e = self.e
         return e.beat(e.played - self.out_latency() - e.safety.la - G.LAT_BUDGET)
+
+    def sound_beat(self):
+        """The beat a key pressed now sounds against: it joins the next device buffer, which starts at `played`, and
+        that buffer carries the music of beat(played - path lookahead). The output buffer delays the key and the
+        music alike, so this is heard_beat() plus the key's whole delay, where a player who plays by ear meant it."""
+        from . import graph as G
+        e = self.e
+        return e.beat(e.played - e.safety.la - G.LAT_BUDGET)
 
     def out_latency(self):
         lat = getattr(self.e.stream, 'latency', 0) if self.e.stream is not None else 0
@@ -319,10 +442,20 @@ class MidiPlay:
             with open(path, 'a', encoding='utf8') as f:
                 f.write(''.join(json.dumps(r) + '\n' for r in recs))
 
-    def played(self, source=None, bars=8):
+    def played(self, source=None, bars=8, fit=False, from_bar=None):
         """The keys played, as notes text in this engine's bars: 'bar | +beat | pitch | d= | v=' lines (the format
-        notes take everywhere), note-offs held by the pedal while it was down. The last `bars` bars that had keys."""
+        notes take everywhere), note-offs held by the pedal while it was down. bars: the last `bars` bars that had
+        keys, or [a, b] (those bars, inclusive). fit=True fits a 16th grid to the hits and prints two placements as
+        live_queue notes (fitted())."""
         from ..notation import format_notes
+        if from_bar is not None and not fit:
+            raise ValueError("from_bar says which bar the fitted notes count as bar 1; use it with fit=True")
+        if isinstance(bars, (list, tuple)):
+            if len(bars) != 2 or int(bars[0]) < 1 or int(bars[1]) < int(bars[0]):
+                raise ValueError(f"bars=[a, b]: the first and last bar, a <= b, from 1 (got {list(bars)})")
+            span = (int(bars[0]), int(bars[1]))
+        else:
+            span = None
         self.flush()
         d = os.path.join(self.e.root, 'live', 'midi')
         names = [n for n in (os.listdir(d) if os.path.isdir(d) else []) if n.endswith('.jsonl')]
@@ -332,10 +465,14 @@ class MidiPlay:
             return "no keys played yet" + (f" on {source!r}" if source else '')
         bpb, L = self.e.bpb, []
         for fn in sorted(names):
-            notes, down, held, ped = [], {}, set(), False
+            notes, down, held, ped, old, lag = [], {}, set(), False, 0, []
             for r in (json.loads(x) for x in open(os.path.join(d, fn), encoding='utf8') if x.strip()):
                 kind, b = r['st'] & 0xF0, r['beat']
                 if kind == 0x90 and r['d2']:
+                    if 'press' in r:
+                        lag.append(b - r['press'])
+                    else:
+                        old += 1
                     if r['d1'] in down:
                         st, v = down.pop(r['d1'])
                         notes.append((st, r['d1'], b - st, v))
@@ -355,16 +492,119 @@ class MidiPlay:
                     ped = False if r['d1'] == 64 else ped
                 elif kind == 0xB0 and r['d1'] == 64:
                     ped = True
-            now = self.heard_beat()
+            now = self.sound_beat()
             notes += [(st, m, max(now - st, 0.0), v) for m, (st, v) in down.items()]
             if not notes:
                 continue
-            last_bar = int(max(n[0] for n in notes) // bpb)
-            keep = [(round(st, 3), m, round(du, 3), v) for st, m, du, v in notes if st // bpb > last_bar - int(bars)]
-            L.append(f"{fn[:-6]}: {len(keep)} of {len(notes)} notes, bars {int(min(k[0] for k in keep) // bpb) + 1}"
-                     f"-{last_bar + 1}" + (f" ({len(down)} still held)" if down else ''))
-            L.append(format_notes(keep, bpb))
+            if span is None:
+                last_bar = int(max(n[0] for n in notes) // bpb)
+                keep = [n for n in notes if n[0] // bpb > last_bar - int(bars)]
+            else:
+                keep = [n for n in notes if span[0] <= n[0] // bpb + 1 <= span[1]]
+                if not keep:
+                    first, last = int(min(n[0] for n in notes) // bpb) + 1, int(max(n[0] for n in notes) // bpb) + 1
+                    L.append(f"{fn[:-6]}: no notes in bars {span[0]}-{span[1]}; it has notes in bars {first}-{last}")
+                    continue
+            keep = [(round(st, 3), m, round(du, 3), v) for st, m, du, v in keep]
+            b0, b1 = int(min(k[0] for k in keep) // bpb) + 1, int(max(k[0] for k in keep) // bpb) + 1
+            L.append(f"{fn[:-6]}: {len(keep)} of {len(notes)} notes, bars {b0}-{b1}"
+                     + (f" ({len(down)} still held)" if down else ''))
+            L.append(self._clock_line(lag, old))
+            L.append(self.fitted(keep, from_bar) if fit else format_notes(keep, bpb))
+            vels = {k[3] for k in keep}
+            if len(vels) == 1 and len(keep) >= 4:
+                L.append(f"velocity: every key came at v={vels.pop()} (this keyboard sends one velocity; the lines "
+                         f"keep it). Looping it, write an accent shape and say so: the bar's downbeat loudest, then "
+                         f"the beats, then pushed 16ths, offbeat 8ths softest; in a chord the top note leads and the "
+                         f"lower notes sit well under it (about 30 under sounded right in one jam).")
         return '\n'.join(L) or "no notes played yet (only pedal or controls)"
+
+    def _clock_line(self, lag, old):
+        """Which clock the times are on, in plain words, and the correction the log applied."""
+        ms = float(np.median(lag)) * self.e.spb * 1000 if lag else 0.0
+        if lag and ms >= 1:
+            s = (f"clock: each note sits where it sounded against the beat the player heard, which is where someone "
+                 f"playing by ear meant it: the key press plus the {ms:.0f} ms the keys take to reach the speakers "
+                 f"(the output buffer). The press times are in the log too ('press').")
+        elif lag:
+            s = ("clock: each note sits where it sounded against the beat the player heard (no output delay was "
+                 "measured, so that is the press).")
+        else:
+            return ("clock: this log was written before the keys' delay was counted: each note is at the press, "
+                    "about one key delay early against what the player heard (fit=True finds the 16ths either way).")
+        if old:
+            s += (f" {old} notes come from a log written before this clock: those are at the press, about one key "
+                  f"delay early (fit=True finds the 16ths either way).")
+        return s
+
+    def fitted(self, notes, from_bar=None):
+        """notes: (start, midi, dur, vel) on the heard clock. The hits (onsets within HIT beat are one), the 16th
+        grid that fits them with a free offset, its error and drift, the rhythm's shape, and the notes snapped two
+        ways as live_queue notes: as played (each hit on its nearest 16th) and with the first hit on a downbeat."""
+        from ..notation import fmt_num
+        bpb, ms = self.e.bpb, self.e.spb * 1000
+        notes = sorted(notes)
+        hits = []                                   # [onset of the hit's first note, [note indices]]
+        for i, n in enumerate(notes):
+            if hits and n[0] - hits[-1][0] < HIT:
+                hits[-1][1].append(i)
+            else:
+                hits.append([n[0], [i]])
+        if len(hits) < 3:
+            return (f"fit: {len(hits)} hits in these bars; a grid needs at least 3. Choose more bars (bars=[a, b]) "
+                    f"or read the lines without fit")
+        g = fit_grid([h[0] for h in hits], min_span=bpb)
+        grid = lambda t: (t - g['offset'] - g['drift'] * (t - g['t0'])) / STEP     # noqa: E731
+        ks = [int(k) for k in g['k']]
+        shape, period, lead = rhythm_shape(ks, bpb)
+        drift_ms = g['drift'] * bpb * ms
+        L = [f"fit: {len(hits)} hits (keys within {HIT:g} beat are one hit) against a 16th grid with a free offset: "
+             f"they sit {abs(g['offset']) * ms:.0f} ms {'after' if g['offset'] >= 0 else 'before'} the 16ths, "
+             f"{g['rms'] * ms:.0f} ms rms off them, drifting {abs(drift_ms):.0f} ms per bar "
+             + ("(steady)" if abs(drift_ms) < 15 else "later (dragging; taken out before snapping)" if drift_ms > 0
+                else "earlier (rushing; taken out before snapping)")
+             + ("" if g['rms'] < 0.06 else ". A loose fit: some hits may land on the wrong 16th, check by ear")]
+        L.append(f"rhythm: {shape} in 16ths" +
+                 (f", repeating every {period} 16ths ({fmt_num(period * STEP)} beats)" if period else
+                  " from the first hit (no repeat found in these bars)")
+                 + (f"; the take starts {lead} 16ths before a {shape} cycle" if lead else ''))
+        # B: a cycle's first group on beat 1 (and on every cycle line within the bar: beats 1 and 3 for 2 beats)
+        x = (ks[0] + lead) * STEP
+        c = period * STEP if period and (bpb * 4) % period == 0 else bpb
+        move = round(x / c) * c - x
+        on = "beat 1" + (" and beat 3" if c * 2 == bpb else '') if c >= bpb / 2 else "the beat"
+        placings = [('A, as played', 0.0, "each hit on the 16th it was played nearest")]
+        if abs(move) > 1e-9:
+            placings.append(('B, groups from beat 1', move, f"everything {fmt_num(abs(move))} beat "
+                             f"{'later' if move > 0 else 'earlier'}, so the {shape} groups start on {on}"))
+        L.append("placement against the beat is a musical choice the data cannot make: play "
+                 + ("both and let the player pick by ear (one word: A or B)" if len(placings) > 1 else
+                    f"it to the player (as played, the {shape} groups already start on {on})"))
+        for label, mv, why in placings:
+            out = []
+            for (t, idx), k in zip(hits, ks):
+                st = k * STEP + mv
+                for i in idx:
+                    _, m, du, v = notes[i]
+                    end = round(grid(notes[i][0] + du)) * STEP + mv
+                    out.append((st, m, max(STEP, end - st), v))
+            origin = (int(from_bar) - 1) * bpb if from_bar is not None else (min(o[0] for o in out) // bpb) * bpb
+            early = [o for o in out if o[0] < origin - 1e-9]
+            out = [o for o in out if o[0] >= origin - 1e-9]
+            if not out:
+                L.append(f"{label}: every note is before bar {int(origin // bpb) + 1}; lower from_bar")
+                continue
+            n_bars = int((max(o[0] for o in out) - origin) // bpb) + 1
+            by_bar = {}
+            for st, m, du, v in sorted(out):
+                by_bar.setdefault(int((st - origin) // bpb), []).append(
+                    f"{fmt_num(st - origin)} {M.note_name(m)} {fmt_num(du)} {v}")
+            first = min(o[0] for o in out)
+            L.append(f"{label} ({why}): first hit at bar {int(first // bpb) + 1} +{fmt_num(first % bpb)}; as a "
+                     f"live_queue clip from the start of bar {int(origin // bpb) + 1}, bars={n_bars}"
+                     + (f" ({len(early)} notes before that bar left out)" if early else '') + ", notes:")
+            L += ['; '.join(by_bar[b]) for b in sorted(by_bar)]
+        return '\n'.join(L)
 
     def loop(self):
         while self.e.running:
@@ -404,7 +644,8 @@ class MidiPlay:
     def describe(self):
         names = self.sources()
         lines = ["MIDI inputs: " + (', '.join(repr(n) for n in names) if names else
-                                    "none (plug a keyboard in, or add a loopMIDI port; this notices it)")]
+                                    "none (plug a keyboard in, or add a loopMIDI port; this notices it)"),
+                 f"and {SCREEN!r}, the on-screen keys page (live_keys_page), for someone with no MIDI instrument"]
         lines += [self.line(p) for p in self.patches.values()] or \
             ["nothing patched: live_midi(source=..., instrument=... or track=...) plays one through the set"]
         if self.clipped:

@@ -71,11 +71,16 @@ the person is out (below).
 
 ## Deploying
 
-- **A server restart only while the person is out.** Check that no page has posted state recently and that no voice note or upload
-  is in flight; a restart in the middle of one loses it.
+- **A server restart never waits on the person's word, only on the person being out.** Check `stage_presence`: when
+  it says not in VR, and no voice note or upload is in flight (a restart in the middle of one loses it), restart,
+  then tell the sessions that were listening. A desktop page that is open is not the person in the room: an open
+  tab posts state every few seconds. Hold only while they are in the headset, and never ask them for a go-ahead
+  they have already given as a standing rule.
 - **Check it from their side after**: the server's health through the headset's own route, the served page carries
   the change, presence shows the listeners back. A restart drops every listener: tell the sessions that were
   listening, or check they reconnected.
+- **Run `stage_preflight` before saying "go in"** and after every deploy: load, hot swap, live insert, say and
+  listen on its own scratch scene, plus the allow rule and the guard hook. Fix or report each BLOCKED line first.
 - **Saying "go in" is your act too.** Before you tell the person the stage is ready, start listening yourself, even
   when another session is the usual listener. On the day the stage moved into ismail, six notes went unheard
   because two sessions each said it was ready and neither was listening.

@@ -14,7 +14,17 @@ return at once. A session folder holds:
   status.json    the recorder's state (streams, levels, dropouts, anchors), rewritten every 2 s, then the reading's
   <stream>.wav   one file per stream, 32-bit float, as heard
   events.jsonl   marks and typed notes, one JSON line each
+  heard.jsonl    words as they were said (listen_heard), one line per utterance or failed chunk
+  hear_<mic>.json  how the hearing goes (how far behind, failures, why there are no bars)
+  heard/chunk.wav  the chunk the transcriber reads now (16 kHz, under 300 KB)
+  news.jsonl     what the listen ops say once at their next reply (a stop because the drive is nearly full)
+  tmp/           the background processes' temp folder (never the system drive's)
   rec.log, read.log, read.json, read.md, stretches/
+
+Where sessions go: <project>/listen/ when listen_start names a project, else the running live set's folder, else
+$ISMAIL_LISTEN_HOME, else <installed songs folder>/_listen (the checkout's drive). Never the system drive by default
+(2026-10-13: a jam's session filled C:, and the speech server failed with it). A session id resolves across all of
+these and the old home (~/.ismail/listen), through an index in the default home.
 
 From songs/partisan_club/tools/session_rec.py (the Live DJ, 2026-10-13): the alignment, the speech chunks, the cut
 detector and its thresholds (tuned on one 4:41 capture: 11 cuts, the skip rule needs beat strength 0.15 on both
@@ -26,6 +36,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -38,7 +49,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-HOME = Path(os.environ.get('ISMAIL_LISTEN_HOME') or Path.home() / '.ismail' / 'listen')
+from .handoffs import SONGS
+
+DEFAULT_HOME = Path(SONGS) / '_listen'               # the installed songs folder: the checkout's drive
+LEGACY_HOME = Path.home() / '.ismail' / 'listen'     # where sessions went before 2026-10-14: searched, never written
+HOME = Path(os.environ.get('ISMAIL_LISTEN_HOME') or DEFAULT_HOME)
 SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
 
 MAX_MIN = 90            # speakers only
@@ -52,6 +67,17 @@ PEEK_S = 30
 STATUS_EVERY_S = 2.0
 ANCHOR_S = 0.05         # a file that falls this far behind the clock (rolling minimum) gets an anchor
 PAUSE_GAP_S = 2.0       # silence this long inside the music is a pause, not a skip
+FREE_FLOOR_GB = 2.0     # no session starts with less free on its drive, and a running one stops there (a stream
+                        # takes about 1.4 GB an hour at 48 kHz stereo; the reading copies each stretch once more)
+DISK_EVERY_S = 10.0
+HEAR_SR = 16000         # what the transcriber gets: 16 kHz PCM16 keeps an 8 s chunk under 300 KB, small enough
+                        # that the speech server never spools it to its own temp folder (the DJ's 400s, 10-13)
+HEAR_MAX_S = 8.0        # a chunk is cut at a pause (UTTER_GAP_S) or at this length, at its quietest 50 ms
+HEAR_QUIET_DB = -45.0   # a chunk with no 50 ms frame above this is not sent
+HEAR_EVERY_S = 1.0
+HEAR_LAG_EVERY_S = 60.0     # the mic's lag behind the speakers is measured again this often
+HEAR_TIMEOUT_S = 60.0
+HEAR_RETRY_S = 2.0
 
 
 # ------------------------------------------------------------------ small helpers
@@ -135,6 +161,161 @@ def events(out):
 def add_event(out, ev):
     with open(Path(out) / 'events.jsonl', 'a', encoding='utf8') as f:
         f.write(json.dumps(ev) + '\n')
+
+
+def add_news(out, text, **kw):
+    """A line the listen ops say once, at their next reply (the recorder runs alone: this is how it speaks)."""
+    with open(Path(out) / 'news.jsonl', 'a', encoding='utf8') as f:
+        f.write(json.dumps({'wall': time.time(), 'text': text, **kw}) + '\n')
+
+
+def take_news(out):
+    """The news lines not said yet, marked said."""
+    p = Path(out) / 'news.jsonl'
+    if not p.exists():
+        return []
+    rows = []
+    for line in p.read_text(encoding='utf8').splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    said = Path(out) / 'news.said'
+    try:
+        k = int(said.read_text())
+    except (OSError, ValueError):
+        k = 0
+    if len(rows) > k:
+        said.write_text(str(len(rows)))
+    return rows[k:]
+
+
+# ------------------------------------------------------------------ where sessions live
+
+def home():
+    """Where a session goes when no project is given and no live set runs: $ISMAIL_LISTEN_HOME (read at each call,
+    so setting it needs no restart), else HOME."""
+    env = os.environ.get('ISMAIL_LISTEN_HOME')
+    return Path(env) if env else HOME
+
+
+def free_gb(path):
+    p = Path(os.path.abspath(path))
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    return shutil.disk_usage(p).free / 2 ** 30
+
+
+def disk_short(path):
+    """None, or what is short when path's drive has less than FREE_FLOOR_GB free."""
+    try:
+        free = free_gb(path)
+    except OSError:
+        return None
+    if free >= FREE_FLOOR_GB:
+        return None
+    drive = os.path.splitdrive(os.path.abspath(path))[0] or str(path)
+    return f"only {free:.1f} GB free on {drive} (for {path})"
+
+
+def live_engines():
+    """The live engines running now, newest first: each one's engine.json record ('project', 'port', 'bpm', ...).
+    Every engine leaves a note in the live registry (ismail/live/engine.py registry_path, read here without
+    importing the engine)."""
+    reg = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    try:
+        files = list(reg.glob('*.json'))
+    except OSError:
+        return []
+    import psutil
+    out = []
+    for f in files:
+        rec = read_json(f) or {}
+        try:
+            alive = psutil.pid_exists(int(rec.get('pid')))
+        except (TypeError, ValueError):
+            alive = False
+        if alive and rec.get('project') and (Path(rec['project']) / 'live' / 'engine.json').exists():
+            out.append(rec)
+    return sorted(out, key=lambda r: -float(r.get('started') or 0))
+
+
+def pick_home(project=None):
+    """-> (the folder a new session goes in, the project whose live engine gives the bars or None, why there)."""
+    eng = live_engines()
+    if project:
+        p = Path(project).expanduser()
+        if not p.is_dir():
+            raise ValueError(f"project {project!r}: no such folder. Give the song's own folder (the installed songs "
+                             f"folder is {SONGS})")
+        p = p.resolve()
+        mine = [e['project'] for e in eng if Path(e['project']).resolve() == p]
+        return p / 'listen', (mine or [e['project'] for e in eng] or [None])[0], 'the project folder'
+    if eng:
+        return Path(eng[0]['project']) / 'listen', eng[0]['project'], "the running live set's folder"
+    if os.environ.get('ISMAIL_LISTEN_HOME'):
+        return home(), None, '$ISMAIL_LISTEN_HOME'
+    return home(), None, 'the listening home'
+
+
+def remember(sid, d):
+    """Index a new session by its id in the default home, so the id resolves wherever the session went."""
+    try:
+        DEFAULT_HOME.mkdir(parents=True, exist_ok=True)
+        with open(DEFAULT_HOME / 'index.jsonl', 'a', encoding='utf8') as f:
+            f.write(json.dumps({'id': sid, 'path': str(Path(d).resolve())}) + '\n')
+    except OSError:
+        pass
+
+
+def known_homes():
+    out = []
+    for h in [home(), HOME, DEFAULT_HOME, LEGACY_HOME] + [Path(e['project']) / 'listen' for e in live_engines()]:
+        if h not in out:
+            out.append(h)
+    return out
+
+
+def _indexed():
+    p = DEFAULT_HOME / 'index.jsonl'
+    out = []
+    if p.exists():
+        for line in p.read_text(encoding='utf8').splitlines():
+            try:
+                r = json.loads(line)
+                out.append((r['id'], Path(r['path'])))
+            except (ValueError, KeyError):
+                pass
+    return out
+
+
+def session_dirs():
+    """Every session folder this machine knows of: the indexed ones and those in the known homes."""
+    seen, out = set(), []
+    cands = [p for _, p in _indexed()]
+    for h in known_homes():
+        if h.is_dir():
+            cands += list(h.iterdir())
+    for p in cands:
+        k = os.path.normcase(os.path.abspath(p))
+        if k not in seen and (p / 'request.json').exists():
+            seen.add(k)
+            out.append(p)
+    return out
+
+
+def find_session(session):
+    """A session folder from its id or its path, wherever it went; None if there is none."""
+    p = Path(session)
+    if (p / 'request.json').exists():
+        return p
+    for sid, q in reversed(_indexed()):
+        if sid == session and (q / 'request.json').exists():
+            return q
+    for h in known_homes():
+        if (h / session / 'request.json').exists():
+            return h / session
+    return None
 
 
 # ------------------------------------------------------------------ the clock
@@ -230,6 +411,13 @@ def record(out):
     req = read_json(out / 'request.json')
     specs, max_s = req['streams'], float(req['max_s'])
     stop = out / 'stop'
+    if any(is_mic(s) for s in specs):        # a mic opens only on the person's own note, checked again here
+        from . import guards
+        try:
+            guards.mic_note(req.get('mic_note'), 'listen.record')
+        except ValueError as e:
+            write_json(out / 'status.json', {'state': 'failed', 'pid': os.getpid(), 'error': f'mic refused: {e}'})
+            return
     pa = _pa()
     p = pa.PyAudio()
     t0 = time.perf_counter()
@@ -239,6 +427,7 @@ def record(out):
               'streams': [], 'levels': {}, 'elapsed_s': 0.0}
     streams, threads = [], []
     lock = threading.Lock()
+    hear_stop, hear_th = threading.Event(), None
 
     def run(st):
         d, sr, ch = st['dev'], st['sr'], st['ch']
@@ -297,6 +486,22 @@ def record(out):
             threads.append(th)
             print(f"recording {st['name']}: {st['device']} {st['sr']} Hz {st['ch']} ch -> {out / st['file']}",
                   flush=True)
+        hearers = [Hearer(out, st, ref if ref['loopback'] and ref is not st else None, wall0, req.get('live'))
+                   for st in streams if is_mic(st['spec'])]
+
+        def hear():                                        # words as they are said, one mic after another
+            while True:
+                last = hear_stop.wait(HEAR_EVERY_S)
+                for h in hearers:
+                    try:
+                        h.step(final=last)
+                    except Exception as e:
+                        print(f"hearing {h.mic['name']}: {type(e).__name__}: {e}", flush=True)
+                if last:
+                    return
+        if hearers:
+            hear_th = threading.Thread(target=hear, daemon=True)
+            hear_th.start()
 
         def snapshot(state):
             now = time.perf_counter() - t0
@@ -314,7 +519,7 @@ def record(out):
             write_json(out / 'status.json', status)
 
         why = 'max'
-        nxt = 0.0
+        nxt = disk_at = 0.0
         while time.perf_counter() - t0 < max_s:
             if stop.exists():
                 why = 'asked'
@@ -334,6 +539,12 @@ def record(out):
                 started = all(st['t_start'] is not None for st in streams)
                 snapshot('recording' if started else 'starting')
                 nxt = el + STATUS_EVERY_S
+            if el >= disk_at:
+                disk_at = el + DISK_EVERY_S
+                short = disk_short(out)
+                if short:
+                    why, status['disk'] = 'disk', short
+                    break
             time.sleep(0.1)
     except KeyboardInterrupt:
         why = 'asked'
@@ -351,6 +562,14 @@ def record(out):
         st['ring'] = None
     snapshot('failed' if why == 'error' else 'stopped')
     print(f"stopped at {status['stopped_at_s']} s ({why})", flush=True)
+    if why == 'disk':
+        add_news(out, f"Listening session {out.name} stopped by itself at {mmss(status['stopped_at_s'])}: "
+                      f"{status['disk']}, under the {FREE_FLOOR_GB:g} GB it keeps free so the drive never fills. What "
+                      f"it recorded is kept in {out}. Free some space, then listen_stop('{out.name}') reads it.",
+                 mic=status['mic'])
+    hear_stop.set()
+    if hear_th is not None:
+        hear_th.join(timeout=60)                           # the last words; the reading hears them all anyway
     return status
 
 
@@ -418,7 +637,7 @@ def fit_residual(ref_path, ref_st, mic_path, mic_st, dur=30.0):
 
 # ------------------------------------------------------------------ speech
 
-def stt_words(path, chunk_s=120, overlap_s=2):
+def stt_words(path, chunk_s=120, overlap_s=2, timeout=900):
     """Words with times (s, in the file), from the speech server, chunk by chunk."""
     info = sf.info(str(path))
     sr, total = info.samplerate, info.frames / info.samplerate
@@ -441,7 +660,7 @@ def stt_words(path, chunk_s=120, overlap_s=2):
                 + f'\r\n--{b}--\r\n'.encode())
         req = urllib.request.Request(SPEAK + '/v1/audio/transcriptions', data=body, method='POST',
                                      headers={'Content-Type': f'multipart/form-data; boundary={b}'})
-        r = json.loads(urllib.request.urlopen(req, timeout=900).read())
+        r = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
         for w in r.get('words') or []:
             t = s0 + w['start']
             if k and w['start'] < overlap_s / 2:          # said in the overlap: the previous chunk has it
@@ -479,6 +698,230 @@ def said_times(text):
         if v not in out and not re.match(r'\d{1,2}:\d{2}', text[m.start(1):m.start(1) + 5]):
             out.append(v)
     return out
+
+
+# ------------------------------------------------------------------ words as they are said (listen_heard)
+
+def speech_up(timeout=1.0):
+    """Whether the speech server answers at all (any HTTP answer counts; nothing is started here)."""
+    try:
+        urllib.request.urlopen(SPEAK, timeout=timeout)
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
+    return True
+
+
+def stt_error(e):
+    """-> (kind, words for the agent): 'down' when the speech server does not answer, else 'failed'."""
+    if isinstance(e, urllib.error.HTTPError):
+        hint = (' (the DJ saw 400 and 500 here while the system drive was full: the server spools to its temp '
+                'folder; machine_status shows free space)' if e.code in (400, 500) else '')
+        return 'failed', f"the speech server answered {e.code} {e.reason}{hint}"
+    if isinstance(e, (urllib.error.URLError, ConnectionError)):
+        return 'down', f"the speech server at {SPEAK} does not answer ({getattr(e, 'reason', e)})"
+    if isinstance(e, TimeoutError):
+        return 'failed', f"the speech server took over {HEAR_TIMEOUT_S:.0f} s"
+    return 'failed', f'{type(e).__name__}: {e}'
+
+
+def engine_clock(project):
+    """-> ({'wall', 'beat', 'bpm', 'bpb'}, None): the live engine's heard beat at a wall time (the beat its keys
+    log uses), or (None, why there is none). Only an engine whose engine.json says 'clock' is asked: the call
+    is exempt from the engine's news, which an older engine would hand to this caller instead of the agent."""
+    if not project:
+        return None, 'no live set runs'
+    rec = read_json(Path(project) / 'live' / 'engine.json')
+    if not rec:
+        return None, 'no live set runs'
+    if not rec.get('clock'):
+        return None, 'the live engine running is older than listen_heard; bars come once it is restarted'
+    req = urllib.request.Request(f"http://127.0.0.1:{rec['port']}/", headers={'Content-Type': 'application/json'},
+                                 data=json.dumps({'op': 'clock', 'args': {}}).encode())
+    try:
+        res = json.loads(urllib.request.urlopen(req, timeout=2).read())
+    except Exception as e:
+        return None, f'the live engine does not answer ({e})'
+    if not res.get('ok'):
+        return None, f"the live engine says: {res.get('error')}"
+    return res['result'], None
+
+
+def newest_clock():
+    eng = live_engines()
+    return engine_clock(eng[0]['project']) if eng else (None, 'no live set runs')
+
+
+class Hearer:
+    """Words as they are said, from one mic of a running session: its new audio is cut at a pause (UTTER_GAP_S) or
+    at HEAR_MAX_S, sent to the transcriber the reading uses (stt_words, the speech server), and each utterance is
+    placed as the reading places words: the mic file's time on the session clock, less the mic's lag behind the
+    speakers, and, when a live set runs, the bar the engine had sounding then. A chunk that fails is tried once
+    more, then written as a failed line: never dropped. Lines go to heard.jsonl; the state to hear_<mic>.json.
+    stt, clock: stand-ins for tests (path -> words; () -> (clock, why))."""
+
+    def __init__(self, out, mic, ref=None, wall0=0.0, live=None, stt=None, clock=None, retry_s=HEAR_RETRY_S):
+        self.out, self.mic, self.ref, self.wall0 = Path(out), mic, ref, float(wall0)
+        self.stt = stt or (lambda p: stt_words(p, timeout=HEAR_TIMEOUT_S))
+        self.clock = clock or ((lambda: engine_clock(live)) if live else newest_clock)
+        self.retry_s = retry_s
+        self.pos = 0                                       # mic file frames read so far
+        self.buf, self.buf_ft = np.zeros(0, np.float32), 0.0   # 16 kHz mono not cut yet, and its file time
+        self.floor = deque(maxlen=int(30 / 0.05))          # 50 ms levels of the last 30 s cut: the room's floor
+        self.lag, self.lag_at = 0.0, -1e18
+        (self.out / 'heard').mkdir(exist_ok=True)
+        self.state = {'who': mic['name'], 'heard_to_s': None, 'chunks': 0, 'failed': 0, 'last_ok': None,
+                      'last_error': None, 'last_error_kind': None, 'last_error_wall': None, 'lag_s': 0.0,
+                      'bars': None, 'updated': None}
+
+    def _pull(self):
+        n = int(self.mic.get('frames') or 0)
+        if n <= self.pos:
+            return
+        try:
+            x, sr = sf.read(self.out / self.mic['file'], start=self.pos, stop=n, dtype='float32', always_2d=True)
+        except Exception:                                  # mid-write: next time
+            return
+        if not len(x):
+            return
+        self.pos += len(x)
+        y = mono(x)
+        y = y if sr == HEAR_SR else resample(y, sr, HEAR_SR)
+        self.buf = np.r_[self.buf, y.astype(np.float32)]
+        self.buf_ft = self.pos / sr - len(self.buf) / HEAR_SR     # anchored to the file each time: no creep
+
+    def _cut(self, final):
+        """-> (samples of buf to take now, whether they hold sound): at the first pause after sound, at HEAR_MAX_S
+        (its quietest frame in the last 2 s), or everything when final. Leading quiet is dropped unsent."""
+        F = int(HEAR_SR * 0.05)
+        nf = len(self.buf) // F
+        if nf == 0:
+            return (len(self.buf), False) if final and len(self.buf) else (0, False)
+        lv = db(np.sqrt((self.buf[:nf * F].reshape(nf, F) ** 2).mean(1)))
+        ref = np.r_[np.array(self.floor), lv]
+        loud = lv > max(HEAR_QUIET_DB, float(np.percentile(ref, 20)) + 8.0)
+        gap = int(round(UTTER_GAP_S / 0.05))
+        seen, run = False, 0
+        mx = int(HEAR_MAX_S / 0.05)
+        for i, v in enumerate(loud[:mx]):
+            if v:
+                seen, run = True, 0
+                continue
+            run += 1
+            if run >= gap:
+                if seen:
+                    return (i - gap // 2 + 1) * F, True    # the middle of the pause
+                if i + 1 - gap // 2 > 0:
+                    return (i + 1 - gap // 2) * F, False   # only quiet so far: drop it, keep 1 s of lead-in
+        if nf >= mx:
+            k = mx - int(2 / 0.05) + int(np.argmin(lv[mx - int(2 / 0.05):mx])) + 1
+            return k * F, bool(loud[:k].any())
+        if final:
+            return len(self.buf), bool(loud.any())
+        return 0, False
+
+    def step(self, final=False):
+        """Cut and hear what is ready; -> how many chunks were sent."""
+        if self.mic.get('t_start') is None:
+            return 0
+        self._pull()
+        sent = 0
+        while True:
+            k, sound = self._cut(final)
+            if k <= 0:
+                break
+            seg, ft0 = self.buf[:k], self.buf_ft
+            self.buf, self.buf_ft = self.buf[k:], self.buf_ft + k / HEAR_SR
+            F = int(HEAR_SR * 0.05)
+            if len(seg) >= F:
+                self.floor.extend(db(np.sqrt((seg[:len(seg) // F * F].reshape(-1, F) ** 2).mean(1))))
+            if sound:
+                self._hear(seg, ft0)
+                sent += 1
+        if self.pos:
+            self.state['heard_to_s'] = round(to_session(self.mic, self.buf_ft), 2)
+        self.state['updated'] = time.time()
+        write_json(self.out / f"hear_{self.mic['name']}.json", self.state)
+        return sent
+
+    def _measure_lag(self):
+        """The mic's lag behind the speakers over the last 30 s, as fit_residual measures it at each end."""
+        if self.ref is None or time.time() - self.lag_at < HEAR_LAG_EVERY_S:
+            return
+        r, m = self.ref, self.mic
+        lo = max(r['t_start'], m['t_start'])
+        hi = min(to_session(r, r['frames'] / r['sr']), to_session(m, m['frames'] / m['sr']))
+        if hi - lo < 10:
+            return
+        self.lag_at = time.time()
+        w = min(30.0, hi - lo)
+        try:
+            lag, strength = residual_at(self.out / r['file'], r, self.out / m['file'], m, hi - w, w)
+        except Exception:
+            return
+        if lag is not None and strength >= 0.05:
+            self.lag = lag
+            self.state['lag_s'] = round(lag, 3)
+
+    def _hear(self, seg, ft0):
+        path = self.out / 'heard' / 'chunk.wav'
+        sf.write(path, seg, HEAR_SR, subtype='PCM_16')
+        s0 = to_session(self.mic, ft0)
+        s1 = to_session(self.mic, ft0 + len(seg) / HEAR_SR)
+        self.state['chunks'] += 1
+        err = None
+        for attempt in (0, 1):
+            try:
+                words = self.stt(path)
+                err = None
+                break
+            except Exception as e:
+                err = e
+                if attempt == 0:
+                    time.sleep(self.retry_s)
+        if err is not None:
+            kind, why = stt_error(err)
+            self.state.update(failed=self.state['failed'] + 1, last_error=why, last_error_kind=kind,
+                              last_error_wall=time.time())
+            self._add({'t': round(s0, 2), 'end': round(s1, 2), 'failed': True, 'error': why, 'kind': kind})
+            return
+        self.state['last_ok'] = time.time()
+        self._measure_lag()
+        for w in words:
+            for k in ('t', 'end'):
+                w[k] = round(to_session(self.mic, ft0 + float(w[k])) - self.lag, 2)
+        clock, why = self.clock()
+        self.state['bars'] = why
+        for u in utterances(words):
+            line = {'t': u['t'], 'end': u['end'], 'text': u['text']}
+            if clock:
+                beat = clock['beat'] + (self.wall0 + u['t'] - clock['wall']) * clock['bpm'] / 60.0
+                line['bar'] = round(beat / clock['bpb'] + 1, 1)
+            self._add(line)
+
+    def _add(self, line):
+        p = self.out / 'heard.jsonl'
+        n = len(p.read_text(encoding='utf8').splitlines()) if p.exists() else 0
+        line = {'n': n + 1, 'who': self.mic['name'], 'wall': round(self.wall0 + line['t'], 2), **line}
+        with open(p, 'a', encoding='utf8') as f:
+            f.write(json.dumps(line) + '\n')
+
+
+def heard_lines(out):
+    p = Path(out) / 'heard.jsonl'
+    rows = []
+    if p.exists():
+        for line in p.read_text(encoding='utf8').splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                pass
+    return rows
+
+
+def hear_states(out):
+    return [s for s in (read_json(p) for p in sorted(Path(out).glob('hear_*.json'))) if s]
 
 
 # ------------------------------------------------------------------ loudness (EBU R128) in numpy

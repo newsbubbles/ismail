@@ -14,9 +14,1127 @@
   tremolo LFOs in beats. Played keys keep their sounds; nothing of theirs renders again.
 - A recording's `.json` lists each change as `[bar, bpm, seconds into the file]`; `live_listen` keeps to one tempo
   per window and says when it left bars out.
+- The engine's clock (op `clock`, which `listen_heard` places words with) gives the tempo at the beat heard, not
+  at the mix position half a second ahead, so words land on their bars across a change.
 - Known gaps: `ramp_beats` is refused (queue step changes at successive bars), echoes already in a delay jump
   once, a note held across the change keeps its old render, and `@ms` offsets in clips convert at the tempo when
   queued.
+
+### Fewer MCP tools for harnesses with a cap
+
+- `ismail mcp --roles dj,mc` or `--shelves live,stream` serves only those roles' or shelves' ops (the ones
+  `ops_find` already uses), always with `guide` and `ops_find`. `--list-roles` prints each role's and shelf's tool
+  count without starting; `--max-tools N` refuses to start over N and names the sizes; an unknown role or shelf is
+  refused with the valid ones. `ISMAIL_MCP_ROLES`, `ISMAIL_MCP_SHELVES` and `ISMAIL_MCP_MAX_TOOLS` do the same for a
+  harness that cannot pass arguments. On a filtered server `ops_find` marks the ops it does not serve.
+
+### The stage on a stream: an on-air page and GPU window capture
+
+- `?onair=<camera>&fps=30` on a stage page shows that camera full frame with no UI, drawn at a steady rate, the
+  pointer layer included, in a window titled "ismail on air <scene>". `stage_on_air` now also tells on-air pages to
+  cut; other pages, the headset's included, ignore it.
+- `stream_visual(capture='auto'|'wgc'|'gdi')`: `auto` captures a window with Windows Graphics Capture (ffmpeg 8
+  gfxcapture) where ffmpeg has it, so a WebGL page drawn on the GPU comes through, covered or not, cropped to a
+  browser window's web content. `wgc` asked for by name is refused without gfxcapture. With `auto` the visual page
+  now draws on the GPU instead of in software; `gdi` is the old grab, and the manual fallback on a hot GPU.
+
+### MIDI files in and out
+
+- `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,
+  meter, markers, nudges to the tick, kits on channel 10). `midi_read`: lists a .mid, then writes the parts you pick
+  into tracks at any bar, optionally quantized; it warns on tempo or meter differences and on kit pads a GM drum file
+  would leave silent. Written with no MIDI library; checked against mido on 40 files from other programs.
+
+### Older downloads on the phone
+
+- The Downloads section shows the last 4 as before, with an "Older downloads (n)" button under it that opens the
+  rest, 10 more per tap, and "Show fewer" to fold it back. The phone server keeps the last 200 offers across
+  restarts; `GET /api/offers?skip=&n=` pages them newest first, and the state carries `offers_n`.
+
+### YouTube chat in realtime
+
+- YouTube chat is read with streamList: one call held open that hands over each message as it is written, instead of
+  a list call every 10 s. It reopens hourly with a fresh login, lets go when the broadcast ends, and falls back to
+  polling if YouTube refuses the stream. `venue_set(reader='poll', poll_s=...)` picks polling. It needs grpcio and
+  protobuf (the `stream` extra); the messages are built at runtime, nothing is generated.
+
+### The stream's visual page, drawn from the set
+
+- `stream_visual(mode='page')` streams a page that moves to the set: the master's level and 16 bands, the engine's
+  beat, and each track's notes as they sound. It reads the engine's local stream and its clock and onsets ops, never
+  the mixer.
+- `stream_scene` sets what it draws with raw numbers (bars, ring, line, pulse, particles, per-track hits, text,
+  grid; each driven by the level, a band, the beat or a track), live with no blip; a wrong field says which fields
+  the layer takes. `stream_page` reports the page's address and what it sees now.
+
+### Live streaming to several sites, with every site's chat
+
+- A stream server (`stream_start`) sends the live set to Twitch, YouTube, Kick, Owncast or any RTMP site at once:
+  the master and a picture drawn from it (`stream_visual`: cqt, spectrum, waves, scope, a still or a captured
+  window, with text lines that change live, `stream_text`) are encoded once (NVENC when the GPU has it) and copied to
+  each site by its own process, so one site dropping never stops the others. Engine restarts carry silence, not a
+  drop. A `file` venue records every set.
+- Every site's chat lands in one numbered log: `chat_watch` (a standing watcher, like phone_watch), `chat_read`,
+  and `chat_say` (one venue, every venue, or a reply where the person wrote). Twitch reads over EventSub (or
+  anonymously, read-only), YouTube through the Data API within its quota, Kick over its public websocket.
+- Venues (`venue_set`, `venue_list`, `venue_remove`) hold no secrets. The person types logins and stream keys in a
+  terminal (`python -m ismail.stream login|key <venue>`); no op ever returns one, and logs blank them.
+- `stream_go` needs the person's words each time it goes live on a public site, and logs them.
+- A practice venue (`platform='fake'`): a local chat page and a scripted test viewer.
+- `references/live-streaming.md`: the setup, going live, chat manners, the DJ and MC roles, chat games.
+
+### A cut takes the old deck off air at once
+
+- `live_transition(style='cut')` ignores `bars`: the old deck's tracks stop and it goes off air (cued) on the cut's own
+  boundary. It used to stay on air at fader off for the default 16 bars, costing the mixer and refusing a load onto it.
+
+### One listener's taste is no longer a rule in the playbook
+
+- Twelve places in SKILL.md, live.md, composition.md, music-video.md and instruments.md stated one person's taste
+  as a rule for every set and song (derived melodies only, a new hook every 2 minutes, an effects pass with a
+  riser into every section, a climax in every form, a VHS look on every video, and more). They now read as
+  examples, scoped to the style they came from or to when the person asks for them.
+
+### Moments marked while the song plays
+
+- `feedback_page(moments=True)` puts a time strip with bar numbers and a "Mark this moment" button (or the M key)
+  under the first audio item (`moments='<label or path>'` picks another). Each moment gets tick boxes (love this,
+  too much, which part, in the person's own part names) and their words.
+- The served page saves moments in the round (`moments.json`); a shared copy keeps them in the browser and puts a
+  "Moments:" block in the message, which `feedback_paste` reads back.
+- `feedback_read` and `feedback_wait` list the moments in time order with their bars (a windowed render counts from
+  where it starts), and a moment that names a quality gets its measure step at that time.
+
+### Recreating and arranging: lessons from four metal recreations and an electro house vocal
+
+- recreate.md: count a tab's real bar starts through meter changes; render both readings of an ambiguous part;
+  snap click-less drums to the record's own onsets; replace the instrument in fit loops; time drafts stem by stem;
+  judge tremolo guitar by chroma; score the window, not the file.
+- composition.md: a clear buildup with the voice on the drop, a payoff line held until the story earns it, where
+  phrase halves land, spoken lines on the stressed syllable, filling a voiceless stretch with what was said, and a
+  high robot voice from a vocoder carrier.
+
+### Render reads the true peak; the noise riser stays under it
+
+- render's master line gives the true peak (4x oversampled) beside the sample peak, and says when it is over
+  -1 dBTP: a sample-peak limiter let a mix read -2 dBFS while it was +0.2 dBTP, and an mp3 of it clips.
+- The noise_riser preset's band-pass tops out at 10.8 kHz instead of 12.8 kHz, which halves its overshoot
+  between samples.
+
+### A song's backup moves its project whole or not at all
+
+- `backup.set_aside` (a song build's backup of proj/) renames proj/ in one step. When something holds it open (a
+  terminal working inside it, on Windows), nothing moves and the error says what to close. Before, the move fell
+  back to copy-then-delete, emptied proj/ around the locked folder and left the reference stems in a backup that a
+  later rebuild would trim.
+
+### Live decks: a new song starts clean, and removing a deck no longer stops the set
+
+- `live_load` onto a deck that held a song resets its strip (fader, eq, filter, transpose) even when its tracks
+  were removed one by one, and says what it reset. A blend's bass kill had played the next song with no bass.
+- Removing a deck while a block was mixing stopped the mixer for good (the heard bar froze and underruns climbed).
+  The mixer now reads the decks it started the block with, and a block that fails plays silent and is named in
+  the next reply instead of ending the set.
+- `live_status` says whether each off-air deck is asleep (costs nothing), ringing out, or still playing notes
+  unheard.
+
+### Live sets: helpers compose, and the mixer's cost is counted
+
+An electro set dropped out for most of its length. Helpers measured references while it played, a priority loop
+cost a core, one deck carried hundreds of per-beat effect ramps, and a deck taken off air was still mixed.
+
+- The live reference says helpers started during a set compose only (notes, patches, effects, from the set's own
+  kit, within a track and effect budget, at most two at a time); measuring happens before the set.
+- A known song goes on air before any helper starts, and a sleeping Bluetooth speaker is named at once.
+- The mixer budget counts automation as well as tracks. A deck off air after a transition is removed or reloaded.
+  Its strip is set back after a new load (a bass kill carried over). Heavy ramps are cleared once a deck lands.
+- Your own live calls are batched rather than polled, and priority tricks never stand in for fewer jobs.
+- A mixer that stays high on a light deck after a long set means restart with `workers=2` (a 20 s gap): one set went
+  from 79-105% to 28% on the same deck. Sets on a shared 8-thread machine start with `workers=2`.
+
+### One call to look before a draft goes out, and notes that say where to look
+
+Over one song's rounds an agent ran render about 43 times and sound_compare about 30, and never the stored comparison,
+its worst bars, a zoom diff or a region measure, though the playbook names them all. By feedback time the playbook
+was too far back to recall them.
+
+- `ear_pass` runs the stored comparison with the reference, ranks the worst bars, and for each of the top ones names
+  the band that differs most (with the `region_measure` call that sizes it), zooms it step by step and writes a crop
+  of yours and one of the reference at that bar to read side by side. The render reply's "Next:" now points to it.
+- A `sound_compare` alone no longer counts as "compared with the reference" in the render reply; `ear_pass`,
+  `compare` and `cmp_run` do.
+- `feedback_read` (and so `feedback_wait` and `feedback_paste`) turns each note that names a quality ("muddy", "too
+  loud", "fake", "out of time") into its measure step: the tool for that kind of word, with the window filled in
+  when the note gives bars or a time, and the part when the note names one. Words like "dark" or "dry" count only
+  as "too dark", "too dry": alone they are taste.
+
+### Part names are checked with the person by ear
+
+A listener said the bass overpowered the track. They meant the answering bass; the agent turned down another one it
+called the talker, and three rounds went by before anyone noticed. Nothing checked that both used the same names.
+
+- `feedback_page(parts=True)` (or a list of tracks) adds "Name the parts": each part alone and in the mix at the bars
+  where it stands out most (cut from the latest `render(stems=True)`), with a box for the person's name for it. It
+  works on the shared copy and comes back through "Copy my answers" and `feedback_paste`.
+- `feedback_read` shows their names, and flags a note whose words could mean several parts ("says 'bass', and 3
+  parts could be it") from the track names, the stem map and the instruments, unless the note names one of them.
+- `lexicon_note(track=, heard=<round>)` keeps their name for a part, confirmed only when it matches what they typed in
+  that round; `track=` alone is marked as not confirmed.
+
+### A listener who is not at this computer can answer, by voice too
+
+A friend answering rounds from elsewhere could not send their answers: the feedback page runs on this computer
+only, the session built its own hosted page, and its Send failed twice (a view-only share cannot save).
+
+- Every feedback page has "Copy my answers": plain text, numbered as the questions, to paste into any chat.
+- `feedback_page(share=True)` also writes a standalone copy (`<round>/share/`: index.html and the clips beside it) to
+  host anywhere. It needs no server and no write access: typing and voice notes stay in the listener's browser, and
+  "Send my answers" sends them as a message (the share menu with the voice notes as files, or a copy to paste and the
+  voice notes to download).
+- `feedback_paste(project, round, text, files)` reads that message into the round: each numbered answer under its
+  question, each voice note (`q<n>_<time>.webm`) as a clip transcribed in the background, then it counts as their
+  Send, so `feedback_read` and `feedback_wait` work as for a page answered here.
+
+### Shared pages say what made the song
+
+A listening page sent to a friend had no word on what made the song or where to find it.
+
+- `credits(format='footer')` returns the footer for a page people may share, as text and HTML: made with ismail, the
+  link to the site, and how the sound was made by counts only (parts modeled on measured recordings, designed,
+  playing recorded audio), with no names and no paths. It writes nothing.
+- `feedback_page` pages end with it (`footer=False` leaves it off).
+- SKILL.md step 8: a page you build yourself for someone who may pass it on ends with it.
+
+### The effects pass is part of the first draft
+
+Two sessions (an electro track, a drum and bass recreation) handed over whole drafts with no effects pass until the
+person asked for one: the loop ended its build at "ear candy" and never named the pass.
+
+- SKILL.md loop, step 5: the effects pass in the first draft: a transition into every section, what changes at each
+  phrase end (fill, filter dip or sweep, drop-out, delay or reverb throw), the ducks; with a reference, zoom on a
+  phrase's last bar against the one before. The Session Sheet gets a `Moves:` line.
+- A full render of a song with three or more tracks and no automation lane or no transitions part says so in one line.
+
+### Balance against the reference in every render with stems
+
+A recreation's second bass was far too loud through three drafts, and nothing said so: the only balance check
+(`levels_from_ref`) ran once, on draft 1, and averages over the whole song.
+
+- `render(stems=True)`, with a reference that has stems and a stem map, prints each stem's share of the mix against
+  the reference's per 8-bar stretch (quiet stretches left out): how far off over the song, the worst stretch, the
+  loudest track of the stem there; a layer the reference has in a stretch and yours lacks (often a part filed under
+  another stem); a stem that plays where the reference's is silent.
+- Then one line on the master: a limiter alone is not a mastering pass; balance first, then `references/mastering.md`.
+- SKILL.md step 6 and mastering.md section 0 say the balance comes before loudness and the master.
+
+### Synthesis unless the user asks for samples
+
+A session cut a reference's kick, snare and shaker into the song after the listener said the drums sounded too
+synthetic. The skill and `sound_extract` both left that door open.
+
+- SKILL.md, Non-negotiables: songs are made with synthesis (sprites, measured voices, mimic profiles, the modeled
+  library voices). Samples (slices of the reference, imported one-shots, the sampled library voices) go in only when
+  the user asks for them in words. "Too synthetic" means measure the hit against the reference's and rebuild it.
+- instruments.md: the sampled-voice and sampler routes are for when the user asked for samples. recreate.md: an
+  extracted hit is a fitting target, never a part.
+- `sound_extract`: its description no longer says "use it", and its reply says the hit is a target to fit.
+
+### Transitions, speech on a rhythm, is the voice heard (ledger:M249, M250)
+
+Three pieces built in a song and proven there.
+
+- New library voice `transitions` (fx family): the note picks the effect, C1 an impact, D1 a noise uplifter, E1 a
+  downlifter, any other note (F1) a reverse crash, and the sweeps last as long as the note, so a 2-bar note ending
+  on the drop is a 2-bar riser. Designed by ear, no recordings. It plays live sample for sample.
+- `sound_speak` saves the engine's own word and phone timings beside the sound on Windows
+  (`sounds/<name>.timings.json`; other systems say timings are not available). New params `rhythm=` and `bpm=`
+  put each syllable on a written 16th: `rhythm='night 0; shift 2; engineer 12 14 16'`, one position per syllable,
+  `-` skips one. Each syllable is cut where the next starts (a syllable starts at the last consonant before its
+  vowel), and the reply says where the sound starts so the stressed word lands on its beat. The timings come from
+  SAPI's events because a speech server's word starts ran early and cut syllables.
+- New op `analyze_voice_heard(project, voice, bars=None)`: after `render(stems=True)`, the voice stem against the
+  sum of the other stems per band (body, words, consonants, air) over the frames where the voice speaks, the
+  loudest other part in each band, and a one-line verdict naming the band that masks it. No transcription.
+
+### Replies that read the live state: the reference, a Send button, "hear it" (ledger:M245, M246, M247)
+
+- A first-session test kept its reference in a separate analysis project, never compared a draft with
+  it, and called a draft "measured on" the reference. render's reply had no word about the reference. Now, when
+  the project has a reference, render prints one line: compared with it never, or not since this render with the
+  last comparison (compare, cmp_run and sound_compare against `ref` leave a receipt in `renders/compared.json`);
+  when the song's ref/ holds audio the project does not use, it says `project_set(reference=)` makes the reference
+  ops reachable. `project_set(reference=)` and `project_new(reference=)` say what to run next, with the caveat
+  that the part carrying the reference's identity is checked on top, never averaged down to its stem.
+- `ops_find("the snare sounds dated, make it sound like the genre")` returned phone_sounds and sound_speak (the
+  word "sound" in their names). analyze_kit, sound_extract, instrument_fit and sound_compare now have "Reach for it
+  when" sentences in their descriptions, as project_set and compare do for a reference that arrives as
+  inspiration; both queries are tests.
+- `instrument_help(type='kit')` and `type='code'` say that note names follow C4 = 60, so C1 is MIDI 24 where GM
+  drum charts say 36 (a kit voice mapped by GM numbers played a rim click on every hit).
+- The feedback page saved on every keystroke and had no way to say "finished", so an agent read and answered a
+  half-typed note. Every round now ends in a Send button that writes `done.json`; typing or recording after it
+  marks the round changed after sending (the earlier send time stays) until Send is pressed again.
+  `feedback_read` opens with SENT or STILL WRITING and, when not sent, "not sent yet: don't act on these answers".
+  New op `feedback_wait(project, round, timeout_s=180, after=)` waits for the Send and returns the answers, or at
+  timeout what is typed so far and how to call it again; `feedback_page`'s reply points to it and never asks the
+  person to type "done". A page server started before this has no Send button: the replies say so and how to
+  restart it.
+- Rounds given a song's `proj/` were written inside it and lost when the song's build regenerated `proj/`. They now
+  go in the song folder (`songs/<slug>/work/feedback/<round>/`); a round already in `proj/` stays where it is.
+- Drafts went out as file cards the person did not find. render (after an mp3 or a named render) and sketch now end
+  in a short "hear it" block built from live state, by file reads and local requests of under half a second: the
+  file's full path; the phone page and when the phone last checked in (the phone server's `/health` now lists its
+  devices); the stage when the person is in the headset; a live engine for this song; this project's feedback
+  round; then one option chosen from that state (a standing choice in `project_set(listen_pref=)`, then the stage,
+  an open feedback round, a phone seen in the last 5 minutes, a live engine, else play_file or a feedback page).
+  It offers; whether a draft goes on a page or hands over as a file stays the agent's call.
+
+### Skill: lessons from a first-session test, and one consistent playbook (ledger:M245)
+
+- A test song came out bland: it matched the reference's averages (a riff turned down 10 dB to a stem's level),
+  wrote a stock chord loop over a reference with one pedal, kept a generic snare, and never compared a draft with
+  the reference, because every reference op was routed through recreate.md. The skill now says, where the decision
+  is made: a reference that arrives as inspiration is set on the song and compared before every draft (a new row,
+  the loop's listen item, a Reference line in the Listening Report, recreate.md); the Session Sheet's harmony is
+  measured from the reference or the genre, a pedal included, and names the reference's signature, built first and
+  pushed; the part that carries the identity is checked on top where it enters, not averaged; "design it" still
+  means measuring genre tracks yourself; a stem is a hint and the full mix the target; genre drums come from
+  measured kit pieces; C1 is MIDI 24 in ismail (GM charts say 36).
+- One rule against guessing in Non-negotiables: a cause, a fact about the reference or a reading of the person's
+  words is a guess until one check backs it, the check is named, and an unchecked cause is never acted on twice.
+- Handing a draft over: the person always gets something to open and hear, the agent follows the "hear it" block
+  in render's and sketch's replies (the VR stage included), the person's way of listening is asked once and kept,
+  and a feedback page is read after their Send (`feedback_wait`), never a typed "done".
+- Coherence pass: the loop reads as a checklist, not a sequence; the guide's lines tied to "step 8" or "step 0"
+  name the moment instead; duplicates folded (the mp3-and-question rule into the loop, the measured-numbers rule
+  into the guess rule, the eye exam in instruments.md into a pointer); an exam page is never handed over as a file
+  path while a song file is.
+
+### Skill: yt-dlp is a Python library too
+
+- `recreate.md` section 0 says yt-dlp is a Python library as well as a command, so a script can fetch several
+  references at once.
+
+### Skill: one reference for helper agents (ledger:M243)
+
+- A first session took 15 minutes to its first sound while one agent built every voice in turn. Helpers were
+  mentioned only inside the jam and stage-takes guides. `references/helpers.md` now covers them for any piece:
+  quick mode by default and a crew when it pays, sound first while helpers build, who owns what (only the main
+  agent talks and plays sound), the brief, the shared machine (helpers use the parent's `ISMAIL_SESSION`, one heavy
+  job per crew), cheaper models for short narrow tasks with the person's choice winning, and working without
+  helpers. SKILL.md (the loop, the table, the reference list), live.md, stage-takes.md, development.md and
+  worktrees.md point to it.
+
+### Skill: fetching a reference from a link
+
+- A new session given a YouTube link had only "yt-dlp; YouTube may bot-wall" to go on, improvised other clients
+  and a browser, and got the computer blocked. `references/recreate.md` section 0 now gives the two commands the
+  sessions that fetch references fine use (find the upload and its SOURCES.md fields, then fetch the audio into
+  `ref/`), recording it as it plays (`listen_start` on the speakers) when there is no download, and one line for
+  a failed download: say so, offer the recording or a file, no retries. A row in SKILL.md's
+  table and the instruments guide point to it; `setup.md` installs yt-dlp and deno after one yes.
+
+### Phone: a linked .md, .csv or .log opens as text
+
+- A panel link to a Markdown plan downloaded on the phone instead of opening (the server sent types it did not
+  know as `application/octet-stream`, and a phone has nothing to open a `.md` with). `.md`, `.csv` and `.log` are
+  now sent as `text/plain; charset=utf-8`. Test: the type table in `tests/test_phone.py`.
+
+### analyze_tuning reads fast notes and their attacks (ledger:M231)
+
+- Each note was read from a fixed 100 ms after its onset and needed 60 ms of steady part after that, so a fast run
+  (a 16th at 104 bpm is ~144 ms onset to onset, and a plucked voice may end it ~60 ms early) read as zero notes:
+  the passage a listener called badly out of tune was never measured. In fast runs the fault is in the attack
+  itself: each fast plucked note starts 5-10 c sharp (the voice's pitch glide) and never settles.
+- The skip now scales with the note: `min(skip_ms, 0.3 x its length)` (onset to the next onset, or to its level's
+  30 dB fall), and the steady part it needs is `min(60 ms, 0.4 x its length)`, at least 25 ms. `skip_ms` keeps its
+  meaning as the longest skip. Every reading needs 4 periods of its pitch in its window (a 25 ms window reads down
+  to ~170 Hz); a note too short to resolve its pitch is counted ("too short to resolve"), never guessed.
+- Notes are timed from the attack itself (the steepest rise in level near the onset), and a read ends where the
+  next note's attack starts, so a short window never mixes two notes.
+- The attack is read too, from 30 to 80 ms after the onset (less on a short note). The table gets an `attack`
+  column (median cents of the attack over the steady pitch), and when most attacks sit more than 5 c off, the
+  verdict adds "attacks start N c sharp ...: shorten the voice's pitch glide". A note too short for a separate
+  steady part is read from its attack on, marked `attack only` in the worst notes, and still counts against the
+  grid, so a fast run is never silently empty.
+- Tests: a run of plucked 16ths at 104 bpm 30 c sharp is read (32 notes, +30 c; the fixed skip read none) and
+  flagged; a run whose notes start 8 c sharp for 40 ms reads in tune with an attack of +8 c and is flagged on the
+  attack; the 40 c glide on slow plucks stays out of the steady pitch and is now named as the attack (+16 c); the
+  drum (tumba +46 c, conga -49 c), noise and grid tests are unchanged.
+
+### analyze_tuning: every part of a render against the tuning grid and key (ledger:M231)
+
+- A pitched part off the tuning grid went unnoticed until someone heard it: a salsa kit measured from records kept
+  their tuning (its tumba sustained at F#3 +46 c, its conga at C#4 -50 c, a quarter tone off any key), and a nylon
+  guitar's chords drifted 10-20 c string to string. New op
+  `analyze_tuning(source='render', stems=None, tol_cents=15, bars=None, key=None, tuning_cents=None, skip_ms=100,
+  worst=5)` reads every track stem of the last `render(stems=True)` (or the reference's stems with `source='ref'`, one
+  part by `track:`/`ref:`/`sound:`/path, a whole mix by `render:mix`/`ref:mix`) and flags notes more than
+  `tol_cents` off the grid.
+- Per note it reads the steady pitch from `skip_ms` after the onset (plucks start up to ~10 c sharp for ~90 ms, a
+  drum's strike is noise), from spectral lines: chords give one pitch per note, partials fold onto their note (a
+  tumba's octave mode reads as the tumba), gliding notes and noise are counted and not read. Per part: pitched notes,
+  median cents off the grid, spread (middle half), the count beyond the tolerance, the worst notes (seconds, bar and
+  beat, note, cents, Hz) and one verdict: in tune; the whole part off (retune by N c); a few pitches off (retune
+  that voice or split it onto its own track); or drifting note to note. A part with no steady pitch is skipped,
+  never flagged.
+- The grid is A4 = 440 Hz (ismail plays at A440), moved by `tuning_cents`; a reference `ref_retune` has not moved is
+  read on its own measured tuning. With a key (`key=`, or the project's or the sketch's) the out-of-key pitches are
+  listed as information, never as a flag.
+- Listed in `guide`, `docs/reference.md`, the listening reference (run it after the first render of a song with
+  pitched percussion or a voice in a new register, and before any exam) and the instruments reference.
+- Tests: `tests/test_analyze_tuning.py` (synthetic stems: a part on the grid; tumba +46 c and conga -49 c flagged
+  within 3 c beside an in-tune quinto; a 40 c attack glide inside 90 ms not flagged; a noise part skipped; the grid
+  moved by `tuning_cents`; a reference read on its own tuning until retuned; errors).
+
+### Worktrees: `done` takes a copy whose pull request was squash-merged
+
+- `done <path>` refused a copy whose pull request GitHub had squash-merged: "is not merged: N commits are not in
+  origin/main". A squash (or rebase) merge puts new commits on main, so the branch's own commits never land there,
+  and the copy stayed until someone removed it by hand.
+- `done` now lets a copy through on any of three tests, in this order, and says which one passed: its commits are in
+  `origin/main` (as before); its files are the same as `origin/main`'s (`git diff --quiet origin/main <head>`: no
+  work is lost); or `gh pr list --head <branch> --state merged` names a merged pull request whose last commit is the
+  copy's last commit. The answer ends with `(its commits are in origin/main)`, `(its files are the same as
+  origin/main)` or `(its pull request #N is merged)`.
+- Real unmerged work is still refused: a commit made after the merge, a branch with no merged pull request, and a
+  copy with no branch. The refusal says why the pull request test did not pass (no merged pull request, commits
+  made after it, or gh missing or not answering). The checks for uncommitted and untracked files are unchanged.
+- Limits: `list` still reads a squash-merged copy as unmerged (it does not ask gh per copy), so such a copy can show
+  IDLE or BEHIND until `done` removes it.
+- Tests: `tests/test_worktrees.py` (a squash-merged copy passing on its files, then on its merged pull request after
+  main moved on; a commit after the merge, no merged pull request and no gh all refused). No test calls the real gh.
+
+### Stage: a camera crew's tools (stage_on_air, stage_pointer)
+
+- For the same talk on the stage (the user, 10-17: agents as a camera crew, a director calling the shots; "wherever my
+  hands point, the camera view shows some kind of pointer ... funny"). `stage_on_air(scene, camera)` cuts to a
+  camera: the monitor material (default `monitor_screen`) shows it live through `stage_surface`, and the cut is
+  logged in scenes/<scene>/on_air.jsonl with its UTC time and an optional note; a camera the scene's manifest does
+  not list is refused and not logged. `stage_on_air_log` lists the cuts with how long each stayed on air. A cut on a
+  monitor that already shows a camera only changes the camera (no new render target).
+- `stage_pointer`: a giant foam finger where a person's hand points (a body following the user live or playing a
+  take), from the shoulder through the index fingertip to the first surface (2.5 m out when nothing is hit). With
+  `when='point'` it shows only while that hand points (index straight, middle and ring curled, the hand 40 cm or more
+  from the shoulder, held 120 ms), and grows in and shrinks away. It is drawn on a new layer, `CAM_ONLY` (editor.js),
+  which the headset's eyes never enable and capture and surface cameras do, so the speaker never sees it and every
+  camera does.
+- Limits: one style for now (`foam_finger`); the pointing test reads the body's finger bones, so a body without
+  finger bones needs `when='always'`. Only the first person following or playing is used unless `person` is given.
+
+### Stage: screens in the room (stage_surface)
+
+- For a talk given from the stage (the user, 10-17: a lecture hall with slides, a video backdrop, a teleprompter
+  and a monitor showing the camera on air): `stage_surface` shows an image, a video, text or a live camera on every
+  mesh of a named material, now, by an agent. The meshes draw flat and unlit (a screen glows; `glow` dims it) and
+  get their own material back with `clear=True`; nothing is saved to the scene. A re-exported room gets its
+  surfaces back; another scene starts with none.
+- The surface keeps its mesh's shape: its aspect is measured from the UVs of its first triangle in world space (or
+  `aspect=`), and images, video and text are drawn into a canvas of that shape, fitted `contain` (on `background`),
+  `cover` or `stretch`; `px` is the long side. Text wraps to the width, `lines` at once, scrolling `scroll` lines a
+  second from `line`. A camera renders at the surface's aspect with the camera's horizontal field of view, `fps`
+  times a second, never drawing its own screen (a texture cannot be read while it is drawn into).
+- Videos load as a whole file (seekable without range requests), muted unless `sound=True`. In a capture
+  (`stage_capture` setup, timed with `at_song`) a video is seeked to the film's time every frame and a camera
+  renders every frame, so the edit sees what the room showed. Files must be inside the scene folder; the op checks
+  before sending.
+- Limits: each camera feed is one more render of the room (keep `fps` low in the headset); a surface covers every
+  mesh of its material, so screens that show different things need their own materials; which way up a picture
+  lands follows the plane's UVs.
+
+### Tests: two stage tests no longer depend on how fast the Windows runner is
+
+- `test_a_recorded_move_thins_to_few_keys_that_play_back_within_two_cm_and_two_degrees` timed out on Windows CI
+  (main after pr:261 on 10-15, and pr:262), and `test_smooth_glides_through_a_key_and_stop_halts_there` did the same
+  on 10-12. Each time it was the run's first `node -e`: the script itself takes about 25 ms, and every later node
+  call in those runs passed. The five stage test files that run page code in node now share `tests/nodejs.py`: the
+  run's first launch is a warm-up of its own (`node -e 0`, up to 300 s, named in the warnings summary if it takes
+  over 5 s), and a script that still times out at 60 s runs once more, with a warning. A script that hangs still
+  fails.
+- `test_listen_and_presence_ops` failed on Windows CI (pr:262 on 10-15, main at 50b115b on 10-17) with the note "heard by
+  tester" but still `waiting`: the check that marks it handed runs on a timer thread 0.3 s after the note, and the
+  test read presence after a fixed 0.6 s sleep. It now waits up to 30 s for the note to be decided, with a 2 s
+  window to hand it over, and still asserts `handed`.
+
+### engine: one reclaim folder at the root of the drive
+
+- New `ismail/reclaim.py` (ledger:M229, the user's voice note: all reclaim folders go in one place at the root of the
+  drive). `reclaim.root()` is `$ISMAIL_RECLAIM`, else on Windows the songs folder's drive root plus `_reclaim`
+  (`D:\_reclaim`), else `songs/_reclaim`; when that cannot be made or written it falls back to `songs/_reclaim` and
+  the op's report says so. `reclaim.move(path, what, group=, why=)` moves a file or folder to
+  `_reclaim/<what>_<YYYYMMDD>/<group>/<path from the drive root>`, never overwrites (a numeric suffix), appends a run
+  to that folder's `manifest.json` and adds or updates its entry in `_reclaim/README.txt` (other entries untouched).
+  `reclaim.Run` keeps many moves as one run. `python -m ismail.reclaim` lists the folders with their sizes;
+  `python -m ismail.reclaim move <path> <what>` moves one. Nothing in it deletes.
+- `song_compress` moves the WAVs to `_reclaim/flac_<date>/<song>/` there (its per-file data kept in the manifest),
+  and `ismail.backup` trims older backups into `_reclaim/backups_<date>/<song>/`, both instead of `songs/_reclaim`.
+- `machine_disk` lists the reclaim folder's folders with their sizes, and the old per-song `songs/*/_reclaim`
+  folders as before. The disk hint, the worktree cleanup message, SKILL.md and docs/reference.md name the new place.
+- Tests point `ISMAIL_RECLAIM` at a temp folder for every test (tests/conftest.py); new tests/test_reclaim.py.
+
+### skill: every song can be made again from its folder
+
+- `skills/ismail/SKILL.md`: each song keeps a script that rebuilds it and renders its audio (`build.py`, `set.py`, and
+  one written for a song taken out of a live session), with what it uses copied into the folder. So its renders and
+  stems are disposable: kept are reference audio, recordings and takes, and upload masters; a WAV gets an mp3 before it
+  goes, and cleared files move to the reclaim folder, never deleted by an agent (ledger:M228, the user's word).
+- Step 8 (play it and ask): a person who cares about disk space is asked once whether WAVs are kept; the answer is
+  a standing choice, and "no" means named renders with `mp3='only'`, older WAVs with an mp3 to the reclaim folder.
+
+### phone: a panel left unsent keeps what you typed
+
+- Typed text, dictated text and picks in a panel were lost when you left it (Later, another tab, a tap outside) and
+  came back: the page rebuilt the panel from the agent's values, so Send went out empty. The page now keeps a
+  panel's inputs when it goes away unsent and puts them back when you reopen it, on this phone across a reload too;
+  a voice note that lands while the panel is closed still adds its words. An answer or Not now drops them
+  (ledger:M227).
+- Tests: `tests/test_phone.py` checks the page keeps, restores and drops them.
+
+### A sampler with several sounds on one pitch; a phone now label that expires (ledger:M218)
+
+- From the Live DJ's handoff (item 55, 10-16): a kit maps one pitch to one instrument, so the beatbox kit put each
+  take of a drum on its own pitch and rewrote every note's pitch in turn, and the live loop started that cycle over
+  every pass. A sampler now takes `'sounds': ['a', 'b', 'c']` in place of `'sound'` with `'select'`:
+  `round_robin` (the default: the k-th hit of a bar of c hits in song bar b plays sound (b * c + k) mod n, so the
+  turns carry on from bar to bar), `random` (seeded on the note's song beat and pitch) or `velocity` (each sound
+  `{'sound': 'soft', 'vel': [0, 80], 'gain_db': 0}`; without ranges they split 0-127 evenly, softest first; sounds
+  whose ranges overlap take turns). Each sound may carry its own `gain_db`.
+- The pick is keyed on where the note sits in the song, as synth and drum seeds are, so a window render picks what
+  the whole song picks. Live, a track whose sampler picks among sounds renders a bar per event and passes the
+  deck's song beat to the worker, so a deck plays the studio's sounds sample for sample (`live_parity`). A looped
+  live clip of whole bars carries the turns on from pass to pass as if the bar were written out again, repeating
+  after `select_cycle` passes (round robin: the number of sounds; random: 8) so the render cache stays bounded.
+- One `'sound'` plays exactly as before. `'select'` without `'sounds'`, both `'sound'` and `'sounds'`, a `'vel'`
+  range outside velocity mode, and ranges given to some sounds and not others are refused with what to write.
+  Render caching, provenance and the credits read every sound of a sampler.
+- phone_now: a now label set by a script used to win over the engine's playing list until someone cleared it (on
+  10-12 the page named a cumbia while the beatbox loop played). The label is now tied to the clips playing as it
+  goes up and those that start in the next 2 bars (a label put up just before its music is queued), and expires
+  when they all stop; the page then shows the engine's own playing list. `now_of=[...]` ties it to named clips,
+  tracks or decks; `now_of=[]` keeps it up until replaced or cleared, as before. An engine that does not answer
+  (a pause) leaves the label as it is.
+- Limits: played keys (`live_midi`) render each key once and have no place in the song, so a multi-sound sampler
+  on keys plays one sound per key (keys render at velocity 100 and scale, so velocity layers do not switch there). A looped live clip whose length is not whole bars repeats its first
+  pass's picks. A label bound to clips expires on a chapter change that queues new clips without a new phone_now
+  (the page falls back to the engine's list, not a wrong name).
+- Tests: `tests/test_sampler_select.py` (the checks, round robin, random, velocity layers and overlaps, per-sound
+  gain, a window render matching the whole song inside a kit, a deck matching the studio for round robin and
+  random, a looped live clip carrying the turns on); `tests/test_phone.py` (a label expiring when its clip stops,
+  one named by deck, and an unbound one).
+
+### Governor: the macOS meter counts a job's compressed memory (ledger:M166)
+
+- On macOS the job meter read a process's own memory as its resident size, and macOS compresses pages out of the
+  resident set under memory pressure, random bytes too. In the test suite a `machine run` job holding 900 MB of
+  random bytes read 844 MB resident at its peak and 812 MB a second later, so it stayed under the 0.85 GB OVER
+  line and OVER MEMORY never fired there. Alone on the same runner it read 914 MB and fired. The meter always saw
+  the job; it saw too little of it.
+- `_mem_of` now reads the physical footprint on macOS (`proc_pid_rusage`, the number Activity Monitor shows:
+  resident plus compressed and swapped out pages), which held at 908 MB through the same run. It falls back to the
+  resident size when the call is not there. Windows (private bytes) and Linux (resident size) are unchanged.
+- Tests: `test_the_cli_says_over_memory_in_the_jobs_own_output` is no longer an expected failure on macOS.
+
+### analyze_melody: a held note reads as one note
+
+- A held note could read as two notes of the same pitch. librosa's onset detector also fires where no note starts:
+  on the click of a note that stops dead (an eighth held 60% split at +0.30 beat), and inside a held tone whose
+  timbre moves (a wah fires every sweep). `melody()` kept every onset as a split, and the tail past it still read as
+  pitched, since pYIN's 93 ms window smears the pitch past the cut, so it passed as a note of its own; the merge
+  step after it only shortens notes and never joins two of the same pitch.
+- An onset is now dropped when the pitch is the same on both sides (within 50 cents) and nothing re-attacks. A
+  re-attack is a level rise of 3 dB or more out of a dip before the next onset (a gap, or a decaying note struck
+  again), or a hard restart: the level holds and the onset stands 15 times over the onset strength around it (a
+  legato retrigger of a flat synth note clicks). A note struck again at the same pitch stays two notes. The output
+  format is unchanged (ledger:M226).
+- Limits: a legato retrigger that barely clicks (a pure sine restarted near its own phase, or under a fast wah)
+  can still read as one longer note.
+- Tests: `tests/test_melody_split.py` reads held legato notes (plain and under a 6 Hz wah), eighths stopped dead,
+  and same-pitch lines struck again: quarters with a gap, a decaying note with no gap, eighths stopped dead, and a
+  flat note retriggered legato.
+
+### song_compress: a finished song's WAVs as FLAC, bit for bit (ledger:M221)
+
+- Stems are about 29 GB of WAV, and FLAC keeps every sample at about a fifth of the size. New op
+  `song_compress(project, dry=True)` turns `renders/stems/`, the reference's stems folder and the named renders
+  (`renders/*.wav` except latest.wav) into FLAC at the WAV's own bit depth, reads each one back and compares every
+  sample, and only on an exact match moves the WAV to `songs/_reclaim/flac_<date>/<song>/` (a `manifest.jsonl`
+  lists every move). It never deletes: the space comes back when the user empties `_reclaim` (hq:D-183).
+- Dry by default: the report gives the files, GB now, GB after (estimated from three files), the skipped files and
+  why, and the song's own scripts that name a `.wav` (found by grep; their owners' code). `dry=False` runs in a CPU
+  slot on the shared machine, one song per call. Never touched, as code in the op: float WAVs (FLAC has no float),
+  anything under `live/`, `sounds/` (the render cache keys on their mtime), takes and phone folders, exam folders,
+  and `boom_trance/takes`, `vox/exam/clips`, `vox/work/cache`, `vox/rec`.
+- Readers find `<name>.flac` when `<name>.wav` is gone (`ismail/audiofile.py`: `find`, `listing`): every analysis
+  source (`render`, `ref:<stem>`, `track:<name>`, a path), the comparison stems, swing and grid on the drum stem,
+  the sketch's tune balance, and `ref_retune`. A windowed render keeps its window as FLAC. Writers stay WAV: a new
+  render writes `<name>.wav` beside the old FLAC and wins, and the next run moves the old FLAC to `_reclaim`.
+- `render(out=...)` writes `renders/<out>.wav` once and makes `latest.wav` a hard link to it (one copy on disk; a
+  drive without hard links gets a copy as before). `write_wav` never writes through a linked name: it writes a
+  temporary file that replaces the name, so a later render never changes an earlier named one. An existing
+  latest.wav that copies a named render becomes a link when the song is compressed.
+- Listed in `guide`, `docs/reference.md`, the `ops_find` start shelf and the playbook's machine section.
+- Tests: `tests/test_flac.py` (find and listing, each switched read site on FLAC-only stems, the latest.wav link
+  across renders, the dry report, the exact read-back, a float WAV skipped, the moves and manifest, a newer WAV
+  beside an old FLAC, the never-touched folders).
+
+### analyze_melody: a quick octave jump reads in its own octave
+
+- An eighth-note octave bounce (E2 E3 at 124 bpm) read its E3s as E2. pYIN's smoothing held the lower pitch through
+  the jump: the lower note's period is also a period of the upper one, and the path may move only about two
+  semitones per frame, so it stayed low for every frame of the upper note, and the pitch refinement searches only
+  one semitone either side. Held (legato) notes read low every time, on a plain sine and on a harmonic tone alike.
+- Each note's octave is now checked against its own spectrum: a note read at f whose odd partials (f, 3f, 5f) are
+  20 dB or more under its even ones (2f, 4f, 6f) is at 2f, and moves up (never above fmax). A true low note keeps
+  its octave, a missing fundamental included, since its 3f still sounds (ledger:M220).
+- Tests: `tests/test_melody_octave.py` reads an A2 A2 A3 A2 eighth-note line on a sine and on a six-partial tone,
+  and checks the octave check on a low saw, a saw without its fundamental, and a sine an octave up.
+
+### analyze: pitch in cents per note, and a pitch contour (ledger:M225)
+
+- `analyze_melody(cents=True)` gives every note's measured pitch as numbers, for scoring maqam steps (quarter
+  tones) and intonation against a reference: tab-separated rows `start note dur vel midi hz cents`, where `midi` is
+  the pitch as a float (note + cents/100). The reading already kept each note's offset but printed it only as a
+  `# +NNc` comment past 25 cents. The default output is unchanged.
+- New op `analyze_contour(source, bars, hop_ms=10, fmin, fmax, start=0, max_rows=200)`: f0 per frame with time,
+  bar, beat, Hz, float MIDI, note and cents, and pYIN's voicing probability ('-' unvoiced), for slides, vibrato and
+  ornaments. One window of at most `max_rows` frames (cap 1000) per call, the last line names the next `start`;
+  only the window is analysed, so bars may span up to 64. pYIN gives voicing and the octave, YIN's interpolated
+  pitch the cents where the two agree. Listed in `guide`, `docs/reference.md` and the listening reference.
+- Tests: `tests/test_note_cents.py` (a tone 50 cents flat, a line with three-quarter-tone steps, the window cap).
+
+### phone: one beatbox classifier (ledger:M222)
+
+- `ismail.phone.beatbox` reads a beatbox voice note into drum hits: `read(y, sr, ref=None)` finds the hits (flux
+  from 100 Hz to 10 kHz, the music under the take taken off when `ref` is given) and classes each one kick, snare
+  or hat; `classify(hits)` is the rule alone, for hits found another way. The hits are ranked against each other
+  on the take: two-means on the log spectral centroid splits dark (kick) from bright when they sit an octave
+  apart, and among the bright ones two-means on onset strength splits the snares (hardest) from the hats. Each hit
+  carries a `margin` (how far it sits from the cut that decided it), so a script picking its clearest hits does
+  not need a band rule of its own. The take is scaled to a -3 dBFS peak first, so a quiet take keeps its quiet
+  hits.
+- Why: three copies of the rule in a live set's scripts drifted apart. The absolute one (more than 30% above 4 kHz
+  a hat, more than 35% under 250 Hz a kick) read 5 of 50 kicks on a real earbud take, where the mouth kick is a
+  dark thump with little under 250 Hz; the relative rule matches the kicks the person played there, and reads the
+  same classes at any take level.
+- Tests: `tests/test_beatbox.py` on a generic stand-in (dark thumps over 18 dB of level, hard bright bursts, quiet
+  airy ticks, a speaker beat under the take). Docs: `jam-runner.md`, step 5.
+
+### docs: the Live DJ's lessons in the live and phone references
+
+- `references/live.md`, "Played keys": say a take fits only after reading the grid fit's numbers, and a recorded
+  (audio) take gets the same fit on its unrounded onsets (`fit_grid`, the fit `live_played` uses).
+- `references/live.md`, "A set's folder": read the section code and `setlog.md` before describing a past set, and
+  serve a page of the set's files over http, never as a file (a file page's relative audio fails in a browser pane).
+- `references/phone.md`, "Watching the phone" step 2: the first line of a passed-on note or an answer to another
+  agent's ask says who it is for and what it is for.
+- `references/phone.md`, `phone_exam`: a raw take sits about 15 dB under a bounce with its peaks near -3.5 dBFS, so
+  the pre-flight's 1 LUFS check refuses the pair; play it on the computer's page or send a labelled limited copy.
+  (ledger:M223)
+
+### docs: a quick start the melody reader reads right
+
+- The CLI quick start in `docs/reference.md` writes `0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1` on `preset:acid_bass` at
+  `volume_db=6`. The old line's sixteenth-note E3 (121 ms at 124 bpm, half of it inside acid_bass's 60 ms glide up
+  from E2) read back as D#3 +42c with a second-part warning, and the render was flagged QUIET at -24.2 LUFS. The new
+  one reads back note for note (voicing 0.50, no warning) and renders at -16.0 LUFS, peak -8.5 dBFS. A clean held E3
+  on acid_bass reads right: the reader was not wrong, the example was too short for the glide (ledger:M214).
+- Tests: `tests/test_quickstart.py` runs the quick start's own lines from the doc through the CLI and checks the
+  notes read back and the level.
+
+### phone: under each note, who took it
+
+- The page writes one small line under each of the person's voice notes: "taken by X" (the agent it was said to,
+  then the agent that claimed it with `phone_claim`; "taken by Voice, Director" for both), or "nobody has it yet".
+  It comes with the page's state from the claims the server keeps, and a claim wakes the page so the line changes
+  at once. The person's ask (ledger:M219, hq:D-179): two agents each skipped an untagged note, sure the other had
+  it, and the phone could not show whether a note landed with anyone. The lines survive a restart (reading the
+  inbox back after one no longer skips its first line when the whole file fits).
+  Docs: `phone.md`, "Watching the phone" step 2. Test in `tests/test_phone.py`.
+
+### Standing grants: the person's sources first, routes stop at what is always asked, a number on watcher_down
+
+- An entry with a `source` now matches before one without, so an old unsourced grant with a wide keyword ("merge")
+  no longer shadows a sourced one that names an owner. `grant_list` marks an unsourced entry and says how to give it
+  a source (`grant_drop`, then `grant_add` with one).
+- A route no longer carries an ask away from the person when it names something always asked (public, money,
+  accounts, deleting) or something only their senses answer (an exam, a listen, a headset test): `grant_check`
+  answers `ask:` and the phone asks them.
+- The heartbeat's `watcher_down` alarm carries `down_since` (epoch seconds of the watcher's last poll), so a lead's
+  alarm reads a number instead of the time in the text.
+
+### sketch: feeling words in the first brief, the tune level held (M181 F2, M213)
+
+- A first brief's feeling words now shape the sketch, not only a next round's: "happy and bouncy" came back at 72
+  and 70 BPM, called "slow and bright", and was offered "faster and bouncier". A lift word sets the lowest tempo
+  (happy 92, bouncy 106, upbeat or exciting 112 BPM), a calm one the highest (calm 76, dreamy 80, sad 84), unless a
+  tempo word or a named BPM says otherwise ("a slow happy tune"); a genre's own range moves only as far as the word
+  needs ("dark techno" stays at 120-126). A feeling with a mode (happy, sad, spooky) picks it when no key is named.
+  This also holds for the three styles a vague brief gets and for `styles=`, which now also takes the brief's gentle
+  words. The feeling words also cover their plain forms (spooky, moody, gloomy, peppy, playful, sunny ...).
+- The everyday-word choices never offer a feeling the person already asked for, in the brief or any round since
+  (no "faster and bouncier" after "bouncy", no "sunnier" after "happy").
+- The tune balance holds the 4-6 LU the `sketch` docstring promises. A tune 5.5 LU under the parts rose 8 dB and
+  stopped at +2.5 LU; now the tune rises at most 8 dB (and never past its -1 dB peak) and the other parts come down
+  the rest of the way, which is clean, where raising the tune further only drives it into the limiter. The reply
+  adds the level measured in the final mix ("in the final mix it sits +5.0 LU"), and says so when it is outside
+  4-6 LU (a gap over 20 LU is a part gone wrong and is not chased); `sketch_ready.json` carries it as `tune_lu`.
+- Tests: six more in `tests/test_sketch.py`.
+
+### stage: capture setup at a song time, and a keyed screen for the comp
+
+- `stage_capture` setup commands take `"at_song"`: the command waits for that frame and runs on film time just
+  before it is drawn (one at or before t0 runs at frame 0; one at or after t1 is refused, as it would never run).
+- `{"type": "screen_key", "color": "#rrggbb" | "off", "material": | "object":}` in a capture's setup draws a
+  material (default "screen") flat and unlit in a key colour, with no tone mapping, fog or shadows, so a comp in post
+  finds what covers the screen exactly; "off" restores it. Captures only, nothing is saved.
+
+### What a fresh clone sees first (QA rehearsal 10-16: F3, F6, F7)
+
+- `ismail --help` no longer says "Installed from PyPI": ismail is not on PyPI yet, so it names the git+ install.
+- The MCP handshake reports ismail's version (0.3.0) instead of FastMCP's own (4.1.0 on a fresh install), and the
+  dependency is `fastmcp>=3.1,<5`, the range that has been run (3.1 here, 4.1 on a fresh install).
+- The guide's plain-words steps no longer forbid what the first sketch's SAY block says ("It's a first try ... What
+  would you change? Or name a song you love", Nate 10-08), and they are numbered once, in order (3p to 9p; "6p" was
+  there twice).
+- `import ismail.guards` on its own works again: api_guards read guards' word sets while guards was half-loaded.
+
+### live: headroom against the real deadline, cutting a section over, the room speaker off and on
+
+- `live_status` has a `headroom:` line: the mixed audio still waiting when the device pulled, at its thinnest since
+  the last status, out of the 500 ms kept ahead (`headroom: 430 ms of 500 ... clean`; THIN under 125 ms, DROPOUT at
+  0), and the slowest block in ms against its 23 ms. The `mixer: N%` line keeps its start (guards parse it) and no
+  longer calls a high % a dropout risk by itself: it is wall time per block and climbs with other programs' CPU while
+  the sound stays clean. Measured with the device's own pulls, so it holds for a speaker and for `device='none'`.
+- `live_queue(clips, section=, cancel_section=, cancel_at=)`: clips and stops carry a set section's name (also a
+  clip's own `section` key), and `cancel_section` takes back what that section still has to do from where the
+  batch's first clip lands (or `cancel_at`, or the next bar with no clips): its later clips are removed, its playing
+  ones cut there, its stops after it dropped, and its effect moves sent with `live_fx(section=)` (or `section` in a
+  move) dropped, a glide in progress holding where it is. The batch's own clips are kept; untagged clips are never
+  touched. `live_status` lists the sections ahead. djkit: `Set.q(clips, section=, cut=)` tags the clips, `Set.cut`,
+  `Set.moves(moves, section=)`; against an engine started before sections it queues untagged, as before.
+- `live_device(device='none')` and back mid-set, without a restart (it existed since M34; the gaps are closed): any
+  spelling of none, a reply and an `output off:` status line that say the room is silent while the clock, streams,
+  recording and `live_listen` go on, a set started silent still follows the default and catches a stall once moved
+  to a speaker, and a quick none, speaker, none no longer leaves two silent clocks pulling audio.
+- The 489% mixer peak while rigging tracks into a running set: no single cause in the engine. Rigging nine tracks
+  holds the engine lock about 1 ms each, chains build outside it, and an emulated rig on a quiet machine peaked at
+  63%. The peak is the machine: each new track sends a warm-up render to every worker, and on a machine already at
+  86-100% CPU one block took about 113 ms of wall time while the cushion covered it (no underruns); the headroom line
+  now shows that. One stall that was the engine's is fixed: `live_track` resolved the instrument under the lock (a
+  first mimic instrument imports its module, 39 ms; a `track:` spec reads project.json), and a bad instrument left a
+  half-made track.
+- Tests: `tests/test_live_headroom.py`, `tests/test_live_sections.py`, two more in `tests/test_live_device.py`.
+  (ledger M128, M129, M130)
+
+### machine: MISDECLARED, HUNG, ORPHAN, the pagefile's drive, and `machine disk` beyond songs/ (ledger:M122-M126)
+
+- MISDECLARED (M122): a job's meter reads its process tree's share of the GPU's 3D engine every 5 s (Windows' own
+  per-process counter through PDH; nvidia-smi gives none on a GeForce). A `--cpu` job whose tree averages 30 % or
+  more over a minute is MISDECLARED on the board, told once in its own output, and counts against the GPU slot.
+- HUNG (M124): a job past 2x its `--est` whose tree used under 2 % of the CPU and no GPU over the last 5 min is HUNG
+  on the board and told once in its output; it is never stopped, and the flag leaves when it works again. With no
+  per-process GPU reading the whole GPU's load decides, and with no reading at all there is no flag.
+- ORPHAN (M123): a top CPU user whose parent process is gone (or whose parent pid was reused) shows as ORPHAN with
+  how long it has run, on the board and in a refusal that names the top processes.
+- The pagefile's drive (M126): the disk line shows the free space of a pagefile drive no job writes to (C: since
+  10-05) and warns PAGEFILE DRIVE LOW under 10 GB free; a warning, not a gate. live_status shows it too.
+- `machine disk` beyond songs/ (M125): the folders beside the checkout that holds songs/ (the top-level folders of
+  D: here), or `$ISMAIL_DISK_ROOTS`, or `<board>/roots.txt`, each with its size and its growth since the last day's
+  snapshot. A call walks for 20 s at most (`DISK_ROOTS_BUDGET_S`, `--budget N`, 0 for no limit), the cut walk
+  first, then the cached biggest, then the rest; a root it did not reach says "not walked yet", one it cut says
+  "at least", and the next call carries on from the folders left. Each root keeps its own last whole size and time
+  in `latest.json` and is walked again after 30 min (`--fresh` now, `--songs-only` skips it). Growth shows only for a
+  root walked whole both today and on the snapshot's day.
+- Every new probe fails soft (no reading, no flag), and a watch that breaks says so once and leaves the job alone.
+- Tests: `tests/test_machine_flags.py` (made-up samples and processes; no real GPU, orphans or drive walks).
+
+### composition: a melody that travels through instruments
+
+- A method in `references/composition.md` (ledger:S50, from the Live DJ's set): one 8-bar line handed to a new
+  instrument at each section while the groove stays fixed, each pass fitted into the voice's measured range by one
+  helper (whole octaves, a lead kept a few semitones under the measured top), each hand-off checked as a new row in
+  `analyze_structure(source='render')`.
+
+### exams: measure first, then spend the person's ear
+
+- `phone_exam(..., measured=, unmeasured=)` (ledger:M212; qa intent_rules 10-16 cluster 5): an exam goes to the
+  phone with the lines the instruments gave (`{'all' or a clip label or pair number: lines with their numbers}`) or
+  the reason only the ear can tell (logged in the phone's `ear_first.jsonl`); with neither it is refused, saying
+  which to pass. Either one is kept in `<answers_path>.measured.json` for the exam ledger.
+- `exam_check` refuses a pair that is the same audio: aligned within 250 ms and level-matched, a difference under
+  -40 dB is one sound twice (pairs by label, 1A with 1B; every two clips when the labels name no pairs). The line
+  names the offset and the level, so a wrong file or a render that did not change shows at once.
+- Docs: `blind-tests.md` "Measure first", `phone.md`. Tests in `tests/test_exam_check.py`; the phone tests pass
+  `unmeasured`.
+
+### phone: a watcher that stops while the person is live is named, once
+
+- The watcher heartbeat (ledger:M211; qa intent_rules 10-16 cluster 3, "be reachable"). While the person is live
+  (the Quest page open, a phone on the stream, or a `phone_expect` for a set, VR or a jam), an agent that watched
+  in the last 30 min and has not polled for 2 min is down. One `alarm` line (`watcher_down`) goes to the lead's
+  watcher (`phone_watch lead=true`), or to every watcher when no lead is up. The page shows "not hearing you: <who>",
+  and `phone_status` and `phone_presence` name it; `watcher_back` follows when it polls again. A watcher skips an
+  alarm addressed to someone else, and its own.
+- `phone_expect(who, why, minutes=180)` and `phone_signoff(who, why)`: a watcher that must stay up, and a clean stop
+  that raises nothing. `phone_presence` also says whether the person is live, who the lead is and who is expected.
+  Docs: `phone.md`, "Watching the phone" step 6. Tests in `tests/test_phone.py` and `tests/test_phone_watch.py`.
+
+### Standing grants know whose step it is: grant_check, grant_add, routes and the still-ask list
+
+- Grants gain `owner` and `kind` (ledger:M209-M210, the 10-16 intent-rules review, clusters 1 and 2). A grant with
+  an owner is that agent's: its own ask is refused with "act on it", anyone else's with "this is <owner>'s: send it
+  to them". A route (`kind: "route"`) sends any question with its keyword to the owner instead of the person.
+  Phone and stage asks pass `sender` to the check, and overrides log the verdict and the sender.
+- A still-ask list no grant covers: anything public, money, accounts and passwords, deleting. A matching grant then
+  only adds a note, and the question goes to the person.
+- New ops on a new `asks` shelf: `grant_check(ask, sender)` (`act:` / `send:` / `ask:`, for a NEEDS NATE line or
+  any ask no op sees), `grant_list()`, `grant_add(says, keywords, source, owner, kind)` (the person's own words as
+  its source; keywords that match any ask and still-ask words refused; a broken file is never overwritten) and
+  `grant_drop(id, why)` (kept in `grants_dropped.jsonl`). Tests: `tests/test_guards.py`.
+
+### master_cue: a finished cue mastered for delivery, measured
+
+- `master_cue(source, start_s, end_s, lufs=-16, tp=-1, sr=48000, out, fade_in_s, fade_out_s=0.4)` (ledger:M207):
+  cuts the cue, fades its ends (cos^2), resamples, then applies one fixed gain to the loudness target (BS.1770
+  integrated). Only when that gain puts the true peak (4x oversampled) over the ceiling does a lookahead peak limiter
+  take the excess; its gain reduction is reported. It never rides the level (ffmpeg loudnorm falls back to a dynamic
+  mode on some files). Writes 24-bit wav, by default `<source>_master.wav`; a file already there moves to `old/`
+  first, and the source is never written. The report (LUFS, true peak, gain, limiting) is the cue's measurement line
+  before anyone listens, with a warning when the target is too loud for the mix.
+- Generalised from `songs/d3_next_teaser/work/master.py`: on the teaser's render it gives the same file, sample for
+  sample (-16.0 LUFS, -1.1 dBTP, 0.2 dB of limiting). Shelved under `render` for `ops_find`. Tests:
+  `tests/test_master_cue.py`.
+
+### stage: cameras that follow, baked into keys for the render
+
+- `stage_follow(scene, object, target, offset, space, lag, look, look_offset, look_lag, orbit, snap, where)`: a
+  camera (or any object) soft-follows an object, a body's joint (`"<person>:<bone>"`) or the person (`"person"`).
+  The offset is in the target's facing by default (`[right, forward, up]`), or Blender world with `space="world"`;
+  a camera looks at its target with a level horizon; `orbit` circles it. The smoothing is time-exact at any frame
+  rate (a step is capped at 1 s after a stall). No object lists the follows; `target=None` stops one; `where` reads a
+  target. A follow waits while its body is not shown, and an error stops it with `behaviour_error` phase `follow`.
+- Behaviours: `s.clock()`, `s.where(target)`, `s.place(name, o)`, `s.follow(target, o)`, and a per-frame hook
+  `frame(s, dt)` (its first error stops it, phase `frame`). Reloading behaviours stops their follows.
+- `stage_camera_record` gains `source="follow"`, the default on a following camera (otherwise `head` for a camera
+  and `hold` for anything else, as before): the follow is snapped at t0, sampled while the clock plays and stopped
+  at the end, so the keys play; Redo and Undo start it again, Keep saves the keys to anim.json for the Blender
+  render. The camera menu's Record move picks it too.
+- Tests: `tests/test_stage_follow.py`; a headless run on a scene copy checked an object follow (settle, aim, level,
+  a 2 m jump at 69 % after one lag), a body's head, an orbit at 90.3 degrees a second, a bake of 19 keys within
+  1.8 cm, Keep into anim.json, and a behaviour with `s.follow`, `frame` and a Stop menu.
+
+### phone_presence and phone_claim: who is listening, and who passes a note on
+
+- `phone_presence()`: both sides, many to many. The agents calling the phone server in the last 90 s, each marked
+  watching (its `phone_watch` is waiting now) or not; the person's devices with the page open (phone, computer,
+  tablet, Quest, from the browser, each page with its own id), with the browser, last seen and whether it is on the
+  stream; the untagged notes nobody claimed in the last hour (LEAD past 3 minutes: the team lead's by default); and
+  the recent claims. `phone_status` gives one line of it, and the page names the devices when more than one is open.
+- `phone_claim(n, by)`: the agent passing on (or answering) note `n` says so first. The first caller wins, decided
+  under the server's one lock, and gets "yours"; everyone after gets "taken: X claimed note n at HH:MM". Claims are
+  kept in `~/.ismail/phone/claims.json`, survive a restart, and every `phone_listen` and `phone_watch` line of a
+  claimed note carries `claimed {by, at}`. `phone_watch` returns `also_watching` and, for untagged notes, says to
+  claim before passing on. The person's ask (10-16): untagged notes reached nobody, or six agents passed one note to
+  the same lead, because every watcher guessed what the others would do.
+
+### sound_zoom, sound_zoom_diff and region_measure: zoom into a sound, and find where it differs from the real takes
+
+- `sound_zoom`: one time x frequency box of a sound at two resolutions, stacked in one PNG: time-sharp on top
+  (256-point window, 32-sample hop at 44.1 kHz) and frequency-sharp below (2048-point). Both panels sit on
+  `spectrogram`'s eye-mode plot box (the same picture code, now with a window and hop per panel), so a box has the
+  same pixels in each, and the .json beside it maps a pixel to (s, Hz) and one address in either panel.
+- `sound_zoom_diff(test, refs)`: where a take differs from 3 or more takes of the same words, beyond their own
+  take-to-take spread, at three scales (grain, strokes, plumes), measured on power; with 4 or more, every take in the
+  test's place makes an own-source control. Hot-spot text first (scale, band, quarter of the word, brighter or
+  darker, z, the control rate in the same cell and whether the spot is beyond every control spot there; a spot
+  counts only where the control lights its cell less often; capped at 12), then a picture of at most 1600 px: the
+  test above the anchor take, the counted spots outlined. With 3 takes the spots are listed uncontrolled and none is
+  counted. Every clip is set to -25 LUFS first, peak under 0.89 (vox's level match; `level_lufs=None` when you
+  matched them). With fewer than 3 takes it refuses and says what to record; there is no absolute threshold. `debias=False` keeps a level across a whole band, which the de-bias
+  absorbs.
+- `region_measure`: power in a box of time and frequency, in dB, and its share of the whole spectrum at that moment.
+- The method moved from the Voice agent's work (`ismail/zoom.py`: `spectrogram_diff` with its defaults unchanged,
+  `region_measure`, `smooth_path` and `frac`, the synthetic parity fixture). On the fixture, seeds 0 to 9 with every
+  take as the anchor, it gives the same maps and spots as the original, cell for cell.
+- New tests (`tests/test_zoom_diff.py`, synthetic audio only): the fixture's box found at the strokes and plumes
+  scales, +5.9 dB in `region_measure`, the one stray cell at seed 4, the refusals, 3 takes without a control, power
+  against mean of dB, the de-bias and `debias=False`, the control-rate rule, the caps, the level match (with its
+  peak cap), and the two-resolution picture.
+  `ISMAIL_ZOOM_ALL_SEEDS=1` runs all ten seeds.
+
+### stage: replay a take as input, ask the person for a test take, keep the last 2 minutes
+
+- `stage_take_replay(scene, take, start=, end=, rate=, grab=)` plays a recorded take on a page nobody wears: the
+  camera takes the take's head pose and each tracked hand becomes a hand on the page (25 joints with their radii),
+  so the page's gestures, touch and grab read it through the same code as a live hand. The reply lists the page's
+  events while it played, a "grabbed / landed onto" line, the take's own recorded marks and anything still held
+  at the end (let go when the replay ends). `stage_take_replay_stop` ends one early. New page module
+  `page/replay.js`, page command `replay_input`, events `replay_start` and `replay_done`.
+- `stage_test_take(scene, ask, name, seconds=15)` asks the person in VR to act something out, records it as
+  `test_<name>`, and labels it with the ask (meta `kind: test`), so an agent can test offline with the person's
+  own hands later. A take recorded outside VR has no frames, and the reply says so.
+- `stage_take_keep_recent(scene, seconds=30, name=)` keeps what the person just did ("keep that") though nothing
+  was recording: while anyone is in VR the page holds their last 2 minutes of head, hands, body and grab marks in
+  memory at 15 Hz (no audio), until a reload. `info=True` says how much it holds. Page command `take_keep_recent`,
+  event `recent_kept`, meta `from: recent`.
+- Limits: hands only (no controller takes, no recorded selects or sticks), the target ray is approximated from
+  the head through the palm, grab hold and release counts use wall time (rate 1 for a grab verdict), and a replay
+  is refused while someone is in VR on that page and stops if VR starts.
+- New tests (`tests/test_stage_replay.py`).
+
+### Fixed: spatial on speakers no longer moves a side sound to the other speaker as ctc rises
+
+- With `out='speakers'`, `ctc` above 0 blended a pan (no interaural delay) with a binaural feed (with one) and
+  ran a crosstalk canceller of the same strength on the mix. The two copies combed: at the default `ctc=0.5` a
+  steady note at 70 degrees right came out louder on the LEFT (1 kHz: -8.8 dB with the default room), and the
+  ears got less separation than plain panning.
+- Now the speakers get one render, the plain equal-power pan with every distance cue, and `ctc` sets only how
+  deep the crosstalk canceller runs on it (delayed and shaped by the head-shadow ratio of the far ear, above
+  150 Hz, gain bounded at 0.9). With one render nothing can comb; `ctc=0` is plain panning sample for sample;
+  the near speaker is the louder one at every frequency and every `ctc`, and the far ear hears less of a side
+  sound as `ctc` rises (70 degrees, ears, 300 Hz to 3 kHz: +3.3 / +8.5 / +14.7 dB at ctc 0 / 0.5 / 1; before:
+  +3.3 / +3.4 / +5.4). A sweep or a jump of `ctc` glides, with no click.
+- On speakers the interaural delay and the pinna echoes are no longer in the feeds (they stay on headphones);
+  the rear darkening stays. The speaker path costs about a third less CPU.
+- New tests (`tests/test_spatial.py`): sines at 500 Hz, 1 kHz, 3 kHz and pink noise at 30, 70 and 90 degrees on
+  both sides, at every `ctc` from 0 to 1, at the speakers and through a simulated speakers-to-ears path.
+
+### spatial: move a sound in 3D, for stereo speakers or headphones, in the studio and live
+
+- A new effect type, `spatial` (`ismail/spatial.py`, live twin `ismail/live/spatial_blocks.py`, one numba kernel
+  for both). Position in metres around the listener (`x` right, `y` front, `z` up), automatable, or a `trajectory`:
+  keyframes (linear or smooth, written as x/y/z or az/el/dist), an analytic orbit, a line or a flyby, with loop and
+  start time; errors say how to write it. Studio trajectories run on song time; live ones start when set or inserted.
+- The chain: mono sum, air absorption, `occlusion` (direct path only), one fractional delay line for Doppler and
+  the interaural delay, clamped 1/r gain and a ground reflection (`ground` soft or hard), a spherical head model
+  (head shadow, pinna echoes for elevation, a rear cue), then `out='headphones'` (binaural) or `out='speakers'`
+  with `ctc` 0 to 1 (0 plain equal-power panning; above 0 a recursive crosstalk canceller for speakers at
+  +-30 degrees, experimental). The effect carries its own early reflections and diffuse tail (`room`, `size`),
+  which fall slower with distance than the direct sound. `spread`, `listener_yaw` (automatable), `doppler` 1 or 0.
+- Optional measured head: `hrtf='sadie_d2'` (SADIE II KU100, Apache 2.0) after `samples_fetch('sadie_d2')` on the
+  person's yes; converted once into `~/.ismail/hrtf` (reading the SOFA file needs h5py). Without it the built-in
+  head is used and needs no data. `samples_list` shows it as a set the spatial effect plays. The download link and
+  size are not yet checked against the York site: the first fetch, after the person's yes, confirms them.
+- Live, a far source is not cut: its sound takes up to 1 s to arrive, so a track or bus holding `spatial` waits
+  1.25 s of quiet (not the usual 0.5 s) before it goes dormant. Each live processor can now ask for such a hold
+  (`Proc.hold_s`, summed per chain, next to `noise`).
+- Fix: a change to `rig.py` (and now `spatial.py`) invalidates cached track renders; before, a rig change could
+  serve a stale render.
+
+### feedback_page: a page the person answers by voice or typing, kept on this computer
+
+- `feedback_page(project, round, items, questions, voice=True, title=None, open=True, port=None)` writes a page
+  into `<project>/work/feedback/<round>/`: the items (clips, pictures or text, each with a label), then numbered
+  questions, each with a text box and a Record button. One shared server on 127.0.0.1 serves every round (found or
+  started by the op, on a free port it records); the page opens in the person's default browser, since an app's
+  browser pane has no microphone. Every typed answer is saved as it changes (`answers.json`, each write also in
+  `answers_log.jsonl`), every recording as a file in `voice/`, transcribed in the background by the speech server
+  the phone page uses, waiting while the CPU is busy. Reopening the page brings back the text, the recordings with
+  their players and the transcripts; clips left waiting when the server stopped are picked up when it starts again.
+- `feedback_read(project, round, since=None)`: the answers verbatim per question, typed text and each clip's file,
+  length and transcript, with times, bounded; says when nothing has come in yet and when transcription is still
+  running. `feedback_list(project=None)` lists rounds, links and what is waiting; `feedback_stop()` stops the server.
+- The skill points to it first for any desk page that takes the person's voice (`blind-tests.md` page mechanics,
+  `user-experience.md`, the SKILL table); hand-built servers only for what it cannot do.
+
+### skill: pages that take the person's voice open in their own browser
+
+- `blind-tests.md` (page mechanics) and `user-experience.md`: a desk page with voice boxes, recorded takes or any mic
+  input is served locally and opened in the person's default browser, since an app's browser pane has no microphone,
+  and it brings back everything they typed or said when reopened. Agents kept rebuilding this; the rule points at the
+  pages that already do it.
+
+### stage_preflight: one check before every VR session or demo
+
+- `stage_preflight(port=, say=, wait=, headless=)` runs on its own scratch scene, `_preflight` (a floor and a
+  box built in code, hidden from the page's scene list, overwritten on every run), and reports one line per
+  check: server, presence, allow_rule, guard_hook, scratch, load (a headless, muted browser opens the scene and
+  its selftest passes), hot_swap (`stage_asset_install` of a new `scene.glb`, answered by the page's reload),
+  live_insert (`stage_world update=`, then `stage_set_load` unload and load), say (`stage_say`, a caption) and
+  listen (a synthetic `preflight_ping`, marked synthetic, comes back through `stage_listen`). Each is PASS,
+  BLOCKED with the next step, or SKIPPED, with its time; then the verdict, shown on the stage (in VR the headset
+  says it; never spoken on the computer).
+- The settings checks only read `~/.claude/settings.json` and the project's `.claude/settings.json` and
+  `settings.local.json`. A missing allow rule or guard hook is BLOCKED with the exact entry to add and where.
+- While someone is in VR, the checks that need a test page are skipped and say so; the person's own scene is
+  never loaded over, moved or reloaded.
+- `stage_listen` now also hears `preflight_ping` (a server started before this change answers BLOCKED: restart
+  it when nobody is in VR). `stage_asset_install` takes the scratch scene `_preflight`.
+
+### stage: a command sent right after a scene switch runs
+
+- `stage_scene_go` now answers only after the page has read the new scene's last command id, so an op sent the
+  moment it returns is newer and runs. Before, the page's first poll on the new scene took every queued command as
+  old, and an op sent within about 2 s of the switch was dropped (it timed out after 30 s). A poll that was still
+  reading the old scene when the switch happened is ignored.
+
+### toms: real toms retuned to the note, struck where and how you say
+
+- `toms` (drums, performer): the Big Rusty toms (Big Rusty Drums by Karoryfer Samples, CC0 1.0: 14", 15", 18"
+  and a 22" kick played as a floor tom). The note is the drum's pitch: the nearest real drum is retuned to it, each
+  recorded layer from its own measured pitch, its ring bent back to a drum at that pitch, then checked as rendered
+  and corrected toward the real drums (pitch per round robin, ring fitted to their envelope). Lanes `pos` (0
+  center .. 1 rim: the fundamental gives up 6 dB toward the rim, fitted on the snare's center and edge hits) and
+  `stroke` (stick, mallet, brush, rimshot, rimclick, shell, dead) per hit; velocity picks the recorded layer.
+  Heard as real F#1-A3; in a blind exam of 5 pairs one listener found the real drum in none. About 2 s per hit.
+- Samples: `$TOM_SAMPLES`, then the project's `ref/` (any Big Rusty Samples folder holding tom_14, tom_15,
+  tom_18 and tom_22), then every folder of the `big_rusty` set (`samples.paths`: a registered copy may lack the
+  toms). Missing, it says to `samples_fetch('big_rusty')`, which already brings every tom folder and stroke.
+  The closed loop's corrections are kept in `~/.ismail/cache/toms` (`$ISMAIL_TOMS_CACHE`), one file per
+  version of the voice's code and data.
+- Performers that name `project_root` get the project folder (studio and live).
+- `sketch` reaches for it on toms, tom fills or grooves, floor, rack, tribal, melodic or pitched toms: a `toms`
+  part on the key's tonic, a fifth and an octave; a tom groove alone, only the fills over a kit. With no toms on
+  the machine the part is left out and said (nothing stands in for a pitched tom).
+
+### Camera moves in VR: the path on the clock, and a move recorded like a take
+
+- `stage_trail(object)` (page command `trail`) draws a keyed camera's path over the clock span in the room: a line
+  coloured from the span's start to its end, a small frustum and the time at each key, and the playhead bright. In
+  VR a key picked on the ray scrubs the clock to it; carried, it moves the key (same time, new place). The camera
+  menu has Path / Hide path.
+- `stage_camera_record(camera, action, source, t0, t1, countdown)` (page command `cam_record`, menu: Record move):
+  after a countdown the clock plays from t0 to t1 while the camera is the person's eyes (`head`) or wherever it is
+  carried (`hold`). The pose is sampled every frame, smoothed (a local quadratic fit, so frame jitter and hand
+  shake do not become keys) and thinned to smooth keys within 2 cm and 2 degrees; they replace the camera's keys
+  inside the recorded window and keep the rest. Keep saves anim.json; Redo and Undo put the old keys back.
+- `interp.js` `thinKeys` and `easeSamples` (shared by recorded moves); the clock holds a recorded object off its
+  keys while it records.
+
+### Grab by touch: hand-sized things, a let-go after an open-handed take, a steadier count
+
+- A hand takes the outermost group it could carry (up to 2.2 m across), not the outermost group: reaching for a pool
+  ball took the whole pool table. `stage_grab_rule(grab=True)` still allows a big thing.
+- The grip locked at the take counts as at least half closed (120 degrees of bend), so a thing taken with an open
+  palm lets go when the hand stays open flat; before, an open-handed take could never let go.
+- The 1.5 s count pauses through a touch or stillness lost for under 0.4 s instead of starting over: one bottle's
+  count restarted 12 times in 9 s.
+- CLI: `key=False`, `key=True`, `key=None` are Python values, not strings (`grab=False` read as a truthy string and
+  allowed the thing instead).
+
+### Ops refuse: personal details on a page, questions already granted, a mic without the person's note
+
+- One module, `ismail/guards.py`, holds the three checks; each refusal says why and what the next call is.
+- Nothing personal on a page: every op that sends text to the phone page (through the one phone call path:
+  captions, panels and their buttons and inputs, asks, exams, now-playing, buttons, offers) and every stage page
+  command that shows text (say, ask, panel, cue, marker, and `stage_busy`) is scanned against a local list:
+  `$ISMAIL_PRIVATE_TERMS`, else `~/.ismail/private_terms.txt` (one term per line, `#` comments), plus the git
+  `user.email`. Whole words, any case; an email anywhere. A hit refuses with "Rephrase without it". With no file,
+  only the email is checked and the reply says how to turn the scan on.
+- Don't ask for what is granted: `phone_panel_show` (yes/no or approve/deny panels, told by their buttons),
+  `phone_ask`, a `phone_say` that asks, `stage_ask` and yes/no `stage_panel_show` are refused when a standing grant's
+  keyword is in the title or text. Grants: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a list
+  of `{id, date, topic, keywords, says}`. `override_grant='<why it does not fit>'` lets the question through and
+  appends the reason to `grant_overrides.jsonl` beside the grants file. No file, no check.
+- The mic needs the person's own yes: `listen_start(mic_ok=...)` (and the recorder, and `session_rec.py
+  --mic-note`) takes the id of their voice note or typed answer from the phone inbox, a VR voice note as
+  `vr:<scene>:<event id>`, or `'chat: <their exact words>'`; a note sent in the last 12 hours, every yes naming the
+  mic or recording and not a no. `mic_ok=True` is refused. The recorder checks the yes again before it opens a
+  device.
+- A chat yes is weaker, so each one is logged locally (`ts`, `op`, the quote's first 300 characters) in
+  `$ISMAIL_MIC_CONSENT_LOG`, else `~/.ismail/mic_consent.jsonl`; the recorder checks it by its log line
+  (`chat-log:<n>`), so the quote is written nowhere else.
+- A typed answer counts only its free-text fields: the phone server now records an answer's `typed` field ids, so
+  an option picked or a box ticked never passes for their words. Answers taken before the phone server restarts
+  carry no `typed` and are refused as a mic yes (ask again).
+
+### Worktrees: sweep the empty folders removed copies leave
+
+- `python -m ismail.worktrees sweep [--dry-run] [--json]`: removes the empty folders next to the main checkout
+  (`<main>-*`) and in `<main>/.claude/worktrees/` that git no longer lists as copies, with `os.rmdir` only, so a
+  folder holding anything stays. A non-empty `<main>-wt-*` folder git does not list is named as "not a dev copy,
+  left alone"; other projects' folders are not reported. A folder a program still sits in is reported HELD for the
+  next sweep. It also drops the owner records of copies that are gone, as `list` does.
+- `done`: on Windows git removes a copy's files and record but not its folder while a program's working folder is
+  inside it (and exits 1). `done` now goes on, removes the empty folder itself, or says it is HELD instead of
+  reporting plain success.
+- The intake (`python -m ismail.handoffs`) counts empty leftover folders and names `sweep`.
+- `worktrees.md`: the sweep, and the rule: never leave a shell's working folder inside a copy (`git -C <copy>` or a
+  subshell).
+
+### Stage dev: restarts check presence, not the person's word
+
+- `stage-dev.md`, Deploying: a stage server restart needs only `stage_presence` saying not in VR and nothing in
+  flight. The dev does not ask the person, and an open desktop page posting state does not count as them being in.
+
+### Stage: named ops for every live edit
+
+- `stage_asset_install(scene, file, kind, name=, scenes=)`: puts a room (`scene.glb`), a piece list
+  (`manifest.json`), an actor body (`actors/<name>.glb`, in the scene the bodies come from) or a tree
+  (`trees/tree_<k>`) into a live scene. The file it replaces is kept in the scene's `history/`; an open page reloads
+  the room or the trees, and a replaced body shows at the next page load. It refuses a missing file, a wrong type, an
+  unknown kind and an unknown scene with the next step.
+- `stage_world(scene, update={...})` changes only the keys given (a key set to null goes back to its default);
+  `world=` still replaces the whole file, and giving both is an error.
+- `stage_restart(port=, scenes=, now=False, who=)` restarts a stage server with the arguments it was started with
+  (servers now record them), waits for `/health` and replies with the port and scenes. While a page is in VR it
+  refuses, says so in the headset, and names the way on: wait for `vr_exit`, or `stage_ask` and `now=True` on a yes.
+- `skills/ismail/hooks/named_ops_guard.py`: an optional Claude Code hook that refuses `python -c` with ismail code,
+  copies into a scenes folder, killing the stage or a live engine by process, and hand edits of `world.json`,
+  `scene.glb` or `manifest.json`, naming the op to use instead (`skills/ismail/hooks/README.md`).
+- The hook fails open: the settings text in its README checks the file exists before running it (a hook exiting 2
+  blocks the call, and Python exits 2 on a missing script), and any error inside the guard lets the call through.
+- `references/stage.md` has the table of blocked forms and their ops.
+
+### Live: keys on the screen
+
+- `live_keys_page(project, phone=False, sender=None)`: optional, for someone with no MIDI instrument who wants to
+  play a part (a real keyboard needs none of it). An on-screen keyboard that plays straight into the running engine
+  as the input `'screen keys'`, no loopMIDI: `live_midi(source='screen keys', ...)` patches it and `live_played`
+  reads it back (`live/midi/screen_keys.jsonl`).
+- Served by the engine on this computer (`http://127.0.0.1:<port>/keys`) and by the phone server (`/keys`, relayed
+  to the engine); `phone=True` posts a phone panel that opens it. One small POST per key, no polling.
+- Two to three octaves (two rows on a phone held upright), octave shift, a sustain toggle, velocity from where the
+  key is pressed (near the top is soft), multi-touch chords, the mouse, and the computer keyboard's Z and Q rows.
+  The top line says whether it is connected and what it plays. Each message carries a sequence number, so a
+  late one never undoes a newer key.
+
+### Stage: the gesture map
+
+- What each hand shape means in VR is now data, not code in six page files: `stage_gestures(scene)` lists it (intent,
+  shape, hand, hold, where it is read, whose row), `stage_gesture_set(scene, intent, shape=, hand=, hold_ms=, off=,
+  owner="person" | "scene")` rebinds one, `stage_gesture_reset` goes back. The page reads `/gestures?scene=` and
+  takes a change at once (page command `gestures_reload`). Nothing changes in feel: the defaults are the gestures
+  and holds the page had.
+- Who wins: locked and fixed rows, then the person's own map (`~/.ismail/stage/person/gestures.json`, every scene),
+  then the scene's rows (world.json `gestures`, checked like the rest of world.json), then the engine.
+- Locked: leaving VR (both thumbs up), the performance stop (both thumbs down), the voice note (phone). Fixed to how
+  the shape moves: travel, the snapshot frame, select, hold. Rebindable: the update reload, the yes and no answers,
+  drop. A rebind that would share a shape with another row where both are read is refused, naming that row and
+  its owner. The update card and the answer prompt sit over the hand the map names and say its gesture.
+- The yes and no answers can be rebound but never switched off: `stage_ask` is answered with them. Saved rows are
+  checked when read too, so a hand-edited value that cannot be used (a hold that is not a number, a shape that does
+  not exist, a row for a locked intent) is ignored with an `IGNORED` line in `stage_gestures` and the engine's value
+  stands; the next save drops it from the file.
+
+### Stage: edits apply in place, no reload
+
+- `stage_material_set(scene, color, material= | object=)` sets a material's base colour on the open page now, as an
+  undoable edit that saves to edits.json like a hand edit.
+- `stage_world` with `world=` tells an open page (page command `world_reload`): it reads world.json again and redoes
+  what was built from it (load sets, changed bodies, props, mouth tracks, keep-out boxes). Before, it waited for the
+  next load or scene switch. In a `stage_batch` the reload goes with the page commands after it, in order (one
+  more reply line, `[i] stage_world (page)`).
+- Pieces the Quest diet merged into their group keep their names: `merge_groups` numbers each piece's vertices
+  (`_part`) and the manifest lists them (`merged`). The first op that names one (`stage_object_set`, `drop`,
+  `select`, ...) splits it back out with its children; saved edits of a piece split it at load. Rooms exported before
+  this split nothing until their next export.
+- The stage docs: live edits go through named ops only (`python -m ismail <op>`, `stage_batch @file.json`), never an
+  inline script; a missing op is the gap to fix.
+
+### Live: played keys on the beat the player heard
+
+- The key log's `beat` is now where the key sounded against the music (the press plus the output buffer, about
+  180 ms on laptop speakers), which is where a player by ear meant it. It was the press, so a take read about one
+  key delay early. The press stays in the log as `press`; old logs still read, and `live_played` says which clock
+  it used and the delay it added.
+- `live_played(fit=True)` fits a 16th grid with a free offset to the hits (keys within 0.15 beat are one hit),
+  reports the offset, the rms error in ms, the drift per bar and the rhythm's shape (3-3-2), and prints the
+  snapped notes for `live_queue` twice: as played, and with the shape's groups from beat 1. `bars=[a, b]` picks
+  the bars, `from_bar` sets the clip's bar 1. It is the method that lined up a played riff in the 2026-10-13 jam
+  after four tries at rounding.
+- When every key in the bars has one velocity, `live_played` says so and suggests an accent shape (the data is
+  unchanged).
 
 ### Live: played keys
 
@@ -30,6 +1148,20 @@
   back as notes lines, the format tracks take.
 - Known gaps: keys skip the track's live effects and the safety limiter (a soft clip guards them), and are not in
   `live_record` recordings or streams yet.
+
+### Listening together: words as they are said, sessions off the system drive
+
+- `listen_heard(since)` gives the person's words a few seconds after they say them, cut at pauses or every 8 s
+  at most, each with its time and the bar the live set had sounding (a new `clock` op on the live engine, exempt
+  from its news). It uses the speech server the reading uses and starts nothing; when that server is down it says
+  so and what still works. A chunk that fails is tried once more, then reported, never dropped. `listen_peek`
+  points at it while the mic is on.
+- Sessions go to `<project>/listen/` (`listen_start(project=)`), else the running live set's folder, else
+  `$ISMAIL_LISTEN_HOME`, else `_listen/` in the installed songs folder: never the system drive by default. Ids
+  resolve across all of them and the old home; a full path works too.
+- A 2 GB free-space floor: `listen_start` refuses under it and says what to do, and a running session stops by
+  itself there, keeping its recording, with a line in the next listen reply. Background temp files stay in the
+  session folder.
 
 ### Listening together
 

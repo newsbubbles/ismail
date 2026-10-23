@@ -9,16 +9,25 @@ so a copy is never stale, forgotten or ownerless (skills/ismail/references/workt
     python -m ismail.worktrees claim <path> --owner <name>    # record the owner of a copy that exists
     python -m ismail.worktrees sync <path>              # merge origin/main into the copy
     python -m ismail.worktrees done <path>              # remove a merged, clean copy and its local branch
+    python -m ismail.worktrees sweep [--dry-run] [--json]     # remove empty folders removed copies left behind
 
 Every dev works in its own copy, so a live set, the phone and the stage keep running from the main checkout. A copy
 is made from origin/main as fetched, never from the local main (it may be behind). The owner records live in the
 repository's shared git folder (`git rev-parse --git-common-dir`/ismail-worktrees.json): every copy sees the same
-file and nothing enters the repository. Records of copies that no longer exist are dropped on `list`.
+file and nothing enters the repository. Records of copies that no longer exist are dropped on `list` and `sweep`.
+
+On Windows `git worktree remove` cannot remove a copy's folder while a program's working folder is inside it: the
+files and git's record go, the empty folder stays, and git never lists it again. `done` tries os.rmdir after git and
+says HELD when it cannot; `sweep` removes such empty folders later (siblings named <main>-* and folders in
+<main>/.claude/worktrees/ that git does not list), only with os.rmdir, so a folder holding anything stays.
 
 Flags on a copy: UNASSIGNED (no owner: claim it), MERGED (its branch is in origin/main: done, remove it), IDLE
 (unmerged, last commit older than IDLE_DAYS: it goes back to its owner, or to the person when it has none), BEHIND
 (origin/main has commits it lacks: sync it). Nothing here passes --force to git, stashes or deletes a file: `done`
 removes only a copy whose work is all in origin/main and that holds nothing git does not track (caches aside).
+Its work is in origin/main when its commits are, when its files are the same as origin/main's, or when GitHub says
+a pull request from its branch was merged with the copy's last commit (a squash or rebase merge puts new commits
+on main, so the branch's own never land there); `done` says which.
 The age of a commit is measured against $ISMAIL_WORKTREES_NOW (seconds since 1970) when set, for tests."""
 import argparse
 import datetime
@@ -128,6 +137,53 @@ def save_owners(owners, repo=HERE):
     os.replace(tmp, path)
 
 
+def prune_owners(repo=HERE, all_wt=None, dry_run=False):
+    """Drop the owner records of copies that no longer exist; -> (owners kept, [paths of the records dropped])."""
+    all_wt = worktrees(repo) if all_wt is None else all_wt
+    owners = load_owners(repo)
+    live = {_key(w['path']) for w in all_wt if not w['missing']}
+    gone = [k for k in owners if k not in live]
+    if gone:
+        dropped = [owners[k].get('path', k) for k in gone]
+        owners = {k: v for k, v in owners.items() if k in live}
+        if not dry_run:
+            save_owners(owners, repo)
+        return owners, dropped
+    return owners, []
+
+
+def leftovers(repo=HERE, all_wt=None):
+    """Folders a removed copy may have left: siblings of the main checkout named <main>-*, and the folders in
+    <main>/.claude/worktrees/, that git does not list as a copy. -> [{path, entries, copy_like}]: entries is how many
+    files and folders it holds (hidden ones too); copy_like says its name is a dev copy's (<main>-wt-*, or under
+    .claude/worktrees/), so a non-empty one is worth a look. Links and junctions are never candidates."""
+    all_wt = worktrees(repo) if all_wt is None else all_wt
+    main = os.path.normpath(all_wt[0]['path'])
+    known = {_key(w['path']) for w in all_wt}
+    base = os.path.basename(main)
+    places = [(os.path.dirname(main), base + '-'), (os.path.join(main, '.claude', 'worktrees'), '')]
+    out = []
+    for parent, prefix in places:
+        try:
+            names = sorted(os.listdir(parent))
+        except OSError:
+            continue
+        for name in names:
+            if not os.path.normcase(name).startswith(os.path.normcase(prefix)):
+                continue
+            path = os.path.join(parent, name)
+            if (not os.path.isdir(path) or os.path.islink(path) or getattr(os.path, 'isjunction', lambda p: False)(path)
+                    or _key(path) in known):
+                continue
+            try:
+                entries = len(os.listdir(path))
+            except OSError:
+                continue                                 # unreadable: not ours to judge
+            copy_like = not prefix or os.path.normcase(name).startswith(os.path.normcase(base + '-wt-'))
+            out.append({'path': path.replace('\\', '/'), 'entries': entries, 'copy_like': copy_like})
+    return out
+
+
 def fetch(repo=HERE):
     _git(['fetch', '--quiet', 'origin'], repo)
 
@@ -158,6 +214,33 @@ def _open_prs(repo):
         return {}, 'gh answered something that is not a list of pull requests'
 
 
+def _merged_pr(branch, head, repo):
+    """-> (number, None) for a merged pull request from branch whose last commit is head, or (None, why not). A
+    commit made after the merge is not in it, so a branch with one does not pass."""
+    try:
+        r = subprocess.run(['gh', 'pr', 'list', '--head', branch, '--state', 'merged', '--limit', '20',
+                            '--json', 'number,headRefOid'],
+                           cwd=repo, capture_output=True, text=True, encoding='utf8', timeout=60)
+    except FileNotFoundError:
+        return None, 'gh is not installed, so no merged pull request was looked up'
+    except subprocess.TimeoutExpired:
+        return None, 'gh did not answer in 60 s, so no merged pull request was looked up'
+    if r.returncode:
+        msg = (r.stderr or '').strip().splitlines()
+        return None, f"gh could not look up its pull requests ({msg[-1] if msg else f'exit {r.returncode}'})"
+    try:
+        prs = json.loads(r.stdout or '[]')
+        hit = [p['number'] for p in prs if p['headRefOid'] == head]
+        if hit:
+            return hit[0], None
+        if prs:
+            return None, (f"pull request #{prs[0]['number']} from {branch} was merged, but the copy has commits "
+                          'made after it')
+    except (ValueError, KeyError, TypeError, IndexError):
+        return None, 'gh answered something that is not a list of pull requests'
+    return None, f'no pull request from {branch} is merged'
+
+
 def _status(path, ignored=False):
     """-> porcelain lines: changed tracked files, '?? ' untracked, and with ignored '!! ' ignored entries."""
     args = ['status', '--porcelain'] + (['--ignored'] if ignored else [])
@@ -173,11 +256,7 @@ def survey(repo=HERE, now=None, prs=True, prune=False):
     now = _now(now)
     all_wt = worktrees(repo)
     main, copies = all_wt[0], all_wt[1:]
-    owners = load_owners(repo)
-    live = {_key(w['path']) for w in all_wt if not w['missing']}
-    if prune and any(k not in live for k in owners):
-        owners = {k: v for k, v in owners.items() if k in live}
-        save_owners(owners, repo)
+    owners = prune_owners(repo, all_wt)[0] if prune else load_owners(repo)
     first_parent = set(_git(['rev-list', '--first-parent', BASE], repo).split())
     pr_map, pr_why = _open_prs(main['path']) if prs else ({}, 'not asked')
     out = []
@@ -289,7 +368,12 @@ def report(s, unassigned=False, flagged=False, fetched_now=False):
 def intake_lines(repo=HERE):
     """For `python -m ismail.handoffs`: the next action, the main checkout, and the flagged copies only."""
     s = survey(repo, prs=False)
-    return report(s, flagged=True)
+    lines = report(s, flagged=True)
+    empty = [f for f in leftovers(repo) if not f['entries']]
+    if empty:
+        lines.append(f"{_n(len(empty), 'empty leftover folder', 'empty leftover folders')} next to the main checkout: "
+                     "python -m ismail.worktrees sweep")
+    return lines
 
 
 # ---- the commands that change something ----
@@ -408,6 +492,65 @@ def sync(path, repo=HERE):
     return 1, '\n'.join(lines)
 
 
+HELD = "a program's working folder is inside it (often a shell that cd'd there): leave it, the next sweep removes it"
+
+
+def _remove_empty(p):
+    """After git removed a copy: its folder, if still there and empty, goes with os.rmdir (never recursive: rmdir
+    refusing a folder that holds anything is the safety net). -> '' or what is left and why."""
+    if not os.path.isdir(p):
+        return ''
+    try:
+        if os.listdir(p):
+            return f'; its folder {p} still holds files git left: look at them (move what matters with `python -m ismail.reclaim move <path> <what>`: _reclaim/ at the drive root)'
+        os.rmdir(p)
+        return ''
+    except OSError:
+        return f'; its empty folder is HELD: {HELD}'
+
+
+def sweep(repo=HERE, dry_run=False):
+    """Remove the empty folders removed copies left behind, and drop the owner records of copies that no longer
+    exist. -> {folders: [{path, action: removed|held|left, why}], records_dropped, dry_run}. Only os.rmdir is used:
+    a folder that holds anything is never removed, and one with a name like a copy's is listed for a look."""
+    all_wt = worktrees(repo)
+    folders = []
+    for f in leftovers(repo, all_wt):
+        p = f['path']
+        if f['entries']:
+            if f['copy_like']:
+                n = _n(f['entries'], 'entry', 'entries')
+                folders.append({'path': p, 'action': 'left', 'why': f'not a dev copy, left alone ({n}; git does '
+                                'not list it): look at it, or ask the person'})
+            continue
+        if dry_run:
+            folders.append({'path': p, 'action': 'removed', 'why': 'empty, not a copy'})
+            continue
+        try:
+            os.rmdir(p)
+            folders.append({'path': p, 'action': 'removed', 'why': 'empty, not a copy'})
+        except OSError:
+            folders.append({'path': p, 'action': 'held', 'why': HELD})
+    dropped = prune_owners(repo, all_wt, dry_run=dry_run)[1]
+    return {'folders': folders, 'records_dropped': dropped, 'dry_run': dry_run}
+
+
+def sweep_lines(res):
+    """-> one line per folder, then the count line."""
+    dry = res['dry_run']
+    say = {'removed': 'would remove' if dry else 'removed', 'held': 'HELD', 'left': 'left alone'}
+    lines = [f"  {say[f['action']]}  {f['path']}: {f['why']}" for f in res['folders']]
+    lines += [f"  {'would drop' if dry else 'dropped'} the owner record of {p} (its copy no longer exists)"
+              for p in res['records_dropped']]
+    count = {a: sum(f['action'] == a for f in res['folders']) for a in say}
+    parts = [f"{count['removed']} {'would be removed' if dry else 'removed'}"]
+    parts += [f"{count['held']} held", f"{count['left']} left alone"] if not dry else [f"{count['left']} left alone"]
+    parts.append(_n(len(res['records_dropped']), 'owner record', 'owner records') +
+                 (' would be dropped' if dry else ' dropped'))
+    lines.append(('dry run, nothing changed: ' if dry else 'swept: ') + ', '.join(parts))
+    return lines
+
+
 def done(path, repo=HERE):
     """Remove a copy whose work is all in origin/main and that holds nothing untracked; -> what was removed."""
     w = _copy(path, repo, 'Nothing to remove.')
@@ -421,10 +564,20 @@ def done(path, repo=HERE):
         stale = ''
     except WorktreeError as e:
         stale = f' ({BASE} could not be fetched, so it may be old: {e})'
-    if not _ok(['merge-base', '--is-ancestor', w['head'], BASE], repo):
-        ahead = _git(['rev-list', '--count', f"{BASE}..{w['head']}"], repo)
-        raise WorktreeError(f"{p} ({w['branch'] or 'detached'}) is not merged: {ahead} commits are not in {BASE}"
-                            f"{stale}; open or finish its pull request, or ask the person before dropping it")
+    main = worktrees(repo)[0]['path']
+    # which test let it through goes in the answer
+    if _ok(['merge-base', '--is-ancestor', w['head'], BASE], repo):
+        how = f'its commits are in {BASE}'
+    elif _ok(['diff', '--quiet', BASE, w['head']], repo):
+        how = f'its files are the same as {BASE}'
+    else:
+        pr, why = _merged_pr(w['branch'], w['head'], main) if w['branch'] else (None, 'it has no branch')
+        if pr is None:
+            ahead = _git(['rev-list', '--count', f"{BASE}..{w['head']}"], repo)
+            raise WorktreeError(f"{p} ({w['branch'] or 'detached'}) is not merged: {ahead} commits are not in "
+                                f"{BASE}, its files differ from {BASE}'s and {why}{stale}; open or finish its pull "
+                                'request, or ask the person before dropping it')
+        how = f'its pull request #{pr} is merged'
     st = _status(p, ignored=True)
     changed = [ln[3:] for ln in st if not ln.startswith(('??', '!!'))]
     if changed:
@@ -434,22 +587,29 @@ def done(path, repo=HERE):
     loose = [ln[3:] for ln in st if ln.startswith('??') or (ln.startswith('!!') and not CACHES.search(ln[3:]))]
     if loose:
         raise WorktreeError(f"{p} holds {len(loose)} files git does not track ({', '.join(loose[:5])}"
-                            f"{', ...' if len(loose) > 5 else ''}): look at them; move what matters to _reclaim/ in the "
-                            'main checkout, never delete. Then run done again')
-    main = worktrees(repo)[0]['path']
-    _git(['worktree', 'remove', p], main)
+                            f"{', ...' if len(loose) > 5 else ''}): look at them; move what matters with "
+                            '`python -m ismail.reclaim move <path> <what>` (_reclaim/ at the root of the drive), never '
+                            'delete. Then run done again')
+    r = _git(['worktree', 'remove', p], main, check=False)
+    if r.returncode and _key(p) in {_key(x['path']) for x in worktrees(repo)}:
+        msg = (r.stderr or r.stdout or '').strip().splitlines()
+        raise WorktreeError(f"git worktree remove failed: {msg[-1] if msg else f'exit {r.returncode}'}")
+    # on Windows git removes the files and the record but not a folder some program's working folder is inside
+    left = _remove_empty(p)
     said = f'removed {p}'
     if w['branch']:
         if not _ok(['branch', '--quiet', '-d', w['branch']], main):
-            # -d compares with the main checkout's HEAD, which may be behind: the branch is in origin/main (checked
-            # above), so delete the ref only if it still points where it did
+            # -d compares with the main checkout's HEAD, which may be behind, and never passes a squash-merged
+            # branch: its work is in origin/main (checked above), so delete the ref only if it still points where
+            # it did
             _git(['update-ref', '-d', f"refs/heads/{w['branch']}", w['head']], main)
             _git(['config', '--remove-section', f"branch.{w['branch']}"], main, check=False)
-        said += f" and its local branch {w['branch']} (its work is in {BASE})"
+        said += f" and its local branch {w['branch']}"
+    said += f' ({how})'
     owners = load_owners(repo)
     if owners.pop(_key(p), None) is not None:
         save_owners(owners, repo)
-    return said + stale
+    return said + stale + left
 
 
 def main(argv=None):
@@ -471,6 +631,9 @@ def main(argv=None):
     s.add_argument('path')
     d = sub.add_parser('done', help='remove a merged, clean copy and its local branch: done <path>')
     d.add_argument('path')
+    w = sub.add_parser('sweep', help='remove the empty folders removed copies left, drop stale owner records')
+    w.add_argument('--dry-run', action='store_true', help='list what it would remove; change nothing')
+    w.add_argument('--json', action='store_true')
     ap.add_argument('--repo', default=HERE, help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
@@ -496,6 +659,9 @@ def main(argv=None):
             return code
         elif a.cmd == 'done':
             print(done(a.path, a.repo))
+        elif a.cmd == 'sweep':
+            res = sweep(a.repo, a.dry_run)
+            print(json.dumps(res, indent=1) if a.json else '\n'.join(sweep_lines(res)))
     except WorktreeError as e:
         print(f'refused: {e}', file=sys.stderr)
         return 1

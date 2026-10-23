@@ -91,7 +91,10 @@ export function initActions(ed, hands, panels, live, takes) {
   function buttons(it) {
     const moving = ed.unlocked === it, rec = takes.recording(), playing = takes.actors && takes.actors.playing.has(it.name);
     const b = [moving ? '✓ Done' : '✋ Move'];
-    if (it.type === 'CAMERA') return ['📷 My eyes', ...b, '◆ Key', moved(it) ? '✕ Cancel' : '✕'];   // a camera only moves and keys (no take, no drop)
+    if (it.type === 'CAMERA') {                // a camera moves, keys, shows its path and records a move (no take, no drop)
+      const path = takes.trails ? [takes.trails.isShown(it.name) ? '〰 Hide path' : '〰 Path'] : [];
+      return ['📷 My eyes', ...b, '◆ Key', ...path, ...(takes.camrec ? ['⏺ Record move'] : []), moved(it) ? '✕ Cancel' : '✕'];
+    }
     const following = playing && takes.actors.playing.get(it.name).live;
     if (kept.has(it.name) && !following) b.push(playing ? '■ Stop' : '▶ Play');
     if (canAct(it) && !rec) b.push(following ? '■ Unfollow' : '◎ Follow');   // they move with you, live
@@ -300,6 +303,17 @@ export function initActions(ed, hands, panels, live, takes) {
       else if (a === '⬇ Drop') ed.drop(it, 'menu');
       else if (a === '📌 Pin' && window.VR_waypoints) { window.VR_waypoints.pinObject(it); ed.setStatus('pinned ' + ed.label(it) + ': say the note'); break; }   // the next voice note is its note
       else if (a === '◆ Key' && takes.clock) { takes.clock.show(true); takes.clock.key(it.name); }   // clock.js: a key at the playhead
+      else if (a === '〰 Path' || a === '〰 Hide path') takes.trails.show(a === '〰 Path', [it.name]);   // trails.js
+      else if (a === '⏺ Record move') {
+        // camrec.js: a camera that follows something bakes its follow; unlocked (✋ Move) it is carried while the clock
+        // plays; otherwise it is the user's eyes
+        const fol = window.VR_behaviours && window.VR_behaviours.follows;
+        const source = fol && fol.of(it.name) ? 'follow' : ed.unlocked === it ? 'hold' : 'head';
+        if (source === 'head') ed.select(null, 'menu');          // a deselect would lock a carried camera again
+        takes.clock.show(true);
+        takes.camrec.start({ name: it.name, source }).catch((e) => ed.setStatus('record move: ' + (e.message || e)));
+        break;
+      }
       else if (a === '● Take') {                              // a person follows the user while the take records
         if (canAct(it)) { ed.select(null, 'menu'); await countdown(FOLLOW_COUNTDOWN_S, it.name); }
         if (canAct(it)) await takes.actors.follow({ person: it.name }).catch(() => null);

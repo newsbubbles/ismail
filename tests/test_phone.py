@@ -25,6 +25,7 @@ STATUS = "live 120 BPM 4/4 | heard bar 5 beat 2 (9 s) | mixed ahead 0.50 s | out
 
 
 DEVICE_CALLS = []
+KEY_CALLS = []
 
 
 class FakeEngine(BaseHTTPRequestHandler):
@@ -36,7 +37,14 @@ class FakeEngine(BaseHTTPRequestHandler):
         req = json.loads(self.rfile.read(n))
         if req['op'] == 'device':
             DEVICE_CALLS.append(req['args'])
-        b = json.dumps({'ok': True, 'result': STATUS if req['op'] == 'status' else ''}).encode()
+        res = {'ok': True, 'result': STATUS if req['op'] == 'status' else ''}
+        if req['op'] == 'keys':
+            KEY_CALLS.append(req['args'])
+            res = {'ok': True, 'result': {'patched': True, 'what': 'preset:pluck', 'ready': 61, 'of': 61,
+                                          'connected': True}}
+            if any(ev[1] == 0xF0 for ev in req['args']['events']):
+                res = {'ok': False, 'error': 'event [1, 240, 0, 0]: status a note-off, note-on or controller'}
+        b = json.dumps(res).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(b)))
         self.end_headers()
@@ -168,6 +176,22 @@ def test_the_agent_drives_the_page(phone, tmp_path):
         urllib.request.urlopen(base + '/files/notatoken', timeout=5)
 
 
+
+def test_older_downloads_page_back_and_outlive_a_restart(phone, tmp_path):
+    ph, base, _ = phone
+    for i in range(12):
+        f = tmp_path / f'take{i:02d}.txt'
+        f.write_text(f'take {i}')
+        P.phone_offer(str(f), label=f'take {i}')
+    st = get(base, '/api/state?since=0&wait=0')
+    assert [o['label'] for o in st['offers']] == ['take 8', 'take 9', 'take 10', 'take 11'] and st['offers_n'] == 12
+    first = get(base, '/api/offers?skip=0&n=10')
+    assert [o['label'] for o in first['offers']][:2] == ['take 11', 'take 10'] and first['total'] == 12 and first['more']
+    rest = get(base, '/api/offers?skip=10&n=10')
+    assert [o['label'] for o in rest['offers']] == ['take 1', 'take 0'] and not rest['more']
+    assert urllib.request.urlopen(base + rest['offers'][-1]['url'], timeout=5).read() == b'take 0'
+    assert S.Phone().view['offers'][0]['label'] == 'take 0'        # a restarted server still has the history
+
 def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
     ph, base, _ = phone
     import soundfile as sf
@@ -176,7 +200,7 @@ def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
     sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
     sf.write(str(b), 0.1 * np.sin(2 * np.pi * 230 * t), 44100)
     ans = tmp_path / 'exam' / 'answers.jsonl'
-    P.phone_exam('round 35', [{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
+    P.phone_exam('round 35', unmeasured='a test of the page', clips=[{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
                    question='which is the record?', chips=['harsh', 'thin'], choices=['A', 'B', "can't tell"],
                    answers_path=str(ans), exam_id='r35')
     p = get(base, '/api/state?since=0&wait=0')['panels'][-1]
@@ -202,6 +226,25 @@ def test_a_voice_note_is_stamped_and_transcribed(phone, monkeypatch):
     assert [x['kind'] for x in v] == ['voice', 'voice_text'] and v[1]['text'] == 'more acid please'
     assert os.path.exists(v[0]['file'])
 
+
+
+def test_under_each_note_the_page_says_who_took_it(phone):
+    """ledger:M219 (hq:D-179): two agents each left an untagged note, sure the other had it, and the person could not
+    see from the phone whether it landed with anyone. Each note gets "taken by X" or "nobody has it yet"."""
+    ph, base, _ = phone
+    n1 = ph.post({'kind': 'voice_text', 'id': 'v1', 'text': 'more bass'})['n']
+    n2 = ph.post({'kind': 'voice_text', 'id': 'v2', 'text': 'said on a card', 'for': 'agent a'})['n']
+    st = get(base, '/api/state')
+    assert st['taken'] == {'v1': [], 'v2': ['agent a']}             # nobody has v1 yet; v2 was said to agent a
+    assert P.phone_claim(n1, by='agent b').startswith('yours')
+    later = get(base, f"/api/state?since={st['cmd']}&wait=5")         # a claim that comes later wakes the page
+    assert later['taken']['v1'] == ['agent b'] and [c['type'] for c in later['cmds']] == ['view']
+    assert P.phone_claim(n1, by='agent c').startswith('taken')         # a second claimer does not change it
+    P.phone_claim(n2, by='agent c')
+    assert get(base, '/api/state')['taken'] == {'v1': ['agent b'], 'v2': ['agent a', 'agent c']}
+    assert S.Phone().taken() == {'v1': ['agent b'], 'v2': ['agent a', 'agent c']}     # and after a restart
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "'taken by ' + esc(tk[c.id].join(', ')) : 'nobody has it yet'" in js and '${took(c)}' in js
 
 @pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
 def test_the_stream_plays_and_knows_the_bar_heard(phone):
@@ -689,6 +732,7 @@ def test_a_panel_takes_choices_checks_toggles_and_a_voice_reply(phone, monkeypat
                                'values': {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True}})
     a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
     assert a['values'] == {'tempo': 'slower', 'parts': ['bass', 'arp'], 'drop': True} and a['for'] == 'dj'
+    assert a['typed'] == []                     # options picked, boxes ticked: none of it is their own words
 
 
 def test_a_second_panel_waits_and_not_now_is_a_dismissal(phone):
@@ -723,7 +767,7 @@ def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_pat
             clips.append({'label': f'{i}{ab}', 'path': str(f)})
             key[f'{i}{ab}'] = cls
     ans = tmp_path / 'exam' / 'answers.jsonl'
-    out = P.phone_exam('floor round', clips, question='which is real?', answers_path=str(ans), exam_id='fl1',
+    out = P.phone_exam('floor round', unmeasured='a test of the page', clips=clips, question='which is real?', answers_path=str(ans), exam_id='fl1',
                        key=key, secrets=['take_r45'], floor='auto')
     rec = json.loads((tmp_path / 'exam' / 'answers.jsonl.floor.json').read_text(encoding='utf8'))
     assert sorted(r['rate'] for r in rec['floors']) == ['128k', '64k', 'same']        # the full set the first time
@@ -735,11 +779,11 @@ def test_floor_pairs_join_a_phone_exam_renumbered_and_never_first(phone, tmp_pat
     same = next(r['pair'] for r in rec['floors'] if r['rate'] == 'same')
     a, b = (urllib.request.urlopen(base + c['url'], timeout=5).read() for c in p['clips'] if c['label'][:-1] == str(same))
     assert a == b                                                              # identical: the floor of floors
-    out = P.phone_exam('floor round 2', clips, answers_path=str(tmp_path / 'e2' / 'a.jsonl'), exam_id='fl2',
+    out = P.phone_exam('floor round 2', unmeasured='a test of the page', clips=clips, answers_path=str(tmp_path / 'e2' / 'a.jsonl'), exam_id='fl2',
                        key=key, secrets=['take_r45'], floor='auto')
     assert out.count('pair ') == 1 and '128k' in out                           # then one rotating pair
     with pytest.raises(Exception, match='labelled by pair'):
-        P.phone_exam('bad', [{'label': 'A', 'path': clips[0]['path']}], floor='auto')
+        P.phone_exam('bad', unmeasured='a test of the page', clips=[{'label': 'A', 'path': clips[0]['path']}], floor='auto')
 
 
 @pytest.mark.skipif(not S.ffmpeg(), reason='ffmpeg is not installed')
@@ -765,10 +809,10 @@ def test_floor_pairs_pass_beside_mp3_clips_and_a_refused_exam_uses_up_nothing(ph
     shutil.copyfile(clips[0]['path'], tmp_path / 'take_r45.mp3')             # a file name that gives the source away
     leaky = [dict(c, path=str(tmp_path / 'take_r45.mp3')) if c['label'] == '1A' else c for c in clips]
     with pytest.raises(Exception, match='pre-flight failed'):
-        P.phone_exam('leaky', leaky, answers_path=str(tmp_path / 'e0' / 'a.jsonl'), exam_id='fx0', key=key,
+        P.phone_exam('leaky', unmeasured='a test of the page', clips=leaky, answers_path=str(tmp_path / 'e0' / 'a.jsonl'), exam_id='fx0', key=key,
                      secrets=['take_r45'], floor='auto')
     assert not hist.exists()                                                   # refused: nothing used up
-    out = P.phone_exam('mp3 round', clips, answers_path=str(tmp_path / 'e1' / 'a.jsonl'), exam_id='fx1', key=key,
+    out = P.phone_exam('mp3 round', unmeasured='a test of the page', clips=clips, answers_path=str(tmp_path / 'e1' / 'a.jsonl'), exam_id='fx1', key=key,
                        secrets=['take_r45'], floor='auto')
     assert out.count('pair ') == 3                                             # the full set, on the round shown
     assert len(json.loads(hist.read_text(encoding='utf8'))) == 1
@@ -875,7 +919,7 @@ def test_a_panel_carries_a_video_that_plays_and_seeks(phone, tmp_path):
     with pytest.raises(urllib.error.HTTPError) as e:
         ranged(f'bytes={len(blob) + 5}-')
     assert e.value.code == 416
-    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime')):
+    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime'), ('.md', 'text/plain; charset=utf-8')):
         assert S.Handler.TYPES[ext] == mime
     big = tmp_path / 'long.mp4'                    # "the rest" comes a chunk at a time, so 4G starts at once
     data = bytes(range(256)) * (S.Handler.RANGE_CHUNK // 256 + 4096)
@@ -1102,7 +1146,7 @@ def test_an_exams_voice_notes_land_in_its_answers_file_even_after_the_answer(pho
     sf.write(str(a), 0.1 * np.sin(2 * np.pi * 220 * t), 44100)
     sf.write(str(b), 0.1 * np.sin(2 * np.pi * 230 * t), 44100)
     ans = tmp_path / 'exam' / 'answers.jsonl'
-    out = P.phone_exam('round 50', [{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
+    out = P.phone_exam('round 50', unmeasured='a test of the page', clips=[{'label': 'A', 'path': str(a)}, {'label': 'B', 'path': str(b)}],
                        choices=['A', 'B'], answers_path=str(ans), exam_id='r50')
     assert 'clips:' in out and f'{a.resolve()}  0.5 s' in out and "kind 'voice_note'" in out   # the manifest
     assert json.loads((S.HOME / 'state.json').read_text(encoding='utf8'))['answer_files']['r50'] == str(ans.resolve())
@@ -1210,6 +1254,7 @@ def test_a_panel_text_box_said_by_voice_carries_its_audio(phone, monkeypatch):
                                'values_voice': {'why': [vid]}})
     a = [x for x in json.loads(P.phone_listen('dj', since=0, wait=0))['lines'] if x['kind'] == 'answer'][-1]
     assert a['values'] == {'why': 'warmer'} and a['values_audio']['why'][0].endswith(f'{vid}.webm')
+    assert a['typed'] == ['why']                # a text box: their own words
 
 
 def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, monkeypatch, tmp_path):
@@ -1242,3 +1287,197 @@ def test_a_voice_note_keeps_what_played_and_what_they_did_while_speaking(phone, 
             break
         time.sleep(0.1)
     assert rows and rows[-1]['media'][0]['t'] == 42.37                          # the answers file has it too
+
+
+def test_the_keys_page_is_served_and_its_keys_reach_the_playing_engine(phone, monkeypatch):
+    """live_keys_page: the phone server serves the on-screen keys and relays each key, one small message, to the
+    engine; no engine, and the page says so instead of failing."""
+    ph, base, _ = phone
+    with urllib.request.urlopen(base + '/keys', timeout=10) as r:
+        page = r.read().decode('utf8')
+    assert "fetch('/api/keys'" in page and 'name="viewport"' in page and '--ground:#0e0d0b' in page
+    KEY_CALLS.clear()
+    j = post(base, '/api/keys', {'sid': 'k1', 'events': [[1, 0x90, 60, 90], [2, 0x80, 60, 0]]})
+    assert j == {'ok': True, 'result': {'patched': True, 'what': 'preset:pluck', 'ready': 61, 'of': 61,
+                                        'connected': True}}
+    assert KEY_CALLS == [{'events': [[1, 0x90, 60, 90], [2, 0x80, 60, 0]], 'sid': 'k1'}]
+    with pytest.raises(urllib.error.HTTPError) as e:
+        post(base, '/api/keys', {'sid': 'k1', 'events': [[3, 0xF0, 0, 0]]})
+    assert e.value.code == 400 and 'note-off, note-on or controller' in json.loads(e.value.read())['error']
+    monkeypatch.setattr(S, 'live_engines', lambda: {})                   # the set stopped
+    for _ in range(50):
+        if not ph.engine:
+            break
+        time.sleep(0.1)
+    assert post(base, '/api/keys', {'sid': 'k1', 'events': []}) == {'ok': True, 'result': {'connected': False}}
+    assert not any(r.get('kind') == 'keys' for r in ph.read_inbox(0))     # keys are not messages for an agent
+
+
+def _state(base, dev, ua, sid=''):
+    req = urllib.request.Request(base + f'/api/state?since=0&wait=0&dev={dev}&sid={sid}', headers={'User-Agent': ua})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+QUEST_UA = 'Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 OculusBrowser/35.0 Chrome/126.0 Safari/537.36'
+IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile Safari/604.1'
+
+
+def test_phone_claim_the_first_caller_wins_and_every_line_carries_it(phone):
+    """The person, 10-16 (n5737, n5776): untagged notes reached nobody or six agents at once; the first agent to say
+    it passes a note on owns it, decided by the server, and the others see it taken."""
+    ph, base, _ = phone
+    n = ph.post({'kind': 'voice_text', 'id': 'v1', 'text': 'for whoever is listening'})['n']
+    got, start = {}, threading.Barrier(8)
+
+    def claim(who):
+        start.wait()
+        got[who] = P.phone_claim(n, by=who)
+    ts = [threading.Thread(target=claim, args=(f'agent {i}',)) for i in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(10)
+    won = [w for w, r in got.items() if r.startswith('yours:')]
+    assert len(won) == 1 and len(got) == 8
+    assert all(r.startswith(f'taken: {won[0]} claimed note {n} at ') for w, r in got.items() if w != won[0])
+    assert P.phone_claim(n, by=won[0]).startswith('yours: you claimed')
+    line = [x for x in json.loads(P.phone_listen('agent 9', since=n - 1, wait=0))['lines'] if x['n'] == n][0]
+    assert line['claimed']['by'] == won[0]
+    assert S.Phone().claims[n]['by'] == won[0]          # a restarted server keeps it
+    with pytest.raises(api.OpError, match='no inbox line'):
+        P.phone_claim(n + 50, by='x')
+
+
+def test_phone_presence_shows_agents_and_devices_many_to_many(phone):
+    ph, base, _ = phone
+    t = threading.Thread(target=P.phone_listen, args=('watcher b',), kwargs={'wait': 3})
+    t.start()
+    P.phone_say('hello', sender='busy agent')
+    _state(base, 'quest1', QUEST_UA)
+    st = _state(base, 'phone1', IPHONE_UA, sid='s1')
+    assert {d['kind'] for d in st['devices']} == {'Quest', 'phone'}
+    ph.post({'kind': 'voice_text', 'text': 'old untagged', '_age': 400})
+    ph.post({'kind': 'voice_text', 'text': 'new untagged'})
+    ph.post({'kind': 'voice_text', 'text': 'tagged one', 'for': 'dj'})
+    time.sleep(0.3)
+    pr = P.phone_presence()
+    assert 'watcher b: watching' in pr and 'busy agent: not watching' in pr
+    assert 'Quest (Quest Browser): open' in pr and 'not on the stream' in pr
+    assert 'phone (Safari): open' in pr and 'on the stream' in pr
+    assert "LEAD: 'old untagged'" in pr and "'new untagged'" in pr and 'tagged one' not in pr
+    assert ' LEAD' not in pr.split("'old untagged'")[1]
+    st = P.phone_status()
+    assert 'agents listening: ' in st and 'watcher b' in st and 'devices open: phone (Safari, stream), Quest' in st
+    t.join(10)
+
+
+def _alarms(ph, what='watcher_down'):
+    return [r for r in ph.read_inbox(0) if r.get('kind') == 'alarm' and r.get('what') == what]
+
+
+def test_a_watcher_that_stops_while_the_person_is_in_vr_raises_one_alarm(phone):
+    """ledger:M211 (qa intent_rules 10-16 cluster 3): a DJ whose watcher died left the person asking "you watching
+    phone?" while live. In VR, an agent that watched and went quiet for 2 min is named once to the lead and on the
+    page, and its return is said once."""
+    ph, base, _ = phone
+    P.phone_listen('lead a', wait=0, lead=True)
+    P.phone_listen('dj', wait=0)
+    assert _state(base, 'quest1', QUEST_UA)['deaf'] == [] and _alarms(ph) == []
+    ph.listened['dj'] = time.time() - 200                                   # its phone_watch stopped polling
+    ph.listened['lead a'] = time.time()
+    st = _state(base, 'quest1', QUEST_UA)
+    assert st['deaf'] == [{'who': 'dj', 'min': 3}]
+    a = _alarms(ph)
+    assert len(a) == 1 and a[0]['agent'] == 'dj' and a[0]['for'] == 'lead a' and 'in VR' in a[0]['text']
+    assert abs(a[0]['down_since'] - (time.time() - 200)) < 5                # a number, not HH:MM in the text
+    _state(base, 'quest1', QUEST_UA)
+    P.phone_listen('lead a', wait=0, lead=True)
+    assert len(_alarms(ph)) == 1                                            # one per stretch down
+    assert 'WATCHER DOWN: dj, stopped 3 min ago' in P.phone_status() and 'lead: lead a' in P.phone_presence()
+    P.phone_listen('dj', wait=0)
+    assert [r['agent'] for r in _alarms(ph, 'watcher_back')] == ['dj'] and _state(base, 'quest1', QUEST_UA)['deaf'] == []
+
+
+def test_signoff_and_not_live_raise_nothing_and_expect_holds_without_vr(phone):
+    ph, base, _ = phone
+    P.phone_listen('dj', wait=0)
+    P.phone_listen('voice', wait=0)
+    ph.listened['dj'] = ph.listened['voice'] = time.time() - 200
+    assert ph.heartbeat() == []                                             # nobody in VR or on the stream
+    assert 'NOT watching now' in P.phone_expect('dj', why='a set', minutes=60)
+    assert [d['who'] for d in ph.heartbeat()] == ['dj'] and _alarms(ph)[0]['for'] is None   # no lead: everyone's
+    assert 'expected: dj until' in P.phone_presence() and 'a set' in P.phone_presence()
+    _state(base, 'quest1', QUEST_UA)
+    assert 'phone_expect (a set) ended' in P.phone_signoff('dj', why='set over')
+    assert [d['who'] for d in ph.heartbeat()] == ['voice']                  # in VR now: voice watched lately
+    ph.listened['voice'] = time.time() - S.RECENT_S - 5
+    assert ph.heartbeat() == []                                             # too long ago to be expected
+    with pytest.raises(api.OpError, match='1 to 1440'):
+        P.phone_expect('dj', why='a set', minutes=0)
+    with pytest.raises(api.OpError, match='why'):
+        P.phone_expect('dj', why=' ')
+
+
+def test_a_listen_with_lines_names_the_other_watchers(phone):
+    ph, base, _ = phone
+    t = threading.Thread(target=P.phone_listen, args=('watcher b',), kwargs={'wait': 3, 'since': 10 ** 6})
+    t.start()
+    time.sleep(0.3)
+    ph.post({'kind': 'voice_text', 'text': 'hi'})
+    out = json.loads(P.phone_listen('watcher a', since=ph.seq - 1, wait=0))
+    assert out['watching'] == ['watcher b']
+    t.join(10)
+
+
+def _until(cond, s=5.0):
+    end = time.time() + s
+    while time.time() < end and not cond():
+        time.sleep(0.05)
+    return cond()
+
+
+def test_a_now_label_expires_when_what_it_named_stops(phone, monkeypatch):
+    """ledger:M218 (the Live DJ, 10-12): a label a set script put up with phone_now stayed over a later loop that
+    never called it, and the page named the wrong piece. The label is tied to what played under it."""
+    ph, base, _ = phone
+    status = {'text': STATUS}
+    monkeypatch.setattr(S, 'engine_call', lambda port, op, timeout=3, **a: status['text'] if op == 'status' else {})
+    monkeypatch.setattr(S, 'LABEL_GRACE_BARS', 0)
+    assert _until(lambda: ph.engine and ph.engine['clips'] == [['lead', 'ch3']])
+    out = P.phone_now(now='Piece one')
+    assert 'the now label stays while ch3 (lead) plays' in out
+    ph.track_label(S.parse_status(STATUS))
+    assert ph.now_text() == 'Piece one'                                         # still playing: it holds
+    status['text'] = STATUS.replace('lead       code', 'beats      code').replace('playing ch3', 'playing loop1')
+    assert _until(lambda: ph.view['now'] is None)                               # a later loop: it expires
+    assert ph.now_text() == 'loop1 (beats)' and ph.view['now_of'] is None
+    # named by deck: it holds while the deck's tracks play
+    status['text'] = STATUS.replace('lead       code', 'a.lead     code')
+    assert _until(lambda: ph.engine['clips'] == [['a.lead', 'ch3']])
+    assert 'stays while a plays' in P.phone_now(now='Deck song', now_of=['a'])
+    time.sleep(1.5)
+    assert ph.now_text() == 'Deck song'
+    status['text'] = STATUS.replace('lead       code', 'b.lead     code')
+    assert _until(lambda: ph.view['now'] is None)
+    # now_of=[]: up until replaced or cleared, whatever plays
+    P.phone_now(now='Sticky', now_of=[])
+    status['text'] = STATUS
+    time.sleep(1.5)
+    assert ph.now_text() == 'Sticky' and ph.view['now_of'] is None
+    P.phone_now(now='')
+    assert ph.now_text() == 'ch3 (lead)'
+
+
+def test_a_panel_left_unsent_keeps_what_was_typed_said_or_picked():
+    """Nate 10-17 (n6203): he typed and dictated into a panel, left it, came back, and the boxes were empty; Send then
+    sent nothing (ledger:M227). Leaving by Later, another tab or a tap outside keeps the inputs; reopening puts them
+    back; an answer or Not now drops them."""
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "const panelKept = store.get('panel_kept', {}) || {};" in js
+    assert "function closeSheet() { keepPanel();" in js
+    assert "function showPanel(p) {\n  keepPanel();" in js and "function showNotes() {\n  keepPanel();" in js
+    assert "if (panelKept[p.id] && p.kind !== 'exam') putBack(box, p, panelKept[p.id]);" in js
+    assert js.index('putBack(box, p, panelKept[p.id])') < js.index('(fieldDrafts[p.id] || []).forEach')   # late voice text adds to it
+    assert "function answeredHere(id) { answered.add(id); forgetPanel(id);" in js
+    assert "if (!shown || shown === '__notes' || answered.has(shown)) return;" in js

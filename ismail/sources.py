@@ -233,7 +233,8 @@ def used_refs(root, d):
             if i.get('type') == 'mimic':
                 out.append(provenance._mimic_source(root, i.get('profile', '')))
             if i.get('type') == 'sampler':
-                out.append(((d.get('sounds') or {}).get(i.get('sound'), {}) or {}).get('note') or '')
+                out += [((d.get('sounds') or {}).get(s, {}) or {}).get('note') or ''
+                        for s in provenance.sampler_sounds(i)]
     ref = (d.get('reference') or {}).get('file')
     if ref:
         out.append(ref)
@@ -281,9 +282,10 @@ def plays_source_audio(d):
         insts = [inst] + list((inst.get('map') or {}).values()) if inst.get('type') == 'kit' else [inst]
         for i in insts:
             if i.get('type') == 'sampler':
-                note = ((d.get('sounds') or {}).get(i.get('sound'), {}) or {}).get('note') or ''
-                if note.startswith(('imported from', 'avg of')):
-                    out.append((name, f"sample {i.get('sound')}, {_public(note)}"))
+                for s in provenance.sampler_sounds(i):
+                    note = ((d.get('sounds') or {}).get(s, {}) or {}).get('note') or ''
+                    if note.startswith(('imported from', 'avg of')):
+                        out.append((name, f"sample {s}, {_public(note)}"))
     return out
 
 
@@ -398,3 +400,45 @@ def credits_md(root, d, consulted=False):
         L += ['## Made from', '', 'A version of ' + ', itself a version of '.join(lin) + '.', '']
     L.append('Made with ismail (https://github.com/newsbubbles/ismail).')
     return '\n'.join(L) + '\n', warn
+
+
+FOOTER_LEAD = 'Made with ismail, an open-source music studio that AI agents play'   # Marketing's wording (ledger:M254)
+
+
+def _how_made(d, root):
+    """One sentence on how the piece's sound was made, by counts only (no track names, no paths, no people)."""
+    tracks = d.get('tracks') or {}
+    if not tracks:
+        return ''
+    audio = {t for t, _ in plays_source_audio(d)}
+    measured = designed = 0
+    for name, tr in tracks.items():
+        if name in audio:
+            continue
+        st, _ = provenance.of_track(tr, d, root)
+        if st == provenance.MEASURED:
+            measured += 1
+        else:
+            designed += 1
+    n, synth = len(tracks), measured + designed
+    one = n == 1
+    how = (f"{measured} modeled on measured recordings, {designed} designed" if measured and designed else
+           ('' if one else 'all ') + ('modeled on measured recordings' if measured else 'designed'))
+    if not audio:
+        return f"1 part, synthesized ({how})." if one else f"{n} parts, all synthesized ({how})."
+    if not synth:
+        return "1 part, from recorded audio." if one else f"{n} parts, all from recorded audio."
+    return f"{n} parts: {synth} synthesized ({how}), {len(audio)} from recorded audio."
+
+
+def footer(root=None, d=None):
+    """-> {'text', 'html', 'link', 'how'}: the line a page people may share ends with (ledger:M254): made with
+    ismail, the link back, and how the piece's sound was made (counts of parts measured, designed, playing recorded
+    audio). No names and no paths, so it is safe on a public page. With no project, the first sentence only."""
+    import html as H
+    from .tags import SITE_URL
+    how = _how_made(d or {}, root) if d else ''
+    text = f"{FOOTER_LEAD}: {SITE_URL}" + (f". {how}" if how else '')
+    lead = H.escape(FOOTER_LEAD).replace('ismail', f'<a href="{SITE_URL}" target="_blank" rel="noopener">ismail</a>', 1)
+    markup = f'<footer class="made-with"><p>{lead}.' + (f' {H.escape(how)}' if how else '') + '</p></footer>'
+    return {'text': text, 'html': markup, 'link': SITE_URL, 'how': how}

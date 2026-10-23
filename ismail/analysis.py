@@ -540,6 +540,8 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     midi = np.where(voiced & (prob > min_conf), librosa.hz_to_midi(np.nan_to_num(f0, nan=1.0)), np.nan)
     oenv = librosa.onset.onset_strength(y=seg, sr=ASR, hop_length=hop)
     ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=ASR, hop_length=hop, backtrack=True).tolist()
+    ldb = 20 * np.log10(librosa.feature.rms(y=seg, hop_length=hop, frame_length=512)[0] + 1e-9)
+    ons = [o for o, nx in zip(ons, ons[1:] + [nfr]) if not _same_note(midi, ldb, oenv, o, nx, hop)]
     # split legato phrases where the rounded pitch changes and stays changed for >= 100 ms
     # (shorter changes are glides or pYIN window smear at note boundaries)
     r = np.where(np.isnan(midi), -1, np.round(midi)).astype(int)
@@ -576,6 +578,7 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
         if len(vm) < max(3, 0.25 * (e - a)):
             continue
         p = _refine_pitch(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, float(np.median(vm)))
+        p = _octave_up(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, p, librosa.note_to_midi(fmax))
         sb = grid.time_to_beat(times[a]) - base_beat
         eb = grid.time_to_beat(times[min(e, nfr - 1)]) - base_beat
         qs = round(sb / quant) * quant
@@ -597,6 +600,34 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     else:
         lines += _melody_confidence(seg, ts, merged, grid, base_beat, prob, times, fmin, fmax)
     return merged, '\n'.join(lines)
+
+
+def _same_note(midi, db, oenv, o, nxt, hop):
+    """True when the onset at frame o is not a new note: the pitch is the same on both sides (within 50 cents) and
+    nothing re-attacks. Onsets also fire on a note-off click and inside a steady held tone, and the tail past such a
+    split keeps pYIN's smeared pitch, so it read as a second note (ledger:M226). A re-attack is a level rise of 3 dB
+    or more out of a dip between the onset and the next one (nxt; within 150 ms), as after a gap or on a decaying
+    note struck again, or a hard restart: with the level held after it, an onset of strength 0.3 or more that stands
+    15 times over the onset strength around it (median over 200 ms each side), a click as a legato retrigger of a flat
+    synth note makes. A filter sweep or wah inside a held note fires onsets too, but they stand only a few times over
+    their own sweep. db is the level per frame from a 512-sample window, short enough to see the dip at a re-attack;
+    the rise is looked for up to 3 frames short of the next onset, so the next note's attack does not count."""
+    w = int(0.05 * ASR / hop)
+    a, b = midi[max(o - w, 0):o], midi[o:o + w]
+    a, b = a[~np.isnan(a)], b[~np.isnan(b)]
+    if len(a) < 3 or len(b) < 3 or abs(np.median(a) - np.median(b)) >= 0.5:
+        return False
+    lo = max(o - 4, 0)
+    end = max(min(nxt - 3, o + 3 * w), o + 4)
+    m = lo + int(np.argmin(db[lo:end]))                    # the deepest dip before the next onset
+    if db[m:end].max() - db[m] >= 3:
+        return False
+    held = o + 4 < min(o + w, len(db)) and np.median(db[o + 4:o + w]) >= db[lo] - 6
+    r, g = 4 * w, int(0.03 * ASR / hop)
+    around = np.concatenate([oenv[max(o - r, 0):max(o - g, 0)], oenv[o + g:o + r]])
+    peak = oenv[o:o + 4].max()
+    click = peak >= 0.3 and (len(around) == 0 or peak >= 15 * np.median(around))
+    return not (held and click)
 
 
 def _melody_confidence(seg, ts, notes, grid, base_beat, prob, times, fmin, fmax):
@@ -753,6 +784,319 @@ def _refine_pitch(y, ta, tb, est_midi):
         if sc > best:
             best, bm = sc, m
     return bm
+
+
+def _octave_up(y, ta, tb, est_midi, max_midi):
+    """Undo a sub-octave reading. pYIN's smoothing can hold the previous pitch through a quick jump an octave up
+    (the lower note's period is also a period of the higher one), so a note read at f is checked against its own
+    spectrum: if its odd partials (f, 3f, 5f) are near silent while its even ones (2f, 4f, 6f) carry the sound,
+    the note is at 2f. Any real tone at f has energy at f or 3f, so a true low note keeps its octave."""
+    d = tb - ta
+    a, b = int((ta + d * 0.2) * ASR), int((tb - d * 0.2) * ASR)
+    x = y[max(a, 0):b]
+    if len(x) < 1024:
+        return est_midi
+    n = 1 << 16
+    S = np.abs(np.fft.rfft(x * np.hanning(len(x)), n=n))
+
+    def part(f):                                           # strongest bin within 30 cents of f
+        if f >= ASR / 2 * 0.95:
+            return 0.0
+        lo, hi = int(f * 2 ** (-0.3 / 12) * n / ASR), int(np.ceil(f * 2 ** (0.3 / 12) * n / ASR)) + 1
+        return float(S[lo:hi].max())
+
+    m = est_midi
+    while m + 12 <= max_midi + 0.5:
+        f = 440 * 2 ** ((m - 69) / 12)
+        odd = sum(part(f * h) for h in (1, 3, 5))
+        even = sum(part(f * h) for h in (2, 4, 6))
+        if even <= 0 or odd >= 0.1 * even:                 # odd partials within 20 dB: the read octave holds
+            break
+        m += 12
+    return m
+
+
+# ------------------------------------------------------------------ pitch in cents (maqam steps, intonation)
+
+def melody_cents_text(notes, text):
+    """melody()'s reading with each note's pitch as numbers (ledger:M225): the note lines become tab-separated rows
+    start, note, dur, vel, midi (float), hz, cents. The header and the confidence lines are kept as they are."""
+    lines = text.splitlines()
+    rows = [lines[0], "# start\tnote\tdur\tvel\tmidi\thz\tcents   (the first four columns are notes_write format; midi is "
+                      "the measured pitch as a float = note + cents/100; hz from it at A440; cents from the named "
+                      "equal-tempered note, -50..+50, so a quarter tone reads near +-50 and sits on either neighbour)"]
+    for st, p, d, v, c in notes:
+        m = p + c / 100.0
+        rows.append(f"{fmt_num(st)}\t{midi_to_name(p)}\t{fmt_num(d)}\t{v}\t{m:.2f}\t{440 * 2 ** ((m - 69) / 12):.2f}"
+                    f"\t{int(round(c)):+d}")
+    return '\n'.join(rows + [ln for ln in lines[1:] if ln.startswith('#')])
+
+
+CONTOUR_MAX_ROWS = 1000
+
+
+def pitch_contour(path, grid, bars=None, hop_ms=10.0, fmin='C1', fmax='C7', start=0, max_rows=200, max_bars=64):
+    """f0 per frame over bars, one window of at most max_rows frames from frame `start` (ledger:M225). pYIN gives the
+    voicing and the coarse pitch (10-cent bins, octave-safe); YIN's interpolated pitch replaces it on frames where the
+    two agree within 60 cents, so steady pitches read to a cent or two. Only the window (plus 0.25 s each side) is
+    analysed, so paging through long ranges stays cheap. Returns (rows, text)."""
+    if not 1.0 <= hop_ms <= 100.0:
+        raise AnalysisError(f"hop_ms={hop_ms} is outside 1-100 ms; 10 ms reads note shapes and vibrato, 5 ms "
+                            f"ornaments, 25-50 ms a long phrase in few rows")
+    if not 1 <= max_rows <= CONTOUR_MAX_ROWS:
+        raise AnalysisError(f"max_rows={max_rows} is outside 1-{CONTOUR_MAX_ROWS}; read a long range window by window "
+                            f"with start=, or raise hop_ms for fewer rows")
+    lo, hi = librosa.note_to_hz(fmin), librosa.note_to_hz(fmax)
+    if hi <= lo * 1.5:
+        raise AnalysisError(f"fmin {fmin} .. fmax {fmax} is too narrow (or reversed); give at least half an octave")
+    y = load(path)
+    b0, b1, _ = _range(y, ASR, grid, bars, max_bars)
+    t0 = max(0.0, grid.bar_time(b0))
+    t1 = min(len(y) / ASR, grid.bar_time(b1))
+    hop = int(round(hop_ms * ASR / 1000))
+    nfr = int(np.floor((t1 - t0) * ASR / hop))
+    if nfr <= 0:
+        raise AnalysisError(f"bars {b0}-{b1 - 1} hold no audio in this source (it is {len(y) / ASR:.1f} s long)")
+    if not 0 <= start < nfr:
+        raise AnalysisError(f"start={start} is past the end: bars {b0}-{b1 - 1} have {nfr} frames at {hop_ms:g} ms "
+                            f"(start=0 .. {nfr - 1})")
+    k1 = min(nfr, start + max_rows)
+    ctx = int(np.ceil(0.25 * ASR / hop))
+    ka, kb = start - ctx, k1 + ctx
+    s0 = int(round(t0 * ASR))
+    a, b = s0 + ka * hop, s0 + kb * hop + 1
+    seg = np.zeros(b - a, dtype=np.float32)
+    ia, ib = max(a, 0), min(b, len(y))
+    if ib > ia:
+        seg[ia - a:ib - a] = y[ia:ib]
+    f0, voiced, prob = librosa.pyin(seg, fmin=lo, fmax=hi, sr=ASR, hop_length=hop, frame_length=2048, center=True)
+    fy = librosa.yin(seg, fmin=lo, fmax=hi, sr=ASR, hop_length=hop, frame_length=2048, center=True)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        agree = voiced & (np.abs(1200 * np.log2(fy / f0)) < 60)
+    f0 = np.where(agree, fy, f0)
+    rows = []
+    for k in range(start, k1):
+        i = k - ka
+        t = (s0 + k * hop) / ASR
+        fb = grid.time_to_bar(t)
+        bar = int(np.floor(fb + 1e-9))
+        beat = (fb - bar) * grid.bpb + 1
+        hz = float(f0[i]) if voiced[i] and np.isfinite(f0[i]) else None
+        rows.append({'t': round(t, 4), 'bar': bar, 'beat': round(beat, 3), 'hz': hz,
+                     'midi': float(librosa.hz_to_midi(hz)) if hz else None, 'p': float(prob[i])})
+    L = [f"# pitch contour bars {b0}-{b1 - 1}, frames {start}-{k1 - 1} of {nfr} at {hop_ms:g} ms "
+         f"({rows[0]['t']:.3f}-{rows[-1]['t']:.3f} s)",
+         "# t_s\tbar\tbeat\thz\tmidi\tnote\tcents\tp   (midi is the pitch as a float; cents from the named "
+         "equal-tempered note, -50..+50; p = pYIN voicing probability; '-' = unvoiced)"]
+    for r in rows:
+        if r['hz'] is None:
+            L.append(f"{r['t']:.3f}\t{r['bar']}\t{r['beat']:.2f}\t-\t-\t-\t-\t{r['p']:.2f}")
+        else:
+            n = int(round(r['midi']))
+            L.append(f"{r['t']:.3f}\t{r['bar']}\t{r['beat']:.2f}\t{r['hz']:.2f}\t{r['midi']:.2f}\t{midi_to_name(n)}"
+                     f"\t{int(round((r['midi'] - n) * 100)):+d}\t{r['p']:.2f}")
+    vm = [r['midi'] for r in rows if r['midi'] is not None]
+    L.append(f"# voiced {len(vm)} of {len(rows)} frames" +
+             (f"; median {np.median(vm):.2f} ({midi_to_name(np.median(vm))}), range {min(vm):.2f}-{max(vm):.2f}"
+              if vm else " (unpitched, silent, or the pitch is outside fmin/fmax)"))
+    L.append(f"# more: start={k1} for the next window ({nfr - k1} frames left)" if k1 < nfr else
+             f"# end of bars {b0}-{b1 - 1}")
+    return rows, '\n'.join(L)
+
+
+# ------------------------------------------------------------------ steady pitches (a part against the tuning grid)
+
+STEADY_BAND = (30.0, 5000.0)    # Hz searched for partials
+
+
+def _fundamentals(x, sr, range_db=15.0, max_notes=6):
+    """The notes sounding in one chunk of a part, as [(midi float at A440, level dB)], and the share of the chunk's
+    energy that sits on spectral lines (a struck or bowed tone ~0.8+, noise ~0.1). One zero-padded Hann FFT; a peak
+    counts when it stands 12 dB over the median of the spectrum around it (noise peaks stand ~6). Peaks within 30 c
+    of a whole multiple (1-12x) of a lower peak no more than 25 dB under them are its partials, and a note's pitch is
+    read from its strongest partial divided by its number, so a soft fundamental under a loud octave (a tumba's
+    second mode) still reads true. Notes more than range_db under the loudest are dropped."""
+    n = 1 << 15
+    X = np.abs(np.fft.rfft(x * np.hanning(len(x)), n=n))
+    L = 20 * np.log10(X + 1e-12)
+    lo, hi = int(STEADY_BAND[0] * n / sr), int(STEADY_BAND[1] * n / sr)
+    hb = max(2.0 * n / len(x), 2.0)                     # Hann main-lobe half width, in bins
+    top = L[lo:hi].max()
+    c = L[lo:hi]
+    pk = np.where((c[1:-1] > c[:-2]) & (c[1:-1] >= c[2:]) & (c[1:-1] > top - 30))[0] + 1 + lo
+    peaks = []
+    for k in pk:
+        r = int(4 * hb)
+        if X[k] < X[max(k - int(hb), 0):k + int(hb) + 1].max():        # a side lobe of a bigger peak
+            continue
+        if L[k] - 20 * np.log10(np.median(X[max(k - r, 1):k + r]) + 1e-12) < 12:
+            continue
+        a, b, g = L[k - 1], L[k], L[k + 1]
+        peaks.append(((k + 0.5 * (a - g) / (a - 2 * b + g - 1e-12)) * sr / n, float(b), k))
+    tot = float((X[lo:hi] ** 2).sum()) + 1e-20
+    on = sum(float((X[max(k - int(hb), 0):k + int(hb) + 1] ** 2).sum()) for _, _, k in peaks)
+    notes = []                                          # [f0, own level, [(partial number, Hz, level)]]
+    for fr, lv, _ in sorted(peaks):
+        for nt in notes:
+            h = fr / nt[0]
+            k = int(round(h))
+            if 1 <= k <= 12 and abs(1200 * np.log2(h / k)) < 30 and nt[1] >= lv - 25:
+                nt[2].append((k, fr, lv))
+                break
+        else:
+            notes.append([fr, lv, [(1, fr, lv)]])
+    out = []
+    for _, _, parts in notes:
+        k, fr, lv = max(parts, key=lambda p: p[2])
+        out.append((float(69 + 12 * np.log2(fr / k / 440.0)), lv))
+    if out:
+        best = max(lv for _, lv in out)
+        out = sorted([o for o in out if o[1] >= best - range_db], key=lambda o: -o[1])[:max_notes]
+    return out, min(on / tot, 1.0)
+
+
+def steady_pitches(y, sr=ASR, skip_ms=100.0, chunk_ms=200.0, max_chunks=4, min_ms=60.0, floor_db=45.0,
+                   max_events=400, min_tonal=0.5, glide_cents=25.0, floor_ms=25.0, min_cycles=4.0):
+    """The steady pitched notes of one part (ledger:M231), and their attacks. A note lasts from its onset to the
+    next onset or until its level falls 30 dB, whichever is first. Its steady pitch is read from the skip after the
+    onset (a pluck starts sharp for ~90 ms; a drum's strike is noise) to that end, at most max_chunks chunks of
+    chunk_ms. skip_ms is the longest skip: a note shorter than skip_ms / 0.3 (a fast run: a 16th at 104 bpm is
+    ~144 ms) is read from 0.3 of its length, and needs min(min_ms, 0.4 of its length) of steady part, at least
+    floor_ms. Its attack is read too, from 0.3 of its skip to the skip, capped at 0.8 of skip_ms (30-80 ms on a long
+    note). Every reading needs min_cycles periods of its pitch in its window (_fundamentals resolves ~4: a 25 ms
+    window reads down to ~170 Hz, 60 ms to ~70 Hz). A short note with no steady part that resolves is read once
+    from its attack to its end and marked attack_only; one that still resolves nothing is counted short.
+    Each chunk is read by _fundamentals; a note whose chunks disagree by more than glide_cents is gliding (a
+    pitch-dropping kick, a slide) and is counted, not read. Chords give one reading per note. The skip and the
+    attack are timed from the attack itself (the steepest rise in level near the onset), as onsets backtrack up to
+    ~70 ms early, into the note before, or land a few ms late; a note's read ends where the next note's attack
+    starts, and a short note with no attack of its own (the tail of the note before) is counted 'unstruck'.
+    Returns (readings [{'t', 'midi', 'db', 'attack', 'attack_only'}], counts {'events', 'pitched', 'noisy',
+    'gliding', 'short', 'sampled', 'fast', 'attack_only', 'unstruck'}); t is the onset in seconds from the start of
+    y, midi a float at A440, attack the attack's midi float (None when its window does not resolve it, or for an
+    attack_only reading); 'fast' counts the notes read with a shortened skip."""
+    pad = int(0.3 * sr)
+    z = np.concatenate([np.zeros(pad, dtype=np.float32), np.asarray(y, dtype=np.float32)])
+    hop = 256
+    oenv = librosa.onset.onset_strength(y=z, sr=sr, hop_length=hop)
+    ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=sr, hop_length=hop, backtrack=True, units='samples')
+    rdb = 20 * np.log10(librosa.feature.rms(y=z, frame_length=1024, hop_length=hop)[0] + 1e-9)
+    loud = rdb.max()
+    counts = {'events': 0, 'pitched': 0, 'noisy': 0, 'gliding': 0, 'short': 0, 'sampled': 0, 'fast': 0,
+              'attack_only': 0, 'unstruck': 0}
+    if loud < -90:
+        return [], counts
+    ons = [int(o) for o in ons if rdb[min(int(o) // hop + 2, len(rdb) - 1)] > loud - floor_db] or [pad]
+    if len(ons) > max_events:                           # a long busy part: an even sample of its hits
+        counts['sampled'] = len(ons)
+        ons = [ons[i] for i in np.linspace(0, len(ons) - 1, max_events).astype(int)]
+    ms = sr / 1000
+    skip, chunk, mn, flo = int(skip_ms * ms), int(chunk_ms * ms), int(min_ms * ms), int(floor_ms * ms)
+
+    def read(i, j):                                     # one window: the notes with min_cycles periods in it
+        notes, share = _fundamentals(z[i:j], sr)
+        return [(m, lv) for m, lv in notes if 440 * 2 ** ((m - 69) / 12) * (j - i) / sr >= min_cycles], share
+
+    w6, h6 = 128, 16                                    # 6 ms frames, 0.7 ms apart
+
+    def rises(i, j, w=w6):                              # the level's jump (dB) from each w-sample frame to the next
+        seg = z[max(i, 0):j]
+        if len(seg) < 3 * w:
+            return np.zeros(0)
+        e = 10 * np.log10((librosa.util.frame(np.ascontiguousarray(seg), frame_length=w, hop_length=h6) ** 2)
+                          .mean(0) + 1e-10)
+        return e[w // h6:] - e[:-(w // h6)]
+
+    def struck(s0, s1):                                 # the attack itself: (where, dB) of the steepest rise, from
+        b0 = max(s0 - int(20 * ms), 0)                  # 20 ms before the onset to 100 after it (an onset
+        d = rises(b0, min(s1, s0 + int(100 * ms) + w6))     # backtracks up to ~70 ms early, or lands a few ms
+        if not len(d):                                  # late), never past the next onset
+            return s0, 0.0
+        i = int(np.argmax(d))
+        return min(b0 + i * h6 + w6, s1 - 1), float(d[i])
+
+    bounds = ons[1:] + [len(z)]
+    hits = [struck(s0, s1) for s0, s1 in zip(ons, bounds)]
+    nexts = [st - int(3 * ms) if rise >= 3 else len(z) for st, rise in hits[1:]] + [len(z)]
+    out = []
+    for s0, s1, (st, rise), nx in zip(ons, bounds, hits, nexts):
+        s1 = max(min(s1, nx), s0 + 1)                   # a note ends where the next one's attack starts
+        f0, f1 = s0 // hop, min(s1 // hop, len(rdb))
+        if f1 <= f0:
+            continue
+        pf = f0 + int(np.argmax(rdb[f0:f1]))
+        pk = rdb[pf]
+        fall = np.nonzero(rdb[pf:f1] <= pk - 30)[0]
+        end = min(s1, (pf + int(fall[0])) * hop if len(fall) else s1, len(z))
+        ln = end - st
+        sk = max(0, min(skip, int(0.3 * ln)))           # the skip, shortened on a short note
+        fast = sk < skip
+        if fast and rise < 3:                           # no attack of its own: the tail of the note before
+            counts['unstruck'] += 1
+            continue
+        if fast:                                        # a second attack inside it (an onset missed): end there
+            c0 = st + int(20 * ms) - 2 * w6             # in 12 ms frames, so a low note's ripple is not one
+            d = np.nonzero(rises(c0, end, 2 * w6) >= 6)[0]
+            if len(d):
+                end = c0 + int(d[0]) * h6 + 2 * w6 - int(3 * ms)
+                ln = end - st
+                sk = max(0, min(skip, int(0.3 * ln)))
+        a = st + sk
+        e = min(end, a + max_chunks * chunk)
+        need = min(mn, max(flo, int(0.4 * ln)))
+        a0, a1 = st + int(0.3 * sk), st + min(int(0.8 * skip), sk)     # the attack window
+        reads, tonal, only = [], 0.0, False
+        if e - a >= need:
+            k = max(1, min(max_chunks, (e - a) // chunk))
+            step = (e - a) // k
+            for j in range(k):
+                notes, share = read(a + j * step, a + (j + 1) * step)
+                tonal += share / k
+                reads.append(notes)
+        if fast and not any(reads) and e - a0 >= need:     # no steady part resolves: read it whole, from the attack
+            notes, tonal = read(a0, e)
+            reads, k, only = [notes], 1, True
+        if not any(reads):
+            if fast or e - a < need:                    # too short to have, or to resolve, a steady part
+                counts['short'] += 1
+            else:
+                counts['events'] += 1
+                counts['noisy'] += 1
+            continue
+        counts['events'] += 1
+        counts['fast'] += fast
+        if tonal < min_tonal:
+            counts['noisy'] += 1
+            continue
+        att = []
+        if not only and a1 - a0 >= int(15 * ms):
+            att, share = read(a0, a1)
+            att = att if share >= min_tonal else []
+        groups = []                                     # one per note, across the chunks
+        for notes in reads:
+            for m, lv in notes:
+                for gr in groups:
+                    if abs(np.median(gr[0]) - m) < 0.5:
+                        gr[0].append(m)
+                        gr[1] = max(gr[1], lv)
+                        break
+                else:
+                    groups.append([[m], lv])
+        got = False
+        for ms_, lv in groups:
+            if len(ms_) < max(1, (k + 1) // 2):         # heard in under half the chunks: a passing partial
+                continue
+            if 100 * (max(ms_) - min(ms_)) > glide_cents:
+                counts['gliding'] += 1
+                continue
+            m = float(np.median(ms_))
+            near = min(att, key=lambda x: abs(x[0] - m), default=None)
+            out.append({'t': (s0 - pad) / sr, 'midi': m, 'db': float(lv), 'attack_only': only,
+                        'attack': float(near[0]) if near and abs(near[0] - m) < 0.75 else None})
+            got = True
+        counts['pitched'] += got
+        counts['attack_only'] += got and only
+    return out, counts
 
 
 def transcribe(path, grid, bars=None, quant=0.25, max_bars=16, fmin='C1', n_octaves=7, threshold=0.35,
@@ -1372,80 +1716,154 @@ def spectrogram_png(path, out_png, t0=0.0, t1=None, grid=None, n_mels=128, f_lo=
     return out_png
 
 
+EYE_PX_MAX = 1600                        # no eye picture is taller or wider than this (a page and an agent read it whole)
+ZOOM_VIEWS = (('time-sharp', 256, 32), ('frequency-sharp', 2048, 128))   # (name, window, hop) in samples at 44.1 kHz,
+# scaled to the file's rate: pulses, onsets and stripes; harmonics and formant ridges (vox eye_zoom, ledger:M193)
+MARK_COLORS = {'brighter': '#4fc3f7', 'darker': '#b2ff59'}
+
+
+def _mono(path):
+    import soundfile as sf
+    y, sr = sf.read(str(path), dtype='float64')
+    return (y.mean(axis=1) if y.ndim > 1 else y), sr
+
+
 def _eye_png(path, out_png, t0, t1, f_lo, f_hi, words, target, ruler, box, size=(6.4, 4.2), dpi=100):
+    y, sr = _mono(path)
+    return _eye_stack(out_png, [dict(y=y, sr=sr, t0=t0, t1=t1, words=words, target=target, name=str(path))],
+                      f_lo, f_hi, ruler, box, size, dpi)
+
+
+def zoom_png(path, out_png, t0=0.0, t1=None, f_lo=0.0, f_hi=16000.0, words=None, target=None, ruler=True,
+             views=ZOOM_VIEWS):
+    """One time x frequency box of a sound drawn at two resolutions, stacked: the time-sharp view (256-point
+    window, 32-sample hop at 44.1 kHz: pulses, onsets, a boundary 50 ms early) above the frequency-sharp one
+    (2048-point: harmonics, formant ridges). Each panel is an eye picture (spectrogram_png's plot box, words, ruler),
+    so a box has the same pixel box in both panels (one panel lower) and a spot the same eye_address; out_png +
+    '.json' lists the panels. Windows scale with the file's rate, so a view keeps its ms and Hz resolution."""
+    y, sr = _mono(path)
+    k = sr / 44100.0
+    panels = [dict(y=y, sr=sr, t0=t0, t1=t1, words=words or [], target=target, name=str(path), label=name,
+                   nfft=max(16, int(round(n * k))), hop=max(1, int(round(h * k)))) for name, n, h in views]
+    return _eye_stack(out_png, panels, f_lo, f_hi, ruler, EYE_BOX)
+
+
+def _eye_stack(out_png, panels, f_lo, f_hi, ruler, box, size=(6.4, 4.2), dpi=100):
+    """Eye pictures stacked top to bottom in one PNG, each on its own copy of the plot box `box` (so every panel has
+    the pixel geometry of a lone eye picture, one panel height lower). A panel: y, sr, t0, t1 (s), words, target,
+    name, and optional nfft/hop (samples; default 1024/64), label (drawn in the corner), marks [{t0, t1, f_lo, f_hi,
+    sign, label}] (outlined boxes in s and Hz of that panel's file). Writes out_png + '.json': the single-picture
+    keys of the first panel, plus 'panels' when there are several."""
     import json
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import matplotlib.mlab as mlab
-    import soundfile as sf
-    y, sr = sf.read(str(path), dtype='float64')
-    if y.ndim > 1:
-        y = y.mean(axis=1)
-    t1 = len(y) / sr if t1 is None else t1
+    from matplotlib.patches import Rectangle
     if not 0 <= f_lo < f_hi:
         raise ValueError(f"f_lo {f_lo} Hz must be under f_hi {f_hi} Hz")
-    seg = y[max(0, int((t0 - 0.03) * sr)):int((t1 + 0.03) * sr)]
-    S, f, t = mlab.specgram(seg, NFFT=1024, Fs=sr, noverlap=1024 - 64)
-    t = t + max(0.0, t0 - 0.03)
-    m = (t >= t0) & (t <= t1)
-    if not m.any():
-        raise ValueError(f"window {t0:.3f}-{t1:.3f} s holds no frame of {path} ({len(y) / sr:.2f} s)")
-    d = t1 - t0
-    fig = plt.figure(figsize=size, dpi=dpi)
-    ax = fig.add_axes(list(box))
-    ax.imshow(10 * np.log10(S[:, m] + 1e-20), origin='lower', aspect='auto', cmap='magma', vmin=-150, vmax=-40,
-              extent=[0, d * 1000, 0, f[-1]], interpolation='nearest')
-    ax.set_ylim(f_lo, f_hi)
-    ax.set_xlim(0, d * 1000)
-    ticks = [x for x in (0, 2000, 4000, 8000, 12000, 16000, 20000) if f_lo <= x <= f_hi]
-    ax.set_yticks(ticks)
-    ax.set_yticklabels([f"{x // 1000}k" if x else '0' for x in ticks], fontsize=7)
-    if ruler:
-        step = 50 if d < 0.6 else 100 if d < 2 else 500 if d < 10 else 1000
-        ax.set_xticks(np.arange(0, d * 1000 + 1, step))
-        ax.tick_params(axis='x', labelsize=7)
-        ax.set_xlabel('ms', fontsize=7, labelpad=1)
-    else:
-        ax.set_xticks([])
-    top = f_lo + (f_hi - f_lo) * 15300 / 16000
-    for w in words:
-        if w['t1'] < t0 or w['t0'] > t1:
-            continue
-        hot = bool(target) and w['w'] == target['w'] and abs(w['t0'] - target['t0']) < 1e-6
-        for e in (w['t0'], w['t1']) if hot else (w['t0'],):
-            if t0 <= e <= t1:
-                ax.axvline((e - t0) * 1000, color='w', lw=1.2 if hot else 0.6, alpha=0.9 if hot else 0.5)
-        ax.text(max(0.0, (w['t0'] - t0) * 1000) + 3, top, w['w'], color='w', fontsize=10 if hot else 8,
-                fontweight='bold' if hot else 'normal', va='top')
+    n = len(panels)
+    if n * size[1] * dpi > EYE_PX_MAX:
+        raise ValueError(f"{n} panels make a picture over {EYE_PX_MAX} px tall; draw at most "
+                         f"{int(EYE_PX_MAX // (size[1] * dpi))}")
+    fig = plt.figure(figsize=(size[0], size[1] * n), dpi=dpi)
+    views = []
+    for i, pn in enumerate(panels):
+        y, sr, t0 = pn['y'], pn['sr'], pn['t0']
+        t1 = len(y) / sr if pn.get('t1') is None else pn['t1']
+        nfft, hop = pn.get('nfft', 1024), pn.get('hop', 64)
+        seg = y[max(0, int((t0 - 0.03) * sr)):int((t1 + 0.03) * sr)]
+        S, f, t = mlab.specgram(seg, NFFT=nfft, Fs=sr, noverlap=nfft - hop)
+        t = t + max(0.0, t0 - 0.03)
+        m = (t >= t0) & (t <= t1)
+        if not m.any():
+            plt.close(fig)
+            raise ValueError(f"window {t0:.3f}-{t1:.3f} s holds no frame of {pn['name']} ({len(y) / sr:.2f} s)")
+        d = t1 - t0
+        pbox = [box[0], (n - 1 - i + box[1]) / n, box[2], box[3] / n]
+        ax = fig.add_axes(pbox)
+        ax.imshow(10 * np.log10(S[:, m] + 1e-20), origin='lower', aspect='auto', cmap='magma', vmin=-150, vmax=-40,
+                  extent=[0, d * 1000, 0, f[-1]], interpolation='nearest')
+        ax.set_ylim(f_lo, f_hi)
+        ax.set_xlim(0, d * 1000)
+        ticks = [x for x in (0, 2000, 4000, 8000, 12000, 16000, 20000) if f_lo <= x <= f_hi]
+        ax.set_yticks(ticks)
+        ax.set_yticklabels([f"{x // 1000}k" if x else '0' for x in ticks], fontsize=7)
+        if ruler:
+            step = 50 if d < 0.6 else 100 if d < 2 else 500 if d < 10 else 1000
+            ax.set_xticks(np.arange(0, d * 1000 + 1, step))
+            ax.tick_params(axis='x', labelsize=7)
+            ax.set_xlabel('ms', fontsize=7, labelpad=1)
+        else:
+            ax.set_xticks([])
+        top = f_lo + (f_hi - f_lo) * 15300 / 16000
+        words, target = pn.get('words') or [], pn.get('target')
+        for w in words:
+            if w['t1'] < t0 or w['t0'] > t1:
+                continue
+            hot = bool(target) and w['w'] == target['w'] and abs(w['t0'] - target['t0']) < 1e-6
+            for e in (w['t0'], w['t1']) if hot else (w['t0'],):
+                if t0 <= e <= t1:
+                    ax.axvline((e - t0) * 1000, color='w', lw=1.2 if hot else 0.6, alpha=0.9 if hot else 0.5)
+            ax.text(max(0.0, (w['t0'] - t0) * 1000) + 3, top, w['w'], color='w', fontsize=10 if hot else 8,
+                    fontweight='bold' if hot else 'normal', va='top')
+        for mk in pn.get('marks') or []:
+            c = MARK_COLORS.get(mk.get('sign'), 'w')
+            x0, x1 = (max(mk['t0'], t0) - t0) * 1000, (min(mk['t1'], t1) - t0) * 1000
+            ax.add_patch(Rectangle((x0, mk['f_lo']), max(x1 - x0, 1.0), max(mk['f_hi'] - mk['f_lo'], 1.0), fill=False,
+                                   edgecolor=c, lw=1.4))
+            if mk.get('label'):
+                ax.text(x0 + 2, min(mk['f_hi'], f_hi), mk['label'], color=c, fontsize=8, fontweight='bold', va='bottom')
+        if pn.get('label'):
+            ax.text(0.01, 0.02, pn['label'], transform=ax.transAxes, color='w', fontsize=7, va='bottom')
+        views.append({'axes': pbox, 't0': round(t0, 4), 't1': round(t1, 4), 'nfft': nfft, 'hop': hop,
+                      'label': pn.get('label'), 'words': [{'w': w['w'], 't0': w['t0'], 't1': w.get('t1')}
+                                                           for w in words if w['t1'] >= t0 and w['t0'] <= t1]})
     fig.savefig(out_png)
     plt.close(fig)
+    v0 = views[0]
+    meta = {'png': os.path.basename(str(out_png)), 'axes': v0['axes'] if n > 1 else list(box),
+            'px': [int(size[0] * dpi), int(size[1] * dpi * n)], 't0': v0['t0'], 't1': v0['t1'], 'f_lo': f_lo,
+            'f_hi': f_hi, 'words': v0['words']}
+    if n > 1:
+        meta['panels'] = views
     with open(str(out_png) + '.json', 'w', encoding='utf8') as fh:
-        json.dump({'png': os.path.basename(str(out_png)), 'axes': list(box), 'px': [int(size[0] * dpi), int(size[1] * dpi)],
-                   't0': round(t0, 4), 't1': round(t1, 4), 'f_lo': f_lo, 'f_hi': f_hi,
-                   'words': [{'w': w['w'], 't0': w['t0'], 't1': w.get('t1')} for w in words
-                             if w['t1'] >= t0 and w['t0'] <= t1]}, fh)
+        json.dump(meta, fh)
     return out_png
+
+
+def _eye_panel_at(view, fx, fy):
+    """(panel, u, v): the panel of an eye picture under a spot (the view itself for a lone picture) and the spot as
+    fractions of its plot box, or None off every plot box."""
+    for pn in view.get('panels') or [view]:
+        l, b, w, h = pn['axes']
+        u, v = (fx - l) / w, (1 - fy - b) / h
+        if 0 <= u <= 1 and 0 <= v <= 1:
+            return pn, u, v
+    return None
 
 
 def eye_point(view, fx, fy):
     """A spot on an eye picture as fractions of the image (fx from the left, fy from the top, as a page reads a
-    click) -> (s from the start of the file, Hz), or None off the plot box. view: the picture's .json."""
-    l, b, w, h = view['axes']
-    u, v = (fx - l) / w, (1 - fy - b) / h
-    if not (0 <= u <= 1 and 0 <= v <= 1):
+    click) -> (s from the start of the file, Hz), or None off the plot box. view: the picture's .json (a stacked
+    picture from zoom_png: the panel under the spot)."""
+    hit = _eye_panel_at(view, fx, fy)
+    if hit is None:
         return None
-    return view['t0'] + u * (view['t1'] - view['t0']), view['f_lo'] + v * (view['f_hi'] - view['f_lo'])
+    pn, u, v = hit
+    return pn['t0'] + u * (pn['t1'] - pn['t0']), view['f_lo'] + v * (view['f_hi'] - view['f_lo'])
 
 
 def eye_address(view, fx, fy, label=''):
     """The shared address of a spot, as the person reads it off a screenshot and the agent finds it again:
-    '<label> 0.19 s 7.9 kHz "this" hiss' (time from the window start; the word under it or 'gap'; the band name)."""
-    p = eye_point(view, fx, fy)
-    if p is None:
+    '<label> 0.19 s 7.9 kHz "this" hiss' (time from the window start; the word under it or 'gap'; the band name).
+    On a stacked picture the same moment gives the same address in every panel."""
+    hit = _eye_panel_at(view, fx, fy)
+    if hit is None:
         return None
-    t, f = p
-    w = [x for x in view.get('words') or [] if x['t0'] <= t]
+    pn = hit[0]
+    t, f = eye_point(view, fx, fy)
+    w = [x for x in pn.get('words') or [] if x['t0'] <= t]
     word = w[-1]['w'] if w and (w[-1].get('t1') is None or t <= w[-1]['t1'] + 0.02) else 'gap'
     band = next(n for top, n in EYE_BANDS if f < top) if f < EYE_BANDS[-1][0] else EYE_BANDS[-1][1]
-    return (f"{label} " if label else '') + f'{t - view["t0"]:.2f} s {f / 1000:.1f} kHz "{word}" {band}'
+    return (f"{label} " if label else '') + f'{t - pn["t0"]:.2f} s {f / 1000:.1f} kHz "{word}" {band}'

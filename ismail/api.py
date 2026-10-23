@@ -19,6 +19,7 @@ import time
 import numpy as np
 
 from . import analysis as A
+from . import audiofile
 from . import machine
 from . import provenance
 from . import sources as sourcesmod
@@ -158,7 +159,10 @@ class Project:
         try:
             rel = os.path.relpath(os.path.abspath(path), rd).replace(os.sep, '/')
             with open(os.path.join(rd, WINDOWS_FILE), encoding='utf8') as f:
-                return json.load(f).get(rel)
+                w = json.load(f)
+            if rel.lower().endswith('.flac') and rel not in w:     # song_compress made it from the .wav (M221)
+                rel = rel[:-5] + '.wav'
+            return w.get(rel)
         except (OSError, ValueError):
             return None
 
@@ -189,7 +193,7 @@ class Project:
         src = self.auto_source(src)
         ref = self.d.get('reference') or {}
         if src == 'render':
-            p = os.path.join(self.root, 'renders', 'latest.wav')
+            p = audiofile.find(os.path.join(self.root, 'renders', 'latest.wav'))
             if not os.path.exists(p):
                 raise OpError("nothing rendered yet; call render first")
             return p
@@ -207,12 +211,12 @@ class Project:
             sd = ref.get('stems_dir')
             if not sd:
                 raise OpError("reference has no stems yet; run separate(source='ref') first")
-            p = os.path.join(sd, stem + '.wav')
+            p = audiofile.find(os.path.join(sd, stem + '.wav'))
             if not os.path.exists(p):
-                raise OpError(f"no reference stem {stem!r}; have: {[os.path.basename(x)[:-4] for x in glob.glob(sd + '/*.wav')]}")
+                raise OpError(f"no reference stem {stem!r}; have: {list(audiofile.listing(sd))}")
             return p
         if src.startswith('track:'):
-            p = os.path.join(self.root, 'renders', 'stems', src[6:] + '.wav')
+            p = audiofile.find(os.path.join(self.root, 'renders', 'stems', src[6:] + '.wav'))
             if not os.path.exists(p):
                 raise OpError(f"no rendered stem for track {src[6:]!r}; render(stems=True) first")
             return p
@@ -221,7 +225,7 @@ class Project:
             if not meta:
                 raise OpError(f"no sound {src[6:]!r}; sound_list to see the bank")
             return os.path.join(self.root, meta['file'])
-        p = src if os.path.isabs(src) else os.path.join(self.root, src)
+        p = audiofile.find(src if os.path.isabs(src) else os.path.join(self.root, src))
         if not os.path.exists(p):
             raise OpError(f"audio source {src!r} not found. Use render | ref | ref:<stem> | track:<name> | sound:<name> | a path")
         return p
@@ -316,7 +320,11 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
         d['objectives'] = [_objective(objective, 'user')]
     with open(os.path.join(root, 'project.json'), 'w', encoding='utf8') as f:
         json.dump(d, f, indent=1)
-    return f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
+    out = f"created project {d['name']} at {root}: {bpm} BPM, {length_bars} bars, bar 1 at {offset_sec}s"
+    if reference:
+        from . import replies
+        out += '\n' + '\n'.join(replies.reference_next())
+    return out
 
 
 @op()
@@ -335,6 +343,8 @@ def project_info(project: str) -> str:
     for anc in d.get('lineage', [])[:3]:
         last = (anc.get('objectives') or [{}])[-1].get('text')
         L.append(f"derived from {anc.get('name')}" + (f", whose objective was {last!r}" if last else ''))
+    if d.get('listen_pref'):
+        L.append(f"how they hear drafts (listen_pref): {d['listen_pref']!r}")
     if d.get('reference'):
         L.append(f"reference: {d['reference'].get('file')}" + (f" (stems: {d['reference']['stems_dir']})" if d['reference'].get('stems_dir') else ''))
     L.append(f"tracks ({len(d['tracks'])}):")
@@ -383,8 +393,14 @@ def _ranges(xs):
 @op(mutates=True)
 def project_set(project: str, bpm: float = None, length_bars: int = None, offset_sec: float = None,
                 reference: str = None, tail_sec: float = None, name: str = None, reference_stems: str = None,
-                objective: str = None, objective_by: str = 'user', artist: str = None) -> str:
-    """Change project settings. Changing bpm keeps notes on the same beats (the song gets faster/slower).
+                objective: str = None, objective_by: str = 'user', artist: str = None,
+                listen_pref: str = None) -> str:
+    """Change project settings (tempo, length, bar 1, the reference, the objective, the artist tag, how they hear
+    drafts). Changing bpm keeps notes on the same beats (the song gets faster/slower).
+    reference: the recording this song is measured against, to match it or as inspiration; the reply says what to
+    run next. Reach for it when a reference arrives, even partway through a song, as a target or as inspiration.
+    listen_pref: the person's standing choice of how they hear a draft, in their words ("send every draft to my
+    phone", "just give me the file"); render's and sketch's "hear it" block follows it and says so. '' clears it.
     artist: the artist tag render writes into its mp3s (default 'ismail'); '' writes no artist tag, for a copy
     whose artist is added later, by hand.
     reference_stems = a folder of already-separated stems (drums.wav, bass.wav, ...) for the reference.
@@ -414,8 +430,19 @@ def project_set(project: str, bpm: float = None, length_bars: int = None, offset
             raise OpError("set reference first")
         P.d['reference']['stems_dir'] = os.path.abspath(reference_stems)
         ch.append(f"reference_stems={reference_stems}")
+    if listen_pref is not None:
+        if str(listen_pref).strip():
+            P.d['listen_pref'] = str(listen_pref).strip()
+            ch.append(f"listen_pref={P.d['listen_pref']!r}")
+        else:
+            P.d.pop('listen_pref', None)
+            ch.append("listen_pref cleared")
     P.save()
-    return "set " + (', '.join(ch) if ch else 'nothing')
+    out = "set " + (', '.join(ch) if ch else 'nothing')
+    if reference is not None:
+        from . import replies
+        out += '\n' + '\n'.join(replies.reference_next())
+    return out
 
 
 @op(mutates=True)
@@ -569,7 +596,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
     The first sketch comes back as soon as it is rendered and the others render in the background (background=
     False waits for all): play the first while they land, and sketch_wait(project) says when they are ready. The
     reply opens with SAY TO THE PERSON, written for them: read it out as it is. Every sketch is mixed (the tune
-    sits 4-6 LU over the rest) and mastered for its style. Versions are numbered across rounds (a next round's
+    sits 4-6 LU over the rest: it rises at most 8 dB and the other parts come down for the rest, and the reply gives
+    the level measured in the final mix) and mastered for its style. Versions are numbered across rounds (a next round's
     first is version 4 after three), so every number names one sketch. A next round (base=) keeps the person's
     tune and chords and changes only what their words name; its reply names the version to play as "before".
     wait: when the machine is busy, stand in line this long ('2m' default, '0' refuses at once). A bare number is
@@ -596,7 +624,8 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
             for st in styles:
                 spec = SK.style_spec(st)
                 got = SK.read_brief(brief)
-                spec.update({'key': key or got['key'], 'bpm': bpm or got['bpm'], 'form': got['form']})
+                spec.update({'key': key or got['key'], 'bpm': bpm or got['bpm'], 'form': got['form'],
+                             **{k: got[k] for k in SK.BRIEF_FEEL}})
                 todo.append((st, spec))
         else:
             base_spec = base_dir = None
@@ -765,6 +794,10 @@ def sketch(project: str, brief: str, base: str = None, n: int = None, styles: li
              f"{top or 'its file'} where your app shows a player, else a clickable link with its full path. "
              f"play_file(path) opens it in their own player (say first that it will play out loud). End on the song "
              f"and the SAY block's question: no setup report, tool counts or devices unless they ask.")
+    first_file = top or (built[0].get('done') or {}).get('file')
+    if first_file:                       # ledger:M247: what is up right now to hear it on, and one option
+        from . import replies
+        L.append(replies.hear_it(root, first_file, what='sketch'))
     song = _kept_version(root)
     keep_line = (f"The song is version {song} (kept); sketch_keep(project, '<version number>', replace=True) makes a "
                  f"new pick the song." if song else
@@ -831,7 +864,7 @@ def samples_fetch(name: str, path: str = None) -> str:
     except samples.SampleError as e:
         raise OpError(str(e))
     s = samples.SETS[name]
-    return (f"{name} {'registered' if path else 'fetched'}: {p}\nthe {s['voice']} voice plays it now. Credit: "
+    return (f"{name} {'registered' if path else 'fetched'}: {p}\n{samples.user(s)} plays it now. Credit: "
             f"{s['credit']} ({s['licence']})")
 
 
@@ -883,7 +916,7 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
     else:
         done = "First session over for this person (nothing marked: this computer's owner already makes songs)."
     heard = sorted(f for f in (os.listdir(os.path.join(src, 'renders')) if os.path.isdir(os.path.join(src, 'renders'))
-                                else []) if f.startswith('sketch_') and f.endswith(('.mp3', '.wav')))
+                                else []) if f.startswith('sketch_') and f.endswith(('.mp3', '.wav', '.flac')))
     song = ''
     v = _version_of(hits[0])
     if heard:                                        # ledger:M170 U-5: the kept song plays at once
@@ -961,21 +994,22 @@ def _ffmpeg_ok():
 
 HOT_DB = -0.5          # a track stem peaking over this is a part at full scale on its own (ledger:M170 S-1)
 TUNE_PEAK_DB = -1.0    # the sketch balance never pushes the tune's own peak over this
+TUNE_RISE_DB = 8.0     # nor raises the tune more than this: the other parts come down for the rest
+TUNE_MOVE_DB = 20.0    # a gap further out than this is a part gone wrong, not a balance to make
 
 
-def _tune_balance(project, target=5.0):
-    """ledger:M150: the tune sat +1 LU over a contrabass in one sketch and 7-13 LU over the others, because the
-    faders are fixed. From a stems render: move the melody's fader so it sits `target` LU (4-6) over the other
-    parts together. -> a line saying where it sits."""
+def _tune_gap(project):
+    """From the last stems render: (the tune's loudness over the other parts together in LU, the tune stem's peak
+    dBFS, the parts' stem files), or a line saying why it cannot be weighed."""
     try:
         import pyloudnorm as pyln
         import soundfile as sf
     except ImportError:
         return 'balance not measured (no pyloudnorm)'
     sd = os.path.join(os.path.abspath(project), 'renders', 'stems')
-    tune = os.path.join(sd, 'melody.wav')
-    others = [os.path.join(sd, f) for f in os.listdir(sd) if f.endswith('.wav') and f != 'melody.wav'
-              and not f.startswith('bus_')] if os.path.isdir(sd) else []
+    have = audiofile.listing(sd)
+    tune = have.get('melody', os.path.join(sd, 'melody.wav'))
+    others = [p for n, p in have.items() if n != 'melody' and not n.startswith('bus_')]
     if not os.path.exists(tune) or not others:
         return 'balance: no tune and parts to weigh'
     y, sr = sf.read(tune)
@@ -987,24 +1021,34 @@ def _tune_balance(project, target=5.0):
     lt, lr = m.integrated_loudness(y), m.integrated_loudness(rest)
     if not (np.isfinite(lt) and np.isfinite(lr)):
         return 'balance: a part is silent'
-    gap = lt - lr
+    return lt - lr, float(20 * np.log10(np.max(np.abs(y)) + 1e-12)), others
+
+
+def _tune_balance(project, target=5.0):
+    """ledger:M150: the tune sat +1 LU over a contrabass in one sketch and 7-13 LU over the others, because the
+    faders are fixed. From a stems render: set the faders so the melody sits `target` LU (4-6) over the other parts
+    together. The tune rises at most TUNE_RISE_DB and never past its peak ceiling; the parts come down for the rest
+    (ledger:M213: a tune 5.5 LU under the parts rose 8 dB and stopped at +2.5). -> a line saying where it sits."""
+    got = _tune_gap(project)
+    if isinstance(got, str):
+        return got
+    gap, peak, others = got
     if target - 1.0 <= gap <= target + 1.0:
         return f"the tune sits {gap:+.1f} LU over the parts"
-    move = float(np.clip(target - gap, -8.0, 8.0))
-    room = TUNE_PEAK_DB - 20 * np.log10(np.max(np.abs(y)) + 1e-12)     # how far the tune can rise before full scale
-    rest_down = max(0.0, move - room) if move > 0 else 0.0
-    move -= rest_down
+    need = float(np.clip(target - gap, -TUNE_MOVE_DB, TUNE_MOVE_DB))
+    up = min(need, TUNE_RISE_DB, max(0.0, TUNE_PEAK_DB - peak)) if need > 0 else need
+    rest_down = need - up
     P = _load(project)
-    v = P.track('melody').get('volume_db', 0.0) + move
-    track_set(project, 'melody', volume_db=round(v, 1))
-    if rest_down > 0.05:            # the tune is at its ceiling: the parts come down instead (ledger:M170 S-1)
+    track_set(project, 'melody', volume_db=round(P.track('melody').get('volume_db', 0.0) + up, 1))
+    if rest_down > 0.05:            # the tune at its rise or its ceiling: the parts come down instead (M170 S-1)
         for f in others:
             name = os.path.basename(f)[:-4]
             if name in P.d.get('tracks', {}):
                 track_set(project, name, volume_db=round(P.track(name).get('volume_db', 0.0) - rest_down, 1))
-        return (f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB (its peak stays under "
-                f"{TUNE_PEAK_DB:.0f} dB) and the parts {-rest_down:+.1f} dB, to about {gap + move + rest_down:+.1f}")
-    return f"the tune sat {gap:+.1f} LU over the parts; moved it {move:+.1f} dB to about {gap + move:+.1f}"
+        return (f"the tune sat {gap:+.1f} LU over the parts; moved it {up:+.1f} dB (at most "
+                f"{TUNE_RISE_DB:+.0f} dB, its peak under {TUNE_PEAK_DB:.0f} dB) and the parts {-rest_down:+.1f} dB, "
+                f"to about {gap + need:+.1f}")
+    return f"the tune sat {gap:+.1f} LU over the parts; moved it {up:+.1f} dB to about {gap + need:+.1f}"
 
 
 def _sketch_render(job):
@@ -1028,9 +1072,14 @@ def _sketch_render(job):
             render(sp, out=f"sketch_{letter}", mp3=mp3, stems=True)
         if down < -0.05:
             bal += f"; master {down:+.1f} dB so the tune is not flattened by the limiter"
-        lufs, peak = _lufs_peak(os.path.join(sp, 'renders', 'latest.wav'))
+        final = _tune_gap(sp)        # ledger:M213: what the person hears, measured, not the plan
+        if not isinstance(final, str) and ('moved it' in bal or down < -0.05 or not 4.0 <= final[0] <= 6.0):
+            bal += f"; in the final mix it sits {final[0]:+.1f} LU" + (
+                '' if 4.0 <= final[0] <= 6.0 else ", outside the 4-6 LU a sketch aims for")
+        lufs, peak = _lufs_peak(audiofile.find(os.path.join(sp, 'renders', 'latest.wav')))
         f = os.path.join(sp, 'renders', f"sketch_{letter}.{'mp3' if mp3 == 'also' else 'wav'}")
-        got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time()}
+        got = {'letter': letter, 'file': f, 'lufs': lufs, 'peak': peak, 'balance': bal, 'at': time.time(),
+               'tune_lu': None if isinstance(final, str) else round(final[0], 1)}
         if job.get('version') and job.get('root') and os.path.exists(f):      # ledger:M170 U-5
             top = os.path.join(job['root'], f"version {job['version']}{os.path.splitext(f)[1]}")
             shutil.copyfile(f, top)
@@ -1049,7 +1098,7 @@ def _tune_hot(project):
     """A tune stem over HOT_DB in the last stems render: how far (dB) to bring it down to TUNE_PEAK_DB; else 0."""
     try:
         import soundfile as sf
-        y, _ = sf.read(os.path.join(os.path.abspath(project), 'renders', 'stems', 'melody.wav'))
+        y, _ = sf.read(audiofile.find(os.path.join(os.path.abspath(project), 'renders', 'stems', 'melody.wav')))
     except Exception:
         return 0.0
     pk = float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
@@ -1126,7 +1175,7 @@ def _loudness_trim(project, target):
     try:
         import pyloudnorm as pyln
         import soundfile as sf
-        y, sr = sf.read(os.path.join(os.path.abspath(project), 'renders', 'latest.wav'))
+        y, sr = sf.read(audiofile.find(os.path.join(os.path.abspath(project), 'renders', 'latest.wav')))
         lufs = pyln.Meter(sr).integrated_loudness(y)
     except Exception:
         return 0.0
@@ -1144,7 +1193,8 @@ def _loudness_trim(project, target):
 
 @op()
 def lexicon_note(project: str = None, said: str = None, means=None, craft: str = None, where: str = None,
-                 outcome: str = None, why: str = None, who: str = 'user', id: str = None) -> str:
+                 outcome: str = None, why: str = None, who: str = 'user', id: str = None, track: str = None,
+                 heard: str = None) -> str:
     """Record what the person called something, and what it means in ismail. said: their words, verbatim ("too
     clean", "the snare is boxy"). means: the system terms it maps to, a list or ';'-separated ("fx eq peak 400 Hz -3
     dB on snare; analyze_timbre centroid"). craft: the role the word belongs to (composer, arranger, performer, sound
@@ -1152,14 +1202,17 @@ def lexicon_note(project: str = None, said: str = None, means=None, craft: str =
     choreographer, listener). outcome: open | worked | partly | missed, with why. Update an entry with id=... (means,
     craft, outcome, why); the words themselves never change. Words about the work only: never record emotion, mood
     or health. The file is local and shared by every session (lexicon_view shows where). Returns the entry and what
-    the same words meant before."""
+    the same words meant before. track: the part their words name ("the answer bass" is the track 'reese'). heard: the
+    feedback round where they named that part after hearing it alone (feedback_page(parts=...)); only then is the
+    name confirmed, checked against what they typed there. A name you inferred stays unconfirmed: ask them."""
     from . import lexicon as LX
     from . import sketch as SK
     song = os.path.basename(os.path.abspath(project)) if project else None
+    confirmed = _heard_name(project, track, said, heard, id) if heard else None
     with LX.scoped(SK.lexicon_file(project)):        # ledger:M175: a guest's words stay theirs
         before = LX.find(said, who) if said and not id else []
         try:
-            e = LX.note(said, means, craft, song, where, outcome, why, who, id)
+            e = LX.note(said, means, craft, song, where, outcome, why, who, id, track=track, confirmed=confirmed)
         except ValueError as ex:
             raise OpError(str(ex))
     L = [("updated " if id else "noted ") + LX.line(e)]
@@ -1169,6 +1222,28 @@ def lexicon_note(project: str = None, said: str = None, means=None, craft: str =
     if not e.get('means'):
         L.append(f"not mapped yet: when you know what it meant, lexicon_note(id={e['id']!r}, means=[...])")
     return '\n'.join(L)
+
+
+def _heard_name(project, track, said, heard, id):
+    """'feedback <round>' when the person named `track` `said` on that round's parts block, else an OpError that says
+    what they did name it (ledger:M253: a part's name is confirmed only by the person)."""
+    from . import api_feedback as AF
+    from . import feedback as FB
+    if not project or not track:
+        raise OpError("heard= confirms a part's name: pass project= (the song) and track= (the part) with it")
+    if id and not said:
+        raise OpError("heard= checks their words: pass said= with them (an entry's words never change, so note a new "
+                      "entry)")
+    d, _ = AF._round_dir(project, AF._round(heard))
+    names = FB.names(d)
+    if track not in names:
+        raise OpError(f"round {heard!r} has no name for {track!r} from them" + (
+            f" (they named {', '.join(f'{t}: {n!r}' for t, n in names.items())})" if names else
+            "; feedback_page(project, round, parts=[...]) lets them hear each part and name it"))
+    if FB._norm(names[track]) != FB._norm(said):
+        raise OpError(f"in round {heard!r} they called {track!r} {names[track]!r}, not {said!r}: note their words "
+                      f"verbatim")
+    return f"feedback {heard}"
 
 
 @op()
@@ -1285,16 +1360,25 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
     if type == 'sampler':
         return "sampler params (defaults):\n" + json.dumps(inst_mod.SAMPLER_DEFAULT, indent=1) + \
             "\nroot = pitch at which the sound plays unshifted; one_shot plays the whole sample regardless of note length;" \
-            " start/end/loop_* in seconds; filter = {type, cutoff, res} (cutoff automatable as inst.filter.cutoff)"
+            " start/end/loop_* in seconds; filter = {type, cutoff, res} (cutoff automatable as inst.filter.cutoff)." \
+            "\nseveral sounds on one pitch (round robin, velocity layers): 'sounds': ['a', 'b', 'c'] in place of" \
+            " 'sound', with 'select': round_robin (default: in turn, carrying on from bar to bar) | random | velocity" \
+            " (each sound {'sound': 'a', 'vel': [0, 80], 'gain_db': 0}; without vel ranges they split 0-127 evenly," \
+            " softest first). The pick is keyed on where the note sits in the song, so a window render, a live deck" \
+            " and the whole song play the same sound for the same note."
     if type == 'kit':
         return 'kit: {"type":"kit","map":{"C1":{"type":"kick",...},"D1":{"type":"sampler","sound":"snare1","one_shot":true}}}' \
-               " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1."
+               " - maps pitches to any instrument. GM-ish names: kick C1, snare D1, clap D#1, hat F#1, open hat A#1." \
+               "\nnote names follow C4 = 60, so C1 = MIDI 24 (GM drum charts number C1 as 36): a voice that maps" \
+               " pieces by MIDI number adds 12 to the note before looking it up in a GM chart, or maps by name."
     if type == 'code':
         return ('code: {"type":"code","voice":"<name>","fn":"voice","params":{},"tail":1.0} plays a voice module '
                 "(voices_list, voice_help; a song's own voices go in <project>/voices/<name>.py). Inline form: "
                 '{"type":"code","code":"def voice(freq, t, vel, gate, sr):\\n    return np.sin(2*np.pi*freq*t)*np.exp(-t*4)",'
                 ' "tail":0.3}. t is a time array (s) covering gate+tail, vel 0..1; return mono or (2,n); np and dsp '
-                'are available inline. Prefer a voice module for anything you will reuse.')
+                'are available inline. Prefer a voice module for anything you will reuse. Note names follow C4 = 60, '
+                'so C1 = MIDI 24 (GM drum charts number C1 as 36): a drum voice that picks its piece by MIDI number '
+                '(69 + 12*log2(freq/440)) adds 12 before looking it up in a GM chart, or maps by name.')
     if type == 'mimic':
         from . import mimic
         return ('mimic: {"type":"mimic","profile":"<name>","params":{},"tail":1.0} plays an instrument measured from '
@@ -1381,7 +1465,8 @@ def track_model(project: str, track: str, on=None, by: str = None) -> str:
 
 
 @op()
-def credits(project: str, out: str = None, overwrite: bool = False, consulted: bool = False) -> str:
+def credits(project: str, out: str = None, overwrite: bool = False, consulted: bool = False,
+            format: str = 'md') -> str:
     """Write the piece's credits (CREDITS.md at the song root) from its SOURCES files (the recording, who made
     or played it, the licence, the link; columns about approval, local paths, dates and notes are left out), each
     track's model (measured from what, or designed) and its lineage (derived_from). Only the sources the piece uses
@@ -1390,8 +1475,17 @@ def credits(project: str, out: str = None, overwrite: bool = False, consulted: b
     rest under 'Also consulted'. A plain list that repeats a table's rows (a SOURCES.txt of video ids) is left out.
     It says whether the piece holds any recorded audio (imported samples, audio clips) or only measurements rebuilt
     by synthesis. Files in ref/ with no SOURCES row are not credited: the reply lists them. Review the file before
-    it goes public. out: another path; overwrite: replace an existing file (it may have been edited by hand)."""
+    it goes public. out: another path; overwrite: replace an existing file (it may have been edited by hand).
+    format='footer' writes nothing and returns the footer a page people may share ends with (ledger:M254): made
+    with ismail, the link, and how the sound was made, by counts only (no names, no paths), as text and as HTML.
+    Reach for it whenever you build a listening page or post by hand: every page a person may pass on ends with it."""
     P = _load(project)
+    if format == 'footer':
+        f = sourcesmod.footer(P.root, P.d)
+        return '\n'.join([f"footer text: {f['text']}", f"footer html: {f['html']}",
+                          "end every page a person may share with it (feedback_page adds it on its own)"])
+    if format != 'md':
+        raise OpError(f"format={format!r}: 'md' writes CREDITS.md, 'footer' returns the footer for a shared page")
     path = os.path.abspath(out) if out else os.path.join(sourcesmod.song_root(P.root), 'CREDITS.md')
     if os.path.exists(path) and not overwrite:
         raise OpError(f"{path} exists (it may have been edited by hand): pass overwrite=True to replace it, or "
@@ -1702,6 +1796,8 @@ def fx_help(project: str = None, type: str = None) -> str:
         out.append(f"{t}: {json.dumps(fxmod.FX_DEFAULTS[t])}  automatable: {list(fxmod.AUTOMATABLE.get(t, ()))}")
         if t in rigmod.DOCS:
             out.append(f"    {rigmod.DOCS[t]}")
+        if t in fxmod._spatial.DOCS:
+            out.append(f"    {fxmod._spatial.DOCS[t]}")
     out.append("notes: compressor.sidechain = track name; duck.source = track name (ducks on its note-ons) or every_beats;"
                " gate.pattern uses step chars; vocoder.modulator = track name or 'sound:<name>'; "
                "autotune: on a vocal track, pitch onto key + scale (major, minor, chromatic, dorian, blues ...), or "
@@ -1903,10 +1999,12 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg on PATH or $ISMAIL_FFMPEG.
     wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once). A bare number is
     minutes: wait='10' is ten minutes; for seconds write wait='600s'.
-    Returns levels, clipping and timing."""
+    Returns levels, clipping and timing; with a reference, whether it was compared since this render; after an mp3
+    or a named render, a "hear it" block: the file's full path, what is up now to hear it on (the phone page, the
+    stage, a live engine, a feedback round) and one option chosen from that state."""
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
-    from .render import Renderer, write_wav, prune_cache, RenderError
+    from .render import Renderer, write_wav, write_renders, prune_cache, RenderError
     try:
         wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
     except ValueError as e:
@@ -1930,9 +2028,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         raise OpError(f"render failed: {e}")
     rd = os.path.join(P.root, 'renders')
     written = ['latest.wav'] + ([out + '.wav'] if out and mp3 != 'only' else [])
-    write_wav(os.path.join(rd, 'latest.wav'), y, R.sr)
-    if out and mp3 != 'only':
-        write_wav(os.path.join(rd, out + '.wav'), y, R.sr)
+    write_renders(rd, y, R.sr, out if out and mp3 != 'only' else None)
     mp3_note = ''
     if mp3 != 'none':
         from .render import write_mp3
@@ -1957,6 +2053,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     prune_cache(P.root)
     peak = 20 * np.log10(np.max(np.abs(y)) + 1e-12)
     clip = float(np.mean(np.abs(y) >= 0.999)) * 100
+    from .master import true_peak_db
+    tp = true_peak_db(y.T)      # 4x oversampled: a sample-peak limiter lets bright sounds over between samples
     try:
         import pyloudnorm as pyln
         lufs = pyln.Meter(R.sr).integrated_loudness(y.T)
@@ -1964,7 +2062,10 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         lufs = float('nan')
     L = [f"rendered {y.shape[1] / R.sr:.1f}s" + (f" (bars {bars[0]}-{bars[1]})" if bars else '') +
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
-         f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS" + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else '')]
+         f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS, true peak {tp:.1f} dBTP"
+         + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else
+            ", over -1 dBTP: an mp3 of it can clip (lower the master limiter's ceiling_db to -1.5, or master_cue "
+            "for delivery)" if tp > -1.0 else '')]
     if waited >= 5:
         L.append(f"  waited {waited / 60:.1f} min in line for the machine (wait='0' refuses at once instead)")
     if R.full and lufs < -20:
@@ -2004,6 +2105,20 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     short = sourcesmod.summary(P.root, P.d)[1]
     if short:
         L.append(short)
+    from . import replies                # ledger:M245 B, M247: lines read from the live state, never "at step 8"
+    ref_line = replies.reference_line(P.root, P.d)
+    if ref_line:
+        L.append(ref_line)
+    if stems:
+        L += replies.balance_lines(P)
+    if not bars and len(P.d.get('tracks') or {}) >= 3:
+        mv = replies.moves_line(P.d)
+        if mv:
+            L.append(mv)
+    heard = (os.path.join(rd, (out or 'latest') + '.mp3') if mp3 != 'none' else
+             os.path.join(rd, out + '.wav') if out else None)
+    if heard:
+        L.append(replies.hear_it(P.root, heard, P.d))
     return '\n'.join(L)
 
 
@@ -2053,7 +2168,7 @@ def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> st
     P = _load(project)
     g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
     ref = P.d.get('reference') or {}
-    drums = os.path.join(ref.get('stems_dir') or '', 'drums.wav')
+    drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
         txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
     else:
@@ -2084,12 +2199,16 @@ def analyze_chords(project: str, source: str = None, bars: list = None, per_bar:
 
 @op()
 def analyze_melody(project: str, source: str = 'ref:other', bars: list = None, fmin: str = 'C1', fmax: str = 'C7',
-                   quant: float = 0.25, min_conf: float = 0.0) -> str:
+                   quant: float = 0.25, min_conf: float = 0.0, cents: bool = False) -> str:
     """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line. Ends
     with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits within 6 dB on a
-    quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax)."""
+    quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax).
+    cents=True gives every note's measured pitch as numbers, for intonation and quarter tones (maqam steps):
+    tab-separated rows start, note, dur, vel, midi (float), hz, cents from the named note. For the pitch moving
+    inside a note (slides, vibrato, ornaments) read analyze_contour."""
     P = _load(project)
-    return A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)[1]
+    notes, txt = A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)
+    return A.melody_cents_text(notes, txt) if cents else txt
 
 
 @op()
@@ -2194,10 +2313,15 @@ def compare(project: str, a: str = 'render', b: str = 'ref', bars: list = None, 
             detail: int = 8) -> str:
     """Compare two sources bar by bar on the project grid (default: your render vs the reference). Scores:
     chroma_sim, rhythm_corr, band dB deltas, log-mel L1, plus the worst bars and advice. Compare stems too:
-    a='track:bass', b='ref:bass'."""
+    a='track:bass', b='ref:bass'. Reach for it when a reference is set (as a target or as inspiration) and a draft
+    is about to go to the person, or they say it is not like the reference; render's reply says when it last ran."""
     P = _load(project)
     (pa, ga), (pb, gb) = P.source(a, bars), P.source(b, bars)
-    return A.compare(pa, pb, ga, bars, offset_b + gb.offset - ga.offset, detail=detail)[1]
+    out = A.compare(pa, pb, ga, bars, offset_b + gb.offset - ga.offset, detail=detail)[1]
+    from . import replies
+    if replies.is_ref(a) or replies.is_ref(b):
+        replies.note_compared(P.root, 'compare', f"{a} vs {b}" + (f" bars {bars[0]}-{bars[1]}" if bars else ''))
+    return out
 
 
 @op()
@@ -2225,7 +2349,8 @@ def spectrogram(project: str, source: str = None, bars: list = None, out: str = 
     gargle, old TTS, cut off, pre-delay, reversed, phaser); the numbers say close but the ear says no; the sound is a
     voice, sung words or a played instrument; two rounds passed without progress; or to see that a fix made its spot
     fade. Draw the reference and yours on the same window, two ways (a few ms around an edge; a whole word or note for
-    texture), and read them one above the other (references/listening.md, "When to zoom")."""
+    texture; sound_zoom draws both in one picture), and read them one above the other (references/listening.md,
+    "When to zoom"). Where yours differs beyond the reference's own spread: sound_zoom_diff."""
     P = _load(project)
     path, g = P.source(source, bars)
     a, b = (g.bar_time(bars[0]), g.bar_time(bars[1] + 1)) if bars else (0.0, None)
@@ -2272,9 +2397,14 @@ def machine_status(project: str = None) -> str:
 @op()
 def machine_disk(top: int = 12) -> str:
     """Where the disk went, when the board says disk LOW or a heavy job waits on disk: each drive's free space and
-    pagefile, the biggest folders under songs/ with their growth since the last daily snapshot, and every _reclaim
-    folder. To free space, move a project's finished intermediates (caches, old renders, uncut takes) into its
-    _reclaim/ folder and tell the user; never delete: the user clears _reclaim."""
+    pagefile, the biggest folders under songs/ with their growth since the last daily snapshot, the reclaim folder
+    at the root of the drive (D:\\_reclaim on Windows) with each of its folders and their sizes, any old per-song
+    songs/*/_reclaim folders, and the folders beyond songs/ with their daily growth (a call walks them for 20 s at
+    most and the next call carries on, so the first look at a whole drive can take a few calls). To free space, move
+    a project's finished intermediates (caches, old renders, uncut takes) with ismail.reclaim.move(path, what) or
+    `python -m ismail.reclaim move <path> <what>`: they land in <root>/_reclaim/<what>_<date>/, keeping their path
+    from the drive root, with a manifest.json (ledger:M229). Tell the user; never delete: the user deletes the
+    folder."""
     return machine.disk_text(top)
 
 
@@ -2323,10 +2453,16 @@ def call(name, /, **kw):
 from . import api_cmp  # noqa: E402,F401  (registers stem/structure/comparison ops)
 from . import api_sound  # noqa: E402,F401  (registers sound_compare / instrument_fit)
 from . import api_measure  # noqa: E402,F401  (registers tuning, swing, kit, section and level ops)
+from . import api_zoom  # noqa: E402,F401  (registers sound_zoom, sound_zoom_diff, region_measure, ledger:M193)
 from . import api_exam  # noqa: E402,F401  (registers exam_check, the exam pre-flight)
 from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list/measure, ledger:M177)
 from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
 from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
+from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
+from . import api_midi  # noqa: E402,F401  (registers midi_write / midi_read: MIDI files in and out, ledger:M113)
+from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
+from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
+from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)

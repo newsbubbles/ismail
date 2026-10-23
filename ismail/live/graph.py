@@ -24,10 +24,11 @@ class GraphError(ValueError):
 class Ramp:
     """A param moving from v0 at sample p0 to v1 at p1 (log-space for frequencies), held after."""
 
-    def __init__(self, p0, v0, p1, v1, log, gen=0):
+    def __init__(self, p0, v0, p1, v1, log, gen=0, section=None):
         self.p0, self.v0, self.p1, self.v1 = int(p0), float(v0), int(max(p1, p0 + 1)), float(v1)
         self.log = log and v0 > 0 and v1 > 0
         self.gen = gen              # the effect chain this ramp was written for (a chain swap drops the others)
+        self.section = section      # the set section it was scheduled for (live_queue(cancel_section=) drops it)
 
     def curve(self, pos, n):
         if pos >= self.p1:
@@ -63,6 +64,26 @@ class Schedule:
         self.r = [x for x in self.r if x.p0 < pos or x.gen != gen] + [Ramp(pos, v, pos + 1, v, False, gen)]
         self.r.sort(key=lambda x: x.p0)
         return v
+
+    def drop_section(self, section, pos):
+        """Take back the moves of `section` from `pos` on: the ones starting then or later go, one gliding through
+        `pos` stops where it is then (same curve up to there). Returns (dropped, held); a param left with nothing
+        scheduled holds the value it had at `pos`."""
+        mine = [x for x in self.r if x.section == section]
+        if not mine:
+            return 0, 0
+        v = self.value(pos)
+        gen = mine[-1].gen
+        gone = [x for x in mine if x.p0 >= pos]
+        held = 0
+        for x in mine:
+            if x.p0 < pos < x.p1:
+                x.v1, x.p1 = x.value(pos), int(pos)       # a glide cut short follows the same line up to there
+                held += 1
+        self.r = [x for x in self.r if x not in gone]
+        if not self.r:
+            self.r = [Ramp(pos, v, pos + 1, v, False, gen)]
+        return len(gone), held
 
     def value(self, pos):
         cur = [x for x in self.r if x.p0 <= pos]
@@ -154,6 +175,7 @@ class Chain:
             self.procs.append(F.make(f, F.Env(SR, bpm, dry, 0)))
         self.latency = sum(p.latency for p in self.procs)
         self.noise = sum(p.noise for p in self.procs)      # self-noise of the chain (amp hiss, tape hiss)
+        self.hold_s = sum(p.hold_s for p in self.procs)    # sound still in flight after the output goes quiet
         self.gr = {}
         self.gen = 0                # set when the chain is scheduled to replace another (ramps carry it)
 

@@ -1,7 +1,9 @@
 // Grab by touch, phase 1 (STAGE_DESIGN_INTERACTION.md section 7; the user, 2026-10-12). A hand takes a thing by
 // holding it, not by a gesture: the palm or the finger bases on it, the hand nearly still, for hold_s (a ring fills).
-// Fingertips alone stay the pinch for menus. The hand then holds it until it opens past half of the grip it took
-// (or pulls 6 cm off a fixed thing) for release_s (a ring empties; closing again keeps it). A release lets go
+// Fingertips alone stay the pinch for menus. A hand takes what it could carry: the outermost group up to HAND_M across
+// (a pool ball under its table's group, never the table: the user, 2026-10-14). The hand then holds it until it opens
+// past half of the grip it took, counted from at least a half-closed hand (taken with an open palm, opening flat lets
+// go; the user, 2026-10-14: an open-handed take could never let go) (or pulls 6 cm off a fixed thing) for release_s (a ring empties; closing again keeps it). A release lets go
 // completely (the user, 2026-10-13: a drop is often on purpose): a loose thing falls under gravity onto whatever is
 // under it, carrying the hand's speed, so a toss flies. Grabs stay on during a performance (a touch, and a held count
 // to let go, so a drum fill cannot drop a stick).
@@ -23,9 +25,12 @@ import { JOINTS } from './hands.js';
 import { world } from './world.js';
 
 const START_M = 0.010, END_M = 0.025;     // a contact starts within 1.0 cm of the surface, ends past 2.5 cm
+const LOSE_S = 0.4;                       // a grab count survives a break in the touch or the stillness this short
 const GAP_S = 0.2;                        // a tracking gap shorter than this keeps the contacts and the counts
 const STILL_MPS = 0.25;                   // the wrist slower than this is "nearly still"
 const OPEN_FRAC = 0.5, GRIP_FRAC = 0.85;  // open past half the locked grip lets go; above 85% the hand still grips
+const GRIP_MIN = 120;                     // the locked grip is at least this (degrees of bend, hands.js): half of it is 60, "extended"
+const HAND_M = 1.1;                       // a hand takes things up to this half-diagonal (2.2 m across: a mic stand, not a pool table)
 const PULL_M = 0.06;                      // a fixed thing: the hand this far off where it took hold lets go
 const SWEEP_M = 0.01;                     // the path from the last frame is tested every centimetre
 const NEAR_M = 0.3;                       // only things whose box is this near the wrist are tested
@@ -69,6 +74,9 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
     return !isLocked(it);
   }
   const fixedOf = (it) => !!(ruleOf(it.name) || {}).fixed;
+  // small enough for a hand, unless a rule allows it (grab: true takes a big thing too)
+  const carriable = (it) => (ruleOf(it.name) || {}).grab === true || !it.box || it.box.isEmpty()
+    || it.box.getSize(new THREE.Vector3()).length() / 2 <= HAND_M;
 
   // ---- the things a hand may take, whole (the mic stand, not its inner mesh), with their meshes' boxes
   let things = [], thingsAt = 0;
@@ -82,9 +90,9 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
       if (!o.isMesh || o.isSkinnedMesh || !o.geometry || !ed.pickable(o)) return;
       const leaf = ed.itemOf(o);
       if (!leaf) return;
-      const path = leaf.path ? leaf.path.filter((y) => !y.big) : [];
-      const it = path[0] || leaf;
-      if (!takeable(it)) return;
+      const path = leaf.path ? leaf.path.filter((y) => !y.big) : [leaf];
+      const it = path.find((y) => takeable(y) && carriable(y));        // outermost first: the mic stand, not its pole
+      if (!it) return;
       if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
       if (!by.has(it)) by.set(it, { it, meshes: [] });
       by.get(it).meshes.push(o);
@@ -206,7 +214,7 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
         }
       }
     }
-    h.held = { it, fixed, pinned, joint, t0: now, grip: curlOf(side) || 0, gripAt: now,
+    h.held = { it, fixed, pinned, joint, t0: now, grip: Math.max(curlOf(side) || 0, GRIP_MIN), gripAt: now,
       offset: wristM(s).invert().multiply(o.matrixWorld), holdW: h.prev.wrist ? h.prev.wrist.clone() : null, nearAt: now };
     h.count = null;
     live.emit('grabbed', { object: it.name, hand: side, joint, contacts, fixed, pinned: pinned ? `${pinned.person} ${pinned.bone}` : null,
@@ -425,13 +433,19 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
         if (!cand || x.r.best < cand.x.r.best) cand = { x, joint: base.sort((a, b) => ORDER[a.n] - ORDER[b.n])[0].n };
       }
       if (!cand || resting || h.speed > STILL_MPS) {
-        h.count = null;
-        ring(side, null);
+        // a flicker (a joint off the box for a frame, a twitch over the speed line) pauses the count; only a
+        // break longer than LOSE_S starts it over (the user, 2026-10-14: a bottle's count began again 12 times in 9 s)
+        if (h.count && !h.count.lost) h.count.lost = now;
+        if (!h.count || now - h.count.lost > LOSE_S * 1000) { h.count = null; ring(side, null); }
         continue;
       }
       const name = cand.x.th.it.name;
+      if (h.count && h.count.lost) {                   // back on: the paused time does not count
+        if (h.count.name === name) h.count.t0 += now - h.count.lost;
+        h.count.lost = null;
+      }
       if (!h.count || h.count.name !== name) {
-        h.count = { name, t0: now };
+        h.count = { name, t0: now, lost: null };
         live.emit('grab_counting', { object: name, hand: side, joint: cand.joint, hold_s: c.hold_s });
       }
       const k = (now - h.count.t0) / (c.hold_s * 1000);

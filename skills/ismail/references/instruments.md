@@ -6,7 +6,7 @@ The default failure: every part is a `synth` (basic waves, one filter, an envelo
 
 A sound is designed toward something you can measure. In this order:
 
-1. **The user's example.** Ask: "is there a recording where this instrument sounds the way you want?" A reference song, a YouTube link, a file. Ask even when they did not mention one.
+1. **The user's example.** Ask: "is there a recording where this instrument sounds the way you want?" A reference song, a YouTube link, a file. Ask even when they did not mention one, except before a new person's first sound. A link is fetched as `recreate.md` section 0 says. When they say "design it", don't ask: find the examples yourself (2 and 3 below, or two or three tracks of the genre).
 2. **A solo passage in the reference.** When recreating a song, find a few seconds where the instrument plays alone or on top (an intro, a break). `analyze_structure` and `spectrogram` show where. That chunk is the target; the rest of the song waits.
 3. **A free recording of the instrument.** CC0 or permissive: Freesound (filter CC0), VSCO 2 Community Edition, University of Iowa Musical Instrument Samples, the tonejs-instruments set (its strings are VSCO 2 CE, CC0, and a Freesound cello pack by flcellogrl, CC BY 4.0: credit it). A few notes across the range at two dynamics is enough to measure. VSCO 2 CE file names are one octave low (a file named C4 sounds C5), the harp excepted: shift +12 when you import from it, and check one note's pitch first. Log it in the song's `ref/SOURCES.md` before measuring (title, link, recordist or player, licence, what you measure from it) and credit it in the voice's INFO.
 4. **Memory, written down.** With nothing to measure, write a Sound Sheet from what you know of the instrument before coding: how it is excited (pluck, bow, breath, hammer, strike), what resonates (string, body, tube, membrane, room), which partials are strong, how the highs decay against the lows, what the attack sounds like, what noise rides along (bow hair, breath, fingers, fret buzz), how velocity changes the colour, and how two notes in a row differ. Then show it to the user; it is cheaper to correct a sheet than a voice.
@@ -15,18 +15,18 @@ Reference audio is the target. When the user named a recording, measure that rec
 fills in what it cannot show (a guitar voice fitted to a generic sample library missed the record the user pointed
 at; "go directly to the thing that I referenced"). Ask what instrument and setup the player used, too (a 1970s
 flamenco guitar has stronger basses and singing trebles than a classical one). While you build the instrument, keep
-the reference out of the render (a slice proves nothing about the voice); when the user wants the record's own sound
-in the song, sampling it is fine (SKILL.md, Non-negotiables).
+the reference out of the render (a slice proves nothing about the voice); the record's own sound goes
+in the song only when the user asks for samples (SKILL.md, Non-negotiables).
 
 ## 2. Pick the route
 
 | route | when | how |
 |---|---|---|
 | library voice or profile | `voices_list` has it (grand_piano, growl, sfx, electric, kit70, mimic profiles ...) | `voice_help(name)` / `instrument_help(type='mimic')`; set params, and for a performer add the rig `voice_help` lists; done |
-| sampled library voice | a Rhodes (`rhodes`), a real acoustic kit (`rusty`), a clean electric guitar (`emily`): real multisamples played note by note | `samples_list` says whether its set is here; if not, tell the person its size and licence and `samples_fetch(<set>)` only on their yes (the Rhodes samples are CC BY-NC: free for their music, not for redistribution) |
+| sampled library voice | the user asked for samples: a Rhodes (`rhodes`), a real acoustic kit (`rusty`), real toms (`toms`), a clean electric guitar (`emily`): real multisamples played note by note. `toms` is for toms heard on their own in played or acoustic music: rock and funk fills, cinematic and tribal tom grooves, marching patterns, jazz and singer-songwriter kits (brushes, mallets), melodic toms (the note is the drum's pitch, F#1-A3), mallet swells, rimshot accents, dead strokes; lanes `pos` (center to rim) and `stroke` per hit. Not for 808/909 or Simmons toms (kit70 or a synth); `rusty` stays the whole kit | `samples_list` says whether its set is here; if not, tell the person its size and licence and `samples_fetch(<set>)` only on their yes (the Rhodes samples are CC BY-NC: free for their music, not for redistribution) |
 | mimic | you have a few isolated recorded notes of the instrument (bowed, blown, sung work best) | `mimic_measure(name, folder=...)` (one note per file, named by pitch), read its leave-one-out report, then `{"type": "mimic", "profile": name}`; pass the open strings as `defaults` for bowed strings. A RECORDING WARNING means the take is faulty, not the instrument: re-record it (see below) |
 | measured voice | the instrument needs a mechanism mimic lacks (touch harmonics, articulations picked by velocity, a crowd, foley) | write `<project>/voices/<name>.py` from the principles below, fit its params to the example |
-| sampler | you have a clean recording of the exact sound and one pitch or a few pitches is enough (a hit, a stab, a vocal chop) | `sound_import`, then a `sampler` track (or a `kit` mapping pitches to samplers) |
+| sampler | the user asked for samples, and you have a clean recording of the exact sound and one pitch or a few pitches is enough (a hit, a stab, a vocal chop) | `sound_import`, then a `sampler` track (or a `kit` mapping pitches to samplers). Several takes of one hit go on one pitch: `'sounds': ['hit1', 'hit2', 'hit3']` in place of `'sound'`, with `'select': 'round_robin'` (default, in turn, carrying on from bar to bar), `'random'` or `'velocity'` (each `{'sound': 'soft', 'vel': [0, 80]}`; without ranges they split 0-127 evenly, softest first; sounds whose ranges overlap take turns). The pick is keyed on where the note sits in the song, so a window render, a live deck and the whole song play the same take for the same note, and a looped live clip carries the turns on from pass to pass |
 | sprite (`synth`) | the sound is a synth | presets + `references/sound-design.md` |
 
 The voices that sound best in this project (grand_piano, the bowed strings, the hum, the concert audience, the guitars) were all measured voices. mimic does the measuring for you when you have recordings; for a hand-written voice, start from the closest existing one: copy it into the song's `voices/` and change it, rather than starting from a blank file.
@@ -51,6 +51,10 @@ Each of these was the difference between "a synth imitating X" and X in at least
   to 7.9. A pickup is the exception: it reads displacement or velocity, as an electric voice does.
 - **Noise between the harmonics, calibrated by synthesis.** Bow hair, breath, finger and hammer noise, measured as the level between partials. Estimating it directly reads 10-20 dB low when the noise is uneven within a band (bow noise is); rebuild the note and raise the noise until the energy between the harmonics matches the recording. Missing air is heard as "not crisp, no breathiness". Without it a voice sounds like an organ.
 - **Inharmonicity and stretch.** Stiff strings (piano, low guitar strings) run sharp up the series.
+- **A voice fitted in one register is proven only there.** Before it plays somewhere new (chords, a lower range,
+  another song's key), render it there with stems and run `analyze_tuning`: drums measured from records keep the
+  records' tuning (a tumba sat a quarter tone sharp, F#3 +46 c), and a random intonation drawn per string on every
+  stroke put a chord's strings 10-20 c apart. Scatter that must hold for a chord is drawn per hand shape, not per pluck.
 - **More than one of it.** Two string polarizations, 1-3 detuned strings per piano note, a section of detuned players each with their own vibrato and timing. Static unison detune is the cheap version.
 - **Velocity changes colour, not just level.** Harder is brighter, with a faster attack and more noise; for guitars, very soft can mean a harmonic or a tap.
 - **No two notes identical.** Seed small random variation per note (timing, level, brightness, noise). Repeated identical hits read as a machine.
@@ -77,7 +81,7 @@ Learned the hard way: a Polyphia recreation had the right notes on the guitar, b
 
 ## 5. Ask the human, every time you play them something
 
-You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='also')`):
+You cannot hear; the user can. Every time you give them an mp3 (how they get it: SKILL.md, the loop's "Hand it over"):
 
 - Say what to listen for: "does the guitar in bars 1-4 sound like the one in the reference? Too clean, too dull, wrong attack, wrong body?" Ask about one or two things, not "what do you think?".
 - Say what you measured, so they can tell you where the numbers and their ears disagree.
@@ -85,8 +89,7 @@ You cannot hear; the user can. Every time you give them an mp3 (`render(mp3='als
 - **A/B one part at a time.** One mp3 per part: the reference part for 4 to 8 bars (its stem, retuned if the record is off pitch, band-limited to drop other parts sharing the stem), a 1 s gap, then yours, both at matched loudness: measure each (pyloudnorm, or ffmpeg `loudnorm` with `print_format=json`) and apply one fixed gain per clip (`volume=<dB>`), never `loudnorm` as the filter itself (see mastering.md). Drums, then bass, then lead. The user answers per part ("beat is good, bass very close, lead not following the melody"), which names the next fix exactly; one mix-level question does not.
 - When a lesson holds across songs, it belongs in this skill (or the voice's INFO), not only in one song's notes.
 
-**When the numbers plateau, give an eye exam.** Put the real sound next to "lenses", versions that each change exactly ONE named thing (body colour, wood ring, room, open strings, bow noise, brightness, attack, vibrato, evenness), all at the same loudness and long enough to include the release. Ask the user to pick the closest and say what is still off in those words ("E, but the vibrato starts slower, more air"). Host it as an exam page with a Submit button that writes the answers to a file you read
-(`references/blind-tests.md`, "Page mechanics"). One round of this found three things no metric had shown (moving vibrato, missing air, sympathetic strings); the metrics were blind to them because they average over time and stop at the release. To know when you are done, follow it with a blind exam (`references/blind-tests.md`).
+**When the numbers plateau, give an eye exam** (lenses that each change one named thing), and to know when you are done, a blind exam: both in `references/blind-tests.md`.
 
 ## Genre palettes
 
@@ -98,4 +101,5 @@ Before choosing sounds, list what the genre is actually played on, then check `v
 - rock / metal: electric guitar through amp and cab, bass guitar, acoustic kit
 - jazz: upright bass, piano, brushes, ride cymbal, horn
 
-Anything on that list with no voice yet is a voice to build (route 2 or 3) before the arrangement, not a synth to settle for.
+When the person wants it to sound played, anything on that list with no voice yet is a voice to build (route 2 or 3)
+before the arrangement. A synth or chiptune take is theirs to choose; ask once when it is unclear.

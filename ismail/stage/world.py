@@ -31,7 +31,7 @@ from pathlib import Path
 
 DEFAULTS = {'actors': {}, 'facings': {}, 'partners': {}, 'floor': 0.0, 'keep_out': [], 'spawn': None, 'credits': [],
             'build': None, 'derives_from': None, 'pass': None, 'assets': None, 'sky': None, 'sets': {}, 'unloaded': [],
-            'props': {}, 'faces': {}, 'grab': None}
+            'props': {}, 'faces': {}, 'grab': None, 'gestures': {}}
 GRAB_KEYS = {'on', 'hold_s', 'release_s', 'objects', 'rules'}
 
 
@@ -116,8 +116,26 @@ def check_world(w):
                                               and isinstance(e.get('at'), (int, float)) for e in lst)):
             out.append(f'faces.{n} must be a list of {{"file": "<name>.json" in faces/, "at": song seconds}}')
     out += check_grab(w.get('grab'))
+    out += check_gestures(w.get('gestures'))
     if w.get('derives_from') and b:
         out.append('a derived scene has no build of its own (it is built from derives_from); drop "build"')
+    return out
+
+
+def check_gestures(g):
+    """Problems with world.json gestures (the scene's rows of the gesture map, gestures.py): {intent: binding}."""
+    from .gestures import DEFAULTS, check_binding
+    if not isinstance(g, dict):
+        return ['gestures must be an object {intent: {"shape", "hand", "hold_ms", "off"}}']
+    out = []
+    for intent, b in g.items():
+        if not isinstance(b, dict) or set(b) - {'shape', 'hand', 'hold_ms', 'off'}:
+            out.append(f'gestures.{intent} must be {{"shape", "hand", "hold_ms", "off"}}')
+            continue
+        try:
+            check_binding({'scene': {k: v for k, v in g.items() if k != intent and k in DEFAULTS}}, 'scene', intent, **b)
+        except (ValueError, TypeError) as e:
+            out.append(f'gestures.{intent}: {e}')
     return out
 
 

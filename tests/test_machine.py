@@ -14,6 +14,14 @@ COOL = {'temp': 60.0, 'clock': 139.0, 'max_clock': 1911.0, 'util': 0.0, 'reasons
         'mem_total_gb': 8.0}
 
 
+class NoGpuPids:
+    def tree(self, pids):
+        return None
+
+    def close(self):
+        pass
+
+
 @pytest.fixture
 def board(tmp_path, monkeypatch):
     monkeypatch.setenv('ISMAIL_MACHINE_DIR', str(tmp_path / 'board'))
@@ -22,6 +30,9 @@ def board(tmp_path, monkeypatch):
     monkeypatch.setattr(machine, 'cpu_load', lambda: (12.0, []))
     monkeypatch.setattr(machine, 'disks', lambda *a: [('D:', 100.0)])
     monkeypatch.setattr(machine, 'pagefiles', lambda: [])
+    monkeypatch.setattr(machine, 'disk_roots', lambda: [])      # never walk the real drive beyond songs/
+    monkeypatch.setattr(machine, 'orphan_age', lambda pid: None)
+    monkeypatch.setattr(machine, '_GpuPids', NoGpuPids)          # no per-process GPU reading: no MISDECLARED, no HUNG
     depth = getattr(machine._held, 'depth', 0)
     machine._held.depth = 0                  # the suite's own slot (conftest) would make every slot pass through
     yield tmp_path / 'board'
@@ -373,9 +384,6 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
     assert not [f for f in os.listdir(board / 'jobs') if f.endswith('.tmp')]
 
 
-@pytest.mark.xfail(sys.platform == 'darwin', strict=False,
-                   reason="macOS runners: the meter often never sees the job's memory (6 s hold, incompressible bytes; "
-                          "ledger:M166); the assert message prints what it measured")
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
     # 2.5x: OVER, not paused (under 3x). Random bytes, not b'x' * n: macOS compresses a page of one repeated byte
@@ -456,8 +464,15 @@ def test_machine_disk_lists_the_songs_their_growth_and_reclaim(board, tmp_path):
     assert 'growth since 2000-01-01' in text and 'big  +0.00 GB' not in text
     lines = text.splitlines()
     assert any(l.strip().startswith('0.00 GB  big') for l in lines)
-    assert '_reclaim (moved out, waiting for the user to clear)' in text
+    assert '_reclaim under songs/, the old per-song places (moved out, waiting for the user to clear)' in text
     assert os.path.join('small', 'live', '_reclaim') in text
+    rr = os.environ['ISMAIL_RECLAIM']                          # the one reclaim folder at the drive root (M229)
+    os.makedirs(os.path.join(rr, 'flac_20261017', 'song'))
+    with open(os.path.join(rr, 'flac_20261017', 'song', 'a.wav'), 'wb') as f:
+        f.write(b'0' * 2 ** 20)
+    text = machine.disk_text(root=str(root), roots=[])
+    assert f"reclaim folder {rr} (moved out, waiting for the user to delete): 0.0 GB in 1 folders" in text
+    assert any(l.strip() == '0.00 GB  flac_20261017' for l in text.splitlines())
     assert sorted(os.listdir(board / 'disk')) == ['2000-01-01.json', __import__('time').strftime('%Y-%m-%d') + '.json']
     assert 'songs/' in api.OPS['machine_disk']()
 

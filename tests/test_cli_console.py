@@ -23,3 +23,9 @@ def test_a_utf8_console_is_left_alone():
     print('C♯4', file=out)
     out.flush()
     assert raw.getvalue().decode('utf-8').strip() == 'C♯4'
+
+
+def test_python_spelled_booleans_are_booleans():
+    from ismail.__main__ import parse_args
+    assert parse_args(['grab=False', 'fixed=True', 'wp=None', 'name=Falsey']) == \
+        {'grab': False, 'fixed': True, 'wp': None, 'name': 'Falsey'}

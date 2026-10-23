@@ -5,7 +5,11 @@ Each op queues the command on the stage server's live link for `scene`, waits fo
 with what the page answered (positions in Blender metres, z up). A page that is not showing the scene, or a command
 the page refuses, raises OpError with the next step. Coordinates on the wire are Blender world space.
 """
+import json
+import time
+
 from ..api import OpError, op
+from .. import guards
 from .link import page_cmd
 
 
@@ -159,15 +163,20 @@ def stage_say(scene: str, text: str, seconds: float = 8, voice: bool = False, vo
 
 
 @op(mutates=True)
-def stage_ask(scene: str, text: str, seconds: float = 60, sender: str = None) -> str:
+def stage_ask(scene: str, text: str, seconds: float = 60, sender: str = None, override_grant: str = None) -> str:
     """Ask a yes/no question out loud and wait for a RIGHT thumbs up (yes) or down (no) held 400 ms (page command:
     ask). Waits until answered or `seconds` pass; other commands go on meanwhile. Use it for every sign-off in the
     headset (a reload, a re-export). Only answerable in VR (the thumbs are hand
     gestures). A second ask while one is open does not raise: the page replies {error: 'already asking: ...'} (the op
     should turn that into OpError). Page replies {question, answer: yes | no | 'no answer', seconds}. Emits: answer,
     voice_spoken, voice_error. While it waits, the question shows over the person's right hand (the hand that
-    answers) with what up and down mean, under sender= (your name as they know it)."""
-    return page_cmd(scene, 'ask', {'text': text, 'seconds': seconds, 'from': sender}, timeout=((60 if seconds is None else seconds) + 30))
+    answers) with what up and down mean, under sender= (your name as they know it).
+    Refused when a standing grant already answers it (~/.ismail/standing_grants.json): act on the grant and say what
+    you did; override_grant='<why it does not fit>' asks anyway and logs the reason."""
+    guards.check_private(text, where='the stage')     # first, so an override is never logged for text that cannot go
+    g = guards.check_grant(text, True, override_grant, 'stage_ask', sender)
+    return guards.with_note(page_cmd(scene, 'ask', {'text': text, 'seconds': seconds, 'from': sender},
+                                     timeout=((60 if seconds is None else seconds) + 30)), g)
 
 
 @op(mutates=True)
@@ -193,7 +202,7 @@ def stage_voice_note(scene: str, action: str = 'start') -> str:
 def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: str = '', image: str = None,
                buttons: list = None, width: float = None, seconds: float = None, quiet: bool = False,
                wait: bool = None, near: list = None, anchor: str = 'world', side: str = None,
-               sender: str = None) -> str:
+               sender: str = None, override_grant: str = None) -> str:
     """Open a panel in VR with a title, text, an image (URL) and buttons (page command: panel). anchor='world'
     (default) fixes it 0.7 m in front of the person: for a note about a place. anchor='body' makes it ride with them,
     just out of view to the `side` ('right' or 'left') of where their body faces, so they turn their head to read it
@@ -207,12 +216,17 @@ def stage_panel_show(scene: str, panel_id: str = None, title: str = '', text: st
     command queue until the answer; wait=False replies at once. The same panel_id replaces an open panel. near is used
     by the page's own modules as a three.js vector; from a command it is unclear (a JSON list has no x/y/z) and should
     not be relied on. Page replies {id, answer, via, seconds}, {id, answer: null, why} when closed unanswered, or
-    {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed."""
+    {id, shown: true} with wait=False. Emits: panel_shown, panel_answer, panel_closed.
+    A yes/no panel (its buttons are yes and no words) whose title or text a standing grant covers is refused: act on
+    the grant and say what you did; override_grant='<why it does not fit>' shows it anyway and logs the reason."""
     if anchor not in ('world', 'body') or side not in (None, 'right', 'left'):
         raise OpError(f"anchor is 'world' or 'body' and side 'right' or 'left' (got {anchor!r}, {side!r})")
+    guards.check_private(title, text, buttons, where='the stage')
+    g = guards.check_grant([title, text], guards.is_yes_no(buttons, None, f'{title} {text}'), override_grant,
+                           'stage_panel_show', sender)
     if wait is None:
         wait = anchor == 'world'
-    return page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side, 'from': sender}, timeout=((60 if seconds is None else seconds) + 120))
+    return guards.with_note(page_cmd(scene, 'panel', {'panel_id': panel_id, 'title': title, 'text': text, 'image': image, 'buttons': buttons, 'width': width, 'seconds': seconds, 'quiet': quiet, 'wait': wait, 'near': near, 'anchor': anchor, 'side': side, 'from': sender}, timeout=((60 if seconds is None else seconds) + 120)), g)
 
 
 @op(mutates=True)
@@ -337,6 +351,69 @@ def stage_take_view(scene: str, take: str, n: int = 8, layout: str = 'strip') ->
 def stage_take_view_clear(scene: str) -> str:
     """Remove the 4D take view (page command: take_view_clear). Page replies {cleared: true}. Emits: nothing."""
     return page_cmd(scene, 'take_view_clear', {}, timeout=30)
+
+
+@op(mutates=True)
+def stage_take_replay(scene: str, take: str, takes: str = None, start: float = None, end: float = None, rate: float = 1,
+                      grab: bool = None, show: bool = True, wait: bool = True) -> str:
+    """Replay a take as input: its head drives the page's camera and its tracked hands drive the page's hands, through
+    the same hands.js, touch.js and grab.js a real hand goes through, so gestures, pinches, grabs and drops happen
+    again offline (page command: replay_input, page/replay.js). The test for "he reached for the ball and took the
+    table": replay his take and read what the page grabbed. takes= the scene the take is in (default `scene`);
+    start/end trim it in the take's seconds; rate 1 for grab verdicts (grab counts use wall time); grab=True turns
+    grab by touch on for the replay and back after; show draws the joints as small balls (left blue, right orange).
+    Hands only: a controller take, a runtime select or a stick does not replay; the target ray is approximated from the
+    shoulder through the palm. Refused while someone is in VR on that page: run it on a page nobody wears (a private
+    stage, or the live one while stage_presence says nobody is in VR). wait=True waits for the take to finish and
+    replies with what the page did, one line per event with the take's time, then what the take itself recorded
+    (its own grab and drop marks) to compare; wait=False replies at once, and the result comes as the replay_done
+    event. replay_input {stop: true} (stage_take_replay_stop) ends it early. Emits: replay_start, replay_done, and
+    whatever the hands do (gesture, hand_rest, grab_counting, grabbed, grab_releasing, grab_released, grab_landed)."""
+    from . import link
+    rec = link.server_for(scene)
+    last = link.http(rec, f'live/events?{link.q(scene=scene, limit=1)}')['last']
+    e = link.send(scene, 'replay_input', {'take': take, 'takes': takes, 'from': start, 'to': end, 'rate': rate,
+                                          'grab': grab, 'show': show}, timeout=60)
+    head = link.reply('replay_input', e) if not isinstance(e, str) else e
+    if not wait or isinstance(e, str):
+        return head
+    res = e.get('result') or {}
+    deadline = time.time() + float(res.get('seconds') or 0) + 30
+    while time.time() < deadline:
+        got = link.http(rec, f'live/events?{link.q(scene=scene, since=last, wait=min(25, max(1, deadline - time.time())), limit=1000)}',
+                        timeout=40)
+        last = got['last']
+        done = next((x for x in got['events'] if x.get('type') == 'replay_done' and x.get('take') == take), None)
+        if done:
+            return head + '\n' + _replay_verdict(done)
+    raise OpError(f'the replay of {take} did not finish in time; stage_events(types=["replay_done"]) shows it when it '
+                  'does, stage_take_replay_stop ends it')
+
+
+def _replay_verdict(done: dict) -> str:
+    """replay_done as text: what happened (one line per event), what the take recorded, what was still held."""
+    def line(x):
+        rest = {k: v for k, v in x.items() if k not in ('t', 'type')}
+        return f'  {x.get("t", 0):7.2f} s  {x.get("type")}  ' + json.dumps(rest, separators=(', ', ': '), default=str)[:300]
+    evs = done.get('events') or []
+    out = [f'replayed {done.get("take")}: {done.get("frames")} frames in {done.get("seconds")} s ({done.get("why")}); '
+           f'{len(evs)} events']
+    out += [line(x) for x in evs]
+    grabbed = [x.get('object') for x in evs if x.get('type') == 'grabbed']
+    landed = [f'{x.get("object")} onto {x.get("onto")}' for x in evs if x.get('type') == 'grab_landed']
+    out.append(f'grabbed: {", ".join(map(str, grabbed)) or "nothing"}; landed: {", ".join(landed) or "nothing"}'
+               + (f'; still held at the end (let go): {", ".join(done["held"])}' if done.get('held') else ''))
+    rec = done.get('recorded') or []
+    out.append(f'the take recorded {len(rec)} marks' + (':' if rec else ''))
+    out += [line(x) for x in rec]
+    return '\n'.join(out)
+
+
+@op(mutates=True)
+def stage_take_replay_stop(scene: str) -> str:
+    """End a take replay early (page command: replay_input {stop: true}); the head and hands go back to the desktop
+    view. Page replies the replay_done result, or {stopped: false} when none was running. Emits: replay_done."""
+    return page_cmd(scene, 'replay_input', {'stop': True}, timeout=30)
 
 
 @op(mutates=True)
@@ -571,13 +648,17 @@ def stage_behaviours(scene: str, reload: bool = False) -> str:
     pinches or triggers the object in VR (or picks a menu item), so the room answers with no agent in the loop: turn
     anything you did by hand (lights, moves, visibility, music, any page command through s.do) into such a function.
     `s` is the object's handle: get, set, state, send (wire to another object's input), light, show, move, sound,
-    emit (a message to agents: object_message), do, after, every. apply(s) runs at load and after every state change:
+    emit (a message to agents: object_message), do, after, every, clock, where (an object, 'person' or a body's joint
+    '<person>:<bone>': location, rotation, forward), place (a pose at once) and follow (soft-follow a target every
+    frame: a chase or drone camera; stage_follow tries one without code, and its options are the same). A `frame(s,
+    dt)` in an object's definition runs every frame. apply(s) runs at load and after every state change:
     put the state-to-room mapping there, so a reload or a scene switch shows the right room. Every interaction needs
     its own sound (`sound`: a file under the scene folder, rendered with ismail); without one the page clicks and
     warns. Every error, at load or at run time, also goes out as behaviour_error {object, phase (load, apply, press,
-    menu, input, after, every), action, error, line}; listen for it. In VR a press that fails buzzes and shows a short
+    menu, input, after, every, frame, follow), action, error, line}; listen for it. In VR a press that fails buzzes and shows a short
     note at the object, and an object whose code did not load (`broken`) does the same instead of opening the edit
-    menu. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings, broken: {object: why}}.
+    menu. Page replies {file, objects: [{object, actions, state, sound}], errors, warnings, broken: {object: why},
+    following: [{object, target, by, waiting?}]}.
     Emits: behaviours_loaded, behaviour_error, behaviour_warning."""
     return page_cmd(scene, 'behaviours', {'reload': reload or None}, timeout=60)
 
@@ -602,11 +683,191 @@ def stage_behaviour_state(scene: str, object: str, state: dict = None) -> str:
 
 
 @op(mutates=True)
+def stage_follow(scene: str, object: str = None, target: str = None, offset: list = None, space: str = 'target',
+                 lag: float = 0.5, look=None, look_offset: list = None, look_lag: float = 0.25, orbit: float = 0,
+                 snap: bool = False, where: str = None) -> str:
+    """Make an object (a camera, a light, a drone) soft-follow a target every frame, live on the page, with no code
+    (page command: follow); the same follow a behaviour starts with s.follow. target: an object's name, 'person' (the
+    user's eyes: the headset in VR, the view on a desktop) or '<person>:<bone>' (a joint of a body the scene shows,
+    e.g. dell:head, dell:pelvis, dell:hand_r; a wrong bone lists some). offset: [right, forward, up] metres from the
+    target, turning with where it faces (space 'target'; a body faces where its hips face), or [x, y, z] Blender
+    metres (space 'world'). lag: seconds to close most of the gap (0 = locked on; 0.3 to 1 reads as a camera
+    operator). look: True aims at the target (the default for cameras and lights), False keeps its turn, a target
+    name or an [x, y, z] point aims there; look_offset [x, y, z] moves the aim point (aim at the chest, not the
+    hips); look_lag smooths the turn. orbit: degrees a second around the target (a drone circling). snap: start on
+    the spot. target=None stops the object's follow. While it follows, its keys on the clock wait. Live only, never
+    saved: bake it into keys for the render with stage_camera_record(source='follow'), then keep.
+    object=None lists what follows what; where=<target> reads a target's pose {location, rotation, quaternion,
+    forward, facing} (Blender metres and degrees) and changes nothing. A reload of behaviours.js ends agent follows.
+    Page replies {object, target, following, waiting?}. Emits: follow {object, target, following, by?, why?}."""
+    if where:
+        return page_cmd(scene, 'follow', {'where': where}, timeout=30)
+    if not object:
+        return page_cmd(scene, 'follow', {}, timeout=30)
+    if space not in ('target', 'world'):
+        raise OpError("space is 'target' or 'world'")
+    for name, v in (('offset', offset), ('look_offset', look_offset)):
+        if v is not None and (not isinstance(v, (list, tuple)) or len(v) != 3):
+            raise OpError(f'{name} must be [x, y, z]')
+    opts = {'offset': offset, 'space': space, 'lag': lag, 'look': look, 'look_offset': look_offset,
+            'look_lag': look_lag, 'orbit': orbit or None, 'snap': snap or None}
+    return page_cmd(scene, 'follow', {'object': object, 'target': target,
+                                      'options': {k: v for k, v in opts.items() if v is not None}}, timeout=30)
+
+
+@op(mutates=True)
 def stage_light_set(scene: str, light: str, energy: float = None, color: list = None) -> str:
     """Set a light's energy (Blender watts) and / or colour (linear RGB) as one undoable edit (page command: light;
     the page reads `name` or `light`). Errors: no such object, not a light. Page replies {light, energy, color}. Emits:
     light_change."""
     return page_cmd(scene, 'light', {'light': light, 'energy': energy, 'color': color}, timeout=30)
+
+
+@op(mutates=True)
+def stage_material_set(scene: str, color: list, material: str = None, object: str = None) -> str:
+    """Set a material's base colour (linear RGB) on the open page now, as one undoable edit that saves like a hand
+    edit (page command: material). Every mesh using that material changes, merged pieces included. object= instead
+    of material: that object's material when it has exactly one. Saved in edits.json materials (the build applies
+    base_color). Errors: no such material (exact name, then case insensitive), no color, an object with more or fewer
+    than one material. Page replies {material, color, color0, meshes}. Emits: material_change."""
+    return page_cmd(scene, 'material', {'color': color, 'material': material, 'object': object}, timeout=30)
+
+
+@op(mutates=True)
+def stage_surface(scene: str, material: str = None, object: str = None, image: str = None, video: str = None,
+                  text: str = None, camera: str = None, clear: bool = False, fit: str = 'contain',
+                  background: str = '#000000', glow: float = 1.0, px: int = 1024, lines: int = 8, scroll: float = 0,
+                  line: float = 0, color: str = '#ffffff', align: str = 'left', font: str = 'sans-serif',
+                  fps: int = 15, sound: bool = False, loop: bool = True, start: float = 0, aspect: float = None) -> str:
+    """Show an image, a video, text or a live camera on every mesh of a material, now (page command: surface): slides
+    on a whiteboard, a video backdrop, a teleprompter, a monitor with the camera on air, screens on desks. The meshes
+    draw flat and unlit (a screen glows; glow 0..1 dims it) until clear=True gives them their own material back
+    (clear without material: every surface). Not saved to the scene: a re-exported room gets its surfaces back,
+    another scene starts with none. The surface keeps its mesh's shape (aspect measured from its UVs, or aspect=
+    width / height); px is the long side in pixels.
+    One source: image= or video= a file inside the scene folder (path relative to it, e.g. "slides/s01.png"), placed
+    by fit 'contain' (whole, on background), 'cover' (filled, cropped) or 'stretch'; a video plays from start=
+    seconds, loops unless loop=False, silent unless sound=True. text= wrapped to the width, lines= lines on the surface
+    at once, scroll= lines a second (0: still), line= the top line to start at, color, background, align left | center
+    | right, font. camera= a camera in the scene, rendered fps times a second at the surface's aspect with the
+    camera's horizontal field of view (each feed costs a render of the room: keep fps low in the headset).
+    object= instead of material: that object's one material. In a stage_capture setup (with at_song for timing) a
+    video follows the film's time and a camera renders every frame. Errors: no such material or camera, a file that
+    is not in the scene folder, no source. Page replies {surface, source, meshes, px, aspect, size?, text_lines?, on}
+    or {cleared, on}. Emits: surface_set, surface_cleared, surface_lost (a reload could not put one back)."""
+    if not (material or object) and not clear:
+        raise OpError('surface needs material= (or object=)')
+    srcs = [k for k, v in (('image', image), ('video', video), ('text', text), ('camera', camera)) if v is not None]
+    if not clear and len(srcs) != 1:
+        raise OpError(f'pass one of image, video, text or camera (got {", ".join(srcs) or "none"})')
+    if fit not in ('contain', 'cover', 'stretch'):
+        raise OpError("fit is 'contain', 'cover' or 'stretch'")
+    if align not in ('left', 'center', 'right'):
+        raise OpError("align is 'left', 'center' or 'right'")
+    for f in (image, video):
+        if f is not None:
+            _scene_file(scene, f)
+    c = {'material': material, 'object': object, 'clear': clear}
+    if not clear:
+        c.update({'fit': fit, 'background': background, 'glow': glow, 'px': px, 'aspect': aspect})
+        if image is not None:
+            c['image'] = image
+        elif video is not None:
+            c.update({'video': video, 'sound': sound, 'loop': loop, 'from': start})
+        elif text is not None:
+            c.update({'text': text, 'lines': lines, 'scroll': scroll, 'line': line, 'color': color, 'align': align, 'font': font})
+        else:
+            c.update({'camera': camera, 'fps': fps})
+    return page_cmd(scene, 'surface', c, timeout=120 if video else 30)
+
+
+@op(mutates=True)
+def stage_pointer(scene: str, person: str = None, hand: str = 'auto', when: str = 'point', size: float = 1.0,
+                  style: str = 'foam_finger', off: bool = False) -> str:
+    """A pointer only the cameras see (page command: pointer): where a person's hand points, a giant foam finger
+    lands on what it points at, so the edit shows what the speaker points at on a slide or a prop without a laser in
+    the headset. It follows a person on the stage (a body following the user live, stage_actor_follow, or playing a
+    take), default the first one playing. The ray runs from the shoulder through the index fingertip. when 'point':
+    shown only while that hand points (index straight, middle and ring curled, the hand out from the shoulder);
+    'always': whenever the person moves. hand 'auto' (each hand that points), 'l' or 'r'. size scales it (1: about
+    0.85 m). Drawn on a layer the headset never shows: camera surfaces (stage_surface camera=) and stage_capture see
+    it; in a capture it is a setup command ({"type": "pointer", ...}). off=True hides it. Errors: unknown style or
+    hand, a person who is not following or playing. Page replies {pointer, person, hand, when, size}."""
+    if hand not in ('auto', 'l', 'r'):
+        raise OpError("hand is 'auto', 'l' or 'r'")
+    if when not in ('point', 'always'):
+        raise OpError("when is 'point' or 'always'")
+    if style not in ('foam_finger',):
+        raise OpError("style is 'foam_finger' (a glove or a telescoping stick could join it)")
+    if off:
+        return page_cmd(scene, 'pointer', {'off': True}, timeout=30)
+    return page_cmd(scene, 'pointer', {'person': person, 'hand': hand, 'when': when, 'size': size, 'style': style}, timeout=30)
+
+
+@op(mutates=True)
+def stage_on_air(scene: str, camera: str, monitor: str = 'monitor_screen', fps: int = 15, note: str = None) -> str:
+    """Cut to a camera: it is on air from now (the crew's director calls it). The monitor material (default
+    'monitor_screen'; None for none) shows that camera live (stage_surface camera=), and the cut is logged with the
+    time in scenes/<scene>/on_air.jsonl, so the edit can cut the rendered angles on the same calls afterwards
+    (stage_on_air_log). note: why, e.g. "he walks to the desks". A page opened as ?onair (the stream's picture)
+    cuts to the camera too (page command on_air); other pages keep their view. Errors: a camera the scene does not
+    have (when its manifest lists cameras), what stage_surface refuses."""
+    import datetime
+    d = _scene_root(scene)
+    man = d / 'manifest.json'
+    if man.is_file():
+        objs = json.loads(man.read_text(encoding='utf-8')).get('objects', {})
+        cams = sorted(k for k, v in objs.items() if isinstance(v, dict) and v.get('type') == 'CAMERA')
+        if cams and camera not in cams:
+            raise OpError(f'no camera {camera!r} in {scene} (cameras: {", ".join(cams)})')
+    page = stage_surface(scene, material=monitor, camera=camera, fps=fps) if monitor else None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    rec = {'utc': now.isoformat(timespec='milliseconds'), 't': round(now.timestamp(), 3), 'camera': camera}
+    if note:
+        rec['note'] = note
+    with open(d / 'on_air.jsonl', 'a', encoding='utf-8') as f:
+        f.write(json.dumps(rec) + '\n')
+    try:                                     # the on-air page follows; no page, or an older one, leaves the cut logged
+        page_cmd(scene, 'on_air', {'camera': camera}, timeout=10)
+    except OpError:
+        pass
+    return f'on air: {camera} at {rec["utc"]}' + (f'\n{page}' if page else '')
+
+
+@op()
+def stage_on_air_log(scene: str, since: str = None, last: int = 50) -> str:
+    """The cuts called with stage_on_air, oldest first: time (UTC), camera, how long it stayed on air, note. since:
+    an ISO time (UTC) to start from. The last cut is still on air."""
+    f = _scene_root(scene) / 'on_air.jsonl'
+    if not f.is_file():
+        return f'no cuts yet in {scene}'
+    recs = [json.loads(x) for x in f.read_text(encoding='utf-8').splitlines() if x.strip()]
+    if since:
+        recs = [r for r in recs if r['utc'] >= since]
+    recs = recs[-last:]
+    out = []
+    for i, r in enumerate(recs):
+        dur = f'{recs[i + 1]["t"] - r["t"]:.1f} s' if i + 1 < len(recs) else 'on air'
+        out.append(f'{r["utc"][11:23]}  {r["camera"]:<20} {dur:>9}' + (f'  {r["note"]}' if r.get('note') else ''))
+    return '\n'.join(out) or 'no cuts in that window'
+
+
+def _scene_root(scene):
+    from pathlib import Path
+    from .link import server_for
+    d = Path(server_for(scene)['scenes']) / scene
+    if not d.is_dir():
+        raise OpError(f'no scene {scene!r}')
+    return d.resolve()
+
+
+def _scene_file(scene, rel):
+    """A file inside the scene folder, the only place the page can load it from."""
+    d = _scene_root(scene)
+    f = (d / rel).resolve()
+    if d not in f.parents or not f.is_file():
+        raise OpError(f'{rel!r} is not a file in the scene folder {d}')
+    return f
 
 
 @op(mutates=True)
@@ -646,6 +907,19 @@ def stage_take_keep_last(scene: str, name: str = None) -> str:
     person followed) in scenes/<scene>/takes/, where actor_play and the review can use it. Only the last Follow is
     kept, until the next Follow or a page reload. Page replies {id, person, frames, seconds}. Emits: follow_kept."""
     return page_cmd(scene, 'take_keep_last', {'name': name}, timeout=60)
+
+
+@op(mutates=True)
+def stage_take_keep_recent(scene: str, seconds: float = 30, name: str = None, info: bool = False) -> str:
+    """Keep what the person just did as a take ("keep that"), though nothing was recording (page command:
+    take_keep_recent). While someone is in VR the page always holds their last 2 minutes of head and hands (and the
+    body when tracked, and grab and drop marks) in memory, at 15 Hz; this saves the newest `seconds` (1..120) as a
+    take named `name` (default "recent", meta from: recent). No audio. The buffer lasts until a reload, across VR
+    sessions, so it works after the headset comes off too. info=True only reports how much the buffer holds. Then
+    stage_take_note to say what it shows, and stage_take_replay to test with it. Page replies {id, frames, seconds},
+    or {frames, seconds} for info. Errors: nothing in the buffer (nobody has been in VR on this page). Emits:
+    recent_kept."""
+    return page_cmd(scene, 'take_keep_recent', {'seconds': seconds, 'name': name, 'info': info or None}, timeout=120)
 
 
 @op(mutates=True)
@@ -704,6 +978,45 @@ def stage_key_interp(scene: str, object: str, mode: str) -> str:
     if mode not in ('stop', 'smooth'):
         raise OpError("mode is 'stop' or 'smooth'")
     return page_cmd(scene, 'key_interp', {'name': object, 'mode': mode}, timeout=30)
+
+
+@op(mutates=True)
+def stage_trail(scene: str, object: str | list = None, show: bool = True) -> str:
+    """Draw a keyed object's path on the clock in the room (page command: trail): a line through every place it
+    passes, blue at the span's start to orange at its end, a small frustum at each key of a camera (where it looks),
+    each key's time beside it and a bright ball where the playhead puts it now. In VR a key is picked to scrub the
+    clock there and grabbed to move it (the key keeps its time; the move is a new key value, saved with
+    stage_anim_save). object: a name or a list of names; none with show=True draws every keyed camera, none with
+    show=False hides every path. The path redraws when its keys change. Page replies {shown: [{name, keys, seconds}]}."""
+    names = [object] if isinstance(object, str) else (list(object) if object else None)
+    return page_cmd(scene, 'trail', {'show': bool(show), 'names': names}, timeout=30)
+
+
+@op(mutates=True)
+def stage_camera_record(scene: str, camera: str, action: str = 'start', source: str = None, t0: float = None,
+                        t1: float = None, countdown: float = 3) -> str:
+    """Record a camera move like a take (page command: cam_record). action 'start': a countdown, then the clock
+    plays from t0 (default: where it is) to t1 (default: the span's end) and the camera's pose is sampled every frame;
+    source 'head' puts the camera at the user's eyes (hidden while it records), 'hold' samples it wherever it is
+    carried (the camera unlocked with Move), 'follow' bakes a running follow (stage_follow, or s.follow in a
+    behaviour): snapped onto its target at t0, stopped at the end so the new keys play (Undo and Redo start it again,
+    Keep leaves it off), so a chase or drone move reaches the Blender render through anim.json. The take ends at t1, at a loop back or with action 'stop'; the samples
+    are thinned into smooth keys (every sample within 2 cm and 2 degrees of what the keys play back) that replace the
+    camera's keys inside the recorded window, the path is drawn (stage_trail) and a panel asks Keep / Redo / Undo.
+    action 'keep' saves anim.json, 'redo' puts the old keys back and records again, 'undo' puts the old keys back,
+    'state' reports. Page replies {state, name, keys?, err_m?, err_deg?, window?}."""
+    if action not in ('start', 'stop', 'keep', 'redo', 'undo', 'state'):
+        raise OpError("action is start, stop, keep, redo, undo or state")
+    if source not in (None, 'head', 'hold', 'follow'):
+        raise OpError("source is 'head', 'hold' or 'follow'")
+    c = {'action': action, 'name': camera, 'countdown': countdown}
+    if source:
+        c['source'] = source
+    if t0 is not None:
+        c['t0'] = t0
+    if t1 is not None:
+        c['t1'] = t1
+    return page_cmd(scene, 'cam_record', c, timeout=30 + (countdown or 0))
 
 
 @op(mutates=True)
@@ -772,4 +1085,4 @@ def stage_actor_part(scene: str, person: str, part: str = None, show: bool = Tru
     return page_cmd(scene, 'actor_part', {'person': person, 'part': part, 'show': show, 'move': move,
                                           'seconds': seconds, 'reset': reset or None}, timeout=30)
 
-TYPED = {'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}
+TYPED = {'follow': 'stage_follow', 'replay_input': 'stage_take_replay', 'trail': 'stage_trail', 'cam_record': 'stage_camera_record', 'embody': 'stage_embody', 'behaviours': 'stage_behaviours', 'behaviour_run': 'stage_behaviour_run', 'behaviour_state': 'stage_behaviour_state', 'music_time': 'stage_music_time', 'load_set': 'stage_set_load', 'actor_pose': 'stage_actor_pose', 'actor_part': 'stage_actor_part', 'key_interp': 'stage_key_interp', 'control_set': 'stage_control_set', 'control_map': 'stage_control_map', 'perform': 'stage_perform', 'follow_anchor': 'stage_follow_anchor', 'take_keep_last': 'stage_take_keep_last', 'take_keep_recent': 'stage_take_keep_recent', 'ack': 'stage_voice_ack', 'actor_follow': 'stage_actor_follow', 'actor_play': 'stage_actor_play', 'actor_stop': 'stage_actor_stop', 'anchor': 'stage_anchor_set', 'anchor_release': 'stage_anchor_release', 'prop_pin': 'stage_prop_pin', 'grab_mode': 'stage_grab_mode', 'grab_rule': 'stage_grab_rule', 'anim_clear': 'stage_anim_clear', 'anim_save': 'stage_anim_save', 'ask': 'stage_ask', 'clear_markers': 'stage_markers_clear', 'clock': 'stage_clock_set', 'cue': 'stage_cue_set', 'cue_remove': 'stage_cue_remove', 'cues_clear': 'stage_cues_clear', 'cues_list': 'stage_cues_list', 'deselect': 'stage_object_deselect', 'drop': 'stage_object_drop', 'eyecam': 'stage_view_eyecam', 'focus': 'stage_view_focus', 'gallery_add': 'stage_gallery_add', 'goto': 'stage_person_goto', 'goto_camera': 'stage_camera_goto', 'growth': 'stage_growth_set', 'highlight': 'stage_object_highlight', 'key': 'stage_key_set', 'key_delete': 'stage_key_delete', 'light': 'stage_light_set', 'material': 'stage_material_set', 'surface': 'stage_surface', 'pointer': 'stage_pointer', 'on_air': 'stage_on_air', 'world_reload': 'stage_world', 'gestures_reload': 'stage_gesture_set', 'look_through': 'stage_view_look_through', 'marker': 'stage_marker_set', 'music': 'stage_music', 'panel': 'stage_panel_show', 'panel_close': 'stage_panel_close', 'reload': 'stage_scene_reload', 'say': 'stage_say', 'scene_go': 'stage_scene_go', 'scene_list': 'stage_scene_list', 'select': 'stage_object_select', 'set': 'stage_object_set', 'sky': 'stage_sky_set', 'snapshot': 'stage_view_snapshot', 'stream': 'stage_stream', 'take_start': 'stage_take_start', 'take_stop': 'stage_take_stop', 'take_view': 'stage_take_view', 'take_view_clear': 'stage_take_view_clear', 'timeline': 'stage_timeline_show', 'trees_reload': 'stage_trees_reload', 'undo': 'stage_edit_undo', 'voice_rec': 'stage_voice_note', 'walk': 'stage_view_walk', 'waypoint': 'stage_waypoint_set', 'waypoint_go': 'stage_waypoint_go', 'waypoint_remove': 'stage_waypoint_remove', 'waypoints_clear': 'stage_waypoints_clear', 'waypoints_list': 'stage_waypoints_list'}

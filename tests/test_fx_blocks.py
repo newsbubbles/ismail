@@ -102,6 +102,14 @@ CASES = [
     {'type': 'tape', 'wow': 0.0, 'flutter': 0.0, 'drive': 0.8},
     {'type': 'wah', 'pos': 0.3},
     {'type': 'wah', 'auto': 0.6},
+    {'type': 'spatial'},
+    {'type': 'spatial', 'out': 'headphones', 'occlusion': 0.5, 'ground': 'hard', 'spread': 0.4, 'size': 0.9},
+    {'type': 'spatial', 'ctc': 1.0, 'trajectory': {'orbit': {'radius': 3, 'period_s': 1.2, 'elevation': 20}}},
+    {'type': 'spatial', 'out': 'headphones', 'trajectory': {'flyby': {'from': [-30, 5, 0], 'to': [30, 5, 0],
+                                                                       'speed_mps': 40}}},
+    {'type': 'spatial', 'doppler': 0, 'room': 0.0, 'trajectory': {
+        'keys': [[0, -2, 1, 0], [0.4, {'az': 180, 'el': 30, 'dist': 4}], [0.9, 2, 1, 0]], 'interp': 'smooth',
+        'loop': True}},
 ]
 
 
@@ -116,6 +124,11 @@ def test_blocks_match_whole(fx):
         curves['cutoff'] = np.geomspace(300, 6000, N)
     if 'drive_db' in auto:
         curves['drive_db'] = np.linspace(6, 20, N)
+    if fx['type'] == 'spatial':            # position and listener moving under automation
+        t = np.arange(N) / SR
+        curves.update(x=4 * np.sin(2 * np.pi * 0.7 * t), y=np.linspace(3, -2, N), z=np.linspace(-1, 2, N),
+                      occlusion=np.linspace(0, 1, N), listener_yaw=np.linspace(0, 270, N),
+                      spread=np.linspace(0, 1, N), ctc=np.linspace(1, 0, N), room=np.linspace(0.8, 0.1, N))
     whole = run(fx, x, key, curves, [N])
     blocks = run(fx, x, key, curves, [1, 37, 512, 4099, 511, 2048])
     scale = max(np.max(np.abs(whole)), 1e-9)

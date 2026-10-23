@@ -128,6 +128,11 @@ def with_gain(chain):
 
 # ------------------------------------------------------------------ plumbing
 
+def _no_sections(err):
+    """The engine is older than section tags (it names 'section' an unknown key)."""
+    return 'unknown keys' in str(err) and "'section'" in str(err)
+
+
 class Set:
     """The live ops for one set folder, logged. Every call appends to set/setlog.md (time, what, the reply);
     queue calls record the clip ids under a section name, so `cancel(section)` can take a queued section back."""
@@ -160,17 +165,39 @@ class Set:
         self.log(f"start {bpm} BPM device {device}: {r.splitlines()[0]}")
         return r
 
-    def q(self, clips, section=None):
-        r = self.O['live_queue'](self.P, clips)
+    def q(self, clips, section=None, cut=None, cut_at=None):
+        """Queue clips for a section: each clip carries the section's name in the engine too, so `cut` (or a later
+        `cut(section)`) can take back what it still has to do. cut: the section this batch cuts over from (its clips
+        still to come or playing, stops and effect moves go from where this batch lands, or from cut_at)."""
+        if section:
+            clips = [c if 'section' in c else dict(c, section=section) for c in clips]
+        kw = {k: v for k, v in (('cancel_section', cut), ('cancel_at', cut_at)) if v is not None}
+        try:
+            r = self.O['live_queue'](self.P, clips, **kw)
+        except Exception as e:
+            if not (section and not kw and _no_sections(e)):
+                raise
+            # an engine started before sections (a set already on air): queue untagged, as before
+            clips = [{k: v for k, v in c.items() if k != 'section'} for c in clips]
+            r = self.O['live_queue'](self.P, clips)
         ids = re.findall(r'\b(c\d+) \S+: bar', r)
         if section:
             self.sections.setdefault(section, []).extend(ids)
-        self.log(f"queue [{section or '-'}] {ids}: " +
+        self.log(f"queue [{section or '-'}]" + (f" cutting [{cut}]" if cut else '') + f" {ids}: " +
                  json.dumps([{k: v for k, v in c.items() if k not in ('notes', 'lanes')} for c in clips]) + '\n' + r)
         return r
 
+    def cut(self, section, at='next_bar'):
+        """Cut a section off mid-chapter: from `at` its clips go (playing ones are cut there), and its stops and
+        its moves sent with section= are dropped. Nothing else is queued: follow with q() or queue in the same call
+        with q(clips, cut=section)."""
+        r = self.O['live_queue'](self.P, [], cancel_section=section, cancel_at=_at(at))
+        self.log(f"cut [{section}] at {at}: {r.splitlines()[0]}")
+        return r
+
     def cancel(self, section):
-        """Take back a section's clips that have not started (a playing one needs a stop or a replacement)."""
+        """Take back a section's clips that have not started (a playing one needs a stop or a replacement; `cut`
+        does both, and takes its moves too)."""
         ids = self.sections.get(section, [])
         if not ids:
             return f"no clips logged for section {section!r}"
@@ -207,14 +234,23 @@ class Set:
         self.log(f"fx {target}[{fx}] {params} over {beats} at {at}: {r}")
         return r
 
-    def moves(self, moves):
-        """A whole choreography in one call (flattens nested lists from throw/gap)."""
+    def moves(self, moves, section=None):
+        """A whole choreography in one call (flattens nested lists from throw/gap). section: the moves belong to it
+        (`cut` takes them back)."""
         flat = []
         for m in moves:
             flat += m if isinstance(m, list) else [m]
+        if section:
+            flat = [m if 'section' in m else dict(m, section=section) for m in flat]
         for m in flat:
             self._note_gain(m.get('target'), m.get('index'), m.get('params'))
-        r = self.O['live_fx'](self.P, moves=flat)
+        try:
+            r = self.O['live_fx'](self.P, moves=flat)
+        except Exception as e:
+            if not (section and _no_sections(e)):
+                raise
+            # an engine from before sections rejects the first move, so none were scheduled: send them untagged
+            r = self.O['live_fx'](self.P, moves=[{k: v for k, v in m.items() if k != 'section'} for m in flat])
         self.log(f"moves ({len(flat)}): {r.splitlines()[0]}")
         return r
 
@@ -231,7 +267,8 @@ class Set:
         st = self.O['live_status'](self.P)
         if short:
             st = '\n'.join(ln for ln in st.splitlines()
-                           if ln.startswith(('live ', 'STALLED', 'safety', '  ', 'render', 'mixer', 'runway', 'NEW')))
+                           if ln.startswith(('live ', 'STALLED', 'safety', '  ', 'render', 'mixer', 'headroom',
+                                             'runway', 'NEW', 'output off', 'sections')))
         return st
 
     def heard_bar(self):

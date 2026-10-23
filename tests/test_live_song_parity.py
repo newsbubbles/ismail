@@ -25,6 +25,7 @@ GLIDE = pytest.param('acid_bass', BASS, marks=pytest.mark.xfail(strict=True, rea
 EXACT = [('saw_lead', MEL), ('pad', MEL), ('pluck', MEL), GLIDE, ('fm_bell', MEL),
          ('noise_riser', '0 C4 4 100'), ('kick', KIT), ('snare', MEL), ('clap', MEL), ('hat_open', MEL),
          ('kit_basic', KIT), ('grand_piano', MEL), ('additive_piano', MEL), ('growl', BASS), ('sfx', FX),
+         ({'type': 'code', 'voice': 'transitions', 'tail': 3.0}, '0 C1 1 100; 1 D1 1 100; 2 E1 1 100; 3 F1 1 100'),
          ({'type': 'sprite', 'oscs': [{'wave': 'square'}]}, MEL), ({'type': 'mimic', 'profile': 'cello'}, BASS)]
 PERFORMERS = [('strat70_lead', 'electric', 'lead', MEL.replace('4', '3').replace('5', '4')),
               ('pbass70', 'electric', 'bass', BASS), ('kit70', 'kit70', 'kit', KIT70)]

@@ -147,3 +147,26 @@ def test_played_keys_keep_their_bank_across_a_change(tmp_path, monkeypatch):
     assert e.midi.patches['ismail keys']['bank'] is bank and all(bank[k] is notes[k] for k in notes)
     opened['ismail keys'].on(0.0, 0x90, 62, 100)
     assert np.max(np.abs(e._pull(BLOCK))) > 0.01
+
+
+def test_the_clock_op_gives_the_tempo_at_the_heard_beat(eng):
+    """live's clock op (listen_heard counts beats from it): the mix runs ahead of the speakers, so for a moment the
+    mix is past a change the listener has not heard. The clock's bpm is the one at the heard beat."""
+    kicks(eng)
+    eng.cmd_tempo(150, at='bar:3')
+    S = eng.tmap.segs[-1][0]
+    while eng.pos <= S:
+        eng.tick()
+        eng.mix_block()
+    assert eng.bpm == 150
+    c = eng.cmd_clock()
+    assert c['bpm'] == 150 and c['beat'] >= 8                    # no output running: the mixed position
+    eng._null_on, eng.played = True, S - SR // 2                 # a silent output half a second behind the mix
+    try:
+        c = eng.cmd_clock()
+        assert c['bpm'] == 120 and c['beat'] < 8                 # heard: still bar 2, at the old tempo
+        eng.played = S + SR
+        c = eng.cmd_clock()
+        assert c['bpm'] == 150 and c['beat'] > 8
+    finally:
+        eng._null_on = False

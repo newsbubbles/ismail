@@ -157,19 +157,43 @@ listening exams and two notes).
    owner, or leave it. Handle a burst of lines in one turn. `round=<card id prefix>` holds the lines of a round of
    someone else's cards that you chose to let run, and wakes you on anything else or 90 s after the round's last
    line.
-2. **Passing on.** A note with no `for` that is plainly about another agent's work goes to that agent at once, word
-   for word, with its inbox number, id and time. When the owner is unclear, keep it and ask the team's lead (or the
-   person, when there is no lead).
-3. **Listening exams mean silence.** From the first exam card, or an `exam_round` started line, silence the music:
+2. **Passing on: claim it first.** Every watcher sees every note, so a note with no `for` used to reach nobody (each
+   agent thought another had it) or everybody (six agents passed one note to the same lead). Before you pass on or
+   answer an untagged note, call `phone_claim(n, by=<your who>)`. "yours" means go ahead; "taken: X claimed it" means
+   leave it, even if you would have done it differently. The server decides who was first, so two agents claiming
+   at once cannot both win, and every later `phone_listen` or `phone_watch` line of that note carries
+   `claimed {by, at}`. The person's page says "taken by X" under the note (the agent it was said to, then its
+   claimer), or "nobody has it yet". A note with a `for` is already that agent's: no claim. Claim only what you will act on now.
+   Then pass it on at once, word for word, with its inbox number, id and time. The first line of anything you pass
+   on, or of your answer to another agent's ask, says who it is for and what it is for; without it the person had to
+   ask "who's this for and what's this for again?". When the owner is unclear, keep it
+   and ask the team's lead (or the person, when there is no lead). An untagged note nobody claims for 3 minutes is
+   the lead's by default: `phone_presence` lists it with LEAD, so the lead's watcher picks it up.
+3. **Who else is here.** `phone_presence()` shows both sides, many to many: each agent calling the phone server and
+   whether its watcher is waiting now, and each of the person's devices with the page open (phone, computer,
+   tablet, Quest; its browser, last seen, on the stream or not), then the unclaimed notes and the recent claims.
+   `phone_watch` returns `also_watching` with every wake. Use it to decide: if you are the only one watching, a note
+   for someone who is not here waits on you to pass it on; if its owner is watching, leave the note to them.
+4. **Listening exams mean silence. From the first exam card, or an `exam_round` started line, silence the music:
    stop every track at the next bar and stop anything that queues new passes. Moving the laptop's output to no
    device is not silence, because the phone's stream keeps playing. The round ends on the person's "done", on
    `exam_round` finished, or after 90 s with no activity from them (clip plays and notes count as activity). Then
    bring the output back and start a fresh pass.
-4. **Stay alive.** A watcher run in the background may be stopped by its host after a time limit. Give it a shorter
+5. **Stay alive. A watcher run in the background may be stopped by its host after a time limit. Give it a shorter
    life of its own (`phone_watch` returns `alive: true` after `wait_min`, 100 minutes by default, where the limit
    is 2 hours), and when it ends, start it again and read `phone_status`, so a note sent hours later still reaches you ("no matter what if I haven't answered in like two
    hours ... you can still get the voice notes").
-5. **Their clock.** The machine's clock may not be the person's. Any clock time shown or said to them is in their
+6. **Down while they are live: the heartbeat.** A watcher that died left the person asking "you watching phone?"
+   during a set, four times in five days (ledger:M211). While the person is live (the Quest page open, a phone on
+   the stream), an agent that watched in the last 30 minutes and has not polled for 2 minutes is down. The server
+   posts one `alarm` line (`what: watcher_down`, `agent`), the page tells the person who is not hearing them, and
+   `phone_status` and `phone_presence` show it. A `watcher_back` line follows when it polls again. The server
+   cannot wake a session; the lead can. So the lead runs `phone_watch "who=<role>" lead=true`, and the alarms are
+   addressed to it (to every watcher while no lead is watching); its `next` line says to wake the agent named,
+   with a message to its session, so that agent re-arms. At the start of a set, a VR session or a jam, an agent
+   that must stay up calls `phone_expect(who, why, minutes)`; that holds even when the person is not in VR or on
+   the stream. When your work is done, `phone_signoff(who, why)` stops on purpose, and nothing is raised.
+7. **Their clock. The machine's clock may not be the person's. Any clock time shown or said to them is in their
    own time zone.
 
 ## Pause means stop, now
@@ -184,8 +208,41 @@ for 70 s after the person pressed pause). Starting again is yours, when they say
 The page may be on someone's screen recording or a shared video: never put where the person lives, their name, or
 other personal details in a caption, a panel or a title (10-06: a story named the person's town while they
 recorded).
+The ops refuse it for you: every op that sends text to the page (`phone_say`, `phone_panel_show`, `phone_ask`,
+`phone_exam`, `phone_now`, `phone_buttons`, the offer and restart lines) and every stage op that shows text
+(`stage_say`, `stage_ask`, `stage_panel_show`, cues, markers, `stage_busy`) scans it first against a local list
+that never goes in the repository: `$ISMAIL_PRIVATE_TERMS`, else `~/.ismail/private_terms.txt`, one place or name
+per line, `#` starting a comment line, plus the git `user.email` of the checkout. Words match whole and
+case-insensitive; an email matches anywhere. A hit refuses with the term, to you only: rephrase without it. With no
+file only the email is checked, and each reply carries one line saying so and how to turn the rest on.
 `phone_unsay(match='text')` (or `since='HH:MM'`, or `n=`) takes lines back off the page, its history, its pinned
 line and its notification; it cannot reach a recording already made.
+
+## Don't ask for what is granted
+
+A person who said "you can always merge reviewed work" should not get the question again. Their standing grants
+live in a local file: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a JSON list of
+`{"id", "date", "topic", "keywords": [...], "says"}`. A yes/no or approve/deny panel (its buttons, or a choice's
+options, are all yes and no words), a `phone_ask`, a `phone_say` that asks ("should I merge #12?"), a `stage_ask`
+or a yes/no `stage_panel_show` whose title or text holds a grant's keyword (whole word, any case) is refused with
+the grant: act on it, then post a caption saying what you did. When the grant really does not fit, pass
+`override_grant='<why it does not fit>'`: the question goes out and the reason is appended to
+`grant_overrides.jsonl` beside the grants file (never a tracked file). No grants file: no check.
+
+**Whose step it is.** An entry with an `owner` belongs to that agent. A grant (`kind: "grant"`, the default) means
+the person already said yes to this kind of step: its owner acts on it, and anyone else's ask is refused with
+"this is <owner>'s: send it to them", so a merge question goes to the agent that merges and not to the person. A
+route (`kind: "route"`) means a kind of question is the owner's to answer ("how many views did it get?" goes to
+the agent that reads the numbers); any question with its keyword is sent there, and the owner may still ask the
+person. Pass `sender=` (your name as the team knows you) on every ask, or the check cannot tell you are the owner.
+**Always asked:** a grant never covers an ask that names anything public (post, publish, upload), money (pay, buy,
+price), accounts and passwords, or deleting; those go to the person every time.
+
+**Before a NEEDS NATE line, or any ask no op sees:** `grant_check(ask, sender)` answers `act:` (yours: do it and
+say what you did), `send:` (another agent's) or `ask:`. The file is kept by ops only: `grant_add(says, keywords,
+source, owner, kind)` needs the person's own words as `source` (a decision id, a phone note `n<id>`, a VR note,
+`chat: <their words>` or `memory: <file>`) and refuses keywords that would match any ask; `grant_list()` and
+`grant_drop(id, why)` (the entry is kept in `grants_dropped.jsonl`).
 
 ## The page's sounds: make them, attach them
 
@@ -257,6 +314,11 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   `now_mark=` / `next_mark=`: 'loved' (one they loved before, played again), 'replay' (played earlier, back
   again) or 'new' (just made). A small mark sits beside it; without one, the page shows a heart when they tapped
   Love this while that piece played.
+- The now label expires when what it names stops, so a later script that never calls `phone_now` cannot leave a
+  stale name up: by default it is tied to the clips playing as it goes up and those that start in the next 2 bars
+  (a label put up just before its music is queued); `now_of=[...]` ties it to named clips, tracks or decks
+  instead; `now_of=[]` keeps the old way (up until replaced or cleared). When it expires the page shows the
+  engine's own playing list. An engine that stops answering (a pause) leaves the label as it is.
 - The piece's shape: `phone_now(length=<seconds>, sections=[{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
   'drop'}], into=<seconds in, if it started before its name went up>)` on every chapter change. The page keeps a
   position line on screen under now/next (elapsed / length, the section, the next one and when), in time or bars as
@@ -275,13 +337,18 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   stage_panel_show shape). Either one with `wait=N` blocks for the answer. A tap on the panel's image opens it full
   screen (pinch or double-tap zooms, a finger moves it, the cross or Back closes it), so a detailed picture can be
   sent as it is; the page's events say `image_open` and `image_close` (with the most it was zoomed).
-- `phone_exam(title, clips, question, chips, choices, answers_path)`: a blind exam. Label the clips blind (A, B). The
-  live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed. That one file holds
+- `phone_exam(title, clips, question, chips, choices, answers_path, measured= or unmeasured=)`: a blind exam. Label
+  the clips blind (A, B). `measured` holds your instruments' lines, or `unmeasured` says why only the ear can tell
+  (blind-tests.md, "Measure first"); one of them is required. The live stream pauses while a clip plays. Submit writes to `answers_path`, so no "done" is needed. That one file holds
   everything about the exam: the answer (kind 'answer'), and every voice note said on the card (kind 'voice_note',
   with `text`, `audio_path` and `field`, the box it was said into, or 'card'), before or after the answer. An answer
   row with `voice_notes_pending` has more rows coming. The answer's note says whether it was typed or said
   (`note_source`, and `note_audio` for the recordings). The reply lists each clip's url, path and length, so the
   post can be checked against what was meant.
+  **A raw take beside a render.** A take recorded raw (no auto gain) sat about 15 dB under a mastered bounce
+  (-31.5 against -16.5 LUFS) with its peaks already near -3.5 dBFS, so it cannot be raised to match without a
+  limiter that changes it. The pre-flight refuses clips more than 1 LUFS apart. Play a raw take on the computer's
+  page (`feedback_page`), or send a limited copy whose label says it is limited.
 - Every text box on a panel or exam card has a mic: they say the note, its words go into the box to edit, and the
   answer carries the recording too (`values_audio` on a panel).
 - `phone_offer(path, label=, auto=True)`: a download (a render, a take, a PDF). The label is the card and the file's
@@ -291,6 +358,13 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
 - `phone_buttons([...])`: your own buttons, as data, for this moment of the set ("darker", "drop it now"). Clear
   them when the moment passes.
 - `phone_buzz()`, `phone_status()` (who listens, the bar they hear, how far behind the room), `phone_stop()`.
+- `phone_presence()` (the agents watching and the person's open devices, the unclaimed notes) and
+  `phone_claim(n, by=)` (you pass on note n: the first caller wins). "Watching the phone" says when.
+- `live_keys_page(project, phone=True)`: optional, for someone in the room with no MIDI instrument who wants to
+  play a part. It posts a panel whose button opens on-screen keys (`/keys` on the page's address) that play into the
+  set from the computer's speakers, not into the stream; opening them leaves the page, so the stream stops until
+  they come back (the keys page has a Phone button back). Patch them first with
+  `live_midi(source='screen keys', track=... or instrument=...)`. A real keyboard needs none of this.
 
 ## Their phone
 

@@ -213,8 +213,8 @@ def _save_edits(name, edits):
 CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoint_remove', 'waypoints_clear', 'waypoints_list', 'waypoint_go', 'sky', 'scene_go', 'scene_list', 'actor_follow', 'trees_reload', 'clock', 'key', 'key_delete', 'anim_save', 'anim_clear', 'timeline', 'growth', 'music', 'take_start', 'take_stop', 'eyecam', 'voice_rec', 'say', 'goto', 'goto_camera', 'focus', 'select', 'deselect', 'highlight', 'marker', 'clear_markers', 'set',
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release', 'prop_pin',
-             'take_keep_last', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'actor_part', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
-             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now', 'embody', 'grab_mode', 'grab_rule'}
+             'take_keep_last', 'take_keep_recent', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'actor_part', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
+             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now', 'embody', 'grab_mode', 'grab_rule', 'material', 'surface', 'pointer', 'on_air', 'world_reload', 'gestures_reload', 'trail', 'cam_record', 'replay_input', 'follow'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -729,6 +729,10 @@ class Handler(SimpleHTTPRequestHandler):
             if not NAME.match(name) or not (SCENES / name).is_dir():
                 return self._json(400, {'error': f'no scene {name!r}'})
             return self._json(200, load_world(SCENES, name))
+        if u.path == '/gestures':                  # the gesture map in force for a scene (gestures.py, page/gestures.js)
+            from .gestures import for_page
+            name = parse_qs(u.query).get('scene', [''])[0]
+            return self._json(200, for_page(SCENES, name if NAME.match(name) and (SCENES / name).is_dir() else None))
         if u.path == '/updates.json':              # the update notes (update_note), newest code changes first
             f = STATE / 'updates.json'
             return self._json(200, json.loads(f.read_text(encoding='utf-8')) if f.is_file() else {'updates': []})
@@ -1104,11 +1108,13 @@ class Server(ThreadingHTTPServer):
         self.pool.shutdown(wait=False, cancel_futures=True)
 
 
-def register(port, scheme, host):
+def register(port, scheme, host, start=None):
+    """Record this server in the registry. start: the arguments it was started with (host, footage, esbuild, tls),
+    so stage_restart can start it again the same way."""
     d = registry_dir()
     d.mkdir(parents=True, exist_ok=True)
     rec = {'pid': os.getpid(), 'port': port, 'host': host, 'scheme': scheme, 'scenes': str(SCENES), 'state': str(STATE),
-           'started': time.time(), 'url': f'{scheme}://127.0.0.1:{port}/'}
+           'started': time.time(), 'url': f'{scheme}://127.0.0.1:{port}/', 'start': start or {}}
     (d / f'{port}.json').write_text(json.dumps(rec, indent=1), encoding='utf-8')
     return d / f'{port}.json'
 
@@ -1138,7 +1144,8 @@ def main(argv=None):
         ctx.load_cert_chain(a.cert, a.key)
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = 'https'
-    reg = register(port, scheme, host)
+    reg = register(port, scheme, host, start={'host': a.host, 'footage': a.footage, 'esbuild': os.environ.get('ESBUILD'),
+                                             'tls': bool(a.tls)})
     presence.URL[0] = f'{scheme}://127.0.0.1:{port}'
     print(f'ismail stage on {scheme}://{host}:{port}/  scenes {SCENES}: {scene_names()}', flush=True)
     try:

@@ -15,7 +15,8 @@
 
 # ismail
 
-**Interfaces your agent runs and rebuilds for you: a DAW, a VR stage and a phone page.**
+**Not a DAW with an agent added on. ismail starts from what the agent lacks: it can't hear, so ismail reads the
+music to it as text, and you steer through screens it builds for you.**
 
 The agent you already use does the work in the background. You bring the taste.
 
@@ -36,12 +37,85 @@ uploaded to GitHub plays inline here). Until it exists, the juke joint video bel
 
 *Agents built a 1958 juke joint for the Crossroads Rewired music video; Nate walked in with a Quest 3 and directed them from inside: voice notes, and dance takes they play on the characters (4:43).*
 
+## What it looks like
+
+**1. You talk; the agent writes the notes, the sounds and the mix as text.**
+
+```
+you   > Make me an 8-bar deep house loop: kick, a bass line in A minor, and some keys.
+
+agent > project_new(bpm=120, length_bars=8, name='Demo Song')
+        track_add('kick', instrument='preset:kick')
+        notes_write('kick', 1, '0 C1 0.5; 1 C1 0.5; 2 C1 0.5; 3 C1 0.5', repeat=8)
+        track_add('bass', instrument='preset:pluck')
+        notes_write('bass', 1, '0 A1 0.5; 1.5 A1 0.5; 2.5 C2 0.5; 3 E2 0.5', repeat=8)
+        track_add('keys', instrument='preset:pluck')
+        notes_write('keys', 1, '0 A3 2; 0 C4 2; 0 E4 2; 2 G3 2; 2 B3 2; 2 D4 2', repeat=8)
+        render()
+
+        rendered 18.0s -> renders/latest.wav
+        master: -16.7 LUFS, true peak -0.3 dBTP
+          kick   peak  -6.1   rms -20.1 dB
+          bass   peak -10.2   rms -27.6 dB
+          keys   peak  -3.0   rms -26.8 dB
+
+        Listening report
+        1. Balance: the keys peak 3 dB over the kick, so they sit on top of the groove.
+           I'll bring them down 4 dB and give the bass 2 dB.
+        Have a listen: does the bass line feel right before I add hats?
+```
+
+**2. Every render comes back as text the agent can read: here, a song's form, bar by bar.**
+
+```
+      bar 12345678901234567890123456789012345678901234567890...
+      mix 66666687787787787887888888888888888888888888888878...
+     ~sub 777777777777777777777776777777666666777777777777.7...
+    ~bass 7777778888888888888888888888888888888888888889888...
+     root ..B...AGGAGGAGGAGGGGGGGGGGGAGGGGaAGGaGaaaaAGaaGaAG...
+  section A----------------------------------------------|B--
+A   bars   1-48  (48)  level    9.6 dB  low X...X...X...X...  snare ....x.......x...
+B   bars  49-56  ( 8)  level   12.6 dB  low XxxXX.XxXxxXxxXx  snare .......x........
+```
+
+**3. Your phone: listen away from the desk, and send a voice note on the beat you heard.**
+
+<img src="assets/tour/phone-page.png" alt="The phone page during a demo set: the set is live, with what plays now and next, a Listen button, a large Hold to talk button, and buttons for Love this, Change it up, Calmer and More energy." width="300">
+
+**4. A page built for one song: click a moment, leave a note, and the agent reads the notes in order.**
+
+<img src="assets/tour/moments-page.png" alt="A feedback page for a demo song: the player, a strip of bar numbers with a pin at bar 5, a Mark this moment button, and the saved moment: 0:08, bar 5, Hit harder, kick, the drop needs more punch here." width="300"> <img src="assets/tour/moment-card.png" alt="The same moment open for editing: tick boxes for what it is (Hit harder ticked), which part (kick ticked), and the listener's words." width="300">
+
+**5. A VR stage: stand inside the song and say what to change.**
+
+The video at the top shows one: agents built a 1958 juke joint, then a person walked in with a headset and
+directed them from inside ([watch it](https://youtu.be/fKGkaf2WYWw)).
+
+**6. Video code gets every note's frame, so the picture lands on the beat.**
+
+<!-- STOP 6 IMAGE: one Crossroads frame for bars 33-35, once the film's owner clears a frame for the public README. -->
+
+```json
+"kick": [
+  {"f": 1600, "beat": 128.0, "pitch": 36, "len": 3, "vel": 127},
+  {"f": 1631, "beat": 130.5, "pitch": 36, "len": 3, "vel": 100},
+  {"f": 1650, "beat": 132.0, "pitch": 36, "len": 3, "vel": 127}
+],
+"snare": [
+  {"f": 1625, "beat": 130.0, "pitch": 36, "len": 3, "vel": 127},
+  {"f": 1675, "beat": 134.0, "pitch": 36, "len": 3, "vel": 127},
+  {"f": 1725, "beat": 138.0, "pitch": 36, "len": 3, "vel": 127}
+]
+```
+
 ## What ismail is
 
-ismail is a set of **recursively modifiable interfaces**. A recursively modifiable interface is a shared space
-between a person and their agents, one side for each, that the agents keep rebuilding from the person's feedback
-while they use it, within constraints the person sets, and where the test that decides whether a change helped can
-itself be changed.
+ismail is a set of **recursively modifiable interfaces**. In short: the agents rebuild the screens you work through
+from what you tell them, while you use them, within limits you set.
+
+The definition: "We define a recursively modifiable interface (RMI) as a shared space between a person and their
+agents, one side for each, that the agents keep rebuilding from the person's feedback while they use it, within
+constraints the person sets, and where the test that decides whether a change helped can itself be changed."
 
 In plain words: ask for a button on your phone, an object in your VR room, a new way to read a mix, and the agent
 builds it from ismail's tools. The engines underneath stay put, and you decide whether a change actually helped
@@ -52,12 +126,13 @@ already use (Claude Code, Codex, Cursor, any MCP client) on one side and to you 
 
 - **The DAW.** Your agent can't hear, so it reads. It writes music as notes, sounds and code, renders it, and reads
   every render back as text. A song is code, so "change bar 12" changes bar 12 and nothing else. Then it plays it
-  live, on decks.
+  live, on decks. Instruments and effects are Python code the agent writes, so it builds what a song needs instead
+  of loading VST or AU plugins.
 - **The VR stage.** A scene in your headset or browser that agents build while you stand in it. Objects carry their
   own behaviour, and when you dance, they put your moves on a character.
 - **The phone page.** The set in your pocket, with the screen off. Talk back through your earbuds; the agent puts
   its own panels on the page for whatever it needs to ask you, from "sample this or play it as a melody?" to a
-  blind listening exam.
+  listening test with the labels hidden.
 
 The agent measures everything it can and asks your ears and eyes only what its measurements can't settle.
 
@@ -128,11 +203,12 @@ Extras and per-client setup are in [docs/reference.md](docs/reference.md).
   one sentence.
 - Mimic needs more notes for instruments whose colour changes from note to note, like the piano (the `grand_piano`
   voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
-- One tempo per project, no MIDI import or export, no plugin hosting.
+- One tempo per project. MIDI files go in and out (`midi_write`, `midi_read`) and a live set takes MIDI from a
+  keyboard, but no MIDI out to synths or other apps yet and no MIDI clock.
 - The agent's own changes to a live set land between its turns, 5 to 30 seconds apart (your taps on the phone or
   the stage act at once).
 - The VR stage is tested on one headset (Quest 3) with one person.
-- It needs a capable agent, and your ear stays the final judge. The blind exams so far had one listener.
+- It needs a capable agent, and your ear stays the final judge. The listening tests so far had one listener.
 
 How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the
 [showcase page](https://newsbubbles.github.io/ismail/#compare).

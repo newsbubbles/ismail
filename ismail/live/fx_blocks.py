@@ -114,6 +114,7 @@ class _Lfilter:
 class Proc:
     latency = 0
     noise = 0.0         # RMS of the noise the processor makes by itself (an amp's hiss and hum), for dormancy
+    hold_s = 0.0        # seconds of silent output while sound is still in flight inside it (a far source), for dormancy
 
     def __init__(self, fx, env):
         self.fx = fx
@@ -620,6 +621,7 @@ PROCS = {'gain': _Gain, 'eq': _Eq, 'filter': _Filter, 'distortion': _Distortion,
          'limiter': _Limiter, 'formant': _Formant, 'vocoder': _Vocoder}
 
 from . import rig_blocks  # noqa: E402,F401  the rig's processors (they build on the classes above) join PROCS
+from . import spatial_blocks  # noqa: E402,F401  the spatial effect joins PROCS
 
 
 def make(fx, env):

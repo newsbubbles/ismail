@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feedback</title>
+<style>
+  :root { --bg: #f7f6f2; --card: #ffffff; --ink: #1d1d1b; --soft: #66645e; --line: #dcd9d0; --accent: #1f5fae;
+          --rec: #c0392b; --ok: #2e7d4f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171716; --card: #222220; --ink: #ecebe6; --soft: #a3a19a; --line: #3a3935; --accent: #7fb0ec;
+            --rec: #ef6b5b; --ok: #6fc28f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .lead { color: var(--soft); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 0 0 16px; }
+  .label { font-weight: 600; margin: 0 0 8px; }
+  audio, video, img { width: 100%; display: block; }
+  img { height: auto; border-radius: 6px; }
+  .q h2 { font-size: 1.1rem; margin: 0 0 10px; }
+  .q h2 .n { color: var(--soft); margin-right: 6px; }
+  textarea { width: 100%; min-height: 96px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
+             border-radius: 8px; padding: 10px; resize: vertical; }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+  button { font: inherit; padding: 10px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
+           color: var(--ink); cursor: pointer; min-height: 44px; }
+  button.rec { border-color: var(--rec); color: var(--rec); }
+  button.rec.on { background: var(--rec); color: #fff; }
+  .status { color: var(--soft); font-size: 0.9rem; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--rec); }
+  .said { margin-top: 12px; display: grid; gap: 10px; }
+  .clip { border-top: 1px solid var(--line); padding-top: 10px; }
+  .clip .when { color: var(--soft); font-size: 0.85rem; }
+  .clip .words { margin: 4px 0 0; white-space: pre-wrap; }
+  .clip .words.wait { color: var(--soft); font-style: italic; }
+  .text-item { white-space: pre-wrap; margin: 0; }
+  #err { display: none; }
+  .send-card { border-color: var(--accent); }
+  button.send { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.send:disabled { opacity: 0.6; cursor: default; }
+  .downloads { display: grid; gap: 6px; margin-top: 10px; }
+  .downloads a { color: var(--accent); }
+  textarea.copy { min-height: 160px; margin-top: 10px; }
+  .part .sub { color: var(--soft); font-size: 0.85rem; margin: 8px 0 4px; }
+  .part input { width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
+                border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .moments-box { margin-top: 12px; display: grid; gap: 10px; }
+  .strip { position: relative; height: 34px; margin-top: 6px; border: 1px solid var(--line); border-radius: 6px;
+           background: var(--bg); cursor: pointer; }
+  .strip .tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); pointer-events: none; }
+  .strip .tick span { position: absolute; left: 3px; bottom: 1px; font-size: 0.72rem; color: var(--soft); white-space: nowrap; }
+  .strip .ph { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--ink);
+               opacity: 0.55; pointer-events: none; }
+  .strip .pin { position: absolute; top: -8px; bottom: -2px; width: 22px; min-height: 0; margin-left: -11px; padding: 0;
+                border: 0; border-radius: 0; background: none; cursor: pointer; }
+  .strip .pin::before { content: ""; position: absolute; left: 10px; top: 8px; bottom: 0; width: 2px; background: var(--accent); }
+  .strip .pin::after { content: ""; position: absolute; left: 5px; top: 0; width: 12px; height: 12px; border-radius: 50%;
+                       background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
+  .strip .pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .markedit { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; display: grid; gap: 10px; }
+  .markedit[hidden] { display: none; }
+  .markedit .sub { color: var(--soft); font-size: 0.85rem; margin: 0; }
+  .markedit textarea { min-height: 60px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px;
+          padding: 6px 12px; font-size: 0.9rem; cursor: pointer; }
+  .chip:has(input:checked) { border-color: var(--accent); }
+  .chip input { margin: 0; }
+  .marklist { margin: 0; padding-left: 22px; display: grid; gap: 6px; font-size: 0.95rem; }
+  .marklist li span { margin-right: 6px; }
+  button.small { padding: 4px 12px; min-height: 34px; font-size: 0.85rem; margin: 2px 6px 2px 0; }
+  .made-with { color: var(--soft); font-size: 0.85rem; margin: 32px 0 0; text-align: center; }
+  .made-with a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Feedback</h1>
+  <p class="lead" id="lead">Everything you type or say here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.</p>
+  <div class="card status bad" id="err"></div>
+  <section id="items"></section>
+  <section id="parts"></section>
+  <section id="questions"></section>
+  <section id="send"></section>
+  <footer class="made-with" id="madewith" hidden></footer>
+</main>
+<!--SHARED-->
+<script>
+(() => {
+  const $ = (s, el) => (el || document).querySelector(s);
+  const make = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const timers = {};
+  const pending = {};
+  let manifest = null;
+  let voiceOn = false;
+  let sent = { state: 'writing', at: null, changed_at: null };
+  let lastState = { answers: {} };
+
+  // A shared copy (feedback_page(share=True), ledger:M255) runs with no server: it is hosted anywhere a listener
+  // can open it, keeps their typing and voice notes in their own browser, and sends them back as a message (the
+  // phone's share menu, or a copy to paste, plus the voice notes as files). feedback_paste reads them into the round.
+  const SHARED = window.FEEDBACK_SHARED || null;
+  const KEY = 'ismail-feedback:' + (SHARED ? SHARED.id || '' : '') + ':';
+  const local = {
+    get(k) { try { return localStorage.getItem(KEY + k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(KEY + k, v); return true; } catch (e) { return false; } },
+  };
+  const memClips = [];
+  function idb() {
+    return new Promise((ok) => {
+      try {
+        const r = indexedDB.open('ismail-feedback', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('clips', { keyPath: 'key' });
+        r.onsuccess = () => ok(r.result); r.onerror = () => ok(null);
+      } catch (e) { ok(null); }
+    });
+  }
+  async function clipsGet() {
+    const db = await idb();
+    let kept = [];
+    if (db) {
+      kept = await new Promise((ok) => {
+        try {
+          const t = db.transaction('clips').objectStore('clips').getAll();
+          t.onsuccess = () => ok((t.result || []).filter((c) => String(c.key).startsWith(KEY)));
+          t.onerror = () => ok([]);
+        } catch (e) { ok([]); }
+      });
+    }
+    const have = new Set(kept.map((c) => c.key));
+    return kept.concat(memClips.filter((c) => !have.has(c.key))).sort((a, b) => (a.at < b.at ? -1 : 1));
+  }
+  async function clipPut(c) {
+    const db = await idb();
+    const ok = db && await new Promise((done) => {
+      try { const tx = db.transaction('clips', 'readwrite'); tx.objectStore('clips').put(c); tx.oncomplete = () => done(true); tx.onerror = () => done(false); }
+      catch (e) { done(false); }
+    });
+    if (!ok) memClips.push(c);
+    return !!ok;
+  }
+  async function sharedState() {
+    const clips = await clipsGet();
+    const answers = {};
+    for (const q of manifest.questions) {
+      answers[String(q.n)] = { text: local.get('t' + q.n) || '', typed_at: local.get('at' + q.n),
+                               said: clips.filter((c) => c.q === q.n) };
+    }
+    const names = {};
+    for (const p of manifest.parts || []) { const v = local.get('p:' + p.track); if (v) names[p.track] = { text: v }; }
+    const at = local.get('sent');
+    let moments = [];
+    try { moments = JSON.parse(local.get('moments') || '[]'); } catch (e) { moments = []; }
+    return { answers, names, moments, sent: { state: at ? (local.get('changed') ? 'changed' : 'sent') : 'writing', at, changed_at: null } };
+  }
+
+  function showError(msg) { const e = $('#err'); e.textContent = msg; e.style.display = msg ? 'block' : 'none'; }
+  function when(iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } }
+
+  async function getJSON(url) {
+    if (SHARED && url === 'manifest') return SHARED.manifest;
+    if (SHARED && url === 'state') return sharedState();
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(url + ': ' + r.status);
+    return r.json();
+  }
+
+  function renderItems(items) {
+    const box = $('#items');
+    for (const it of items) {
+      const c = make('div', 'card');
+      if (it.label) c.appendChild(make('p', 'label', it.label));
+      if (it.kind === 'audio') {
+        const a = make('audio'); a.controls = true; a.preload = 'metadata'; a.src = it.src; c.appendChild(a);
+        if (manifest.moments && manifest.moments.item === it.n) renderMoments(c, a);
+      }
+      else if (it.kind === 'video') { const v = make('video'); v.controls = true; v.preload = 'metadata'; v.playsInline = true; v.src = it.src; c.appendChild(v); }
+      else if (it.kind === 'image') { const i = make('img'); i.src = it.src; i.alt = it.label || 'picture'; c.appendChild(i); }
+      else c.appendChild(make('p', 'text-item', it.text || ''));
+      box.appendChild(c);
+    }
+  }
+
+  // Moments (ledger:M263): while the clip plays, the person marks anything that strikes them (the button or M): a pin
+  // on the strip, tick boxes and their words. The served page saves them like typed answers; a shared copy keeps
+  // them in the browser and puts them in the message. feedback_paste reads the 'Moments:' block back, so its lines
+  // stay as momentLine writes them.
+  let MARKS = [];
+  let momentsPending = false;
+  let markAudio = null, markEdit = null, markRender = null;
+  function clock(t) { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+  function barAt(t) {
+    const g = manifest.moments && manifest.moments.grid;
+    if (!g || !g.bpm) return null;
+    return Math.floor(((g.start_sec || 0) + t - (g.offset_sec || 0)) / ((g.bpb || 4) * 60 / g.bpm)) + 1;
+  }
+  function momentLine(m) {
+    const b = barAt(m.t);
+    const head = m.tags.concat(m.parts).join(', ');
+    const words = String(m.text || '').split(/\s+/).filter(Boolean).join(' ');
+    return clock(m.t) + (b ? ' (bar ' + b + ')' : '') + ': ' + ([head, words].filter(Boolean).join('. ') || '-');
+  }
+  function cleanMarks(list) {
+    return (Array.isArray(list) ? list : []).filter((m) => m && typeof m.t === 'number').map((m) => ({
+      id: String(m.id || ('m' + Math.random().toString(36).slice(2, 9))), t: m.t,
+      tags: Array.isArray(m.tags) ? m.tags.map(String) : [], parts: Array.isArray(m.parts) ? m.parts.map(String) : [],
+      text: String(m.text || '') })).sort((a, b) => a.t - b.t);
+  }
+  function momentsStatus(text, cls) { const s = $('#mst'); if (s) { s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); } }
+
+  async function saveMoments() {
+    clearTimeout(timers.moments);
+    if (SHARED) {
+      const ok = local.set('moments', JSON.stringify(MARKS));
+      momentsStatus(ok ? 'Kept in this browser' : 'This browser does not keep it: send your answers before you close the page.', ok ? 'ok' : 'bad');
+      return true;
+    }
+    momentsPending = false;
+    try {
+      const r = await fetch('moments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moments: MARKS }) });
+      if (!r.ok) throw new Error(r.status);
+      momentsStatus('Saved', 'ok');
+      return true;
+    } catch (e) {
+      momentsPending = true;
+      momentsStatus('Not saved yet: the page server does not answer. Keep this tab open; it tries again.', 'bad');
+      timers.moments = setTimeout(saveMoments, 5000);
+      return false;
+    }
+  }
+  function momentsChanged() {
+    changedAfterSend();
+    momentsPending = !SHARED;
+    clearTimeout(timers.moments);
+    timers.moments = setTimeout(saveMoments, 300);
+    if (markRender) markRender();
+  }
+
+  function chips(opts, name) {
+    const row = make('div', 'chips');
+    for (const o of opts) {
+      const l = make('label', 'chip'); const i = make('input'); i.type = 'checkbox'; i.name = name; i.value = o;
+      l.appendChild(i); l.appendChild(make('span', null, o)); row.appendChild(l);
+    }
+    return row;
+  }
+
+  function renderMoments(card, audio) {
+    const mo = manifest.moments;
+    markAudio = audio;
+    const box = make('div', 'moments-box');
+    const strip = make('div', 'strip'); strip.title = 'Tap to jump there';
+    const ticks = make('div'), pins = make('div'), ph = make('div', 'ph');
+    strip.appendChild(ticks); strip.appendChild(pins); strip.appendChild(ph);
+    box.appendChild(strip);
+    const dur = () => (isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0);
+    const pct = (t) => (dur() ? Math.max(0, Math.min(100, t / dur() * 100)) : 0) + '%';
+    function drawTicks() {
+      ticks.textContent = '';
+      const d = dur(), g = mo.grid;
+      if (!d) return;
+      const put = (t, label) => { const k = make('div', 'tick'); k.style.left = pct(t); k.appendChild(make('span', null, label)); ticks.appendChild(k); };
+      if (g && g.bpm) {
+        const bs = (g.bpb || 4) * 60 / g.bpm, b0 = barAt(0), b1 = barAt(d);
+        const step = [1, 2, 4, 8, 16, 32, 64].find((s) => (b1 - b0) / s <= 10) || 128;
+        let first = Math.ceil((b0 - 1) / step) * step + 1;
+        if (first < b0) first += step;
+        for (let b = first; b <= b1; b += step) {
+          const t = (g.offset_sec || 0) + (b - 1) * bs - (g.start_sec || 0);
+          if (t >= 0 && t < d) put(t, (b === first ? 'bar ' : '') + b);
+        }
+      } else {
+        const step = [5, 10, 15, 30, 60, 120, 300].find((s) => d / s <= 8) || 600;
+        for (let t = 0; t < d; t += step) put(t, clock(t));
+      }
+    }
+    function hear(t) { audio.currentTime = Math.max(0, t - 3); audio.play().catch(() => {}); }
+    strip.addEventListener('click', (e) => {
+      if (e.target.closest('.pin') || !dur()) return;
+      const r = strip.getBoundingClientRect();
+      audio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * dur();
+    });
+    audio.addEventListener('timeupdate', () => { ph.style.left = pct(audio.currentTime); });
+    audio.addEventListener('loadedmetadata', () => { drawTicks(); markRender(); });
+    audio.addEventListener('durationchange', () => { drawTicks(); markRender(); });
+
+    const bar = make('div', 'row');
+    const mb = make('button', 'send', 'Mark this moment'); mb.type = 'button'; mb.id = 'markbtn';
+    bar.appendChild(mb);
+    bar.appendChild(make('span', 'status', 'While it plays, mark anything that strikes you (or press M). Each moment lands on the strip above; tap a pin to hear it again.'));
+    box.appendChild(bar);
+
+    const ed = make('div', 'markedit'); ed.hidden = true; ed.id = 'markedit';
+    const head = make('p', 'label'); ed.appendChild(head);
+    ed.appendChild(make('p', 'sub', 'What is it? (tick any)'));
+    const tagRow = chips(mo.tags || [], 'mtag'); ed.appendChild(tagRow);
+    let partRow = null;
+    if ((mo.parts || []).length) { ed.appendChild(make('p', 'sub', 'Which part? (tick any)')); partRow = chips(mo.parts, 'mpart'); ed.appendChild(partRow); }
+    const words = make('textarea'); words.id = 'marktext'; words.placeholder = 'In your words (optional)'; words.setAttribute('aria-label', 'This moment, in your words');
+    ed.appendChild(words);
+    const btns = make('div', 'row');
+    const save = make('button', 'send', 'Save moment'); save.type = 'button';
+    const cancel = make('button', null, 'Cancel'); cancel.type = 'button';
+    btns.appendChild(save); btns.appendChild(cancel); ed.appendChild(btns);
+    box.appendChild(ed);
+
+    const none = make('p', 'status', 'No moments yet.'); box.appendChild(none);
+    const list = make('ol', 'marklist'); list.setAttribute('aria-label', 'Your moments'); box.appendChild(list);
+    const st = make('span', 'status'); st.id = 'mst'; box.appendChild(st);
+    card.appendChild(box);
+
+    let editing = -1, draftT = 0;
+    const ticked = (row) => (row ? [...row.querySelectorAll('input')].filter((i) => i.checked).map((i) => i.value) : []);
+    function openEdit(i) {
+      editing = i;
+      const m = i >= 0 ? MARKS[i] : { t: draftT, tags: [], parts: [], text: '' };
+      const b = barAt(m.t);
+      head.textContent = 'Moment at ' + clock(m.t) + (b ? ', bar ' + b : '');
+      for (const c of tagRow.querySelectorAll('input')) c.checked = m.tags.includes(c.value);
+      if (partRow) for (const c of partRow.querySelectorAll('input')) c.checked = m.parts.includes(c.value);
+      words.value = m.text;
+      ed.hidden = false;
+      words.focus({ preventScroll: true });
+      ed.scrollIntoView({ block: 'nearest' });
+    }
+    markEdit = () => { draftT = Math.round((audio.currentTime || 0) * 10) / 10; openEdit(-1); };
+    function small(label, aria, fn) { const b = make('button', 'small', label); b.type = 'button'; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b; }
+    markRender = () => {
+      MARKS.sort((a, b) => a.t - b.t);
+      pins.textContent = '';
+      list.textContent = '';
+      MARKS.forEach((m, i) => {
+        const p = make('button', 'pin'); p.type = 'button'; p.style.left = pct(m.t); p.title = momentLine(m);
+        p.setAttribute('aria-label', 'Moment at ' + momentLine(m) + '. Play from 3 seconds before and edit it');
+        p.addEventListener('click', () => { hear(m.t); openEdit(i); });
+        pins.appendChild(p);
+        const li = make('li'); li.appendChild(make('span', null, momentLine(m)));
+        li.appendChild(small('Play', 'Play moment ' + clock(m.t) + ' from 3 seconds before', () => hear(m.t)));
+        li.appendChild(small('Edit', 'Edit moment ' + clock(m.t), () => openEdit(i)));
+        li.appendChild(small('Remove', 'Remove moment ' + clock(m.t), () => { MARKS.splice(i, 1); ed.hidden = true; momentsChanged(); }));
+        list.appendChild(li);
+      });
+      none.hidden = MARKS.length > 0;
+    };
+    mb.addEventListener('click', markEdit);
+    save.addEventListener('click', () => {
+      const old = editing >= 0 ? MARKS[editing] : null;
+      const m = { id: old ? old.id : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                  t: old ? old.t : draftT, tags: ticked(tagRow), parts: ticked(partRow), text: words.value.trim() };
+      if (old) MARKS[editing] = m; else MARKS.push(m);
+      ed.hidden = true;
+      momentsChanged();
+    });
+    cancel.addEventListener('click', () => { ed.hidden = true; });
+    drawTicks();
+    markRender();
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (!markEdit || (e.key !== 'm' && e.key !== 'M') || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    e.preventDefault();
+    markEdit();
+  });
+
+  function setStatus(n, text, cls) { const s = $('#st' + n); if (s) { s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); } }
+
+  async function saveText(n) {
+    clearTimeout(timers[n]);
+    const text = $('#t' + n).value;
+    pending[n] = false;
+    if (SHARED) {
+      const ok = local.set('t' + n, text) && local.set('at' + n, new Date().toISOString());
+      setStatus(n, ok ? 'Kept in this browser' : 'This browser does not keep it: send your answers before you close the page.', ok ? 'ok' : 'bad');
+      return true;
+    }
+    try {
+      const r = await fetch('text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ q: n, text: text }) });
+      if (!r.ok) throw new Error(r.status);
+      setStatus(n, 'Saved', 'ok');
+      return true;
+    } catch (e) {
+      pending[n] = true;
+      setStatus(n, 'Not saved yet: the page server does not answer. Keep this tab open; it tries again.', 'bad');
+      timers[n] = setTimeout(() => saveText(n), 5000);
+      return false;
+    }
+  }
+
+  // Their answers as plain text, numbered as the questions, to paste into any chat (ledger:M255). feedback_paste
+  // reads this back, so the question lines stay as they are.
+  async function answersText() {
+    const st = SHARED ? await sharedState() : lastState;
+    const L = [(manifest.title || 'Feedback') + (manifest.round ? ' (round ' + manifest.round + ')' : '') + ': my answers', ''];
+    for (const q of manifest.questions) {
+      const t = $('#t' + q.n);
+      const typed = (t ? t.value : '').trim();
+      const said = ((st.answers || {})[String(q.n)] || {}).said || [];
+      L.push(q.n + '. ' + q.text);
+      if (typed) L.push(typed);
+      for (const c of said) {
+        if (SHARED) L.push('(voice note ' + c.file + (c.secs ? ', ' + c.secs + ' s' : '') + ')');
+        else L.push('(voice note' + (c.secs ? ', ' + c.secs + ' s' : '') + ': ' + (c.state === 'done' ? (c.text || 'no words heard') : 'not written down yet') + ')');
+      }
+      if (!typed && !said.length) L.push('(no answer)');
+      L.push('');
+    }
+    if (manifest.moments && MARKS.length) {
+      L.push('Moments:');
+      for (const m of MARKS.slice().sort((a, b) => a.t - b.t)) L.push('   ' + momentLine(m));
+      L.push('');
+    }
+    if ((manifest.parts || []).length) {
+      L.push('Names for the parts');
+      for (const p of manifest.parts) { const v = ($('#pn' + p.n) || {}).value || ''; L.push('- ' + p.track + ': ' + (v.trim() || '(no name)')); }
+    }
+    return L.join('\n').trim() + '\n';
+  }
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* older browsers: the textarea way */ }
+    const t = make('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t);
+    t.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    t.remove();
+    return ok;
+  }
+
+  function showText(text) {
+    const box = $('#copybox');
+    box.textContent = '';
+    const t = make('textarea', 'copy'); t.readOnly = true; t.value = text; box.appendChild(t);
+    t.focus(); t.select();
+  }
+
+  async function copyAnswers() {
+    const text = await answersText();
+    if (await copyText(text)) { $('#sendst').textContent = 'Copied: your answers are ready to paste anywhere.'; $('#sendst').className = 'status ok'; }
+    else { showText(text); $('#sendst').textContent = 'Select the text below and copy it.'; $('#sendst').className = 'status'; }
+  }
+
+  // Send: the person says they are finished (done.json on the computer); typing after it is a late addition, shown
+  // here and to the agent, until they press Send again (ledger:M246)
+  function showSent() {
+    const b = $('#sendbtn'), s = $('#sendst');
+    if (!b || !s) return;
+    b.disabled = false;
+    const again = SHARED ? 'Send my answers again' : 'Send again';
+    if (sent.state === 'sent') {
+      b.textContent = again;
+      s.textContent = SHARED ? 'You sent your answers ' + when(sent.at) + '. If you add anything, send them again.'
+                             : 'Sent ' + when(sent.at) + '. Thank you. If you add anything, press Send again.';
+      s.className = 'status ok';
+    }
+    else if (sent.state === 'changed') { b.textContent = again; s.textContent = 'You changed something after sending. Press Send again when you are done.'; s.className = 'status'; }
+    else { b.textContent = SHARED ? 'Send my answers' : 'Send'; s.textContent = 'Not sent yet.'; s.className = 'status'; }
+  }
+
+  function changedAfterSend() {
+    if (sent.state === 'sent') { sent.state = 'changed'; if (SHARED) local.set('changed', '1'); showSent(); }
+  }
+
+  async function sendShared() {
+    const b = $('#sendbtn'), s = $('#sendst');
+    b.disabled = true;
+    const text = await answersText();
+    const clips = (await sharedState()).answers;
+    const all = Object.values(clips).flatMap((a) => a.said || []);
+    const files = all.map((c) => new File([c.blob], c.file, { type: (c.blob && c.blob.type) || 'audio/webm' }));
+    const title = manifest.title || 'My answers';
+    let how = '';
+    try {
+      if (navigator.share && (!files.length || (navigator.canShare && navigator.canShare({ files })))) {
+        await navigator.share(files.length ? { title, text, files } : { title, text });
+        how = 'shared';
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') { s.textContent = 'Not sent: the share menu was closed. Press the button again when you are ready.'; s.className = 'status'; b.disabled = false; return; }
+    }
+    const box = $('#downloads');
+    box.textContent = '';
+    if (!how) {
+      how = (await copyText(text)) ? 'copied' : 'shown';
+      if (how === 'shown') showText(text);
+      for (const c of all) {
+        const a = make('a', null, 'Download the voice note for question ' + c.q + (c.secs ? ' (' + c.secs + ' s)' : ''));
+        a.href = URL.createObjectURL(c.blob); a.download = c.file; box.appendChild(a);
+      }
+    }
+    local.set('sent', new Date().toISOString());
+    local.set('changed', '');
+    sent = { state: 'sent', at: local.get('sent'), changed_at: null };
+    showSent();
+    const notes = all.length ? ' Attach your ' + (all.length === 1 ? 'voice note' : all.length + ' voice notes') + ' too: download ' + (all.length === 1 ? 'it' : 'each one') + ' below.' : '';
+    s.textContent = how === 'shared' ? 'Sent through your share menu. Thank you. If you add anything, send again.'
+      : how === 'copied' ? 'Your answers are copied. Paste them into your chat with the person who sent you this page.' + notes
+      : 'Copy the text below and paste it into your chat with the person who sent you this page.' + notes;
+    s.className = 'status ok';
+  }
+
+  async function send() {
+    if (SHARED) return sendShared();
+    const b = $('#sendbtn');
+    b.disabled = true;
+    $('#sendst').textContent = 'Sending...';
+    $('#sendst').className = 'status';
+    for (const n of Object.keys(pending)) {
+      if (pending[n] && !(await saveText(Number(n)))) {
+        $('#sendst').textContent = 'Not sent: an answer could not be saved because the page server does not answer. Try again in a moment.';
+        $('#sendst').className = 'status bad';
+        b.disabled = false;
+        return;
+      }
+    }
+    if (momentsPending && !(await saveMoments())) {
+      $('#sendst').textContent = 'Not sent: your moments could not be saved because the page server does not answer. Try again in a moment.';
+      $('#sendst').className = 'status bad';
+      b.disabled = false;
+      return;
+    }
+    try {
+      const r = await fetch('done', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (!r.ok) throw new Error(r.status);
+      const j = await r.json();
+      sent = { state: 'sent', at: j.at, changed_at: null };
+      showSent();
+    } catch (e) {
+      $('#sendst').textContent = 'Not sent: the page server does not answer. Your answers are saved; try Send again in a moment.';
+      $('#sendst').className = 'status bad';
+      b.disabled = false;
+    }
+  }
+
+  function renderSend() {
+    const c = make('div', 'card send-card');
+    c.appendChild(make('p', 'label', SHARED ? 'When you have said everything, send your answers to the person who sent you this page.'
+                                            : 'When you have said everything, press Send.'));
+    const row = make('div', 'row');
+    const b = make('button', 'send', 'Send'); b.type = 'button'; b.id = 'sendbtn'; b.addEventListener('click', send);
+    row.appendChild(b);
+    const cp = make('button', null, 'Copy my answers'); cp.type = 'button'; cp.id = 'copybtn'; cp.addEventListener('click', copyAnswers);
+    row.appendChild(cp);
+    const st = make('span', 'status'); st.id = 'sendst'; row.appendChild(st);
+    c.appendChild(row);
+    const dl = make('div', 'downloads'); dl.id = 'downloads'; c.appendChild(dl);
+    const cb = make('div'); cb.id = 'copybox'; c.appendChild(cb);
+    $('#send').appendChild(c);
+  }
+
+  function renderClips(n, said) {
+    const box = $('#said' + n);
+    if (!box) return;
+    box.textContent = '';
+    for (const c of said || []) {
+      const d = make('div', 'clip');
+      d.appendChild(make('div', 'when', 'Said ' + when(c.at) + (c.secs ? ', ' + c.secs + ' s' : '')));
+      const a = make('audio'); a.controls = true; a.preload = 'none';
+      a.src = c.blob ? URL.createObjectURL(c.blob) : 'voice/' + encodeURIComponent(c.file); d.appendChild(a);
+      if (SHARED) d.appendChild(make('p', 'words wait', 'Kept in this browser; it goes with your answers when you send them.'));
+      else if (c.state === 'done') d.appendChild(make('p', 'words', c.text || '(no words heard)'));
+      else d.appendChild(make('p', 'words wait', 'Writing down your words... (' + (c.state || 'waiting') + ')'));
+      box.appendChild(d);
+    }
+  }
+
+  function stamp() {
+    const d = new Date(), p = (x) => String(x).padStart(2, '0');
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+
+  async function record(n, btn) {
+    if (btn.rec) { btn.rec.stop(); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) {
+      setStatus(n, 'The microphone is blocked in this browser. Allow it from the icon in the address bar, or type your answer instead.', 'bad');
+      return;
+    }
+    const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const chunks = [];
+    const t0 = Date.now();
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(btn.tick);
+      btn.rec = null; btn.classList.remove('on'); btn.textContent = 'Record';
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      if (SHARED) {
+        const ext = /ogg/.test(blob.type) ? 'ogg' : /mp4|m4a/.test(blob.type) ? 'm4a' : 'webm';
+        const file = 'q' + n + '_' + stamp() + '.' + ext;
+        const kept = await clipPut({ key: KEY + file, q: n, file, at: new Date().toISOString(), secs: Number(secs), blob });
+        setStatus(n, kept ? 'Voice note kept in this browser.' : 'Voice note kept while this tab is open: send your answers before you close it.', kept ? 'ok' : 'bad');
+        changedAfterSend();
+        refresh();
+        return;
+      }
+      setStatus(n, 'Saving your recording...');
+      for (let i = 0; i < 6; i++) {
+        try {
+          const r = await fetch('voice?q=' + n + '&secs=' + secs, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+          if (!r.ok) throw new Error(r.status);
+          setStatus(n, 'Recording saved. Your words appear under it when they are written down.', 'ok');
+          changedAfterSend();
+          refresh();
+          return;
+        } catch (e) { await new Promise((ok) => setTimeout(ok, 2000)); }
+      }
+      setStatus(n, 'The recording could not be saved: the page server does not answer.', 'bad');
+    };
+    rec.start(1000);
+    btn.rec = rec; btn.classList.add('on');
+    btn.tick = setInterval(() => { btn.textContent = 'Stop (' + Math.round((Date.now() - t0) / 1000) + ' s)'; }, 500);
+    btn.textContent = 'Stop';
+  }
+
+  function renderQuestions(qs) {
+    const box = $('#questions');
+    for (const q of qs) {
+      const c = make('div', 'card q');
+      const h = make('h2'); h.appendChild(make('span', 'n', q.n + '.')); h.appendChild(document.createTextNode(q.text)); c.appendChild(h);
+      const t = make('textarea'); t.id = 't' + q.n; t.setAttribute('aria-label', 'Answer ' + q.n); t.placeholder = voiceOn ? 'Type here, or press Record and say it' : 'Type here';
+      t.addEventListener('input', () => { pending[q.n] = true; changedAfterSend(); setStatus(q.n, 'Typing...'); clearTimeout(timers[q.n]); timers[q.n] = setTimeout(() => saveText(q.n), SHARED ? 300 : 600); });
+      t.addEventListener('blur', () => { if (pending[q.n]) saveText(q.n); });
+      c.appendChild(t);
+      const row = make('div', 'row');
+      if (voiceOn) { const b = make('button', 'rec', 'Record'); b.type = 'button'; b.addEventListener('click', () => record(q.n, b)); row.appendChild(b); }
+      const st = make('span', 'status'); st.id = 'st' + q.n; row.appendChild(st);
+      c.appendChild(row);
+      const said = make('div', 'said'); said.id = 'said' + q.n; c.appendChild(said);
+      box.appendChild(c);
+    }
+  }
+
+  // Name the parts (ledger:M253): each part alone and in the mix where it stands out most, and the person's name
+  // for it, so a note about "the bass" means the same part to both of them
+  async function saveName(p) {
+    const text = $('#pn' + p.n).value.trim();
+    const st = $('#pst' + p.n);
+    if (SHARED) {
+      const ok = local.set('p:' + p.track, text);
+      st.textContent = ok ? 'Kept in this browser' : 'This browser does not keep it: send your answers before you close the page.';
+      st.className = 'status' + (ok ? ' ok' : ' bad');
+      return;
+    }
+    try {
+      const r = await fetch('name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: p.track, text }) });
+      if (!r.ok) throw new Error(r.status);
+      st.textContent = 'Saved'; st.className = 'status ok';
+    } catch (e) { st.textContent = 'Not saved yet: the page server does not answer.'; st.className = 'status bad'; }
+  }
+
+  function renderParts(parts) {
+    if (!parts || !parts.length) return;
+    const box = $('#parts');
+    const head = make('div', 'card');
+    head.appendChild(make('p', 'label', 'Name the parts'));
+    head.appendChild(make('p', 'sub', 'Each part plays alone, then in the mix, where it stands out most. Write what you call it, so that when you say "the bass" we both mean the same one.'));
+    box.appendChild(head);
+    for (const p of parts) {
+      const c = make('div', 'card part');
+      c.appendChild(make('p', 'label', 'Part ' + p.n + ' (I call it "' + p.track + '")'));
+      for (const [k, word] of [['solo', 'Alone'], ['mix', 'In the mix']]) {
+        c.appendChild(make('p', 'sub', word));
+        const a = make('audio'); a.controls = true; a.preload = 'metadata'; a.src = p[k]; c.appendChild(a);
+      }
+      const t = make('input'); t.type = 'text'; t.id = 'pn' + p.n; t.placeholder = 'What do you call it?';
+      t.setAttribute('aria-label', 'Your name for part ' + p.n);
+      t.addEventListener('input', () => { changedAfterSend(); clearTimeout(timers['p' + p.n]); timers['p' + p.n] = setTimeout(() => saveName(p), 500); });
+      t.addEventListener('blur', () => saveName(p));
+      c.appendChild(t);
+      const st = make('span', 'status'); st.id = 'pst' + p.n; c.appendChild(st);
+      box.appendChild(c);
+    }
+  }
+
+  // the made-with-ismail line and how the piece's sound was made (ledger:M254)
+  function renderFooter(f) {
+    const box = $('#madewith');
+    if (!f || !f.lead || !box) return;
+    const i = f.lead.indexOf('ismail');
+    const p = make('p');
+    p.appendChild(document.createTextNode(i < 0 ? f.lead : f.lead.slice(0, i)));
+    if (i >= 0) {
+      const a = make('a', null, 'ismail'); a.href = f.link; a.target = '_blank'; a.rel = 'noopener'; p.appendChild(a);
+      p.appendChild(document.createTextNode(f.lead.slice(i + 6)));
+    }
+    p.appendChild(document.createTextNode('.' + (f.how ? ' ' + f.how : '')));
+    box.appendChild(p);
+    box.hidden = false;
+  }
+
+  let polling = null;
+  async function refresh(first) {
+    let st;
+    try { st = await getJSON('state'); showError(''); }
+    catch (e) { showError('The page server does not answer right now. What you already saved is safe on the computer.'); return; }
+    lastState = st;
+    if (first && st.sent) { sent = st.sent; showSent(); }
+    if (first && manifest.moments && !MARKS.length) { MARKS = cleanMarks(st.moments); if (markRender) markRender(); }
+    if (first) for (const p of manifest.parts || []) { const v = ((st.names || {})[p.track] || {}).text; if (v && $('#pn' + p.n)) $('#pn' + p.n).value = v; }
+    let waiting = 0;
+    for (const q of manifest.questions) {
+      const a = st.answers[String(q.n)] || {};
+      const t = $('#t' + q.n);
+      if (first && t && !pending[q.n]) { t.value = a.text || ''; if (a.typed_at) setStatus(q.n, (SHARED ? 'Kept ' : 'Saved ') + when(a.typed_at), 'ok'); }
+      renderClips(q.n, a.said);
+      if (!SHARED) waiting += (a.said || []).filter((c) => c.state !== 'done').length;
+    }
+    clearTimeout(polling);
+    if (waiting) polling = setTimeout(() => refresh(false), 4000);
+  }
+
+  window.addEventListener('beforeunload', () => {
+    if (manifest && manifest.moments && SHARED) local.set('moments', JSON.stringify(MARKS));
+    else if (momentsPending) navigator.sendBeacon('moments', new Blob([JSON.stringify({ moments: MARKS })], { type: 'application/json' }));
+    for (const n of Object.keys(pending)) {
+      if (!pending[n]) continue;
+      if (SHARED) { local.set('t' + n, $('#t' + n).value); continue; }
+      const body = new Blob([JSON.stringify({ q: Number(n), text: $('#t' + n).value })], { type: 'application/json' });
+      navigator.sendBeacon('text', body);
+    }
+  });
+
+  (async () => {
+    try { manifest = await getJSON('manifest'); }
+    catch (e) { showError('This page could not load its questions: the page server does not answer.'); return; }
+    voiceOn = !!manifest.voice;
+    document.title = manifest.title || 'Feedback';
+    $('#title').textContent = manifest.title || 'Feedback';
+    if (SHARED) $('#lead').textContent = 'What you type' + (voiceOn ? ' and record' : '') + ' here stays in this browser until you send it, and is still here if you close the page and open it again. When you have said everything, press Send my answers at the bottom: it opens your share menu, or copies your answers to paste into a chat.';
+    else if (!voiceOn) $('#lead').textContent = 'Everything you type here is saved on this computer as you go. You can close this tab any time: when you open it again, it is all still here. When you have said everything, press Send at the bottom.';
+    renderItems(manifest.items || []);
+    renderParts(manifest.parts || []);
+    renderQuestions(manifest.questions || []);
+    renderSend();
+    renderFooter(manifest.footer);
+    showSent();
+    await refresh(true);
+  })();
+})();
+</script>
+</body>
+</html>

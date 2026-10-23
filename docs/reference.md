@@ -90,6 +90,48 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 
 Any other MCP client works the same way: run `ismail mcp` (or `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
 
+### Fewer tools, for a harness with a tool cap
+
+The server offers every op as a tool, over 300 of them. Many harnesses cap tools near 128, or choose worse with that
+many. Start it with only some roles or shelves (the same ones `ops_find` shows) and it serves just their ops, plus
+`guide` and `ops_find`, so the agent can still find and read about what it lacks. `ops_find` then marks the ops this
+server does not serve.
+
+```bash
+ismail mcp --list-roles                      # each role's and shelf's tool count; starts nothing
+ismail mcp --roles mc                        # one role
+ismail mcp --roles mc --shelves listen       # a role and a shelf: the union
+ismail mcp --shelves live,stream,phone,listen,together,asks --max-tools 128
+```
+
+`--max-tools N` refuses to start when the set has more than N tools, and the error lists every role's and shelf's
+size. An unknown role or shelf is refused with the list of valid ones. At start the server writes how many tools it
+serves to stderr. A harness that cannot pass arguments can set `ISMAIL_MCP_ROLES`, `ISMAIL_MCP_SHELVES` and
+`ISMAIL_MCP_MAX_TOOLS` (comma-separated, like the options); an option wins over its variable.
+
+Run `--list-roles` for the current counts: the roles grow with the ops. Some roles are over 128 on their own (`dj`
+was 143 when this was written), so name shelves for those.
+
+A harness that reads `mcp_servers` with a stdio command and args (Codex's `~/.codex/config.toml`, for example):
+
+```toml
+[mcp_servers.ismail]
+command = "ismail"
+args = ["mcp", "--shelves", "live,stream,phone,listen,together,asks", "--max-tools", "128"]
+
+# or, with no arguments, through the environment
+# [mcp_servers.ismail]
+# command = "ismail"
+# args = ["mcp"]
+# env = { ISMAIL_MCP_ROLES = "mc", ISMAIL_MCP_MAX_TOOLS = "128" }
+```
+
+The same in JSON, for a harness that reads `mcpServers`:
+
+```json
+{"mcpServers": {"ismail": {"command": "ismail", "args": ["mcp", "--roles", "mc"]}}}
+```
+
 ## Quick start (CLI)
 
 Every tool is also a CLI op. Arguments are `key=value` pairs (values parsed as JSON when they can be) or one JSON object.
@@ -99,13 +141,13 @@ python -m ismail guide                                # read first: workflow and
 python -m ismail ops                                  # list operations
 python -m ismail help notes_write                     # one op's arguments and docs
 python -m ismail -p songs/demo project_new bpm=124 length_bars=8
-python -m ismail -p songs/demo track_add name=bass instrument='"preset:acid_bass"'
-python -m ismail -p songs/demo notes_write '{"track": "bass", "bar": 1, "notes": "0 E2 0.5 110; 0.5 E3 0.25", "repeat": 8}'
+python -m ismail -p songs/demo track_add name=bass instrument='"preset:acid_bass"' volume_db=6
+python -m ismail -p songs/demo notes_write '{"track": "bass", "bar": 1, "notes": "0 E2 1 110; 1 E3 1; 2 G2 1; 3 B2 1", "repeat": 8}'
 python -m ismail -p songs/demo render stems=true out=v1 mp3=also
 python -m ismail -p songs/demo analyze_melody source=track:bass bars=[1,2]
 ```
 
-`render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render. `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
+The last line reads the bass back from its stem as notes: the four you wrote, once per bar. `render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render (latest.wav is then a hard link to it: one copy on disk). `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
 
 Keep your projects under `songs/` (git-ignored) or anywhere else; a project is just a folder.
 
@@ -117,7 +159,17 @@ Find any tool by what you need or by role with `ops_find`.
   read back as text. Named effect stacks (`fx_stack_*`, `stack:<name>`) and an `autotune` effect. A second part
   measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
   (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
-  (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from.
+  (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from. A finished song's stems
+  and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to the
+  reclaim folder, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone. Everything moved
+  out to free space goes to one reclaim folder at the root of the drive (`ismail.reclaim`: `D:\_reclaim` on
+  Windows, `songs/_reclaim` elsewhere, `$ISMAIL_RECLAIM` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
+  file's path from the drive root, with a `manifest.json` and a `README.txt` line per folder, and `machine_disk`
+  lists its folders with their sizes. The person deletes a folder there; nothing in ismail deletes.
+- **MIDI files in and out.** `midi_write` puts the song (or some tracks, or a window of bars) into a type 1 .mid
+  that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
+  tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
+  parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
@@ -136,6 +188,11 @@ Find any tool by what you need or by role with `ops_find`.
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
   rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
+  questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
+  browser (an app's browser pane has no microphone), with every typed answer and voice clip saved in the song and
+  transcribed, and all of it back when they reopen the page. The page ends in a Send button: `feedback_wait` waits
+  for it and returns the answers, and `feedback_read` says SENT or STILL WRITING first.
 - **The first session** for someone new: `guide(new_person=True)`, `sketch` versions 1, 2 and 3 on the showcase
   voices (`sketch(base=)`, `sketch_keep` for the next round), and feeling words ("happier", "calmer", "darker") that
   change a sketch by named moves.
@@ -177,7 +234,7 @@ Measured or sampled voices come from these sets. The audio itself stays out of t
 | [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE) (Versilian Studios) | the `violin`, `contrabass`, `clarinet`, `bassoon` and `horn` mimic profiles | CC0 1.0 |
 | "real cello notes" by flcellogrl ([Freesound pack 12408](https://freesound.org/people/flcellogrl/packs/12408/)) | the `cello` mimic profile | CC BY 4.0 |
 | [jRhodes3d](https://github.com/sfzinstruments/jlearman.jRhodes3d) by Jeff Learman | the `rhodes` voice | samples CC BY-NC 4.0; the author grants CC0 for music made with them |
-| [Big Rusty Drums](https://github.com/sfzinstruments/karoryfer.big-rusty-drums) by Karoryfer Samples | the `rusty` voice | CC0 1.0 |
+| [Big Rusty Drums](https://github.com/sfzinstruments/karoryfer.big-rusty-drums) by Karoryfer Samples | the `rusty` and `toms` voices | CC0 1.0 |
 | [Emilyguitar](https://github.com/sfzinstruments/karoryfer.emilyguitar) by D. Smolken, Karoryfer Samples | the `emily` voice | CC0 1.0 |
 
 ## Concepts
@@ -185,8 +242,8 @@ Measured or sampled voices come from these sets. The audio itself stays out of t
 - **Project**: a folder with `project.json` (tempo, grid offset, tracks, buses, master, sound bank, reference) plus `sounds/`, `renders/`, `cache/`, `history/` (undo snapshots) and `comparisons/`.
 - **Time**: bars are 1-indexed; note times are beats relative to the bar you write at. `offset_sec` is the time of bar 1, so a project can sit exactly on a reference recording's grid.
 - **Notes**: `'<beat> <pitch> <dur> [vel] [@offset]'`, one per line or `;`-separated; `@-40ms` nudges a sound off its beat so a late attack lands on it (`track_set(offset_ms=)` for a whole part). Drum and step patterns: `pattern_write` with strings like `X...x...X...x...` (X 127, x 100, o 70, - 45, `_` ties).
-- **Instruments**: two synth engines. **sprite** (`"type": "synth"` or `"sprite"`: saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide) is right for synth sounds. **mimic** (`"type": "mimic"`) plays instruments measured from recordings (see below). Plus `sampler`, drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
-- **Effects**: gain, eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, hall, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, autotune, and a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah. Tracks, buses and the master fader can be automated. A chain can be saved and reused by name (`fx_stack_*`, `stack:<name>`).
+- **Instruments**: two synth engines. **sprite** (`"type": "synth"` or `"sprite"`: saw, square, pulse, triangle, sine, additive, wavetable and noise oscillators, unison, FM, drive, SVF and ladder filters, envelopes, LFOs, mono glide) is right for synth sounds. **mimic** (`"type": "mimic"`) plays instruments measured from recordings (see below). Plus `sampler` (one sound, or several on one pitch: `sounds` with `select` round_robin, random or velocity layers, picked on where the note sits in the song so a window, a live deck and the whole song agree), drum synths (`kick`, `snare`, `hat`, `clap`, `tom`, `noise_hit`), `kit` (pitch to instrument map) and `code` (a Python voice function for anything else). `presets_list` has starting points.
+- **Effects**: gain, eq, filter, distortion, bitcrush, compressor (with sidechain), duck, gate, delay, reverb, hall, chorus, flanger, phaser, tremolo/autopan, width, limiter, vocoder, formant, autotune, a guitar rig: fuzz, univibe, amp (tone stack, power stage with sag), cab, rotary speaker, tape, wah, and spatial (a sound moved in 3D for stereo speakers or headphones, with distance, Doppler, occlusion and its own room; its path can be coded as a trajectory). Tracks, buses and the master fader can be automated. A chain can be saved and reused by name (`fx_stack_*`, `stack:<name>`).
 - **Voices**: engineered instruments kept as Python modules, so a project stores a name instead of code (see below).
 - **Sound bank**: sounds made from any instrument and effect chain (`sound_make`), speech (`sound_speak`), imported files, and averaged events cut from a recording (`sound_extract`). Bank sounds work as sampler sources, wavetables, vocoder modulators and audio clips.
 - **Undo and batch**: every edit snapshots the project (`undo`); `batch` applies a list of ops atomically.
@@ -209,9 +266,11 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
 | fx | `crackle` | designed vinyl surface noise: clicks and hiss |
+| fx | `transitions` | designed transitions picked by the note: C1 impact, D1 uplifter, E1 downlifter, F1 reverse crash; the sweeps last as long as the note |
 | guitar | `electric` | performer: electric guitar or bass as waveguide strings (pick, pickup comb, pickup resonance) playing a whole part, with legato, slides, bends, whammy, vibrato and mutes as lanes. Presets `strat70_lead`, `strat70_rhythm`, `strat70_rotary`, `strat70_clean` (the clean guitar a sketch reaches for) and `pbass70` (a bass fitted to a record's bass stem); it is the DI signal, so `voice_help` lists the rig each preset was fitted with |
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 | drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
+| drums | `toms` | performer: the Big Rusty toms (Karoryfer, CC0) retuned to the note, so the note is the drum's pitch (F#1-A3 heard as real); lanes `pos` (0 center .. 1 rim) and `stroke` (stick, mallet, brush, rimshot, rim click, shell, dead) per hit; velocity picks the recorded layer. Not told apart from the real drum in a blind exam of 5 pairs (one listener, 2026-10-14). About 2 s of rendering per hit. Finds its samples in `$TOM_SAMPLES`, the project's `ref/`, or `samples_fetch('big_rusty')` |
 | guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
 
 Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
@@ -262,10 +321,14 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | What is in a drum kit | `analyze_kit` (splits a drum stem into its pieces, with each one's pattern and audio) |
 | Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax) |
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
+| Intonation, quarter tones (maqam steps), slides, vibrato | `analyze_melody(cents=True)` (each note's pitch as a float MIDI number, Hz and cents), `analyze_contour` (f0 per frame, in windows of up to 1000 rows) |
+| Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
 | Vowels of a voice | `analyze_formants` |
-| A picture, if you really need one | `spectrogram` (PNG) |
+| Is the voice heard over the mix | `analyze_voice_heard` (per band, the voice stem over the other stems while it speaks, and the band and part that mask it) |
+| A picture, if you really need one | `spectrogram` (PNG), `sound_zoom` (one window time-sharp and frequency-sharp) |
+| Where yours differs from the real takes | `sound_zoom_diff` (hot spots beyond the takes' own spread), `region_measure` (power in a box) |
 
 Sources are `render`, `track:<name>` (after `render(stems=True)`), `ref`, `ref:<stem>`, `sound:<name>` or a file path.
 
@@ -377,6 +440,7 @@ ismail/
   dsp.py         oscillators, filters, dynamics, delay lines, reverb (numba)
   instruments.py synth, sampler, drums, kit, code
   fx.py          effects; rig.py the guitar rig (fuzz, univibe, amp, cab, rotary, tape, wah)
+  spatial.py     the spatial effect: 3D position, trajectories, head model, crosstalk cancellation, distance reverb
   render.py      project to audio, dependency ordering, per-track cache, wav/mp3 writers
   analysis.py    audio to text (grid, bars, chords, melody, drums, timbre, formants, compare)
   features.py    16th-step feature grid shared by structure and comparisons
@@ -391,17 +455,20 @@ ismail/
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
                  (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
-                 fx (sfx, crackle), guitar (electric, emily), drums (kit70, rusty); showcase.json lists the voices
+                 fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
+  audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup
+  reclaim.py     the one reclaim folder at the drive root: moves keep their path, a manifest per folder (M229)
   tags.py        ID3 tags on every mp3; lexicon.py a person's own words mapped to ismail's terms
   mcp_server.py, guide.py
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
   phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
   exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer
+  feedback/      feedback pages answered by typing or voice, kept and transcribed; the feedback_* ops (api_feedback.py)
   capture.py     faults in a recording found before it is measured (soft-limited peaks, band-limited capture)
   sketch.py      first sketches from a brief on the showcase voices, versions 1, 2, 3, feeling words
   machine.py     the shared machine's governor: one board for GPU, CPU and memory, heavy jobs run in its slots

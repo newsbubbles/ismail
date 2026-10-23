@@ -10,6 +10,10 @@
 | Is the drum pattern right? | `analyze_drums(source='track:drums')` | step strings per lane; X within 4 dB of the lane's loud hits |
 | What pieces does a kit have? | `analyze_kit(source='ref:drums')` | one component per piece: energy share, pitch region, hits per 16th; `(fragment)` = lower k |
 | How much swing? | `analyze_swing(source=)` | 16ths: the 'a' against the 'and', in beats and ms; straight = 0 |
+| How far off pitch is each note? Quarter tones (maqam steps)? | `analyze_melody(cents=True)` | per note: midi as a float, Hz, cents from the named note; a quarter tone reads near +-50c and can sit on either neighbour, so compare the float midi |
+| Is every part in tune with the song (pitched drums too)? | `analyze_tuning()` after `render(stems=True)` | per part: notes, median cents off the grid, spread, count beyond 15 c, the attack's cents over the steady pitch, the worst notes (bar, beat, note, cents) and one verdict: in tune, the whole part off (retune by N c), a few pitches off (retune that voice or split it onto its own track), or drifting note to note, plus "attacks start N c sharp" when the voice's pitch glide is what is heard (fast runs: their notes are read from 0.3 of their length). Run it after the first render of a song with pitched percussion or a voice in a new register, and before any exam |
+| Can the voice (a narrator, a vocal) be heard over the rest? | `analyze_voice_heard(voice=<track>, bars=)` after `render(stems=True)` | per band (body, words, consonants, air): the voice over the other stems in dB while it speaks, the loudest other part there, and a verdict naming the band that masks it. Run it before asking the person whether they can make out the words |
+| How does the pitch move inside a note (slide, vibrato, ornament)? | `analyze_contour(bars=, hop_ms=)` | one row per frame: Hz, float midi, note+cents, voicing p ('-' unvoiced); max_rows per window, the last line names the next start |
 | Does the dynamic shape work? | `analyze_sections(sections={...})` | rms, peak, loudest and quietest 400 ms per section; WARNING when a build is as loud as its climax |
 | One part or several in this stem? | `stem_parts(source=, bars=)` | per band: share of its movement at the note rate; WARNING on a loud band that moves on its own (another player, or bleed) |
 | Does it pump / gate / groove? | `analyze_envelope(bars, band=)` | digits per 16th; a kick-ducked part shows dips on the beats |
@@ -29,6 +33,12 @@ missed.
 
 ## When to zoom
 
+With a reference, `ear_pass` is the first look before every draft: one call runs `cmp_run`, ranks the worst bars,
+names the band that differs most in each (with the `region_measure` call that sizes it), zooms each bar step by step
+and writes a crop of yours and of the reference at that bar to read side by side. A note that names a quality
+("muddy", "too loud", "fake") comes back from `feedback_read` with its measure step already written: the window, if
+they gave a time or bars, and the tool for that kind of word.
+
 The zoom is a measurement, not only a picture for exams: the sound becomes a large image of time against
 frequency, and you frame any part of it at the resolution the question needs. Reach for it early when:
 
@@ -44,15 +54,21 @@ frequency, and you frame any part of it at the resolution the question needs. Re
 
 How: draw the reference and yours on the same window and read them one above the other. Zoom two ways: a few ms
 around an edge (a time-sharp view shows a start early or late) and a whole word or note (a frequency-sharp view shows
-texture up high). For a blind check of your own, `exam_eye_crops` then `exam_eye_score`: if you can pick the real
+texture up high). `sound_zoom` draws one window both ways in one picture (256-point window above, 2048-point below,
+the same pixel box in each). For a blind check of your own, `exam_eye_crops` then `exam_eye_score`: if you can pick the real
 one from the picture, the person will most likely hear the difference too.
 
-To see where two takes differ, diff the zooms against the reference's own spread. Use at least 3 takes of the
-reference line, level-match every clip first, and light a cell only where the test lies outside the reference's
-take-to-take spread in that cell. Run a control too, one of the reference's own takes in the test's place: what
-lights there is the method's noise, not a difference. Then group the lit cells into spots and fix the largest, and
-after the fix check the spot again: it should close. This lives in a song's work folder for now
-(`songs/vox/work/spectrogram_diff.py`: `spectrogram_diff`, `spot_clusters`, `closing_check`), not as an op yet.
+To see where two takes differ, diff the zooms against the reference's own spread: `sound_zoom_diff(test, refs)`.
+It needs at least 3 takes of the reference line for their spread and refuses with fewer, since there is no
+absolute threshold to fall back on. It level-matches every clip first (-25 LUFS, peak under 0.89) and lights a cell
+only where the test lies outside the reference's take-to-take spread in that cell, measured on power. With 4 takes or
+more it runs a control too, each of the reference's own takes in the test's place: what lights there is the method's
+noise, not a difference, so a spot counts only where the control lights its cell less often. With 3 it lists the
+spots uncontrolled and counts none; a 4th take adds the control. It reads the hot spots first (scale, band, quarter
+of the word, brighter or darker, the control rate and whether the spot is beyond every control spot there), then a
+picture of yours above the reference take with the spots outlined. Fix the largest, and after the fix check the spot again: it should close. Its de-bias takes a level
+across a whole band as the band's offset, so a band that is darker for the whole word does not show as a spot: run
+`debias=False`, or `region_measure` on the band (power in a box of time and frequency, in dB) for yours and a take.
 
 What they said, and what the zoom found (the Voice agent's rounds):
 
@@ -73,6 +89,11 @@ time**, **blur along pitch**.
 Tracks are analysable as `track:<name>` only after `render(stems=True)`. A track stem is the track after its own effects and fader, scaled by the master chain's gain, so the stems sum to the mix. That means a sidechain duck shows up in `track:<name>`; if it barely dips, the duck depth is small, not the stem pre-fx.
 
 Readings that mislead:
+- A stem is a hint, the full mix is the target. Separation splits one sound across stems: a bass shaped on its
+  demucs stem (rolloff 367 Hz) came out too narrow, because the full mix showed its harmonics running to about
+  1.5 kHz in `other`. Shape a part on a stem only when the same reading on the full mix agrees, and finish with full
+  mix against full mix (band levels, `analyze_envelope` per band, `compare`). Spectrogram colours are relative: check
+  a band's level with numbers before calling it empty.
 - Long-window numbers are blind to fakeness. 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB while the user heard "30% there": what makes a sound fake lives inside single notes (attack, how each partial decays, pitch movement, noise). Report those numbers, never as proof that a sound is convincing.
 - `analyze_drums` on a full mix (`render`, `ref`) is band activity: leads and pads show up as snare and hat hits. Read your drums as `track:<drum track>`.
 - Lengths added up from typical (median) measurements come out short. Durations lean long (a few notes or words
@@ -98,6 +119,7 @@ Harmony:   analyze_pitches bar <n> = <notes> (the chord you meant? yes/no)
 Space:     width (analyze_timbre stereo line) <value>; reverb/delay sends present on <tracks>
 Form:      analyze_structure rows match the form map: yes/no (which section differs)
 Dynamics:  analyze_sections: range <dB> quietest to loudest; the section before the climax <dB> under it (3+)
+Reference: compare / sound_compare on the part you changed, ref vs render (when the song has one): <the numbers>
 Worst:     <the single worst line above> -> next fix
 ```
 

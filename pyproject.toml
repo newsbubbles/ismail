@@ -26,7 +26,7 @@ dependencies = [
     "librosa>=0.10",
     "pyloudnorm>=0.1",
     "matplotlib>=3.8",
-    "fastmcp>=2.0",
+    "fastmcp>=3.1,<5",
     "psutil>=5.9",
     "threadpoolctl>=3.1",
     "mutagen>=1.45",
@@ -39,6 +39,7 @@ video = ["opencv-python>=4.8", "pycollada>=0.8", "pillow>=10.0"]
 live = ["sounddevice>=0.4"]
 voice = ["pyworld>=0.3.4"]
 listen = ["pyaudiowpatch>=0.2; sys_platform == 'win32'"]
+stream = ["websockets>=12", "grpcio>=1.60", "protobuf>=4.21"]
 dev = ["pytest>=8.0"]
 
 [project.urls]
@@ -57,7 +58,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ismail.voices.bass", "ismail.voices.fx",
             "ismail.voices.strings", "ismail.voices.winds", "ismail.voices.brass", "ismail.voices.guitar", "ismail.voices.drums", "ismail.video", "ismail.video.blender",
-            "ismail.stage", "ismail.stage.bridge", "ismail.phone", "ismail.exampage"]
+            "ismail.stage", "ismail.stage.bridge", "ismail.phone", "ismail.exampage", "ismail.feedback",
+            "ismail.stream", "ismail.stream.adapters"]
 
 [tool.setuptools.package-data]
 "ismail.voices" = ["*.json"]
@@ -67,6 +69,8 @@ packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ism
 "ismail.voices.brass" = ["*.json"]
 "ismail.video" = ["templates/*", "templates/*/*"]
 "ismail.exampage" = ["*.html"]
+"ismail.feedback" = ["*.html"]
+"ismail.stream" = ["page/*.html"]
 "ismail.phone" = ["page/*.js", "page/*.html", "page/*.svg", "page/*.webmanifest", "page/cues/*.mp3", "page/*.png"]
 "ismail.stage" = ["page/*.js", "page/*.html", "page/*.mjs", "page/sounds/*.wav", "page/vendor/three/LICENSE",
                   "page/vendor/three/build/*", "page/vendor/three/examples/jsm/**/*"]

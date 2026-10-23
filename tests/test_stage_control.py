@@ -335,3 +335,12 @@ def test_music_time_and_takes_on_the_music_reach_the_page(stage):
             OPS['stage_cmd'](scene='room', type='music_time')
     finally:
         page.stop = True
+
+
+def test_grab_takes_hand_sized_things_counts_through_flickers_and_lets_go_after_an_open_take():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 'grab.js').read_text(encoding='utf-8')
+    assert 'path.find((y) => takeable(y) && carriable(y))' in js        # a pool ball, not its table
+    assert '<= HAND_M' in js and "grab === true" in js
+    assert 'Math.max(curlOf(side) || 0, GRIP_MIN)' in js                 # an open-handed take can still open past half
+    assert 'now - h.count.lost > LOSE_S * 1000' in js and 'h.count.t0 += now - h.count.lost' in js

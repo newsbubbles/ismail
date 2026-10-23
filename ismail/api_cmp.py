@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 
+from . import audiofile
 from .api import op, OpError, _load
 
 STEMS = ('drums', 'bass', 'other', 'vocals')
@@ -32,7 +33,7 @@ def ref_stems(P):
     sd = ref.get('stems_dir')
     if sd:
         for s in STEMS:
-            p = os.path.join(sd, s + '.wav')
+            p = audiofile.find(os.path.join(sd, s + '.wav'))
             if os.path.exists(p):
                 out[s] = p
     return out
@@ -75,13 +76,13 @@ def render_stems(P, mode):
             continue
         if tr.get('output', 'master') != 'master':
             continue  # routed into a bus: the bus stem carries it (processed), don't count it twice
-        p = os.path.join(sd, t + '.wav')
+        p = audiofile.find(os.path.join(sd, t + '.wav'))
         if not os.path.exists(p):
             raise OpError(f"no rendered stem for {t!r}; render(stems=True) (full song) first")
         add(s, p)
     # buses: assign to the stem of the tracks feeding them (outputs count fully, sends by level)
     for bname in P.d.get('buses', {}):
-        p = os.path.join(sd, f"bus_{bname}.wav")
+        p = audiofile.find(os.path.join(sd, f"bus_{bname}.wav"))
         if not os.path.exists(p):
             continue
         weight = {}
@@ -349,7 +350,84 @@ def cmp_run(project: str, label: str = '', stems: str = 'tracks', b: str = 'ref'
     except OSError as e:
         shutil.rmtree(d, ignore_errors=True)  # never leave a half-written run behind as the 'latest'
         raise OpError(f"comparison not stored ({e}); if the disk is full, free space and cmp_run again")
+    from . import replies
+    if replies.is_ref(b):
+        replies.note_compared(P.root, 'cmp_run', cid)
     return f"comparison id {cid}\n" + C.view_summary(rep)
+
+
+EAR_TOP_MAX = 6
+EAR_ZOOM_ROWS = 18
+
+
+@op()
+def ear_pass(project: str, top: int = 3, stem: str = 'mix', stems: str = None, crops: bool = True) -> str:
+    """Look before a draft goes out, in one call (ledger:M252): a full comparison of your latest render with the
+    reference (cmp_run), its worst bars ranked as cmp_worst ranks them, and for each of the top ones the band that
+    differs most (A-B dB, with the region_measure call that sizes it), the step-level zoom (cmp_zoom) and, with
+    crops=True, a sound_zoom crop of yours and one of the reference at that bar, to read side by side. stems: as
+    cmp_run (default 'tracks' when the project has a stem map and a full render(stems=True), else 'none': the mix
+    only). stem: whose bars to rank (mix, drums, bass, other, vocals). top: how many bars (at most 6). This is the
+    comparison the render reply asks for. Reach for it before each draft goes to the person, and when a note names
+    a quality (muddy, too loud, fake) you cannot place by ear."""
+    from . import cmp as C
+    from . import features as FE
+    from . import replies
+    from .analysis import BANDS
+    from .api_zoom import sound_zoom
+    P = _load(project)
+    if not (P.d.get('reference') or {}).get('file'):
+        raise OpError("ear_pass compares your render with the reference, and this project has none: "
+                      "project_set(reference=<file>) sets one; without it, sound_zoom the window the person named")
+    try:
+        top = max(1, min(int(top), EAR_TOP_MAX))
+    except (TypeError, ValueError):
+        raise OpError(f"top={top!r}: how many of the worst bars to look at, 1 to {EAR_TOP_MAX}")
+    mode, note = stems or ('tracks' if P.d.get('stem_map') else 'none'), ''
+    try:
+        summary = cmp_run(project, label='ear pass', stems=mode)
+    except OpError as e:
+        if stems or mode == 'none' or stem != 'mix':
+            raise
+        mode, note = 'none', f" (mix only: {e})"
+        summary = cmp_run(project, label='ear pass', stems=mode)
+    rep, d, cid = _rep(P, None, stem)
+    st = rep['stems'][stem]
+    rows = [r for r in st['rows'] if r['active_a'] or r['active_b']]
+    if not rows:
+        raise OpError(f"ear_pass: no bar of {stem} sounds in either side of comparison {cid}; pick another stem")
+    worst = sorted(rows, key=lambda r: -C._score_row(r, st['pitched'], st['drums']))[:top]
+    L = [f"ear pass: comparison {cid}, stems '{mode}'{note}", *summary.split('\n')[1:], '',
+         f"the {len(worst)} worst bars of {stem}, worst first: {', '.join(str(r['bar']) for r in worst)}",
+         C.view_bars_list(rep, stem, sorted(r['bar'] for r in worst))]
+    yours = 'render' if stem == 'mix' else rep['a'][stem]
+    theirs = 'ref' if stem == 'mix' else f"ref:{stem}"
+    pngs = []
+    for r in worst:
+        b = r['bar']
+        i = int(np.argmax(np.abs(r['dbands'])))
+        name, lo, hi = BANDS[i] if len(BANDS) == len(r['dbands']) else (FE.BAND_NAMES[i], None, None)
+        box = f", f_lo={lo}, f_hi={hi}" if lo is not None else ''
+        L += ['', f"bar {b}: level A-B {r['dlevel']:+.1f} dB; most different band: {name} {r['dbands'][i]:+.0f} dB "
+                  f"(region_measure(source='render', bars=[{b}, {b}]{box}, level_lufs=-25) and the same on 'ref' "
+                  f"size it)"]
+        z = C.view_zoom(rep, d, os.path.join(P.root, 'cache'), b, stem, ('level', 'hits', 'notes'), 1).split('\n')
+        L += z[:EAR_ZOOM_ROWS]
+        if len(z) > EAR_ZOOM_ROWS:
+            L.append(f"   ... {len(z) - EAR_ZOOM_ROWS} more rows: cmp_zoom(bar={b}, stem='{stem}')")
+        if crops:
+            for side, src in (('yours', yours), ('ref', theirs)):
+                outp = os.path.join(d, 'ear', f"bar{b}_{side}.png")
+                try:
+                    sound_zoom(project, source=src, bars=[b, b], out=outp)
+                    pngs.append(outp)
+                except OpError as e:
+                    L.append(f"   no crop of {side}: {e}")
+    replies.note_compared(P.root, 'ear_pass', f"{cid} bars {', '.join(str(r['bar']) for r in worst)}")
+    if pngs:
+        L += ['', "crops (yours above the reference, bar by bar: read each pair side by side; sound_zoom_diff and "
+                  "region_measure on a box that differs):"] + [f"   {p}" for p in pngs]
+    return '\n'.join(L)
 
 
 @op()

@@ -4,7 +4,7 @@ Mastering is its own pass, after the mix is right and before anything goes to th
 
 ## 0. Fix the mix first
 
-Mastering cannot fix a masked kick, a harsh lead or a clipping track. Before touching the master: every track peak under 0 dBFS, limiter gain reduction under about 6 dB with the mix as it stands, and the Listening Report clean. If the limiter is already working hard, turn tracks down; do not start mastering on top of it.
+Mastering cannot fix a masked kick, a harsh lead or a clipping track. With a reference, the balance lines of `render(stems=True)` (each stem's share of the mix per 8-bar stretch against the reference's) come first: no stem 3 dB off in a loud stretch, no layer missing. Before touching the master: every track peak under 0 dBFS, limiter gain reduction under about 6 dB with the mix as it stands, and the Listening Report clean. If the limiter is already working hard, turn tracks down; do not start mastering on top of it.
 
 ## 1. Pick the target from a reference
 

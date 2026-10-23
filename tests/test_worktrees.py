@@ -7,6 +7,8 @@ import pytest
 
 from ismail import handoffs, worktrees as wt
 
+REAL_MERGED_PR = wt._merged_pr
+
 
 def git(cwd, *args):
     r = subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf8')
@@ -38,6 +40,7 @@ def repo(tmp_path, monkeypatch):
         monkeypatch.setenv(k, v)
     monkeypatch.delenv('ISMAIL_WORKTREES_NOW', raising=False)
     monkeypatch.setattr(wt, '_open_prs', lambda repo: ({}, 'not in tests'))
+    monkeypatch.setattr(wt, '_merged_pr', lambda branch, head, repo: (None, 'gh is not asked in tests'))
     origin = str(tmp_path / 'origin.git')
     git(str(tmp_path), 'init', '-q', '--bare', '-b', 'main', origin)
     up = str(tmp_path / 'upstream')
@@ -64,6 +67,33 @@ def merge_pr(up, branch):
     git(up, 'merge', '-q', '--ff-only', 'origin/main')
     git(up, 'merge', '-q', '--no-ff', '--no-edit', f'origin/{branch}')
     git(up, 'push', '-q', 'origin', 'HEAD:main')
+
+
+def squash_pr(up, branch):
+    """origin/main takes a pushed branch as one new commit, as GitHub squash-merges a pull request: none of the
+    branch's own commits land on main."""
+    git(up, 'fetch', '-q', 'origin')
+    git(up, 'merge', '-q', '--ff-only', 'origin/main')
+    git(up, 'merge', '-q', '--squash', f'origin/{branch}')
+    git(up, 'commit', '-q', '-m', f'{branch} (#7)')
+    git(up, 'push', '-q', 'origin', 'HEAD:main')
+
+
+def fake_gh(monkeypatch, answer):
+    """gh answering `pr list --state merged` with answer (a list of pull requests, or an exception to raise); git
+    still runs. -> the gh commands asked."""
+    calls, real_run = [], subprocess.run
+
+    def run(args, **kw):
+        if args[0] != 'gh':
+            return real_run(args, **kw)
+        calls.append(args)
+        if isinstance(answer, Exception):
+            raise answer
+        return subprocess.CompletedProcess(args, 0, json.dumps(answer), '')
+    monkeypatch.setattr(wt, '_merged_pr', REAL_MERGED_PR)
+    monkeypatch.setattr(wt.subprocess, 'run', run)
+    return calls
 
 
 def copy_of(s, path):
@@ -166,6 +196,57 @@ def test_done_removes_only_a_merged_clean_copy(repo):
     assert 'removed' in msg and 'feature' in msg and not os.path.exists(path)
     assert git(main, 'branch', '--list', 'feature') == ''
     assert wt._key(path) not in wt.load_owners(main)
+    assert msg.endswith('(its commits are in origin/main)')
+
+
+def test_done_takes_a_squash_merged_copy_by_its_files_or_its_merged_pull_request(repo, monkeypatch):
+    main, up = repo
+    wt.new('feature', 'dev a', main)
+    path = os.path.join(os.path.dirname(main), 'proj-wt-feature')
+    commit(path, 'f.py', 'f = 1\n')
+    git(path, 'push', '-q', 'origin', 'feature')
+    squash_pr(up, 'feature')
+    monkeypatch.setattr(wt, '_merged_pr', lambda *a: pytest.fail('the files say it: gh is not needed'))
+    msg = wt.done(path, main)                                # nothing landed on main since: the same files
+    assert msg.endswith('local branch feature (its files are the same as origin/main)') and not os.path.exists(path)
+    assert git(main, 'branch', '--list', 'feature') == ''
+
+    wt.new('other', 'dev b', main)
+    path = os.path.join(os.path.dirname(main), 'proj-wt-other')
+    commit(path, 'g.py', 'g = 1\n')
+    git(path, 'push', '-q', 'origin', 'other')
+    squash_pr(up, 'other')
+    advance(up)                                              # main moved on: the files differ, GitHub knows
+    head = git(path, 'rev-parse', 'HEAD')
+    calls = fake_gh(monkeypatch, [{'number': 8, 'headRefOid': head}])
+    msg = wt.done(path, main)
+    assert msg.endswith('local branch other (its pull request #8 is merged)') and not os.path.exists(path)
+    assert git(main, 'branch', '--list', 'other') == '' and wt._key(path) not in wt.load_owners(main)
+    assert calls and calls[0][:7] == ['gh', 'pr', 'list', '--head', 'other', '--state', 'merged']
+
+
+def test_done_still_refuses_unmerged_work_after_a_squash_merge(repo, monkeypatch):
+    main, up = repo
+    wt.new('feature', 'dev a', main)
+    path = os.path.join(os.path.dirname(main), 'proj-wt-feature')
+    commit(path, 'f.py', 'f = 1\n')
+    git(path, 'push', '-q', 'origin', 'feature')
+    merged = git(path, 'rev-parse', 'HEAD')
+    squash_pr(up, 'feature')
+    advance(up)
+    commit(path, 'h.py', 'h = 1\n')                         # work after the merge: not in it
+    fake_gh(monkeypatch, [{'number': 7, 'headRefOid': merged}])
+    with pytest.raises(wt.WorktreeError, match=r'not merged.*files differ.*#7 from feature was merged, but the '
+                                               r'copy has commits made after it.*ask the person'):
+        wt.done(path, main)
+    fake_gh(monkeypatch, [])
+    with pytest.raises(wt.WorktreeError, match='no pull request from feature is merged'):
+        wt.done(path, main)
+    fake_gh(monkeypatch, FileNotFoundError('gh'))
+    with pytest.raises(wt.WorktreeError, match='gh is not installed, so no merged pull request was looked up'):
+        wt.done(path, main)
+    assert os.path.exists(os.path.join(path, 'h.py')) and git(main, 'branch', '--list', 'feature')
+    assert wt._key(path) in wt.load_owners(main)
 
 
 def test_sync_merges_origin_main_and_keeps_a_conflict_for_its_owner(repo):
@@ -213,3 +294,91 @@ def test_the_intake_shows_the_copies_that_need_something(repo, monkeypatch, caps
     handoffs.main(['--songs', str(tmp_path / 'songs'), '--no-prs'])
     section = capsys.readouterr().out.split('== dev copies')[1]
     assert section.startswith(' (worktrees): all copies owned and current') and 'stray' not in section
+
+
+def _held(path):
+    raise PermissionError(13, 'Permission denied', path)
+
+
+def test_sweep_removes_only_empty_folders_git_does_not_list(repo, monkeypatch, tmp_path, capsys):
+    main, _ = repo
+    side = os.path.dirname(main)
+    wt.new('kept', 'dev a', main)
+    reg = os.path.join(side, 'proj-wt-reg')                  # a registered copy, emptied: git still lists it
+    git(main, 'worktree', 'add', '-q', '-b', 'reg', reg, 'origin/main')
+    moved = tmp_path / 'moved'
+    moved.mkdir()
+    for name in os.listdir(reg):
+        os.replace(os.path.join(reg, name), str(moved / name))
+    assert os.listdir(reg) == []
+    for name in ('proj-wt-old', 'proj-other', 'proj-held'):
+        os.makedirs(os.path.join(side, name))                # empty leftovers of removed copies
+    agent = os.path.join(main, '.claude', 'worktrees', 'agent-1')
+    os.makedirs(agent)
+    write(os.path.join(side, 'proj-wt-stray', '.hidden'), 'x')   # a hidden file is still a file
+    write(os.path.join(side, 'proj-hq', 'notes.md'), 'another project\n')
+    wt.save_owners({**wt.load_owners(main), wt._key(os.path.join(side, 'proj-wt-gone')):
+                    {'owner': 'ghost', 'path': os.path.join(side, 'proj-wt-gone')}}, main)
+    lines = wt.intake_lines(main)
+    assert lines[-1] == '4 empty leftover folders next to the main checkout: python -m ismail.worktrees sweep'
+
+    dry = wt.sweep(main, dry_run=True)
+    out = wt.sweep_lines(dry)
+    assert sorted(wt._key(f['path']) for f in dry['folders'] if f['action'] == 'removed') == sorted(
+        wt._key(p) for p in (agent, *(os.path.join(side, n) for n in ('proj-wt-old', 'proj-other', 'proj-held'))))
+    assert out[-1] == ('dry run, nothing changed: 4 would be removed, 1 left alone, '
+                       '1 owner record would be dropped')
+    assert all(os.path.isdir(os.path.join(side, n)) for n in ('proj-wt-old', 'proj-other', 'proj-held'))
+    assert len(wt.load_owners(main)) == 2
+
+    real = os.rmdir
+    monkeypatch.setattr(wt.os, 'rmdir', lambda p: _held(p) if p.replace(os.sep, '/').endswith('proj-held') else real(p))
+    assert wt.main(['--repo', main, 'sweep']) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1] == 'swept: 3 removed, 1 held, 1 left alone, 1 owner record dropped'
+    held = next(ln for ln in out if 'proj-held' in ln)
+    assert held.startswith('  HELD') and "often a shell that cd'd there" in held and 'next sweep removes it' in held
+    stray = next(ln for ln in out if 'proj-wt-stray' in ln)
+    assert 'not a dev copy, left alone' in stray and not any('proj-hq' in ln for ln in out)
+    for name in ('proj-wt-old', 'proj-other'):
+        assert not os.path.exists(os.path.join(side, name))
+    assert not os.path.exists(agent) and os.path.isdir(os.path.join(main, '.claude', 'worktrees'))
+    assert os.path.isdir(reg) and os.path.isdir(os.path.join(side, 'proj-held'))
+    assert os.listdir(os.path.join(side, 'proj-wt-stray')) == ['.hidden']
+    assert os.listdir(os.path.join(side, 'proj-hq')) == ['notes.md']
+    assert os.path.isfile(os.path.join(main, 'a.py')) and os.path.isfile(os.path.join(side, 'proj-wt-kept', '.git'))
+    assert list(wt.load_owners(main)) == [wt._key(os.path.join(side, 'proj-wt-kept'))]
+    monkeypatch.setattr(wt.os, 'rmdir', real)               # the shell left: the next sweep takes it
+    res = wt.sweep(main)
+    assert [f['action'] for f in res['folders']] == ['removed', 'left']
+    assert not os.path.exists(os.path.join(side, 'proj-held'))
+    assert wt.main(['--repo', main, 'sweep', '--json']) == 0
+    assert json.loads(capsys.readouterr().out)['folders'][0]['path'].endswith('proj-wt-stray')
+
+
+def test_done_says_held_when_the_copys_empty_folder_stays(repo, monkeypatch):
+    main, up = repo
+    wt.new('feature', 'dev a', main)
+    path = os.path.dirname(main) + '/proj-wt-feature'
+    commit(path, 'f.py', 'f = 1\n')
+    git(path, 'push', '-q', 'origin', 'feature')
+    merge_pr(up, 'feature')
+    real_git, real_rmdir = wt._git, os.rmdir
+
+    def windows_git(args, cwd, check=True):
+        # as on Windows with a shell inside the copy: git removes the files and its record, not the folder, exit 1
+        r = real_git(args, cwd, check)
+        if args[:2] == ['worktree', 'remove']:
+            os.makedirs(path)
+            return subprocess.CompletedProcess(args, 1, '', f"error: failed to delete '{path}': Permission denied\n")
+        return r
+    monkeypatch.setattr(wt, '_git', windows_git)
+    monkeypatch.setattr(wt.os, 'rmdir', _held)
+    msg = wt.done(path, main)
+    assert msg.startswith(f'removed {path}') and 'local branch feature' in msg
+    assert "empty folder is HELD: a program's working folder is inside it" in msg and 'next sweep removes it' in msg
+    assert os.path.isdir(path) and git(main, 'branch', '--list', 'feature') == ''
+    assert wt._key(path) not in wt.load_owners(main)
+    monkeypatch.setattr(wt, '_git', real_git)                # the shell left: the next sweep takes it
+    monkeypatch.setattr(wt.os, 'rmdir', real_rmdir)
+    assert [f['action'] for f in wt.sweep(main)['folders']] == ['removed'] and not os.path.exists(path)

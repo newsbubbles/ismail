@@ -21,10 +21,68 @@ person and an agent change the same scene.
   `<address>?scene=<name>` on the desktop, or in the headset through `tailscale serve` (https). One server per port;
   `stage_status` lists servers, scenes, which pages are live and the server's health (workers busy, long-polls,
   threads, free disk; GET /health).
+- **Preflight before a VR session or a demo:** `stage_preflight()` (or `python -m ismail stage_preflight`). On its
+  own scratch scene, `_preflight` (hidden from the page's scene list, overwritten on every run), a headless, muted
+  browser loads a page; then a new `scene.glb` is hot-swapped under it (`stage_asset_install`), `world.json` and
+  a load set change live (`stage_world update=`, `stage_set_load`), `stage_say` shows a caption, and a synthetic
+  event (`preflight_ping`, marked synthetic) goes round the inbox to `stage_listen`. It also reads, never writes,
+  `~/.claude/settings.json` and the project's `.claude/settings.json` and `settings.local.json`: is there an allow
+  rule for `python -m ismail`, and is the named-ops guard in the PreToolUse hooks. One line per check, PASS,
+  BLOCKED with the next step, or SKIPPED; then the verdict, shown on the stage (in VR the headset says it; out of
+  VR it is a caption, never spoken on the computer). While someone is in VR the checks that need the test page
+  are skipped and the line says so; the person's own scene is never loaded over or moved.
 - **Drive:** each page command is a typed tool that waits for the page's answer: `stage_object_set`,
   `stage_object_select`, `stage_say`, `stage_panel_show`, `stage_waypoint_set`, `stage_actor_play`, `stage_stream`,
   `stage_scene_go` and the rest. A tool fails with the next step when no page shows the scene; `stage_cmd` is only
   for a command that has no tool yet.
+- **Live edits go through named ops only.** From a shell that is `python -m ismail <op> key=value ...` (e.g.
+  `python -m ismail stage_say scene=room text="..."`), or several at once with `python -m ismail stage_batch
+  @moment.json` (the file holds `{"scene": ..., "ops": [...]}`). Never an inline script (`python -c`, a scratch
+  file) that posts to the page or edits the scene's files: it skips the checks, the undo, the save and the events
+  the op gives, and it needs a fresh permission every time. If the edit you need has no op, that is the gap to
+  fix: add the op (and its page command), rather than scripting around it.
+  **Every off-path form has a named op**; a blocked command prompts for permission, and a prompt in the headset
+  throws the person out of VR:
+
+  | Blocked form | Named op |
+  |---|---|
+  | `python -c` (or a heredoc) with ismail code | `python -m ismail <op> key=value` (`python -m ismail ops` lists them) |
+  | `cp`, `mv`, `Copy-Item`, `robocopy` or `shutil` of a file into a scenes folder | `stage_asset_install(scene, file, kind=scene, manifest, actor or tree, name=)` |
+  | `Stop-Process`, `taskkill` or `kill` of the stage server or a live engine | `stage_restart(port=)` (waits while they are in VR; `now=True` after a yes from `stage_ask`), `stage_stop`, `live_stop(project=)` |
+  | editing `world.json` by hand | `stage_world(scene, update={...})`: only the keys given change (`world=` replaces the whole file and resets keys left out) |
+  | reading voice notes by tailing files | `stage_listen` or `stage_events(scene, types=["voice_message"], wait=)` |
+
+  `stage_asset_install` keeps the file it replaces in the scene's `history/` and tells an open page (a new room or
+  piece list reloads the room, so ask first in VR; a replaced body shows at the next page load). `stage_restart`
+  restarts the server with the arguments it was started with, refuses while a page is in VR (and says so in the
+  headset), and replies once `/health` answers. An optional guard for Claude Code refuses these forms before they
+  run and names the op instead: `skills/ismail/hooks/README.md`. Other harnesses get the same rule from this table.
+- **Edits apply in place while they are in the room; nothing needs a reload for them.** Objects
+  (`stage_object_set`, `stage_object_drop`), lights (`stage_light_set`), material colours (`stage_material_set`:
+  every mesh with that material changes), captions and cards, the sky, actors, load sets, props and `stage_world`
+  (world.json: an open page reads it again at once and redoes what was built from it). A piece the headset export
+  merged into its group (the Quest diet joins each group into one mesh) is split back out the first time an op
+  names it, with its children, and then moves, saves and undoes like any object. What still needs the room
+  rebuilt (`stage_scene_export`, swapped in under the construct, so only when they are out or ask): new or changed
+  geometry, modelling, modifiers, textures and any material change other than the base colour, a new object, and
+  a new merged piece list (a room exported before pieces were numbered splits nothing until its next export).
+- **Screens in the room** (`stage_surface`): an image, a video, text or a live camera on every mesh of a material,
+  now, flat and unlit, until `clear=True`. Slides and a video backdrop on a wall, a teleprompter that scrolls
+  (`text=`, `lines=`, `scroll=` lines a second), a monitor showing a scene camera (`camera=`, `fps=`). Files sit in
+  the scene folder (paths relative to it). The surface keeps its mesh's shape (measured from its UVs; `fit`
+  contain, cover or stretch). Give each screen its own material in the build: a surface covers every mesh of its
+  material, and a plane's UVs decide which way up the picture is (check it once in a capture). Not saved to the
+  scene. In `stage_capture` it is a setup command (`{"type": "surface", ...}`, timed with `at_song`); a video there
+  follows the film's time and a camera renders every frame.
+- **A camera crew** for a talk on the stage: `stage_on_air(scene, camera)` cuts to a camera (the monitor material
+  shows it live, default `monitor_screen`) and logs the cut with its time; `stage_on_air_log` lists the cuts with how
+  long each stayed on air, for cutting the rendered angles afterwards. `stage_pointer` puts a giant foam finger where a
+  person's hand points (shoulder through fingertip), only while it points (`when='point'`), on a layer the headset
+  never shows: the monitor feed and `stage_capture` see it (a capture setup command `{"type": "pointer", ...}`).
+  **Streaming the talk:** a page opened as `<stage url>?scene=<scene>&onair=<first camera>&fps=30` is the stream's
+  picture: the camera on air only, full frame, no UI, titled `ismail on air <scene>`, and it follows every
+  `stage_on_air` cut (other pages keep their view). Capture it with `stream_visual(window='ismail on air <scene>',
+  capture='wgc')` (`references/live-streaming.md`).
 - **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
   moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
   `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.
@@ -43,6 +101,12 @@ person and an agent change the same scene.
   sky, a light, a set unloaded) go in `setup` as live commands. Every load set is in the shot unless
   `sets=False`. `stage_capture_status(scene, job)` follows it. Timers inside behaviours (setTimeout) still run on
   the wall clock.
+  - **A change partway through the shot:** give a setup command `"at_song": <song seconds>` and it runs just before
+    that frame is drawn (a light switch at 255.0 s; until then the room stays as it was).
+  - **A screen to comp in post:** `{"type": "screen_key", "color": "#00ff00"}` in `setup` draws the material
+    "screen" (or `"material":`, or `"object":` for that object's one material) flat and unlit in the key colour, so
+    every keyed pixel in a frame is the visible screen and whatever covers it is found exactly. `"color": "off"`
+    puts it back. Captures only; the scene is not changed.
 
 ## Listening while the person is in
 
@@ -213,6 +277,14 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Measure a gesture from a take before binding it.** A pinch that the system already uses collides with yours
   (one pinch once had six jobs and opened a palette while the person's hands were busy);
   gestures are personal, so calibrate them per person, and keep their recordings local without consent.
+- **The gesture map is data, read it before you name a gesture.** `stage_gestures(scene)` lists what each hand shape
+  means in VR now (the intent, shape, hand, hold, where it is read, and whose row it is). `stage_gesture_set(scene,
+  intent, shape=, hand=, hold_ms=, off=)` rebinds one in the person's own map (it follows them into every scene), or
+  with `owner="scene"` in this scene's rows (world.json `gestures`; the person's rows win). The page takes it at
+  once. A rebind that would share a shape with another row where both are read is refused, naming that row.
+  Leaving VR, the performance stop and the voice note are locked (never rebound or off, so nobody is trapped);
+  travel, the snapshot frame, select and hold are fixed to how the shape moves. The yes and no answers can be
+  rebound but not switched off (`stage_ask` waits on them). `stage_gesture_reset` goes back.
 - **Keep tooling in service of the work.** An editor feature is worth building when the scene waits on it; when the
   scene is waiting for layout, build the scene.
 - **The scene's content is yours; how the stage works is the stage dev's.** Models, lights, the street, music, the
@@ -232,9 +304,12 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   wait while they talk, and for 3 s after a note, because they often send the next one at once. Menus they open
   themselves never wait, and nothing times out while they talk. A voice note's `during` lists what they did while it
   recorded (selections, menus shown and pressed, presses on things), so "this one" can be read without the event log.
-- **A sign-off in the headset is a right thumbs up.** Before anything that hitches or changes the room around them (a
-  reload, a re-export, a scene switch), ask with `stage_ask`: right thumbs up is yes, down is no. Never wait for them
-  to say a word for it, and never use the left hand, which takes updates. An open ask holds no other command.
+- **A sign-off in the headset is a right thumbs up** (the map's `answer_yes`; `stage_gestures` says if the person
+  moved it). Before anything that hitches or changes the room around them (a reload, a re-export, a scene switch),
+  ask with `stage_ask`: right thumbs up is yes, down is no. Never wait for them to say a word for it, and never use
+  the left hand, which takes updates. An open ask holds no other command. An ask (or a yes/no panel) that a standing
+  grant already answers is refused, and text naming a private term is refused on every op that shows it: phone.md,
+  "Nothing personal on the page" and "Don't ask for what is granted".
 - **Seat a person before they are followed.** `stage_follow_anchor(person, joint="hips", to="<their seat>")` keeps
   them seated while the person drives them sitting or standing; a Follow keeps nothing, so keep a good one with
   `stage_take_keep_last`. Leave everyone else unpinned: a Follow sets itself up from the body (seated stays on the
@@ -244,6 +319,26 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   reads; `trial=True` moves it without saving. Camera moves keyed on the clock want `stage_key_interp(mode="smooth")`.
   A whole move goes in one call: `stage_keys_set(keys=[{name, t, location, look}, ...], interp={name: "smooth"})`
   keys from values (`look` aims a camera at a point) without moving anything to each spot first.
+- **A camera move is seen and recorded in the room.** `stage_trail(object=<camera>)` draws its path on the clock
+  (blue at the start to orange at the end, a small frustum at each key, a bright ball where the playhead puts it); in
+  VR a key picked on the ray scrubs the clock there, and carried, it moves (its time stays; `stage_anim_save` keeps
+  it). The camera's menu has the same: Path, and Record move. `stage_camera_record(camera, t0, t1)` records a move
+  like a take: a countdown, then the clock plays and the camera is the person's eyes (`source="head"`, hidden while
+  it records), wherever it is carried (`source="hold"`: unlocked with Move first) or wherever its follow takes it
+  (`source="follow"`, the default on a following camera: the follow is baked and stops, so the keys play). The samples are smoothed and
+  thinned to a few smooth keys (within 2 cm and 2 degrees) that replace the camera's keys between t0 and the last
+  sample; keys outside that window stay. A Keep / Redo / Undo panel follows; nothing is saved before Keep. Watch
+  the `cam_record` events, and do not talk over a take.
+- **A camera can follow something by itself.** `stage_follow(scene, object=<camera>, target=...)` keeps it on an
+  object, a body's joint (`"<person>:head"`, `"<person>:pelvis"`, `"<person>:hand_r"`; a wrong bone lists them) or
+  the person (`"person"`: the headset, or the desktop view). `offset` is `[right, forward, up]` in the target's
+  facing (`[0, -3, 1.5]`: 3 m behind and 1.5 m up; a body faces where its hips face), or Blender `[x, y, z]` with
+  `space="world"`. `lag` (seconds, 0.5) is how soft it trails; a camera looks at the target (`look_offset` moves the
+  aim point, `look_lag` softens the turn) and keeps the horizon level; `orbit` circles it in degrees a second (a
+  lagged orbit runs a little inside its circle). `target=None` stops it; no object lists the follows; `where=<target>`
+  reads where a target is. A follow is live, not saved: to keep the shot, Record move bakes it into keys
+  (`stage_camera_record`, `source="follow"`), and Keep writes them to anim.json, which the Blender render reads.
+  A thing that should always follow says so in its behaviour (`s.follow`, below).
 - **A Follow is a performance: be quick and quiet in it.** From the moment someone follows the person, the mic
   records in clips and their gestures do nothing. Watch the `perform_*` events; when a part is worth reading,
   `stage_perform(action="next_clip")` cuts the clip there (its words come back as `perform_clip`, on the Follow
@@ -268,6 +363,16 @@ A person in a headset cannot see your terminal. Contact is part of the interface
 - **Find takes by what was said.** The person names takes and talks about them while recording; every take keeps
   those words. `stage_takes(query="glass")` finds them with the second each word was said; `stage_take_note` names
   a take or adds your own note.
+- **Test with the person's own hands while they are away.** `stage_take_replay(scene, take, start=, end=)` plays a
+  take as input on a page nobody wears: the camera takes the head, each tracked hand drives the page's hands, touch
+  and grab through the same code as a real hand, and the reply lists what happened ("grabbed: cup; landed: cup onto
+  shelf"), what the take itself recorded, and what was still held at the end. `grab=True` turns grab on for the
+  replay only. To get the take you need, ask for it while they are in VR: `stage_test_take(scene, ask="Pick up the
+  cup and put it on the shelf.", name="cup to shelf")` says the ask, records it, and labels it "test cup to shelf"
+  so `stage_takes(query=)` finds it later. When they say "keep that" about something they just did,
+  `stage_take_keep_recent(scene, seconds=30, name=)` saves it: while anyone is in VR the page holds their last 2
+  minutes of head and hands (15 Hz, no audio). Limits: hands only (controller takes carry no joints), the aiming ray is
+  approximated, rate 1 for a grab verdict, refused while someone is in VR on that page.
 - **Put dances on the beat by number.** `stage_take_sync(scene, takes, bpm)` reads each take's pulse, its own BPM,
   the rate that puts it on the beat, its seam, and the lag between takes; `loops=True` lists the best whole-bar
   windows of a long take (clear pulse on the beat, small seam, little travel). `stage_take_loop(take, name, bpm=)`
@@ -296,8 +401,11 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   a Follow, and is saved with the scene. `clear=True` unpins it.
 - **Grab by touch (in VR, hand tracking).** `stage_grab_mode(scene, on=True, objects="unlocked", hold_s=1.5,
   release_s=1.0)`: a hand takes a thing by resting on it, the palm or the finger bases touching it and the hand nearly
-  still, for `hold_s` (a ring fills); it holds it until the hand opens past half its grip for `release_s` (a ring
-  empties; closing again keeps it). Let go, it falls onto what is under it with the hand's speed, so a toss flies.
+  still, for `hold_s` (a ring fills; a touch or stillness lost for under 0.4 s pauses the ring instead of
+  restarting it); it holds it until the hand opens past half its grip for `release_s` (a ring empties; closing again
+  keeps it). The grip counts as at least half closed, so a thing taken with an open palm drops when the hand stays
+  open flat: close the fingers around it to carry it. A hand takes the outermost group up to 2.2 m across (a mic
+  stand, a chair, a pool ball under its table's group; never the table), unless a rule says `grab=True`. Let go, it falls onto what is under it with the hand's speed, so a toss flies.
   Fingertips alone stay the pinch for menus. Inside a person (`stage_embody`) the person's hand holds it, and the grab
   and the drop go into the take and play back with it. `objects` can be a list of names or globs (`["drum_stick_*"]`).
   `stage_grab_rule(scene, object, grab=True, fixed=False)` sets one thing: `fixed=True` for a bar or a rail the hand
@@ -351,6 +459,13 @@ needs a model to listen spends tokens on work that could have been saved as dete
   switch to a lamp), `light` (watts and colour, with `seconds` to fade; `energy: null` puts a light back as built),
   `show`, `move` (`by`, `to`, `turn` in degrees, `seconds`), `sound`, `emit` (a message to agents: `object_message`),
   `do` (any page command, the same ones you send), `after`, `every`. Names take a list or a glob (`cf_floor_*`).
+  For things that track others: `clock()` (`{t, playing}`), `where(target)` (location, rotation, forward and facing
+  of an object, `"<person>:<bone>"` or `"person"`; `{shown: false}` while that body is not shown), `place(name,
+  {location, look})` (set a thing now, aiming it at a point or a target) and `follow(target, options)` (the same
+  options as `stage_follow`; `null` stops it). A chase camera: `apply(s) { s.follow(s.get('on') ? 'runner:pelvis' :
+  null, { offset: [0, -4, 1.6], lag: 0.4 }); }`.
+- **Every frame.** `frame(s, dt)` in a thing's definition runs every frame after the clock and the bodies have moved
+  (dt in seconds). Keep it small; its first error stops it and goes out as `behaviour_error` with phase `frame`.
 - **Every interaction sounds.** Give each thing a `sound`: a file under the scene folder, rendered with ismail (a
   switch should sound like a switch). Without one the page plays a plain click and warns you. The same goes for
   anything else you build that the person touches: no silent controls.

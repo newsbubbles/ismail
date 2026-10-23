@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from ..api import OpError, op
-from .. import machine
+from .. import guards, machine
 from . import server as S
 
 
@@ -23,7 +23,24 @@ def _port():
         return None
 
 
+# the fields of each server op that the person reads on the page: guards.check_private scans them before they go
+SHOWN = {'say': ('text',), 'panel_show': ('title', 'text', 'buttons', 'inputs', 'link_label'), 'ask': ('text',),
+         'exam': ('title', 'question', 'chips', 'choices', 'clips'), 'offer': ('label', 'title', 'album', 'artist'),
+         'buttons': ('buttons',), 'now': ('now', 'next', 'recording_why', 'sections'), 'restarting': ('why',)}
+
+
+def _shown(op_name, args):
+    vals = []
+    for f in SHOWN.get(op_name, ()):
+        v = args.get(f)
+        if f == 'clips':                                  # a clip's label and note are shown, never its path
+            v = [{'label': c.get('label'), 'note': c.get('note')} for c in v or [] if isinstance(c, dict)]
+        vals.append(v)
+    return vals
+
+
 def _call(op_name, timeout=30, **args):
+    note = guards.check_private(*_shown(op_name, args)) if op_name in SHOWN else ''
     port = _port()
     if port is None:
         raise OpError("the phone server is not running: phone_start() first (it relays the live set to the phone)")
@@ -39,7 +56,7 @@ def _call(op_name, timeout=30, **args):
         raise OpError(f"the phone server does not answer ({e}): phone_start() again (log: {S.HOME / 'server.log'})")
     if not res.get('ok'):
         raise OpError(res.get('error', 'phone server error'))
-    return res['result']
+    return guards.with_note(res['result'], note)
 
 
 def _tailnet(port):
@@ -153,7 +170,7 @@ def phone_status() -> str:
 
 
 @op()
-def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False) -> str:
+def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = False, lead: bool = False) -> str:
     """The watcher: every inbox line after the cursor, never filtered by owner; the agent decides what is its own,
     and exam_round lines (state started / finished, with the panel id, `for` and title) say when to keep quiet.
     What the person sent from the phone, oldest first, as JSON {since, lines}: taps (love = cut a highlight,
@@ -164,8 +181,50 @@ def phone_listen(who: str, since: int = None, wait: float = 25, page: bool = Fal
     since: the last call's `since` (default: only new lines); wait: seconds to wait for one. Every line also
     carries room {bar, of} (the engine's bar then, there even when the page is off the stream) and now (the piece).
     page=True also returns the page's own actions (kind 'page': open with the device, listen, stop, hidden/visible,
-    scroll to a section, download, clip play, panel open/close, note start/end); phone_timeline reads them best."""
-    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page)
+    scroll to a section, download, clip play, panel open/close, note start/end); phone_timeline reads them best.
+    lead=True: you are the team lead, so the heartbeat's alarms (an agent's watcher down while the person is live)
+    are addressed to you."""
+    return _call('listen', timeout=float(wait or 0) + 15, who=who, since=since, wait=wait, page=page,
+                 lead=lead or None)
+
+
+@op()
+def phone_claim(n: int, by: str, why: str = None) -> str:
+    """Say you are the one passing on (or answering) the person's note `n`, BEFORE you do it. The first agent to call
+    it owns the note; the server decides who was first, so two agents claiming at once cannot both win. Returns
+    "yours: ..." (go ahead) or "taken: <agent> claimed note n at HH:MM: leave it to them" (do nothing with it).
+    Every phone_listen and phone_watch line of a claimed note carries claimed {by, at}, and the person's page says
+    "taken by <by>" under the note ("nobody has it yet" before anyone does). Claim the untagged notes
+    (no `for`) you will act on; a note with a `for` is already that agent's. by: your `who`. why: a few words
+    (e.g. 'passing to Marketing'). An untagged note nobody claims for 3 minutes is the team lead's by default."""
+    return _call('claim', n=n, by=by, why=why)
+
+
+@op()
+def phone_presence(minutes: float = 60) -> str:
+    """Who is here, both sides, many to many. Agents: every agent that called the phone server in the last 90 s, and
+    whether its phone_watch is waiting now (watching) or it is busy between wakes. The person's devices: each page
+    (phone, computer, tablet, Quest) with its browser, open or asleep, last seen, and whether it is on the stream.
+    Then the person's untagged notes in the last `minutes` that nobody has claimed (LEAD marks one past 3 minutes:
+    the team lead's by default) and the recent claims. Read it before deciding whether a note is yours to pass on."""
+    return _call('presence', minutes=minutes)
+
+
+@op()
+def phone_expect(who: str, why: str, minutes: float = 180, by: str = None) -> str:
+    """Say that `who`'s phone watcher must stay up for the next `minutes` (a set, a VR session, a jam): if it stops
+    polling for 2 minutes, one alarm line goes to the lead's watcher (phone_watch lead=true) and the page tells the
+    person who is not hearing them. Without it, an agent that watched in the last 30 min is expected anyway while the
+    person is in VR (the Quest page open) or on the stream. Call it at the start of the set or session; by: who set
+    it. phone_signoff(who) ends it."""
+    return _call('expect', who=who, why=why, minutes=minutes, by=by)
+
+
+@op()
+def phone_signoff(who: str, why: str = None) -> str:
+    """You stop watching on purpose (your work is done, the set is over): no alarm when your watcher stops, and your
+    phone_expect ends. Watching again later counts as before."""
+    return _call('signoff', who=who, why=why)
 
 
 # phone_watch: the standing watcher every agent runs. It used to live in one song folder and in the Live DJ's memory;
@@ -222,7 +281,7 @@ def _clip(d, limit=_LINE_CHARS):
 
 
 @op()
-def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str = None) -> str:
+def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str = None, lead: bool = False) -> str:
     """The standing phone watcher: blocks until the person sends something, returns it, and remembers its place. Run
     it in the background (`python -m ismail phone_watch "who=<your role>"`), act on what it returns, and re-arm it
     FIRST after every wake, before any other work. Never write your own watcher.
@@ -235,16 +294,18 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
     wait_min: after this many minutes with nothing it returns {alive: true} so you re-arm and read phone_status (a
     background task may be stopped at 2 hours). round=<card id prefix>: you let a round of someone else's cards run:
     its lines are held (counted, not returned) and the watcher wakes on anything else, or 90 s after the round's last
-    line. A phone server restart is waited out (it looks again every 10 s)."""
+    line. A phone server restart is waited out (it looks again every 10 s).
+    lead=true: you are the team lead: the heartbeat's alarms (an agent's watcher down while the person is live) come
+    to you, and you wake that agent. An alarm addressed to another watcher does not wake you."""
     notes = []
     if since is None:
         since = _cursor_load(who)
-    hits, held, err = [], [], None
+    hits, held, err, others = [], [], None, []
     t0 = last = time.time()
 
     def look(wait):
         nonlocal since, last
-        res = json.loads(phone_listen(who, since=since, wait=wait, page=True))
+        res = json.loads(phone_listen(who, since=since, wait=wait, page=True, lead=lead))
         got = int(res.get('since', since or 0))
         if since is not None and got < since:              # the inbox is shorter than the cursor: never replay
             notes.append(f"the saved cursor ({since}) was past the inbox's end ({got}): now from {got}")
@@ -252,24 +313,36 @@ def phone_watch(who: str, since: int = None, wait_min: float = 100, round: str =
             notes.append(f"no saved cursor for {who}: started at the end of the inbox (line {got}); history is not "
                          f"replayed (pass since=<n> to read from a line)")
         since = got
+        if res.get('watching') is not None:
+            others[:] = res['watching']
         for d in res.get('lines', []):
             if round and d.get('kind') in ('page', 'voice'):     # clip plays, a note recording: they are still at it
                 last = time.time()
             if _of_round(d, round):
                 held.append(d)
                 last = time.time()
-            elif _wanted(d):
+            elif _wanted(d) and not (d.get('kind') == 'alarm'                # another's alarm, or about you
+                                     and (d.get('agent') == who or d.get('for') not in (None, who))):
                 hits.append(_clip(d))
 
     def done(**extra):
         _cursor_save(who, since)
-        arm = f'python -m ismail phone_watch "who={who}"' + (f' round={round}' if extra.pop('_keep_round', False) else '')
+        arm = (f'python -m ismail phone_watch "who={who}"' + (' lead=true' if lead else '')
+               + (f' round={round}' if extra.pop('_keep_round', False) else ''))
         out = {'who': who, 'since': since, 'lines': hits, **extra}
+        if hits:
+            out['also_watching'] = others
         if held:
             out['held'] = {'round': round, 'lines': len(held), 'answered': sum(d.get('kind') == 'exam' for d in held)}
         if notes:
             out['note'] = '; '.join(notes)
-        then = ('act on these lines' if hits else 'read phone_status (is the server up, is anyone listening?)'
+        open_notes = [d['n'] for d in hits if d.get('kind') in S.NOTE_KINDS and not d.get('for')
+                      and not d.get('claimed')]
+        downs = [d['agent'] for d in hits if d.get('kind') == 'alarm' and d.get('what') == 'watcher_down']
+        then = (('act on these lines' + (f"; WATCHER DOWN {downs}: wake each (a message to its session) so it "
+                                         f"re-arms phone_watch" if downs else '') + (f"; untagged notes {open_notes}: phone_claim(n, by='{who}') before you pass "
+                                         f"one on or answer it, and leave it if the answer is taken"
+                                         if open_notes else '')) if hits else 'read phone_status (is the server up, is anyone listening?)'
                 if extra.get('alive') else 'the round is over: bring the sound back and start a fresh pass')
         out['next'] = (f"re-arm FIRST, in the background, before anything else: {arm} (the cursor is saved at "
                        f"{since}); then {then}")
@@ -313,18 +386,25 @@ def phone_timeline(minutes: float = 15, kinds: list = None, limit: int = 200) ->
 
 @op()
 def phone_say(text: str, speak: bool = False, pin: bool = False, buzz: bool = False, voice: str = None,
-              sender: str = None, priority: str = None) -> str:
+              sender: str = None, priority: str = None, override_grant: str = None) -> str:
     """A caption on the phone. speak=True also says it into the stream (Kokoro, the music ducked under it), so they
     hear it in their pocket: only to answer something they said, never unprompted. pin=True keeps it at the top
     (a "since you left" summary). buzz=True vibrates the phone if the page is open. priority: 'needs you' (sorts
-    first and lights the corner key in the accent colour), 'normal' (the default) or 'low' (sorts last)."""
-    return _call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender, priority=priority)
+    first and lights the corner key in the accent colour), 'normal' (the default) or 'low' (sorts last).
+    Refused: text naming a place or personal detail from the local private terms (rephrase it), and a yes/no
+    question ("should I merge ...?") that a standing grant already answers (act on the grant and say what you did;
+    override_grant='<why it does not fit>' asks anyway and logs the reason). phone.md, "Nothing personal on the
+    page" and "Don't ask for what is granted"."""
+    guards.check_private(text)                    # first, so an override is never logged for text that cannot go
+    g = guards.check_grant(text, guards.asks_yes_no(text), override_grant, 'phone_say', sender)
+    return guards.with_note(_call('say', text=text, speak=speak, pin=pin, buzz=buzz, voice=voice, who=sender,
+                                  priority=priority), g)
 
 
 @op()
 def phone_now(now: str = None, next: str = None, recording_why: str = None, mood: str = None,
               now_mark: str = None, next_mark: str = None, length: float = None, sections: list = None,
-              into: float = None, sender: str = None) -> str:
+              into: float = None, now_of: list = None, sender: str = None) -> str:
     """What the page shows as now playing and next up (default: read from the engine), and why recording is on or
     off (the page always shows whether it is). '' clears a field. mood: set the mood chip (calm, steady, lift, peak).
     now_mark/next_mark: a small mark beside the piece, so they know what they are hearing: 'loved' (one they loved
@@ -332,9 +412,12 @@ def phone_now(now: str = None, next: str = None, recording_why: str = None, mood
     without one the page shows a heart when they tapped Love this while that piece played.
     length: the piece's length in seconds and sections: [{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
     'drop'}, ...]: the page keeps a position line on screen (elapsed / length, the next section). into: seconds into
-    the piece now, when it did not start as its name went up."""
+    the piece now, when it did not start as its name went up.
+    The now label expires when what it names stops, so a later script that never calls phone_now cannot leave a
+    stale name up: by default it is tied to the clips playing as it goes up and those that start in the next 2 bars;
+    now_of=[names] ties it to those clips, tracks or decks instead; now_of=[] leaves it up until replaced or cleared."""
     return _call('now', now=now, next=next, recording_why=recording_why, mood=mood, now_mark=now_mark,
-                 next_mark=next_mark, length=length, sections=sections, into=into, who=sender)
+                 next_mark=next_mark, length=length, sections=sections, into=into, now_of=now_of, who=sender)
 
 
 VIDEO_MAX_H = 720
@@ -403,7 +486,7 @@ def phone_video_copy(video, video_wait='10m'):
 def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', image: str = None, buttons: list = None,
                      inputs: list = None, wait: float = 0, sender: str = None, video: str = None,
                      video_wait: str = '10m', priority: str = None, link: str = None,
-                     link_label: str = 'Open') -> str:
+                     link_label: str = 'Open', override_grant: str = None) -> str:
     """A panel over the phone page (the stage_panel_show shape): title, text, an image file, a video file, buttons
     (labels), and inputs for a fuller answer: [{'id', 'kind': 'choice' (one of options) | 'check' (any of options) |
     'toggle' (on or off) | 'text', 'label', 'options', 'optional'}]. A choice must be picked before a button sends
@@ -424,12 +507,19 @@ def phone_panel_show(panel_id: str = None, title: str = '', text: str = '', imag
     link_label naming the button.
     A panel never pops up: it shows as a message on the page's corner key (a short buzz), and the person opens it
     when they choose, switches between open messages, or puts one back with Later. Send one only for something to
-    decide; say everything else in a caption."""
+    decide; say everything else in a caption.
+    Refused: a title, text, button or input naming a place or personal detail from the local private terms
+    (rephrase it), and a yes/no or approve/deny panel (its buttons, or a choice's options, are yes and no words)
+    whose title or text a standing grant covers: act on the grant, then post a caption saying what you did.
+    override_grant='<why the grant does not fit>' shows it anyway and logs the reason (phone.md)."""
+    guards.check_private(title, text, buttons, inputs, link_label)   # before an override is logged or a video copied
+    g = guards.check_grant([title, text], guards.is_yes_no(buttons, inputs, f'{title} {text}'), override_grant,
+                           'phone_panel_show', sender)
     if video:
         video = phone_video_copy(video, video_wait)
-    return _call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
+    return guards.with_note(_call('panel_show', timeout=float(wait or 0) + 15, panel_id=panel_id, title=title, text=text, image=image,
                  buttons=buttons, inputs=inputs, wait=wait, who=sender, video=video, priority=priority,
-                 link=link, link_label=link_label)
+                 link=link, link_label=link_label), g)
 
 
 @op()
@@ -439,9 +529,13 @@ def phone_panel_close(panel_id: str) -> str:
 
 
 @op()
-def phone_ask(text: str, wait: float = 0, sender: str = None) -> str:
-    """A yes/no question on the phone; the answer arrives as kind 'answer'; wait=N blocks up to N seconds for it."""
-    return _call('ask', timeout=float(wait or 0) + 15, text=text, wait=wait, who=sender)
+def phone_ask(text: str, wait: float = 0, sender: str = None, override_grant: str = None) -> str:
+    """A yes/no question on the phone; the answer arrives as kind 'answer'; wait=N blocks up to N seconds for it.
+    Refused when a standing grant already answers it (act on the grant, then say what you did in a caption;
+    override_grant='<why it does not fit>' asks anyway and logs the reason), or when it names a private term."""
+    guards.check_private(text)
+    g = guards.check_grant(text, True, override_grant, 'phone_ask', sender)
+    return guards.with_note(_call('ask', timeout=float(wait or 0) + 15, text=text, wait=wait, who=sender), g)
 
 
 FLOORS = ('64k', '128k', 'same')      # floor pairs: the real clip against a 64 or 128 kb/s MP3 copy, or itself
@@ -535,11 +629,50 @@ def _floor_remember(record):
     hist_f.write_text(json.dumps(hist, indent=1), encoding='utf8')
 
 
+def _measured(title, clips, measured, unmeasured, exam_id, sender):
+    """phone_exam's measure-first gate (ledger:M212; qa intent_rules 10-16 cluster 5): the lines the instruments gave
+    before the ear is asked, or the reason only the ear can tell, logged. Returns what to keep beside the answers."""
+    why = str(unmeasured or '').strip()
+    if measured and why:
+        raise OpError("measured= or unmeasured=, not both: what you measured, or why only the ear can tell")
+    if not measured and not why:
+        raise OpError("measure before the person's ear: pass measured={'all' or a clip label or pair number: the lines "
+                      "your instruments gave (exam_check, sound_compare, analyze_*, with their numbers)}, or "
+                      "unmeasured='<why only the ear can tell>' (it is logged). The person, 10-16: measure first, "
+                      "then spend my ear")
+    if why:
+        if len(why.split()) < 3:
+            raise OpError(f"unmeasured={why!r} says no reason: in a few words, why no instrument can tell this (it is "
+                          f"logged with the exam)")
+        rec = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'exam_id': exam_id, 'title': title, 'who': sender,
+               'why': why}
+        S.HOME.mkdir(parents=True, exist_ok=True)
+        with open(S.HOME / 'ear_first.jsonl', 'a', encoding='utf8') as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        return {'unmeasured': why}
+    if not isinstance(measured, dict):
+        raise OpError("measured is a dict: {'all' or a clip label or pair number: 'the lines' or ['line', ...]}")
+    labels = {str(c.get('label')) for c in clips or [] if isinstance(c, dict) and c.get('label')}
+    names = labels | {m.group(1) for l in labels for m in [re.match(r'^(\d+)\s*[A-Za-z]$', l)] if m} | {'all'}
+    bad = [k for k in measured if str(k) not in names]
+    if bad:
+        raise OpError(f"measured keys {bad} name no clip: use 'all', a clip label or a pair number "
+                      f"({', '.join(sorted(names))})")
+    out = {}
+    for k, v in measured.items():
+        lines = [str(x).strip() for x in (v if isinstance(v, (list, tuple)) else [v]) if str(x).strip()]
+        if not lines or not any(re.search(r'\d', l) for l in lines):
+            raise OpError(f"measured[{k!r}] has no measurement in it: paste the instrument's lines with their numbers "
+                          f"(LUFS, dB, Hz, a distance), not a summary")
+        out[str(k)] = lines
+    return {'measured': out}
+
+
 @op()
 def phone_exam(title: str, clips: list, question: str = '', chips: list = None, choices: list = None,
                answers_path: str = None, exam_id: str = None, wait: float = 0, key: dict = None,
                secrets: list = None, check: bool = True, sender: str = None, floor: str = None,
-               floor_from: str = None) -> str:
+               floor_from: str = None, measured: dict = None, unmeasured: str = None) -> str:
     """A blind exam on the phone: clips [{label, path, note?}] each with a play button (the live stream pauses while
     one plays, and rejoins live after), word chips to tick per clip, one choice (e.g. ['A is the record', 'B is the
     record', "can't tell"]), a note, and Submit. The answers arrive as kind 'exam' {id, answers}, and are appended
@@ -554,7 +687,12 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
     (default: the first clip keyed real, record or ref). A floor pair told apart more often than chance means the
     phone and the ear separate even an MP3 copy; a floor never told apart means a "can't tell" on a real pair is
     about the voice, not the device. The pre-flight checks your pairs only (a floor pair is one clip against itself,
-    in WAV beside clips of any format), and a refused exam uses up no floor round."""
+    in WAV beside clips of any format), and a refused exam uses up no floor round.
+    measured: what you measured before spending the person's ear, {clip label, pair number or 'all': the lines your
+    instruments gave, with their numbers}; or unmeasured='<why only the ear can tell>' (logged in ear_first.jsonl).
+    One of the two is required (the person, 10-16: measure first, then spend my ear). Either is kept beside the
+    answers (<answers_path>.measured.json) for the exam ledger."""
+    kept = _measured(title, clips, measured, unmeasured, exam_id, sender)
     record = None
     if floor:
         if floor not in ('auto', 'full'):
@@ -578,6 +716,12 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
             raise OpError('the exam was not shown, its pre-flight failed:\n' + '\n'.join(lines))
     out = _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
                 choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
+    if answers_path:
+        os.makedirs(os.path.dirname(os.path.abspath(answers_path)), exist_ok=True)
+        with open(answers_path + '.measured.json', 'w', encoding='utf8') as f:
+            json.dump(dict(kept, exam_id=exam_id, title=title, labels=(record or {}).get('labels')), f, indent=1,
+                      ensure_ascii=False)
+        out += f"\nmeasured lines kept in {answers_path}.measured.json"
     if record:
         _floor_remember(record)
         if answers_path:
@@ -659,7 +803,8 @@ def phone_sounds(event: str = None, path: str = None, gain_db: float = 0.0, menu
 def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
     """Take captions back off the phone page, its history and its pinned line: match='text' (several with '|',
     case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
-    other personal details on the page: they may be recording the screen."""
+    other personal details on the page: they may be recording the screen (the ops that show text refuse the terms
+    in ~/.ismail/private_terms.txt, or $ISMAIL_PRIVATE_TERMS, and the git email)."""
     return _call('unsay', match=match, since=since, n=n)
 
 

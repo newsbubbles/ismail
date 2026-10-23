@@ -8,7 +8,8 @@ work. The helper keeps the loop with the person and hands back what it got. The 
 agent harnesses are built (one agent, many helpers) works for the performance loop too.
 
 Read `stage.md` first (the stage tools, contact with a person in a headset, a Follow is a performance), and
-`rigged-characters.md` for the bodies the person plays.
+`rigged-characters.md` for the bodies the person plays. `helpers.md` covers helpers in general (the shared machine,
+which model for which task).
 
 ## Who owns what
 
@@ -38,7 +39,7 @@ Voice:        record (every Follow does), what to cut into clips, what the lines
 You may use:  stage_listen, stage_busy, stage_events, stage_presence, stage_say, stage_panel_show, stage_panel_close,
               stage_actor_follow, stage_actor_play, stage_actor_stop, stage_follow_anchor, stage_control_set,
               stage_control_map, stage_actor_profile, stage_perform, stage_performance, stage_take_start,
-              stage_take_stop, stage_take_keep_last, stage_take_view, stage_take_note, stage_actor_map_save,
+              stage_take_stop, stage_take_keep_last, stage_take_view, stage_take_note, stage_test_take, stage_take_keep_recent, stage_actor_map_save,
               stage_batch,
               stage_object_set with trial=True only
 You may not:  change the scene for real, save animation, export or rebuild, restart anything, speak in other

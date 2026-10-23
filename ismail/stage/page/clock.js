@@ -25,6 +25,9 @@ export function initClock(ed, live, xrApi, panels) {
   const st = { t: 0, playing: false, rate: 1, auto: false, dirty: false };
   let anim = { span: [0, 30], objects: {}, growth: {} };
   const growers = [];                                           // {root name, uniform}
+  // trails.js redraws a keyed path when keys change; camrec.js holds the object it records off the keys
+  const changed = [], held = new Set();
+  const notify = () => { for (const f of changed) { try { f(); } catch (e) { console.warn('clock change', e); } } };
 
   // ---- keys
   const keysOf = (name) => (anim.objects[name] = anim.objects[name] || []);
@@ -38,7 +41,7 @@ export function initClock(ed, live, xrApi, panels) {
     if (i >= 0) ks[i] = k; else { ks.push(k); ks.sort((a, b) => a.t - b.t); }
     st.dirty = true;
     live.emit('keyed', { name, t: k.t, keys: ks.length });
-    draw();
+    draw(); notify();
     return { name, t: k.t, keys: ks.length };
   }
   // many keys in one command, from values (Film, 2026-10-10: a camera move or an object's path in one go, without
@@ -74,7 +77,7 @@ export function initClock(ed, live, xrApi, panels) {
       for (const [n, m] of Object.entries(interp)) { if (m === 'stop') delete anim.interp[n]; else anim.interp[n] = m; }
     }
     st.dirty = true;
-    apply(); draw();
+    apply(); draw(); notify();
     const keys = Object.fromEntries([...touched].map((n) => [n, anim.objects[n].length]));
     live.emit('keyed', { names: keys, many: list.length });
     return { keyed: list.length, keys, span: anim.span };
@@ -85,7 +88,7 @@ export function initClock(ed, live, xrApi, panels) {
     const before = ks.length;
     anim.objects[name] = t === undefined ? [] : ks.filter((x) => Math.abs(x.t - t) > 1e-3);
     if (!anim.objects[name].length) delete anim.objects[name];
-    st.dirty = true; draw();
+    st.dirty = true; draw(); notify();
     return { deleted: before - (anim.objects[name] || []).length };
   }
   const qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
@@ -104,7 +107,7 @@ export function initClock(ed, live, xrApi, panels) {
     for (const [name, ks] of Object.entries(anim.objects)) {
       if (ks.length < 2) continue;                              // one key holds nothing: the object stays where it is
       const it = ed.byName.get(name);
-      if (!it || (ed.editing && ed.selected === it)) continue;  // never fight the hand that holds it
+      if (!it || (ed.editing && ed.selected === it) || held.has(name)) continue;  // never fight the hand that holds it
       ed.runHome(it);             // saves keep where it was edited to, never the frame the timeline is on (2026-10-12)
       ed.setBlenderWorld(it, sample(ks, st.t, (anim.interp || {})[name]));
     }
@@ -288,7 +291,7 @@ vKoW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     const j = await fetch(`scenes/${encodeURIComponent(scn())}/anim.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (j) anim = { span: j.span || [0, 30], objects: j.objects || {}, growth: j.growth || {}, interp: j.interp || {} };
     patchGrowth();
-    apply();
+    apply(); notify();
     return { keys: Object.keys(anim.objects).length, growers: growers.map((g) => g.name) };
   }
   async function save() {
@@ -319,11 +322,24 @@ vKoW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     if (!anim.objects[c.name]) throw new Error(`${c.name} has no keys`);
     anim.interp = anim.interp || {};
     if (c.mode === 'stop') delete anim.interp[c.name]; else anim.interp[c.name] = c.mode;
-    st.dirty = true; apply(); draw();
+    st.dirty = true; apply(); draw(); notify();
     return { name: c.name, mode: c.mode, keys: anim.objects[c.name].length };
   };
-  live.handlers.anim_clear = (c) => { if (c.name) delete anim.objects[c.name]; else anim.objects = {}; st.dirty = true; draw(); return { cleared: c.name || 'all' }; };
+  live.handlers.anim_clear = (c) => { if (c.name) delete anim.objects[c.name]; else anim.objects = {}; st.dirty = true; draw(); notify(); return { cleared: c.name || 'all' }; };
   live.handlers.timeline = (c) => show(c.show !== false);
   live.handlers.growth = (c) => { anim.growth[c.name] = { t0: c.t0, t1: c.t1 }; st.dirty = true; apply(); return { name: c.name, ...anim.growth[c.name], growers: patchGrowth() }; };
-  return { st, get anim() { return anim; }, key, seek, show, save, load, patchGrowth, bar };
+  // the keys an object has, played back at t with its own mode (null with none)
+  function sampleAt(name, t) {
+    const ks = anim.objects[name];
+    return ks && ks.length ? sample(ks, t, (anim.interp || {})[name]) : null;
+  }
+  // put back a list of keys as they were (camrec.js: a redo or an undo of a recorded move); null removes them
+  function setKeys(name, ks, mode) {
+    if (ks && ks.length) anim.objects[name] = ks.map((k) => ({ ...k })); else delete anim.objects[name];
+    anim.interp = anim.interp || {};
+    if (mode === 'smooth') anim.interp[name] = 'smooth'; else if (mode !== undefined) delete anim.interp[name];
+    st.dirty = true; apply(); draw(); notify();
+  }
+  return { st, get anim() { return anim; }, key, keyMany, keyDelete, setKeys, sampleAt, seek, show, save, load, patchGrowth, bar,
+    onChange: (f) => changed.push(f), hold: (name) => held.add(name), unhold: (name) => { held.delete(name); apply(); } };
 }

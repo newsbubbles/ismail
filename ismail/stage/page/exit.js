@@ -26,12 +26,12 @@ export function initExit(ed, hands, live) {
   }
 
   function update() {
-    const L = hands.state.left, R = hands.state.right;
-    const both = !hands.performing && !!(L && L.f && R && R.f && L.g === 'thumbs_up' && R.g === 'thumbs_up');   // perform.js: gestures off
+    const G = hands.gestures;                           // gestures.js: vr_exit is a locked row (both thumbs up)
+    const both = !hands.performing && !!G.on('vr_exit');   // perform.js: gestures off
     if (!both) { since = 0; card.visible = false; return false; }
     const now = performance.now();
     if (!since) since = now;
-    const k = Math.min(1, (now - since) / HOLD_MS);
+    const k = Math.min(1, (now - since) / G.hold('vr_exit', HOLD_MS));
     ed.camera.getWorldPosition(pos); ed.camera.getWorldDirection(fwd);
     card.position.copy(pos).addScaledVector(fwd, 0.6); card.lookAt(pos);
     card.visible = true; draw(k);

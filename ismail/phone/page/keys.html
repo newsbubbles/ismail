@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0d0b">
+<link rel="icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
+<title>ismail keys</title>
+<!--
+The on-screen keys (live_keys_page): for someone with no MIDI instrument who wants to play a part. Every key is one
+small POST to /api/keys, answered by the live engine itself (this page served by the engine, on this computer) or by
+the phone server, which relays it to the playing engine. The engine feeds them to the 'screen keys' input, which
+live_midi patches like any keyboard. Same look as the phone page (index.html's taste contract): warm black ground,
+Archivo caps, mono chrome, 3px radius, hairlines, no gradients; a lit key is the accent, brighter the harder it was hit.
+-->
+<style>
+:root{
+  --ground:#0e0d0b; --panel:#171612; --panel-2:#1f1d19; --line:#2c2a25; --ink:#efe9dd; --dim:#a8a194;
+  --accent:hsl(293 68% 66%); --accent-deep:hsl(293 40% 18%); --warn:#e2a93b;
+  --ivory:#e4ddd0; --ivory-ink:#5d574d; --ebony:#0b0a09;
+  --u:4px; --r:3px; --press:90ms;
+  --display:'Archivo','Arial Narrow',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--ground)}
+html,body{margin:0;color:var(--ink);font:400 16px/1.4 var(--display);overflow-x:hidden}
+body{padding:calc(env(safe-area-inset-top) + calc(var(--u)*3)) calc(env(safe-area-inset-right) + calc(var(--u)*4))
+     calc(env(safe-area-inset-bottom) + calc(var(--u)*3)) calc(env(safe-area-inset-left) + calc(var(--u)*4));
+     max-width:1280px;margin:0 auto;user-select:none;-webkit-user-select:none}
+.cap{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+button,a.btn{font:700 14px/1.1 var(--display);font-stretch:75%;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-height:48px;padding:0 calc(var(--u)*3);
+  cursor:pointer;touch-action:manipulation;display:inline-flex;align-items:center;justify-content:center;gap:calc(var(--u)*2);
+  text-decoration:none;transition:background var(--press) ease-out,box-shadow var(--press) ease-out}
+button:active,a.btn:active{background:var(--panel-2);box-shadow:inset 0 2px 0 rgba(0,0,0,.65)}
+button svg,a.btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter;flex:none}
+/* the strip: where it is, what it plays, how long a key takes */
+.strip{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*2) calc(var(--u)*3);padding-bottom:calc(var(--u)*3);border-bottom:1px solid var(--line)}
+#back{color:var(--dim);font-size:12px;min-height:40px}
+#back[hidden]{display:none}
+.lamp{display:inline-flex;align-items:center;gap:calc(var(--u)*2);padding:calc(var(--u)*1.5) calc(var(--u)*2.5);border:1px solid var(--line);
+  border-radius:var(--r);font:700 12px/1 var(--display);font-stretch:62%;letter-spacing:.18em;color:var(--dim);white-space:nowrap;flex:none}
+.lamp i{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none}
+.lamp.half{border-color:var(--warn);color:var(--warn)}
+.lamp.half i{background:var(--warn)}
+.lamp.on{border-color:var(--accent);color:var(--accent)}
+.lamp.on i{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+#say{flex:1 1 260px;min-width:0;font-size:16px;line-height:1.3}
+#say b{font-weight:700;font-stretch:85%}
+#lat{flex:none;font-variant-numeric:tabular-nums}
+#lat:empty{display:none}
+/* the controls */
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*2);padding:calc(var(--u)*3) 0}
+.oct{display:flex;align-items:center;gap:calc(var(--u)*2)}
+.oct button{width:56px;padding:0}
+.readout{min-width:64px;text-align:center}
+.readout .cap{display:block;margin-bottom:5px}
+#octv{font:600 20px/1 var(--mono);font-variant-numeric:tabular-nums}
+#sus{margin-left:auto;min-width:132px}
+#sus[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-deep)}
+/* the keyboard */
+#kb{display:flex;flex-direction:column;gap:calc(var(--u)*3);touch-action:none;-webkit-touch-callout:none;overflow:hidden}
+.row{position:relative;width:100%}
+.k{position:absolute;top:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;
+   padding-bottom:10px;overflow:hidden;font:600 11px/1 var(--mono)}
+.k.w{height:100%;background:var(--ivory);color:var(--ivory-ink);border:1px solid var(--ground);border-radius:0 0 var(--r) var(--r);z-index:1}
+.k.b{height:60%;background:var(--ebony);color:var(--dim);border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r) var(--r);z-index:2}
+.k::after{content:'';position:absolute;inset:0;background:var(--accent);opacity:0;pointer-events:none;transition:opacity 60ms linear}
+.k.on::after{opacity:var(--v,.8)}
+.k.mute{opacity:.28}
+.k span{position:relative;z-index:1;pointer-events:none}
+.k .kc{font-size:10px;opacity:.75}
+.k .kc:empty,.k .nm:empty{display:none}
+.hint{display:flex;flex-wrap:wrap;justify-content:space-between;gap:calc(var(--u)*2);margin-top:calc(var(--u)*2)}
+.desk{display:none}
+@media (hover:hover) and (pointer:fine){.desk{display:block}}
+@media not ((hover:hover) and (pointer:fine)){.k .kc{display:none}}   /* computer key caps only where there is a keyboard */
+.help{margin:calc(var(--u)*3) 0 0;color:var(--dim);font-size:14px}
+kbd{font:600 11px/1 var(--mono);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:2px 5px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="strip">
+  <a class="btn" id="back" href="/" hidden><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Phone</a>
+  <span class="lamp" id="lamp"><i></i><span id="lampt">NOT CONNECTED</span></span>
+  <span id="say">Looking for the set...</span>
+  <span class="cap" id="lat"></span>
+</div>
+<div class="controls">
+  <div class="oct">
+    <button id="octdn" aria-label="Octave down"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="readout"><span class="cap">Lowest</span><span id="octv">C3</span></div>
+    <button id="octup" aria-label="Octave up"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
+  <button id="sus" aria-pressed="false">Sustain</button>
+</div>
+<div id="kb"></div>
+<div class="hint">
+  <span class="cap">Top of a key: soft. Bottom: loud.</span>
+  <span class="cap desk" id="kvelv"></span>
+</div>
+<p class="help desk">
+  Computer keys: <kbd>Z</kbd><kbd>S</kbd><kbd>X</kbd><kbd>D</kbd><kbd>C</kbd> ... <kbd>/</kbd> from the lowest C,
+  <kbd>Q</kbd><kbd>2</kbd><kbd>W</kbd><kbd>3</kbd><kbd>E</kbd> ... <kbd>]</kbd> an octave up.
+  <kbd>&larr;</kbd><kbd>&rarr;</kbd> octave, <kbd>&uarr;</kbd><kbd>&darr;</kbd> how hard they play, hold <kbd>Space</kbd> for sustain.
+</p>
+<script>
+'use strict';
+// the computer keyboard, as the stopgap page and FL Studio lay it out: semitones above the lowest C shown
+const MAP = {
+  KeyZ:0, KeyS:1, KeyX:2, KeyD:3, KeyC:4, KeyV:5, KeyG:6, KeyB:7, KeyH:8, KeyN:9, KeyJ:10, KeyM:11,
+  Comma:12, KeyL:13, Period:14, Semicolon:15, Slash:16,
+  KeyQ:12, Digit2:13, KeyW:14, Digit3:15, KeyE:16, KeyR:17, Digit5:18, KeyT:19, Digit6:20, KeyY:21, Digit7:22, KeyU:23,
+  KeyI:24, Digit9:25, KeyO:26, Digit0:27, KeyP:28, BracketLeft:29, Equal:30, BracketRight:31
+};
+const SHOW = {Comma:',', Period:'.', Semicolon:';', Slash:'/', BracketLeft:'[', BracketRight:']', Equal:'='};
+const CAPS = {};
+for (const [code, st] of Object.entries(MAP)) (CAPS[st] = CAPS[st] || []).push(SHOW[code] || code.replace(/^Key|^Digit/, ''));
+const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const BLACK = new Set([1, 3, 6, 8, 10]);
+const $ = (id) => document.getElementById(id);
+const kb = $('kb');
+const sid = Math.random().toString(36).slice(2, 10);
+const fromPhone = new URLSearchParams(location.search).get('from') === 'phone';
+let oct = 0, sus = false, kvel = 100, rows = 1, whites = 15, seq = 0, rtt = null, lastSent = 0, playable = null, st = null;
+const held = new Map();     // pointer or computer key -> the note it holds
+const count = new Map();    // note -> how many fingers and keys hold it (one note-on, one note-off)
+const vel = new Map();      // note -> the velocity it lit with
+const base = () => 48 + 12 * oct;
+const noteName = (n) => NAMES[n % 12] + (Math.floor(n / 12) - 1);
+$('back').hidden = !fromPhone;
+
+// ---- the wire: one small message per key, never waiting on the one before
+let pend = [];
+function queue(ev) {
+  pend.push([++seq, ...ev]);
+  if (pend.length === 1) queueMicrotask(() => { const evs = pend; pend = []; post(evs); });
+}
+async function post(events, keepalive) {
+  const t0 = performance.now();
+  if (events.length) lastSent = t0;
+  try {
+    const r = await fetch('/api/keys', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                        body: JSON.stringify({sid, events}), keepalive: !!keepalive});
+    const j = await r.json();
+    const dt = performance.now() - t0;
+    rtt = rtt === null ? dt : rtt * 0.7 + dt * 0.3;
+    show(j.ok ? j.result : {connected: true, error: j.error || 'the set refused that'});
+  } catch (e) {
+    show(null);
+  }
+}
+function show(s) {
+  st = s;
+  const lamp = $('lamp'), say = $('say');
+  let cls = '', lt = 'NOT CONNECTED', text;
+  if (!s) text = 'Cannot reach the computer playing the set. This page keeps trying.';
+  else if (s.error) { cls = 'half'; lt = 'CONNECTED'; text = s.error; }
+  else if (!s.connected) text = 'No live set is playing on the computer. The keys work as soon as one plays.';
+  else if (!s.patched) { cls = 'half'; lt = 'CONNECTED'; text = 'Connected to the set, but these keys have no sound yet. Ask for one.'; }
+  else {
+    cls = 'on'; lt = 'CONNECTED';
+    const what = esc(String(s.what || 'a sound').replace(/^preset:/, ''));
+    text = s.ready < s.of ? `Connected. Getting <b>${what}</b> ready: ${s.ready} of ${s.of} notes.`
+                          : `Connected, playing <b>${what}</b>.`;
+  }
+  lamp.className = 'lamp ' + cls;
+  $('lampt').textContent = lt;
+  say.innerHTML = text;
+  $('lat').textContent = s && s.patched && rtt !== null ? `KEY TO SOUND ~${Math.round(rtt / 2 + (s.out_ms || 0))} MS` : '';
+  const p = s && s.patched && s.keys ? new Set(s.keys) : null;
+  if (String(p && [...p]) !== String(playable && [...playable])) { playable = p; paintMute(); }
+}
+function esc(t) { return t.replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+// the line stays true while nobody plays: a light check every few seconds (keys never wait on it)
+setInterval(() => { if (!document.hidden && performance.now() - lastSent > 4000) post([]); }, 5000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(true); else post([]); });
+addEventListener('pagehide', () => releaseAll(true));
+addEventListener('blur', () => { if (held.size || sus) releaseAll(); });
+
+// ---- notes
+function noteOn(n, v) {
+  if (n < 0 || n > 127) return;
+  const c = count.get(n) || 0;
+  count.set(n, c + 1);
+  if (c) return;
+  vel.set(n, v);
+  light(n);
+  queue([0x90, n, v]);
+}
+function noteOff(n) {
+  const c = count.get(n) || 0;
+  if (!c) return;
+  if (c > 1) { count.set(n, c - 1); return; }
+  count.delete(n);
+  vel.delete(n);
+  light(n);
+  queue([0x80, n, 0]);
+}
+function setSus(on) {
+  if (on === sus) return;
+  sus = on;
+  $('sus').setAttribute('aria-pressed', String(on));
+  queue([0xB0, 64, on ? 127 : 0]);
+}
+function releaseAll(beacon) {
+  for (const n of held.values()) noteOff(n);
+  held.clear();
+  downs.clear();
+  for (const n of [...count.keys()]) { count.set(n, 1); noteOff(n); }
+  if (sus) setSus(false);
+  if (beacon && pend.length) { const evs = pend; pend = []; post(evs, true); }
+}
+function light(n) {
+  const el = kb.querySelector(`.k[data-n="${n}"]`);
+  if (!el) return;
+  const v = vel.get(n);
+  el.classList.toggle('on', v !== undefined);
+  if (v !== undefined) el.style.setProperty('--v', (0.35 + 0.65 * v / 127).toFixed(2));
+}
+function paintMute() {
+  for (const el of kb.querySelectorAll('.k')) el.classList.toggle('mute', !!playable && !playable.has(+el.dataset.n));
+}
+
+// ---- the keyboard on screen: two rows of an octave on a phone held upright, else one row of 15 to 22 white keys
+function layout() {
+  const W = kb.clientWidth || innerWidth;
+  rows = innerHeight > innerWidth && W < 600 ? 2 : 1;
+  whites = rows === 2 ? 7 : Math.max(15, Math.min(22, Math.floor(W / 40)));
+  kb.innerHTML = '';
+  for (let r = rows - 1; r >= 0; r--) {           // the higher octave on top, as music reads
+    const row = document.createElement('div');
+    row.className = 'row';
+    const notes = [], ws = [];
+    for (let n = base() + 12 * r; ws.length < whites; n++) {
+      notes.push(n);
+      if (!BLACK.has(n % 12)) ws.push(n);
+    }
+    const w = 100 / whites;
+    for (const n of notes) {
+      const black = BLACK.has(n % 12);
+      const el = document.createElement('div');
+      el.className = 'k ' + (black ? 'b' : 'w');
+      el.dataset.n = n;
+      const wi = ws.indexOf(black ? n - 1 : n);
+      el.style.left = (black ? (wi + 1) * w - w * 0.31 : wi * w) + '%';
+      el.style.width = (black ? w * 0.62 : w) + '%';
+      const kc = (CAPS[n - base()] || []).join(' ');
+      el.innerHTML = `<span class="kc">${esc(kc)}</span><span class="nm">${n % 12 === 0 ? noteName(n) : ''}</span>`;
+      row.appendChild(el);
+    }
+    kb.appendChild(row);
+  }
+  size();
+  for (const n of vel.keys()) light(n);
+  paintMute();
+  $('octv').textContent = noteName(base());
+}
+function size() {
+  const top = kb.getBoundingClientRect().top + scrollY;
+  const below = document.querySelector('.hint').offsetHeight + 24 +
+                (matchMedia('(hover:hover) and (pointer:fine)').matches ? document.querySelector('.help').offsetHeight + 12 : 0);
+  const gap = 12 * (rows - 1);
+  const h = Math.max(120, Math.min(rows === 2 ? 260 : 340, (innerHeight - top - below - gap) / rows));
+  for (const row of kb.children) row.style.height = Math.round(h) + 'px';
+}
+let relay = 0;
+addEventListener('resize', () => { clearTimeout(relay); relay = setTimeout(layout, 120); });
+
+// ---- touch and mouse: every finger is its own key; sliding moves the note to the key under it
+function keyAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  return el && el.closest ? el.closest('#kb .k') : null;
+}
+function velAt(k, y) {                           // higher on the key = softer
+  const r = k.getBoundingClientRect();
+  const f = Math.max(0, Math.min(1, (y - r.top) / r.height));
+  return Math.max(1, Math.min(127, Math.round(22 + 105 * f)));
+}
+function press(id, k, y) {
+  const n = +k.dataset.n;
+  held.set(id, n);
+  noteOn(n, velAt(k, y));
+}
+const downs = new Set();                        // pointers pressed on the keys, sounding or slid off them
+kb.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  const k = keyAt(e.clientX, e.clientY);
+  if (!k) return;
+  e.preventDefault();
+  const id = 'p' + e.pointerId;
+  if (held.has(id)) noteOff(held.get(id));
+  downs.add(id);
+  press(id, k, e.clientY);
+});
+addEventListener('pointermove', (e) => {
+  const id = 'p' + e.pointerId;
+  if (!downs.has(id)) return;
+  const k = keyAt(e.clientX, e.clientY);
+  if (k && +k.dataset.n === held.get(id)) return;
+  if (held.has(id)) { noteOff(held.get(id)); held.delete(id); }
+  if (k) press(id, k, e.clientY);
+});
+const lift = (e) => {
+  const id = 'p' + e.pointerId;
+  downs.delete(id);
+  if (!held.has(id)) return;
+  noteOff(held.get(id));
+  held.delete(id);
+};
+addEventListener('pointerup', lift);
+addEventListener('pointercancel', lift);
+kb.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ---- the controls and the computer keyboard
+function setOct(d) {
+  const o = Math.max(-2, Math.min(3, oct + d));
+  if (o === oct) return;
+  for (const n of held.values()) noteOff(n);   // held keys end; the pedal stays as it is
+  held.clear();
+  oct = o;
+  layout();
+}
+function setKvel(v) { kvel = Math.max(10, Math.min(127, v)); $('kvelv').textContent = `Computer keys play at ${kvel}`; }
+$('octdn').onclick = () => setOct(-1);
+$('octup').onclick = () => setOct(1);
+$('sus').onclick = () => setSus(!sus);
+setKvel(100);
+addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') { e.preventDefault(); setOct(e.code === 'ArrowLeft' ? -1 : 1); return; }
+  if (e.code === 'ArrowUp' || e.code === 'ArrowDown') { e.preventDefault(); setKvel(kvel + (e.code === 'ArrowUp' ? 10 : -10)); return; }
+  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) setSus(true); return; }
+  if (!(e.code in MAP)) return;
+  e.preventDefault();
+  const id = 'c' + e.code;
+  if (e.repeat || held.has(id)) return;
+  const n = base() + MAP[e.code];
+  held.set(id, n);
+  noteOn(n, kvel);
+});
+addEventListener('keyup', (e) => {
+  if (e.code === 'Space') { setSus(false); return; }
+  const id = 'c' + e.code;
+  if (!held.has(id)) return;
+  noteOff(held.get(id));
+  held.delete(id);
+});
+
+layout();
+post([]);
+if (document.fonts) document.fonts.ready.then(size);
+</script>
+</body>
+</html>

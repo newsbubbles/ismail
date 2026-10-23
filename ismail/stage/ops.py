@@ -104,6 +104,77 @@ def stage_stop(port: int = None, scenes: str = None) -> str:
     return '; '.join(out)
 
 
+def _pages_in_vr(rec):
+    """The scenes on this server whose page is in VR now (a fresh page whose state says xr, or presence's headset)."""
+    out = []
+    try:
+        for p in link.http(rec, 'live', timeout=5):
+            if p.get('age_s', 1e9) <= link.PAGE_FRESH_S and (link.page_state(rec, p['scene']).get('state') or {}).get('xr'):
+                out.append(p['scene'])
+        pr = link.http(rec, 'live/presence', timeout=5)
+        if pr.get('in_vr') and pr.get('scene') and pr['scene'] not in out:
+            out.append(pr['scene'])
+    except (OpError, KeyError, TypeError):
+        pass                                               # a server that does not answer has no page to protect
+    return out
+
+
+@op(mutates=True)
+def stage_restart(port: int = None, scenes: str = None, now: bool = False, who: str = None) -> str:
+    """Stop the stage server and start it again the way it was started (the same scenes folder, port, host, footage
+    folder and esbuild), then wait until it answers. Use it after changing the server's code; never kill the
+    process by hand (Stop-Process, taskkill, kill), which loses the registry and the listeners. Picks the server by
+    port or scenes, or the only one. Refused while a page on that server is in VR, unless now=True: the person hears
+    "<who> wants to restart the room server; it waits until you leave VR" in the headset, and you wait for vr_exit
+    (stage_listen or stage_events) and call again, or ask them (stage_ask) and pass now=True on a yes. who= your name
+    as the headset shows it. Every listener reconnects by itself (stage_listen again; the ear does it)."""
+    srv = link.servers()
+    if scenes:
+        d = Path(scenes).resolve()
+        srv = [r for r in srv if Path(r['scenes']) == d]
+    elif port:
+        srv = [r for r in srv if int(r['port']) == int(port)]
+    if not srv:
+        raise OpError('no matching stage server is running; stage_start(scenes="<song>/video/vr/scenes") starts one')
+    if len(srv) > 1:
+        raise OpError('several stage servers run: pass port= (' + ', '.join(f'{r["port"]}: {r["scenes"]}' for r in srv) + ')')
+    rec = srv[0]
+    start = rec.get('start')
+    if (start or {}).get('tls') or rec.get('scheme') == 'https':
+        raise OpError(f'the stage on port {rec["port"]} runs https (--tls), which stage_start cannot start; restart it '
+                      'by hand the way it was started')
+    in_vr = _pages_in_vr(rec)
+    if in_vr and not now:
+        line = f'{who or "An agent"} wants to restart the room server; it waits until you leave VR.'
+        try:
+            link.page_cmd(in_vr[0], 'say', {'text': line, 'seconds': 8, 'from': who}, timeout=15)
+            told = 'they were told in the headset'
+        except Exception:                                  # noqa: BLE001  (the page did not answer: the refusal stands)
+            told = 'the headset did not take the line'
+        raise OpError(f'the person is in VR in {", ".join(in_vr)}; not restarted ({told}). Wait for vr_exit '
+                      f'(stage_listen or stage_events) and call stage_restart again, or ask them with '
+                      f'stage_ask(scene="{in_vr[0]}", text="Restart the room server now?") and on a yes call '
+                      f'stage_restart(port={rec["port"]}, now=True)')
+    if start is None:                                      # recorded by a server from before start args were kept
+        start = {'host': rec['host'] if rec.get('host') not in (None, '127.0.0.1') else None}
+        note = '; the old server did not record footage= or esbuild=, so they are the defaults now'
+    else:
+        note = ''
+    stopped = stage_stop(port=int(rec['port']))
+    started = stage_start(scenes=rec['scenes'], port=int(rec['port']), host=start.get('host'),
+                          footage=start.get('footage'), esbuild=start.get('esbuild'))
+    health = '; /health did not answer within 10 s (stage_status)'
+    for _ in range(20):                                    # stage_start waited for /stage; wait for /health too
+        try:
+            h = link.http(next(r for r in link.servers() if int(r['port']) == int(rec['port'])), 'health', timeout=5)
+            health = f'; health: {"well" if h.get("ok") else "UNWELL"}, pid {h.get("pid")}'
+            break
+        except (OpError, StopIteration):
+            time.sleep(0.5)
+    return (f'restarted the stage on port {rec["port"]} for {rec["scenes"]}'
+            + (' (the person was in VR: now=True)' if in_vr else '') + f'{note}\n{stopped}\n{started}{health}')
+
+
 @op()
 def stage_status(scene: str = None) -> str:
     """The running stage servers, their scenes, and which pages are live (scene, mode, seconds since the page last
@@ -201,7 +272,10 @@ def stage_busy(who: str, text: str = '', minutes: float = None, port: int = None
     ("rendering Dell's drums, in line behind 2 jobs, about 5 min"). who= your name as the headset shows it (the
     stage_listen who). The headset shows it beside the "heard by" receipts, and while it runs (minutes, default 10, up
     to 60) a note you have not answered is not called stuck. Set it before anything that can wait on something you do
-    not control (a queue, the GPU, the network); text='' clears it when you are free."""
+    not control (a queue, the GPU, the network); text='' clears it when you are free. A line naming a private term
+    is refused (ismail.guards)."""
+    from .. import guards
+    guards.check_private(text, who, where='the stage')
     rec = link.server_for(port=port)
     got = link.http(rec, 'live/busy', {'who': who, 'text': text, 'minutes': minutes})
     b = got.get('busy')
@@ -246,20 +320,168 @@ def stage_cmd(scene: str, type: str, fields: dict = None, timeout: float = 30) -
 
 
 @op(mutates=True)
-def stage_world(scene: str, scenes: str = None, world: dict = None) -> str:
+def stage_world(scene: str, scenes: str = None, world: dict = None, update: dict = None) -> str:
     """Read a scene's world.json (who plays whom, facings, partners, floor, keep-out boxes, spawn, credits, build),
-    or with world= write it (checked first; the old one kept in the scene's history/). scenes= the scenes folder when
-    no server runs. The page reads it again on its next load or scene switch."""
+    or change it. update= changes only the keys it names and keeps the rest of the file: update={"floor": 0.1}, or
+    update={"actors": {...}} (a key's value is replaced whole, so give the whole actors map; null removes the key,
+    which goes back to its default). world= replaces the whole file: every key left out goes back to its default
+    (load sets, props, faces, grab, gestures and the build are lost), so use update= to change a key. Not both.
+    Either is checked first, and the old file is kept in the scene's history/. scenes= the scenes folder when no
+    server runs. An open page takes it at once (page command world_reload: facings, partners, floor, grab and
+    actors apply now; unloaded sets, props, faces and keep-out boxes are redone; the reply lists what changed and
+    what was redone); with no page open it applies at the next load. Never edit world.json by hand."""
     d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
     if not (d / scene).is_dir():
         raise OpError(f'no scene {scene!r} in {d}')
-    if world is None:
+    if world is not None and update is not None:
+        raise OpError('give update= (only the keys to change) or world= (the whole file), not both')
+    if world is None and update is None:
         return json.dumps(worldmod.load_world(d, scene), indent=1)
+    if update is not None:
+        if not isinstance(update, dict) or not update:
+            raise OpError('update= is an object of the keys to change, e.g. {"floor": 0.1}; stage_world(scene) reads '
+                          'the keys there are')
+        f = worldmod.world_path(d, scene)
+        try:
+            cur = json.loads(f.read_text(encoding='utf-8')) if f.is_file() else {}
+        except ValueError as e:
+            cur = e
+        if not isinstance(cur, dict):
+            raise OpError(f'{f} is not a JSON object ({cur}); stage_world(world=...) writes a whole new one (the broken '
+                          'one is kept in history/)')
+        world ={k: v for k, v in {**cur, **update}.items() if not (k in update and update[k] is None)}
     try:
         f = worldmod.save_world(d, scene, world)
     except ValueError as e:
         raise OpError(str(e))
-    return f'wrote {f}: ' + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': '))
+    head = f'updated {", ".join(update)} in {f}: ' if update is not None else f'wrote {f}: '
+    return head + json.dumps(worldmod.load_world(d, scene), separators=(', ', ': ')) + _world_now(scene)
+
+
+def _world_now(scene):
+    """Tell an open page world.json changed (best effort: with no page open it applies at the next load). In a
+    stage_batch the command joins the batch's page commands, in order, and the batch replies for it."""
+    if link.pending() is not None:
+        link.page_cmd(scene, 'world_reload', {}, timeout=30)
+        return ''
+    try:
+        r = link.page_cmd(scene, 'world_reload', {}, timeout=30)
+        return '\nthe page: ' + (r if isinstance(r, str) else json.dumps(r, separators=(', ', ': ')))
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return '\nthe page takes it at its next load'
+
+
+# what stage_asset_install can put in a scene: kind -> (where it goes, the file types it takes, the page command
+# that picks it up on an open page, or None)
+ASSET_KINDS = {
+    'scene': ('scene.glb', ('.glb',), 'reload'),
+    'manifest': ('manifest.json', ('.json',), 'reload'),
+    'actor': ('actors/<name>.glb (in the scene world.json "assets" names, else this one)', ('.glb',), None),
+    'tree': ('trees/tree_<k>.glb or trees/tree_<k>.json', ('.glb', '.json'), 'trees_reload'),
+}
+
+
+def _keep_in_history(f, hdir, prefix=''):
+    """Move a scene file into its scene's history/ under a time stamp (the save_world idiom); where it went."""
+    hdir.mkdir(exist_ok=True)
+    stamp = time.strftime('%Y%m%d_%H%M%S')
+    to = hdir / f'{prefix}{f.stem}_{stamp}{f.suffix}'
+    n = 2
+    while to.exists():
+        to = hdir / f'{prefix}{f.stem}_{stamp}_{n}{f.suffix}'
+        n += 1
+    f.replace(to)
+    return to
+
+
+@op(mutates=True)
+def stage_asset_install(scene: str, file: str, kind: str, name: str = None, scenes: str = None) -> str:
+    """Put a file into a live scene where the stage reads it (never cp, Copy-Item or a script into scenes/). kind:
+    "scene" (scene.glb, a new export of the room), "manifest" (manifest.json, its piece list), "actor" (a body,
+    actors/<name>.glb; name= defaults to the file's name; a derived scene's bodies go to its world.json "assets"
+    scene), "tree" (trees/tree_<k>.glb or its tree_<k>.json; name= tree_<k>). A prop is not a file: it is a node of
+    scene.glb, pinned with stage_prop_pin. A file already there is kept in the scene's history/ (nothing is deleted).
+    scenes= the scenes folder when no server runs. An open page takes it best effort: scene and manifest reload the
+    room (page command reload; the page also does it by itself when both files changed), a tree reloads the trees
+    (trees_reload); a body is read when a person is first cast to it (stage_world update={"actors": {...}}), and a
+    body the page already showed changes at the next page load. In VR a room reload is felt: ask first (stage_ask)."""
+    import shutil
+    if kind not in ASSET_KINDS:
+        raise OpError(f'kind is one of {", ".join(ASSET_KINDS)} (got {kind!r}); a prop is a node of scene.glb, not a file '
+                      '(stage_prop_pin pins it to a person)')
+    where, exts, page = ASSET_KINDS[kind]
+    src = Path(file).expanduser()
+    if not src.is_file():
+        raise OpError(f'no file {src}; give file= the path of the {"/".join(exts)} to install')
+    if src.suffix.lower() not in exts:
+        raise OpError(f'a {kind} is a {" or ".join(exts)} file ({where}); {src.name} is not')
+    if src.suffix.lower() == '.glb':
+        with open(src, 'rb') as fh:
+            if fh.read(4) != b'glTF':
+                raise OpError(f'{src} is not a binary glTF (it does not start with "glTF"); export it as .glb')
+    else:
+        try:
+            ok = isinstance(json.loads(src.read_text(encoding='utf-8')), dict)
+        except (ValueError, UnicodeDecodeError):
+            ok = False
+        if not ok:
+            raise OpError(f'{src} is not a JSON object; a {kind} file must be one')
+    d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+    # _preflight: stage_preflight's own scratch scene (hidden names start with _; it hot-swaps its room there)
+    if not (worldmod.NAME_OK(scene) or scene == '_preflight') or not (d / scene).is_dir():
+        raise OpError(f'no scene {scene!r} in {d} (stage_scenes or stage_status lists them; stage_scene_new makes one)')
+    if kind in ('scene', 'manifest'):
+        if name:
+            raise OpError(f'name= is for an actor or a tree; a {kind} is always {where}')
+        home, target, prefix = d / scene, d / scene / where, ''
+    elif kind == 'actor':
+        name = name or src.stem
+        if not worldmod.NAME_OK(name):
+            raise OpError(f'name {name!r}: a body name is letters, digits, _ and - only (it is what world.json actors names)')
+        try:
+            home = d / (worldmod.load_world(d, scene).get('assets') or scene)
+        except ValueError as e:
+            raise OpError(str(e))
+        if not home.is_dir():
+            raise OpError(f'{scene} takes its bodies from {home.name!r} (world.json assets), which is not a scene in {d}')
+        target, prefix = home / 'actors' / f'{name}.glb', 'actors_'
+    else:
+        name = name or src.stem
+        import re
+        if not re.fullmatch(r'tree_([1-9]|1[0-9]|2[0-4])', name):
+            raise OpError(f'name {name!r}: a tree is tree_<k>, k from 1 to 24 (the page loads trees/tree_1 to tree_24)')
+        home, target, prefix = d / scene, d / scene / 'trees' / f'{name}{src.suffix.lower()}', 'trees_'
+    if target.exists() and target.resolve() == src.resolve():
+        raise OpError(f'{src} is already that file in the scene; install a new copy from elsewhere')
+    target.parent.mkdir(exist_ok=True)
+    kept = None
+    try:
+        if target.exists():
+            kept = _keep_in_history(target, home / 'history', prefix)
+        shutil.copy2(src, target)
+    except OSError as e:
+        if kept is not None and kept.exists():
+            try:
+                kept.replace(target)                       # put the old one back
+            except OSError:
+                pass
+        raise OpError(f'could not install {src.name} into {target} ({e}); the file may be open in another program: '
+                      'try again in a moment')
+    out = (f'installed {src.name} as {target.relative_to(d)} ({target.stat().st_size} bytes)'
+           + (f'; the old one is in {kept.relative_to(d)}' if kept else ''))
+    if kind == 'actor':
+        if home.name != scene:
+            out += f' ({scene} takes its bodies from {home.name})'
+        return out + ('; the page reads a body when a person is first cast to it (stage_world update={"actors": '
+                      '{...}}), and a body it already showed changes at the next page load')
+    if link.pending() is not None:
+        link.page_cmd(scene, page, {}, timeout=30)
+        return out
+    try:
+        r = link.page_cmd(scene, page, {}, timeout=30)
+        return out + '\nthe page: ' + (r if isinstance(r, str) else json.dumps(r, separators=(', ', ': ')))
+    except Exception as e:                                 # noqa: BLE001  (no page open, an older page, a reload running)
+        return out + f'\nthe page takes it at its next load ({str(e)[:160]})'
 
 
 def _set_members(d, scene, items):
@@ -487,6 +709,7 @@ def stage_note(scenes: str, title: str, level: str = 'normal') -> str:
 
 
 from . import ops_page  # noqa: E402,F401  (registers the page command ops)
+from . import preflight  # noqa: E402,F401  (registers stage_preflight)
 
 
 @op()
@@ -601,6 +824,52 @@ def stage_take_note(scene: str, take: str, label: str = None, note: str = None, 
     except FileNotFoundError:
         raise OpError(f'no take {take!r} in {scene}; stage_takes lists them')
     return f"{take}: label {m.get('label')!r}, {len(m.get('notes') or [])} notes"
+
+
+@op(mutates=True)
+def stage_test_take(scene: str, ask: str, name: str, seconds: float = 15, countdown: float = 4, sender: str = None,
+                    voice: bool = True) -> str:
+    """Ask the person in VR to act something out for a test, and record it (the user, 2026-10-15: "prompt me for a
+    take while I'm in there, start it and then I act it out, then you take that and roll with it"). Says the ask (spoken
+    when voice=True, as sender) with "Start when you see Go.", waits `countdown` seconds after the line, records a take
+    named test_<name> for `seconds` (up to 120) under a "Go." caption (shown, not spoken into the take), says it is done, and labels the take "test <name>"
+    with the ask as a note, so stage_takes(query=<name>) finds it. The take's meta.json gets kind "test" and the ask.
+    Replay it offline with stage_take_replay(scene, take=<id>) as often as a test needs. Frames are only sampled while
+    the page is in VR: a take with 0 frames says so. Write the ask as one thing to do, e.g. "Pick up the bottle on table
+    two and put it on the bar." Replies the take id, frames and seconds."""
+    from . import takes
+    from .ops_page import stage_say
+    seconds = max(1.0, min(float(seconds), 120.0))
+    slug = ''.join(c if c.isalnum() else '_' for c in name.strip().lower()).strip('_') or 'take'
+    stage_say(scene, f'{ask} Start when you see Go.', seconds=countdown + 6, voice=voice, sender=sender, aloud=True)
+    time.sleep(countdown + (0.35 * len(ask.split()) if voice else 0))   # the line is queued, not yet spoken
+    e = link.send(scene, 'take_start', {'name': f'test_{slug}'}, timeout=30)
+    res = (e.get('result') if isinstance(e, dict) else None) or {}
+    take = res.get('id')
+    if not take:
+        raise OpError(f'the take did not start: {e}')
+    stage_say(scene, 'Go.', seconds=2, sender=sender)          # recording: shown, not spoken into the take
+    time.sleep(seconds)
+    e = link.send(scene, 'take_stop', {}, timeout=600)
+    got = (e.get('result') if isinstance(e, dict) else None) or {}
+    stage_say(scene, 'Got it, thanks.', seconds=3, sender=sender)
+    d = _scene_dir(scene) / 'takes' / take
+    for _ in range(20):                                    # the page posts meta.json at the start; wait for it
+        if (d / 'meta.json').is_file():
+            break
+        time.sleep(0.25)
+    if not (d / 'meta.json').is_file():
+        raise OpError(f'take {take} has no meta.json on the server; stage_takes shows what landed')
+    takes.note(_scene_dir(scene), take, label=f'test {name}', text=f'asked: {ask}', at=0, by=sender or 'agent')
+    takes._write_meta(d, {'kind': 'test', 'ask': ask})
+    frames = got.get('frames')
+    out = f'{take}: {frames if frames is not None else "?"} frames, {got.get("seconds", "?")} s, labelled "test {name}"'
+    if not frames:
+        out += ('\nno frames: the page was not in VR while it recorded (takes sample only in VR); ask again when '
+                'stage_presence shows the person in the headset')
+    else:
+        out += f'\nreplay it: stage_take_replay(scene={scene!r}, take={take!r})'
+    return out
 
 
 @op(mutates=True)
@@ -903,6 +1172,91 @@ def _words_of(words):
     return words
 
 
+def _gesture_dir(scene, scenes):
+    return _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
+
+
+def _gestures_now(scene):
+    """Tell an open page the gesture map changed (best effort: with no page open it applies at the next load)."""
+    try:
+        r = link.page_cmd(scene, 'gestures_reload', {}, timeout=20)
+    except Exception:                                      # noqa: BLE001  (no page open, or an older page)
+        return 'the page takes it at its next load'
+    return '' if r == link.QUEUED else 'the page has it now'
+
+
+def _gesture_lines(scenes, scene):
+    from . import gestures as gm
+    rows, coll = gm.resolve(gm.layers(scenes, scene))
+    out = []
+    for intent, r in rows.items():
+        tag = ', '.join(x for x in (r['owner'], r.get('lock'), 'off' if r.get('off') else None) if x)
+        out.append(f'{intent}: {gm.describe(r)} ({gm.WHERE[r["where"]]}) means {r["means"]} [{tag}]')
+    return out + [c if c.startswith('IGNORED') else f'COLLISION {c}' for c in coll]
+
+
+@op()
+def stage_gestures(scene: str, scenes: str = None) -> str:
+    """The gesture map in force in VR for this scene: each intent (what a gesture means), the hand shape and hand that
+    do it, how long it is held, where it is read, and who owns the row (engine, person, scene; locked and fixed rows
+    are the engine's), then any collisions and any saved value IGNORED because it cannot be used (the engine's value
+    stands). Shapes: pinch, ok, pinch_middle, thumbs_up, thumbs_down, fist, open, gun,
+    point, phone, peace, rock. Rebind with stage_gesture_set; stage_gesture_reset goes back to the defaults."""
+    return '\n'.join(_gesture_lines(_gesture_dir(scene, scenes), scene))
+
+
+@op(mutates=True)
+def stage_gesture_set(scene: str, intent: str, shape: str = None, hand: str = None, hold_ms: float = None,
+                      off: bool = None, owner: str = 'person', scenes: str = None) -> str:
+    """Bind a gesture to an intent in the VR gesture map (stage_gestures lists them): shape (a hand shape), hand
+    (left, right, either, both at once), hold_ms (held this long before it acts), off=True switches the intent off.
+    owner="person" (default) is the person's own map and follows them into every scene; owner="scene" is this scene's
+    rows (world.json gestures), which the person's rows win over. A rebind that would make two intents share a shape
+    where both are read is refused, naming the row it collides with. Locked rows (vr_exit, stop, voice_note) never
+    change; fixed rows (travel, frame_shot, select, hold) are wired to how the shape moves. The page takes it live."""
+    from . import gestures as gm
+    d = _gesture_dir(scene, scenes)
+    lay = gm.layers(d, scene)
+    try:
+        rows = gm.check_binding(lay, owner, intent, shape=shape, hand=hand, hold_ms=hold_ms, off=off)
+    except ValueError as e:
+        raise OpError(str(e))
+    f = _gesture_save(d, scene, owner, rows)
+    r, _ = gm.resolve({**lay, owner: rows})
+    return f'{intent}: {gm.describe(r[intent])}{" (off)" if r[intent].get("off") else ""}, {owner} row, saved in {f}; ' + _gestures_now(scene)
+
+
+def _gesture_save(d, scene, owner, rows):
+    from . import gestures as gm
+    if owner == 'person':
+        return gm.save_person(rows)
+    w = worldmod.load_world(d, scene)
+    w['gestures'] = rows
+    try:
+        return worldmod.save_world(d, scene, w)
+    except ValueError as e:
+        raise OpError(str(e))
+
+
+@op(mutates=True)
+def stage_gesture_reset(scene: str, intent: str = None, owner: str = 'person', scenes: str = None) -> str:
+    """Back to the engine's gesture for one intent, or for every intent with no intent given, in the person's own map
+    (owner="person") or this scene's rows (owner="scene"). The page takes it live."""
+    from . import gestures as gm
+    if owner not in gm.LAYERS:
+        raise OpError(f'owner is one of {", ".join(gm.LAYERS)}')
+    d = _gesture_dir(scene, scenes)
+    rows = dict(gm.layers(d, scene)[owner])
+    if intent is not None and intent not in rows:
+        raise OpError(f'the {owner} rows do not set {intent}' + (f' (they set {", ".join(rows)})' if rows else ' (they set nothing)'))
+    gone = [intent] if intent else list(rows)
+    for k in gone:
+        rows.pop(k)
+    f = _gesture_save(d, scene, owner, rows)
+    return f'{owner} rows: reset {", ".join(gone) or "nothing (none were set)"}; saved in {f}; ' + _gestures_now(scene)
+
+
+
 @op(mutates=True)
 def stage_face(scene: str, person: str, at: float = None, audio: str = None, take: str = None, start: float = 0.0,
                end: float = None, words=None, transcribe: bool = False, clear: bool = False, file: str = None,
@@ -1029,8 +1383,8 @@ def _rest_now(scene, person):
         return '; the page shows it at its next load'
 
 
-NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_listen', 'stage_busy', 'stage_scene_export', 'stage_scene_new',
-                'stage_scene_go'}
+NOT_IN_BATCH = {'stage_batch', 'stage_start', 'stage_stop', 'stage_restart', 'stage_listen', 'stage_busy', 'stage_scene_export',
+                'stage_scene_new', 'stage_scene_go'}
 
 
 @op(mutates=True)
@@ -1043,7 +1397,7 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
     the batch: the scene folder's top-level .json files that the ops here changed (world.json and the like) go back
     to what they were; takes, performances and voice files are not put back, and what the page already did stays
     (the page cannot roll back; the reply says what ran). Not in a batch: stage_batch, stage_start,
-    stage_stop, stage_listen, stage_busy, stage_scene_export, stage_scene_new, stage_scene_go. Replies one line per op:
+    stage_stop, stage_restart, stage_listen, stage_busy, stage_scene_export, stage_scene_new, stage_scene_go. Replies one line per op:
     [i] op: its answer."""
     import inspect
     from ..api import OPS
@@ -1121,6 +1475,7 @@ def stage_batch(scene: str, ops: list, stop_on_error: bool = True) -> str:
             if on_page:
                 queued.append((i, name))
                 continue
+            queued.extend((i, f'{name} (page)') for _ in range(link.pending() or 0))   # page commands it sent
             note_changes()
             out.append(f'[{i}] {name}: {r}')
         if not (failed and stop_on_error):
@@ -1162,6 +1517,11 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     run once before the first frame, e.g. [{"type": "actor_play", "person": "body_a", "take": "t1", "at_music": 0},
     {"type": "sky", "mode": "night"}] (per-shot overrides; the scene files are not changed). Every load set is in
     the shot unless sets=False (setup can unload one: {"type": "load_set", "name": ..., "loaded": false}).
+    A setup command with "at_song": <song seconds> waits for that frame and runs just before it is drawn, e.g.
+    {"type": "behaviour_run", "object": "light_switch", "at_song": 255.0} (one at or before t0 runs at frame 0).
+    {"type": "screen_key", "material": "screen", "color": "#00ff00"} (captures only) draws a material flat and unlit
+    in a key colour so a comp in post finds what covers it exactly ("object": instead of "material": that object's
+    one material; default material "screen"); "color": "off" puts it back, e.g. timed with at_song.
     audio: the song file, cut to t0..t1 under the video. Out: <scene>/captures/<job>/capture.mp4 (H.264, 4:2:0), frames/f_00000.png with
     keep_frames (or video=False)."""
     import re
@@ -1204,6 +1564,15 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     for c in setup or []:
         if not isinstance(c, dict) or not c.get('type'):
             raise OpError('setup is a list of live commands: {"type": "actor_play", ...}')
+        if c.get('at_song') is not None:
+            if isinstance(c['at_song'], bool) or not isinstance(c['at_song'], (int, float)):
+                raise OpError(f'setup {c["type"]}: at_song is song seconds (got {c["at_song"]!r})')
+            if c['at_song'] >= t1:
+                raise OpError(f'setup {c["type"]}: at_song {c["at_song"]:g} is after the shot ({t0:g} to {t1:g} s), so it would never run')
+        if c['type'] == 'screen_key':
+            col = c.get('color', '#00ff00')
+            if not (col == 'off' or (isinstance(col, str) and re.match(r'^#[0-9A-Fa-f]{6}$', col))):
+                raise OpError(f'screen_key color is "#rrggbb" or "off" (got {col!r})')
     job_id = name or time.strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:4]
     if not re.match(r'^[A-Za-z0-9_\-]+$', job_id):
         raise OpError('name: letters, digits, _ and - only')

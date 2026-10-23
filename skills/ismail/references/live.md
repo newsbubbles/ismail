@@ -51,8 +51,8 @@ How fast you answer depends on what the person is doing:
 - **A jam is threaded.** The person plays parts in (takes: voice notes, recordings) and you turn them into loops.
   They lead; you are the DAW. The main thread answers everything they send within about a minute, before any long
   work, even if the answer is only "got it, it goes in at the next loop". Any work longer than a couple of minutes
-  (fixing a transcription, sync, sound matching, levels) goes to a helper (a subagent, or a second session when
-  your harness has no helpers) with full context: the song folder, the take, what the person said, and what done
+  (fixing a transcription, sync, sound matching, levels) goes to a helper (`helpers.md`; a second session when
+  your harness has none) with full context: the song folder, the take, what the person said, and what done
   looks like. The main thread keeps listening and talking, and says when the helper's result goes in.
 
 ### In a jam
@@ -100,7 +100,11 @@ nearest proven instrument and name it.
 
 **First sound within minutes.** Open with a short arc built from proven parts, then build the later sections while it
 plays and the audience reacts. The same blues set spent 40 minutes preparing seven eras before the user heard a
-note, and one sentence of feedback condemned all of it.
+note, and one sentence of feedback condemned all of it. Put a known song on air first (`live_start`, then
+`live_load` straight away) and only then start helpers: an electro set that spawned five helpers before any sound
+had the person waiting 10 minutes. Aim for music within about 2 minutes of
+the ask. After the first clip, check that the heard bar moves: a Bluetooth speaker that went to sleep plays
+nothing while `live_status` says STALLED, so tell the person at once ("tap the speaker to wake it").
 
 **Never downgrade in silence.** When a constraint forces a worse sound (a voice that renders too slowly for the
 set, a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that voice, a
@@ -130,10 +134,10 @@ camera, facial expression categories); treat it the same way.
   context reset once missed six of the person's notes in 36 minutes. `phone.md`, "Watching the phone", has the rest.
 - **Read the room.** When the audience is into it, lean in: keep the feel and add an element or two, build, take
   it down, drop. When it goes flat or repetitive, move on: a switch-up, a breakdown, a new song.
-- **Think in energy, not song form.** Bring elements in over time (a percussion layer, 808 slides, string stabs,
-  a riser), strip them for a breakdown (drums and bass out, filter the keys down, a snare roll into the last
-  bar), then drop with more than before (double-time hats, the hook instrument). Every 16 to 32 bars something
-  should change.
+- **In club and electronic sets, think in energy, not song form.** Bring elements in over time (for example a
+  percussion layer, 808 slides, string stabs, a riser), strip them for a breakdown (drums and bass out, filter
+  the keys down, a snare roll into the last bar), then drop with more than before (double-time hats, the hook
+  instrument). Something changing every 16 to 32 bars is a common pace there; other styles move at their own.
 - **Small edits by default.** Steer with one-element changes between bigger moves: `live_track(volume_db=)`,
   `live_fx` sweeps, `{track, stop: true}`, a one-bar roll or fill clip (`loop: 0`), one part's new pattern.
 - **Queue a runway before every question.** Whatever is queued loops while the user answers, and answers can
@@ -157,17 +161,20 @@ began. When a new part must line up with a 16-bar phrase that started on bar 37,
 
 ### Reading the audience
 
-Learned from a one-hour set steered by one listener; the same reading applies to any audience feed.
+Learned from a one-hour set steered by one listener. These are what that listener responded to: examples to test
+against your own listener's notes, not rules for every set.
 
 - **They judge change over time, not static balance.** "It didn't really change much" was about contrast, not the
   mix. A drop lands when the bar before it is emptied: the one that worked measured -27 dB with no sub in the bar
   before, then -19 dB with the sub 30 dB up, plus a silence gap. Meter the bar before a drop against the drop and
   aim for 6 to 8 dB of difference and a clear swing in the sub band.
-- **Dynamics come from effects, not EQ and not more layers:** delay throws, reverb washes, filter sweeps, stutter
-  gates, bitcrush, sidechain pumping, and silence. Faders and EQ are housekeeping; effects are the performance.
-- **Invented melodies fail; derived ones win.** A generic pentatonic acid line was "all over the place". A call
-  taken from the reference's vocal, callbacks to earlier sections' bell, cello and violin lines, and the opening
-  progression reused all worked. New melodic material comes from the reference or from earlier in the set.
+- **For that listener, dynamics came from effects, not EQ or more layers:** delay throws, reverb washes, filter
+  sweeps, stutter gates, bitcrush, sidechain pumping, and silence. Another listener may want the playing or the
+  arrangement to carry it; their notes say which.
+- **For that listener, derived melodies beat invented ones.** A generic pentatonic acid line was "all over the
+  place". A call taken from the reference's vocal, callbacks to earlier sections' bell, cello and violin lines, and
+  the opening progression reused all worked. When a new line falls flat, try material from the reference or from
+  earlier in the set. A set may also need no melody at all; follow what the person asks for.
 - **Measured beats guessed, and the listener hears it.** A guessed gnawa groove (four strokes on clean triplets)
   was "cool"; the measured one (three strokes at 0, 0.32 and 0.74 of a beat, its timbres fitted from the stems)
   was "I love it... closer". Measuring mid-set is fine at idle priority.
@@ -176,8 +183,8 @@ Learned from a one-hour set steered by one listener; the same reading applies to
   acid line was gone within seconds), then the bigger fix follows.
 - **Ask about the culture, not the knobs:** "does it read as gnawa?" got a useful answer where a technical
   question would not.
-- **Endings are emotional arcs** ("full circle", "crescendo", then peace). Plan the last 15 minutes early as an
-  arc, but keep the ending swappable: do not queue it until it is close.
+- **Plan the ending early.** That listener wanted an emotional arc ("full circle", "crescendo", then peace); ask
+  yours what the end should feel like. Keep the ending swappable: do not queue it until it is close.
 
 ### Highlights on praise
 
@@ -206,7 +213,14 @@ A section written from scratch took 5 to 10 minutes; a request for a new ending 
 it replaced had already started.
 
 - When a message arrives, read `live_status` (heard bar, runway) before writing anything, and cancel what no
-  longer fits: `Set.cancel('<section>')` takes back the clips logged for it.
+  longer fits: `Set.cancel('<section>')` takes back the clips logged for it that have not started.
+- **Cutting over mid-chapter.** Queue each section with its name (`Set.q(clips, section='s05_canopy')`,
+  `Set.moves(moves, section='s05_canopy')`, or `section=` on `live_queue` and `live_fx`). Then
+  `live_queue(clips, cancel_section='s05_canopy')` lands the new section and takes back what the old one still
+  had to do from where the new clips land (`cancel_at=` for another bar): its later clips go, its playing ones
+  are cut there (last notes ring out), its stops and effect moves after it are dropped, and a glide in progress
+  holds where it is. `Set.cut('<section>', at=<bar>)` does it with nothing new queued. `live_status` lists the
+  sections with work ahead. Clips queued without a section are never touched.
 - Build each move from the kit so the visible work is short calls, not long file writes.
 - Judge a sparse part by `live_status`'s "max 10 s" level, not the snapshot: a vocal call read -70 dB when the
   snapshot fell in its rest.
@@ -220,8 +234,13 @@ sessions' renders, Blender and video jobs.
 - **Read `python -m ismail.machine` before the set and before every slow step.** It names the other jobs. Go on
   when it says go; the person can overrule the heat.
 - **Guard on audio trouble, never on machine CPU alone.** A guard that polls `live_status` every ~15 s and pauses
-  on new underruns past a small allowance, late notes, a mixer above ~65% twice, or STALLED holds a set safely.
-  Four pauses triggered by whole-machine CPU came with zero underruns.
+  on new underruns past a small allowance, late notes, a `headroom:` line saying THIN or DROPOUT, or STALLED
+  holds a set safely. Four pauses triggered by whole-machine CPU came with zero underruns, and three more on a
+  mixer at 65-75% cost minutes of silence with clean audio.
+- **Headroom, not the mixer %, says how near a dropout is.** `mixer:` is the time a block takes to mix against
+  its length, so it climbs when other programs load the machine (a 489% peak while tracks were rigged, with no
+  underrun). The device plays from 500 ms of audio mixed ahead; `headroom: 430 ms of 500` is that cushion at its
+  thinnest since the last status. THIN (under 125 ms) is the time to drop a track or an effect; 0 is a dropout.
 - **Every watchdog runs as a tracked background task**, so its exit wakes you. A detached guard paused a set and
   the person sat in 50 minutes of silence; a helper loop that crashed left 9 more. `live_status` flags what a
   guard should wake you for: `SILENT ON AIR` (nothing sounding for 10 s), `RUNWAY ENDED` (nothing new queued for 8
@@ -233,18 +252,54 @@ sessions' renders, Blender and video jobs.
 - **One deck at a time on a busy machine.** A cued deck of a 20-track song costs the mixer as much as one on air,
   and its first section renders in a burst: every breakup in one morning lined up with a deck load. Switch songs
   with a stop and a start (a short gap) until the machine has room.
-- **The set follows the person's clock.** Read the time at every checkpoint and shape the arc to their day:
-  energy, a let-down, a sleep session queued whole so it runs with no agent and ends by itself, silence, a sunrise
-  (a dawn chorus entering in the order birds wake), a morning groove. Plans move when they say so.
+- **Your own calls cost the mixer too.** Each `python -m ismail live_*` call starts a new Python process that
+  imports ismail (seconds of a core), and the engine then does the work: `live_load` renders a song, `live_track
+  remove` rebuilds the graph. In one electro set the mixer's peak read 188 to 251% in the windows where ops were
+  being sent and 76 to 80% between them, with a bar-wait loop calling `live_status` every 10 to 20 s. Send changes
+  in batches (one `live_queue` with many clips, `Set.moves`), keep one tracked guard instead of several loops, and
+  do not poll faster than the guard needs.
+- **A long-running engine can degrade; a restart clears it.** After decks were loaded and removed mid-set (one heavy
+  with ramps, then 16 removed tracks) and with 4 render workers on an 8-thread machine under other load, a light
+  7-track deck read 79 to 105% with spikes to 240% and 23,271 underruns. Restarted with `live_start(...,
+  workers=2, priority='high')` and the same deck, it read 28% (peak 37%) with no underruns 45 s later. When the
+  mixer stays over about 70% with a light deck, restart (a 20 s gap, said to the person first) rather than trim
+  more tracks. On a shared 8-thread machine, start sets with `workers=2`.
+- **Never use priority tricks instead of fewer jobs.** A loop that kept helper processes at Idle priority polled
+  the process list every 3 s and cost a full core by itself, and Idle priority did not stop a busy machine from
+  starving the mixer. Stop the work instead.
+
+### Helpers during a set
+
+The same electro set dropped out for most of its length because six helpers each downloaded a reference and
+measured it while it played (`analyze_kit` alone held 1 to 3 cores; the mixer read 178 to 275% of real time).
+Once the engine runs:
+
+- **Helpers compose only:** notes, patches, effects and project data, checked with `notes_read` rolls. The engine
+  renders their songs when they are loaded live. No downloads, no `analyze_*`, `separate`, `mimic_*` or fits, no
+  full renders. Reference research and measuring happen before the set, or in a pause with the engine stopped. The
+  guest-jam rule "reference first" means a reference picked before the set, not measured during it.
+- **Give each helper the kit the set already plays:** its build script, patches and voices to copy. Starting from
+  the kit is fast and sounds like the set, and it is what the person asked for: composing with the kit they
+  already have, not sound engineering.
+- **Give each helper a budget for the deck it writes:** about 7 tracks, about 3 effects each, one shared reverb or
+  delay bus, no per-beat effect ramps (one or two slow sweeps over 8 bars or more), and no vocoder unless its voice
+  source plays live.
+- **At most two helpers at a time**, and read the `mixer:` and `headroom:` lines of `live_status` after each one
+  starts.
+- **A long set can follow the person's clock.** Read the time at every checkpoint and shape the arc to their day.
+  One 16-hour run went: energy, a let-down, a sleep session queued whole so it runs with no agent and ends by
+  itself, silence, a sunrise (a dawn chorus entering in the order birds wake), a morning groove. Plans move when
+  they say so.
 - **Pause and resume are a performance move.** Snapshot the status to a file, stop the recording, a short fade,
   stop. Resume with a short ease-in at a level that fits the hour, never the exact old state. Each resume is a new
   take file, logged in `notes/feedback.md`.
 - **Keep a runway, always.** Queue 8 to 16 minutes ahead, set a checkpoint timer that fires well before the runway
   ends, and never let a section end into silence.
-- **Change it before they ask.** One chord for an hour read as repetitive. Progressions with every part built from
-  its chord, a new hook every 2 minutes and alternating section forms (full, a drive with no break, a deep one that
-  starts underwater) kept it moving. Builds escalate every 4 bars and drops land louder (`Set.gap` brings each track
-  back to its own level).
+- **When the person says it is repetitive, change more.** One chord for an hour read as repetitive to one
+  listener. What kept that set moving: progressions with every part built from its chord, a new hook every 2
+  minutes, and alternating section forms (full, a drive with no break, a deep one that starts underwater), with
+  builds escalating every 4 bars and drops landing louder (`Set.gap` brings each track back to its own level). A
+  sleep, focus or practice set may want the opposite: steady, with few changes.
 - **Use what the person is doing elsewhere.** Other sessions' work makes material: their birds, a gnawa groove, a
   song's villain, a series on decks, a song built by a background agent while the set plays. Check each borrowed
   voice's blind-test notes and provenance before it goes on air; two unproven voices once had to be pulled.
@@ -300,6 +355,13 @@ songs/<slug>/
   lists the old tracks it stops. To reuse a name, `live_fx(track, clear=True)` first: scheduled moves outlive
   clip changes.
 - Temp files go to your scratchpad, not `set/`. Measurements are saved as files, not only printed.
+- **Read the code before you describe a past set.** What a section did is in its module and `setlog.md`, not in
+  memory. A set was once described to another agent as cutting the player's beatbox into a kit; its script had only
+  read the pattern and played it on a stock kit, and the other agent caught it from the code.
+- **A page that plays the set's files** (takes, highlights, two placings to compare) is served over http from a
+  local server, never opened as a file. A browser pane shows a file page as a `data:` snapshot, so its relative
+  audio fails to load (MEDIA_ERR 4). `feedback_page` serves clips with questions; for a page of your own, see
+  `blind-tests.md`, "Page mechanics".
 
 ### A new piece while the engine runs
 
@@ -380,9 +442,26 @@ air; only you hear it, through `live_listen(deck=...)`.
 3. `live_transition(to='B', style=..., bars=16, at='next_8')` queues the whole mix: `blend` (B up without bass,
    bass swap half-way, A out), `bass_swap`, `filter`, `cut`. It starts at the first boundary after B is
    playing, puts B on air, and when it ends stops A and takes it off air (cued), ready for the next `live_load`.
+   A `cut` ends where it starts: A stops and goes off air on the same boundary, whatever `bars` says.
    `live_status` says `SILENT ON AIR` when a set that has played sounds nothing for 10 s. The reply is the timeline; `live_status` shows each deck's
    fader and eq as they move.
-4. Watch `live_status`'s mixer load: two full songs is about 50%; above ~70% risks dropouts.
+4. Watch `live_status`'s mixer load (two full songs is about 50%) and its headroom line: the cushion of mixed
+   audio is the real risk, and it reads THIN before a dropout. An off-air deck costs the mixer while its tracks
+   play notes or ring out, and nothing once they are quiet: its `live_status` line says `asleep`, `tails ringing
+   out` or `AWAKE off air` (its tracks still play, unheard). A transition stops the deck it leaves, so that deck
+   is asleep a few seconds after it ends. Load the next song onto it (the load replaces its tracks): no need to
+   remove the deck or its tracks mid-set. If you do clear a deck, do it before queueing its next load, never at
+   the same time: removals made beside a load took the freshly loaded tracks.
+
+A studio song is not automatically a light deck. Before `live_load`, look at how much automation the song carries:
+One song's hundreds of per-beat effect ramps (bass cutoff, resonance, drive, pump depth) used 90 to 130% of the
+mixer on their own. Load a lighter section, or clear the moves once it lands (`live_fx(target='B.bass',
+clear=True)`); each effect holds its last values. A track whose source does not come over (a vocoder reading a
+muted voice or placed audio) plays as its bare carrier, a loud synth lead: remove it on load (`live_track(...,
+remove=True)`). `live_load` onto a deck that held a song starts it from a neutral strip (fader, eq, filter,
+transpose) and its reply names what the last song left there (`strip reset for the new song (the last one left
+it at fader off, eq L KILL)`): a blend's bass kill once played the next song with no bass. A deck set with
+`live_deck` before its first song keeps those settings.
 
 Put the swap where the incoming deck's bass plays: a 16-bar section whose loop restarts on a sparse bar leaves a
 hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
@@ -410,7 +489,9 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   beats, gates, `every_beats` ducks, LFOs in beats) follow at the same bar; echoes already in a delay jump once.
   Played keys (`live_midi`) keep their sounds. There is no gradual ramp: for one, queue a few step changes at
   successive bars. `live_listen` keeps to one tempo per window (it says when it left bars out), and with
-  `recording=` the bars must not cross a change. Metric modulation (above) changes the feel with no change at all.
+  `recording=` the bars must not cross a change. The engine's clock (what `listen_heard` places words with) gives
+  the tempo at the beat heard, so words land on their bars across a change. Metric modulation (above) changes the
+  feel with no change at all.
 - **Gliding parts** (a portamento synth lead, a Moog bass) belong on the synth engine (`mono`, `glide`) with
   measured harmonics (an `additive` osc or a fitted filter): mimic renders each note alone and does not glide.
 - **Pre-flight.** `live_start` names any other engine still running on the machine (a forgotten set held a
@@ -421,10 +502,17 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   reply says "output moved". To move by hand mid-set, `live_device(device='JBL')` (part of a name works): the
   timeline and queue carry on with a gap of about a second, nothing is reloaded. `live_stop` waits for the engine
   to exit and kills it with its workers when a dead device would hang it.
-- **Heavy jobs before the set.** Stem separation during a set caused 1,654 underruns; measurement scripts at idle
-  priority were fine.
-- **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Share reverbs on
-  buses (a reverb per track is expensive) and stop parts you no longer hear; removing tracks barely helps.
+- **Follow where the person listens.** When they move to the phone, `live_device(device='none')` turns the room
+  speaker off: the clock, the queue, the phone stream, the recording and `live_listen` carry on, and
+  `live_status` says `output off`. `live_device(device='default')` (or a name) turns it back on, no restart. Both
+  at once is a speaker on plus the phone stream.
+- **Heavy jobs before the set, helpers included.** Stem separation during a set caused 1,654 underruns, and
+  helpers measuring references during an electro set broke it up for most of its length; Idle priority did not
+  save it. A helper started during a set composes only ("Helpers during a set", above).
+- **Mixer budget.** About 18 tracks in a crescendo peaked at 71% of real time and dropped out. Count automation as
+  well as tracks: per-beat effect ramps on two tracks cost more than eight plain tracks. Share reverbs on buses (a
+  reverb per track is expensive) and stop parts you no longer hear; removing a few tracks barely helps, removing a
+  finished deck's tracks and a heavy deck's ramps took one set from 110-130% to 76%.
 - **A new voice's first pass**: check its level at once (a first qraqeb sat 30 dB under the part it answered). A
   single event above +12 dBFS is dropped as a broken voice, and the next reply of any op says so ("NEW since
   your last call"). A code voice's randomness is seeded by pitch and velocity: vary them for stroke variety.
@@ -470,13 +558,49 @@ straight to the speakers.
   sustain pedal, `transpose` and `channel` are followed. Tell the person before their keys first sound.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
-- **What they played is text.** Every key is logged with the bar heard. `live_played()` reads it back as notes
-  lines (`bar | +beat | pitch | d= | v=`, the format tracks take). Read it to answer what they played, quote a
-  phrase back in their words, or turn a phrase into a part: edit the lines (fix a note, quantize, move it to bar 1)
-  and give them to `live_track` so the set plays it from then on.
-- **No MIDI keyboard?** Optional, only for someone who wants to play and has no instrument: on Windows, loopMIDI
-  makes a virtual port (name it, e.g. "ismail keys"), and any on-screen keyboard page that sends Web MIDI to that
-  port plays through `live_midi` like a real one. Someone with a keyboard needs none of this.
+- **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
+  (`bar | +beat | pitch | d= | v=`, the format tracks take). Read it to answer what they played or quote a phrase
+  back in their words. `bars=[a, b]` reads those bars; with a number it reads the last ones played.
+- **The clock.** A key sounds one output buffer after the press (about 180 ms on a laptop's speakers), and the music
+  reaches the speakers through the same buffer. Someone playing by ear lines up the note they hear with the beat they
+  hear, so each note is placed where it sounded against the music: the press plus the keys' delay. The header of
+  `live_played` names that delay in ms; the press times stay in the log (`press`). A log written before this clock
+  holds the press, about one key delay early, and the header says so.
+- **Looping their take back.** Never round the raw lines to the grid: a take that sits near half a 16th off rounds
+  the wrong way ("it sounds like a half off", 2026-10-13). In order:
+  1. **Ask which bars.** The player says which part was good (aloud with the mic on, or by bar number); quote the
+     bars back. Never guess where the good part starts.
+  2. `live_played(bars=[a, b], fit=True)` groups the hits (keys within 0.15 beat are one), fits a 16th grid with a
+     free offset, and says the offset, the rms error in ms, the drift per bar and the rhythm's shape in 16ths
+     (3-3-2). It prints the snapped notes twice, ready for `live_queue` (beats from the clip start, bar 1 = the
+     take's first bar, or `from_bar=`): **A as played**, and **B with the shape's groups from beat 1**. When they
+     are the same it prints one. Say a take fits only after reading these numbers. Three takes once went back off
+     the beat because each was rounded to the log's clock, which sat about half a beat off what the player heard.
+  3. **Offer both by ear.** Where the take sits against the kick is a musical choice the data cannot make. Say each
+     in words ("A: as you played it; B: the groups start on the beat") and play them so the answer is one word.
+     A snare on 2 and 4 gives the player something to hear the placement against.
+  4. **Keep the choice for the run.** Once the player says a take is right, later takes in the same run usually need
+     the same placement (same keys, same engine): use the same letter first.
+- **A take recorded as audio** (an instrument on the mic) has no key log. Take its onset times in beats, unrounded
+  (an op that snaps to `quant` has already rounded them), then do the same: onsets within 0.15 beat are one hit,
+  fit a 16th grid with a free offset (`fit_grid` in `ismail/live/midi_play.py` is the fit `live_played` uses, drift
+  included), read the offset and rms, snap, and offer A and B by ear.
+- **Flat velocities.** A cheap keyboard sends every key at one velocity (often 80); `live_played` says so. The lines
+  keep it. When looping it, write an accent shape and say you did: the bar's downbeat loudest, then the beats, then
+  pushed 16ths, offbeat 8ths softest; in a chord the top note leads and the lower notes sit well under it (about 30
+  under sounded right in one jam; 14 was too close).
+- **No MIDI keyboard?** Optional, only for someone who wants to play and has no instrument; someone with a
+  keyboard needs none of this. `live_keys_page()` gives an on-screen keyboard that plays straight into the running
+  engine as the input `'screen keys'`, no virtual port: patch it like any input,
+  `live_midi(source='screen keys', track='bass')`, and `live_played(source='screen keys')` reads it back. It is
+  served on this computer (`http://127.0.0.1:<engine port>/keys`: mouse, touch screen, or the computer keyboard's
+  Z and Q rows) and on the phone page's address while it runs (`live_keys_page(phone=True)` posts a panel with a
+  button that opens it). Two to three octaves, octave shift, a sustain toggle, multi-touch chords, and velocity
+  from where the key is pressed (near the top is soft); its top line says whether it is connected and what it
+  plays. The keys sound from this computer's speakers, so it is for someone in the room.
+- **Other software as the keyboard** (a DAW, a sequencer, a Web MIDI page): on Windows, loopMIDI makes a virtual
+  port (name it, e.g. "ismail keys"); whatever sends MIDI to that port plays through `live_midi` like a real
+  keyboard.
 
 ## Playing for a screen recording
 
@@ -494,7 +618,8 @@ sidechain/duck/vocoder from live tracks, ramps on every automatable fx param.
 
 Effects run two ways. An effect with a live processor (every built-in type but `autotune`, the guitar rig included) runs
 block by block on the mixer and matches the studio version (held by tests): a wah's `pos`, a rotary's `speed`, a
-univibe's `rate_hz` move with `live_fx` like any filter. An amp or tape with hiss on keeps hissing while its track
+univibe's `rate_hz` move with `live_fx` like any filter. A `spatial` effect's `x`, `y`, `z` and `listener_yaw` move
+the same way; its `trajectory` starts when it is set or the effect is inserted, whichever is later. An amp or tape with hiss on keeps hissing while its track
 plays, as in the studio, and sleeps with the track when its notes stop. An effect that exists only in the studio
 (a new type nobody has written a live twin for) is **baked**: the render workers run it on each note or phrase
 before the mix. `live_status` marks it `(baked)`. A baked effect cannot be moved with `live_fx`, restarts its LFOs
@@ -542,6 +667,8 @@ it like any recorded phrase. The studio side (autotune first in the chain, one p
   renders, so the reply moves slow first launches a bar or two later; every later pass reuses them, and
   identical notes (a repeated chord) render once. Performers render a bar at a time with a second of context:
   `kit70` about 5x realtime; check `live_status` for `electric` with your part. Queue them a phrase ahead.
+  `toms` is slower than realtime (about 2 s per hit, more the first time a drum and stroke is retuned): render
+  its part in the studio and play it as audio rather than live.
 - `live_start` takes ~20 to 30 s: the render workers warm up every instrument kind and every mimic profile in
   the folder before it returns, so the first clips land on time.
 - Mimic profiles come out quiet next to synths and code voices (about 9 dB): check their level in
