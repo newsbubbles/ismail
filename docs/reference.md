@@ -132,6 +132,10 @@ Find any tool by what you need or by role with `ops_find`.
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`).
+- **What a deck costs.** `deck_cost(song, bars=, bpm=)` renders the deck's first bar offline the way the live engine
+  does and times it, without starting or touching an engine: each track's render seconds and real-time factor, the
+  wait for the first bar with the engine's render workers, and the mixer's load per block. It says which deck
+  leaves a silent gap after `live_load`, how long, and which track makes it.
 - **The VR stage** (`ismail/stage`, the `stage_*` tools): a three.js WebXR page for a desktop browser or a headset,
   and a small server that carries the live link between the page and the agent. Scenes live in the song's folder.
   The agent drives the page with ops and reads what the person did and said with `stage_events`. Objects carry
