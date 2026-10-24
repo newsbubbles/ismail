@@ -20,6 +20,22 @@
   in sat at most 4.8 dB under the held note (was 10.3), median 3.0 (was 5.3).
 - Four study params nobody set were left out: `floor_hi`, `chiff`, `part_spread`, `lane_tilt`.
 
+### mimic perform: fingered slurs by default, and when the vibrato comes in is a lane
+
+- A slur in `"perform": true` is now a fingered slur (ledger:M322). Nate on the clarinet performer's blind round,
+  2026-10-24: the 45 ms glide "doesn't sound like a finger covering a hole, it sounds like a MIDI instrument sliding
+  up", while he liked how the note's profile changes at the join. New param `slur_cross` (0..1, default 1): at 1 the
+  pitch moves to the new note in about 4.5 ms and each partial's level hands over from the old note's to the new
+  note's over `slur_color_ms` (20 ms, new), each partial from its own start (up to about 15 ms in). The join, 10-90 %
+  of the pitch move, read from the render (D4 to F4, 23 slurs): 5.6 / 5.9 ms p50 / p90, against 26.6 / 33.9 ms with
+  the glide. The level dip at the join is now about -3.6 dB in one 10 ms frame (the glide's was -2.8 dB over 40 ms);
+  the -0.8 dB slur dip is kept, at least 12 ms wide. No second attack: the new note's harmonics are at +0.3 dB re
+  held in the 60 ms after the join. This is a new take for every performed slur; `"slur_cross": 0` renders exactly
+  what it did before (a test compares against a saved copy of the old performer).
+- Lanes `vib_delay` and `vib_grow` (s, read at each note's start, ledger:M323): when the vibrato comes in and how
+  fast it grows, per note ("coming in slightly late ... the agent should be able to control"). Left out, the params of
+  the same names, as before; each note still varies them by about 20 %.
+
 ### mimic: short notes no longer drift tens of cents off
 
 - mimic's slow random curves (pitch drift, vibrato rate and depth wander, swell, shimmer) were scaled by the std of

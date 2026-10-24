@@ -12,7 +12,9 @@ M308), made general: any sustained (blown or bowed) profile, the profile's own m
 split into lines, and the room, ring and sympathetic strings of mimic's own post stage.
 
 How notes are read (per line; a chord splits into lines, each phrased on its own):
-  overlap         SLUR: no new attack, the pitch moves under continuous air
+  overlap         SLUR: no new attack, the pitch moves under continuous air: by default as fingers do, in about
+                  5 ms, while each partial's level cross-fades from the old note's to the new note's over about
+                  20 ms (slur_cross 1); slur_cross 0 is the glide of slur_ms (45 ms) it had before
   gap < breath_gap TONGUE: the air keeps going, the tone dips and speaks again with the measured chiff
   longer gap      a new BREATH: a new phrase, with its onset
 
@@ -20,6 +22,9 @@ Lanes (automation 'inst.lane.<name>', per-sample curves, as for every performer 
 songs/kit_winds' tenor sax uses where they overlap):
   level   dB on the tone (swells, tapers); +1 dB also brightens by 0.15 dB per octave of partial number
   vib     vibrato depth, cents peak, read at each note's start (0 = straight); grows in after vib_delay
+  vib_delay  s into a note before its vibrato starts, read at each note's start (falls back to the vib_delay param;
+          each note still varies it by about +-20 %)
+  vib_grow   s the vibrato takes to reach full depth, read at each note's start (falls back to vib_grow)
   scoop   semitones the note starts below its pitch and rises from (read at the note's start)
   tongue  0..1 hardness of a tongued or breath onset (0 = a pure breath attack)
   breath  dB on the air noise
@@ -35,6 +40,8 @@ INFO = {
     "use": "legato winds and bowed strings (a slurred melody, a sustained line) that sound like separate notes "
            "note by note; decaying profiles (piano, harp, plucked) refuse it",
     "lanes": {"level": "dB on the tone", "vib": "cents peak, read at note start",
+              "vib_delay": "s before the vibrato starts, read at note start (default: the vib_delay param)",
+              "vib_grow": "s for the vibrato to reach full depth, read at note start (default: the vib_grow param)",
               "scoop": "semitones below, read at note start", "tongue": "0..1 onset hardness",
               "breath": "dB on the air noise", "bend": "semitones added to the pitch"},
     "params": {"bright": "dB/octave of partial number, added", "vel_bright": "dB/octave per velocity unit",
@@ -43,7 +50,16 @@ INFO = {
                "vib_rate": "Hz (null = the profile's measured median, else 5.5)",
                "vib_delay": "s into a note before vibrato starts", "vib_grow": "s for it to reach full depth",
                "vib_am_db": "breath pulse with the vibrato, dB at full depth",
-               "slur_ms": "pitch glide of a slur", "scoop_ms": "time to rise out of a scoop",
+               "slur_ms": "pitch glide of a slur at slur_cross 0, and the colour cross-fade there (2 x slur_ms)",
+               "slur_cross": "0..1 a fingered slur: at 1 (default) the pitch moves in about 4.5 ms and each "
+                             "partial's level cross-fades from the old note's to the new note's over about 20 ms, "
+                             "each at its own time; 0 = the glide over slur_ms of before (Nate on the clarinet "
+                             "performer, 10-24: \"it sounds like a MIDI instrument sliding up\")",
+               "slur_color_ms": "ms each partial's level takes to hand over from the old note's to the new note's "
+                                "at slur_cross 1 (each from its own start, up to about 15 ms in); the old note's levels "
+                                "at the new pitch make a short dip at the join (about -3.6 dB in one 10 ms frame at "
+                                "20), longer as this grows (90: about the 40 ms of the glide's dip)",
+               "scoop_ms": "time to rise out of a scoop",
                "attack_ms": "breath onset rise", "tongue": "default onset hardness 0..1",
                "release": "s, the air stop at a phrase end",
                "breath_gap": "s: a gap shorter than this is tongued, longer is a new breath",
@@ -57,7 +73,8 @@ INFO = {
 }
 
 DEFAULTS = dict(bright=0.0, vel_bright=6.0, vib=None, vib_rate=None, vib_delay=0.45, vib_grow=0.6, vib_am_db=1.6,
-                slur_ms=45.0, scoop_ms=110.0, attack_ms=75.0, tongue=0.35, release=0.16, breath_gap=0.16,
+                slur_ms=45.0, slur_cross=1.0, slur_color_ms=20.0, scoop_ms=110.0, attack_ms=75.0, tongue=0.35,
+                release=0.16, breath_gap=0.16,
                 noise=0.0, lead_ms=28.0, drift_cents=3.0, breathe_db=0.7, taper_db=5.0, end_sag_cents=14.0,
                 chord_ms=30.0, room=None, room_mix=-10.0, width=0.35, seed=5)
 
@@ -67,6 +84,17 @@ POST = ('ring', 'ring_q', 'strings', 'sympathy', 'string_t60', 'mono')   # mimic
 MIMIC_OK = SHARED + POST
 
 CR = 64
+# a fingered slur (slur_cross 1, ledger M322): the fingers change the note in a few ms, not a slide. Nate on the
+# clarinet performer's ear round, 2026-10-24: the 45 ms glide "doesn't sound like a finger covering a hole, it sounds
+# like a MIDI instrument sliding up", while the way the note's profile changes at the join was liked. Read from
+# the measured flute voice Nate liked ("fingers on a real flute"): the pitch moves in about 3 ms (joins 4.4 / 5.8 ms
+# p50 / p90 there), and the old note's partials hand over to the new note's each at its own time, spread about 15 ms.
+SLUR_X_MS = 4.5           # the pitch move at full slur_cross, ms (x the slur's own +-20 %, as slur_ms has)
+SLUR_X_COL_SD_MS = 6.0    # each partial's level cross-fade (slur_color_ms) starts |N(0, this)| ms after the join, per
+                          # partial and slur (keyed on song ms)
+SLUR_DIP_DB = -0.8        # the level dip at a slur, centred on the pitch move ...
+SLUR_X_DIP_W = 0.012      # ... its half-width x the move (0.7), never under this at full slur_cross (s), so a fast
+                          # move still dips audibly while the fingers cross
 MAX_PARTIALS = 200
 
 
@@ -260,6 +288,7 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
         return float(lane_vec(name, np.array([int(i)]), default)[0])
 
     rel = float(P['release'])
+    scr = float(np.clip(P['slur_cross'], 0.0, 1.0))
     lead = float(P['lead_ms']) / 1000.0
     nyq = min(sr / 2 * 0.95, 20000)
     sr_c = sr / CR
@@ -313,9 +342,13 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
             age = tc[i0:] - tc[i0]
             if how == 'slur':
                 pm = ph[j - 1][1]
-                sl = max(0.015, float(P['slur_ms']) / 1000 * (1 + 0.2 * nrng.normal()))
+                jit = 1 + 0.2 * nrng.normal()
+                sl = max(0.015, float(P['slur_ms']) / 1000 * jit)
+                if scr > 0:
+                    # the fingers' move: a few ms (slur_cross 1) in place of the glide (0)
+                    sl = (1 - scr) * sl + scr * max(0.002, SLUR_X_MS / 1000 * jit)
                 bend[i0:] += (pm - m) * (1 - _smooth(age / sl))
-                art_db[i0:] += -0.8 * np.exp(-((age - sl * 0.5) / (sl * 0.7)) ** 2)
+                art_db[i0:] += SLUR_DIP_DB * np.exp(-((age - sl * 0.5) / max(sl * 0.7, scr * SLUR_X_DIP_W)) ** 2)
             elif how == 'tongue':
                 tg = float(np.clip(lane_at('tongue', a0 + i0 * CR, P['tongue']), 0, 1))
                 gap = st - (ph[j - 1][0] + ph[j - 1][2])
@@ -334,10 +367,11 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
                 x = np.clip(age / stime, 0, 1)
                 bend[i0:] += -sc * (1 - x) ** 2
                 art_db[i0:] += -2.0 * (1 - x) ** 2
-            # vibrato: delayed, then growing; only notes long enough reach it
+            # vibrato: delayed, then growing; only notes long enough reach it (lanes vib_delay and vib_grow, read
+            # at the note's start, ledger M323: "when the vibrato comes in ... the agent should be able to control")
             dep = lane_at('vib', a0 + i0 * CR, vib_default) * np.exp(nrng.normal(0, 0.12))
-            delay = float(P['vib_delay']) * np.exp(nrng.normal(0, 0.2))
-            grow = max(0.05, float(P['vib_grow']) * np.exp(nrng.normal(0, 0.2)))
+            delay = max(0.0, lane_at('vib_delay', a0 + i0 * CR, P['vib_delay'])) * np.exp(nrng.normal(0, 0.2))
+            grow = max(0.05, lane_at('vib_grow', a0 + i0 * CR, P['vib_grow']) * np.exp(nrng.normal(0, 0.2)))
             curve = max(dep, 0.0) * np.clip((age - delay) / grow, 0, 1) ** 1.3
             if how == 'slur' and i0 > 0:
                 # the vibrato carries through a slur and eases back (no step in pitch at the join)
@@ -398,7 +432,11 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
         kk = np.arange(1, K + 1, dtype=float)
         lk = np.log2(kk)
 
-        # each note's source levels; a slur moves the colour with the pitch, no step
+        # each note's source levels; a slur moves the colour with the pitch, no step. At slur_cross 0 all partials
+        # cross-fade together over 2 x slur_ms; a fingered slur hands each partial over in slur_color_ms from its
+        # own start (the old note's level to the new note's, at the new pitch). The old note's levels at the new
+        # pitch read lower through the body for that time: a short dip, as fingers crossing make (on a real flute
+        # -6 dB in 5 ms frames, about 12 ms under -3 dB), where the glide's was 40 ms long
         srcs, nbr = [], []
         for st, m, d, v, how in ph:
             s, ab = _source_db(prof, m, v, kk, P)
@@ -410,8 +448,15 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
                 continue
             i0 = max(0, int(round((ph[j][0] - p0) * sr_c)))
             sl = max(0.015, float(P['slur_ms']) / 1000)
-            i1 = min(nc, i0 + int(np.ceil(2 * sl * sr_c)) + 1)
-            x = _smooth((tc[i0:i1] - tc[i0]) / (2 * sl))[:, None]
+            if scr == 0:
+                i1 = min(nc, i0 + int(np.ceil(2 * sl * sr_c)) + 1)
+                x = _smooth((tc[i0:i1] - tc[i0]) / (2 * sl))[:, None]
+            else:
+                xr = _rng(seed, int(round((ph[j][0] + t_song0) * 1000)), 3)
+                off = scr * np.abs(xr.normal(0, SLUR_X_COL_SD_MS / 1000, K))       # each partial's own start
+                span = (1 - scr) * 2 * sl + scr * max(float(P['slur_color_ms']), 1.0) / 1000
+                i1 = min(nc, i0 + int(np.ceil((span + off.max()) * sr_c)) + 1)
+                x = _smooth(((tc[i0:i1] - tc[i0])[:, None] - off[None, :]) / span)
             src_c[i0:i1] = srcs[j - 1][None, :] * (1 - x) + srcs[j][None, :] * x
         a, b, w = nbr[0]
         B = a['B'] * (1 - w) + b['B'] * w
