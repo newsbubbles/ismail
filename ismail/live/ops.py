@@ -617,8 +617,10 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
     on a silent engine of its own (no live_start needed, nothing is late), then compares each track, each bus and
     the mix: level, envelope, octave bands, and the residual (how close to sample for sample; -100 dB and below is
     identical; under -80 dB nobody can tell). Judged from the second bar: in the first, the studio rings in what came before the window and a
-    deck starts clean (its own line, 'edge'). tracks limits both sides to those tracks. Takes about as long as
-    rendering the bars twice."""
+    deck starts clean (its own line, 'edge'). Each part is judged at its best lag: within 3 ms it reads 'ok (same,
+    offset N samples ...)', further off it DIFFERS (looked for up to 100 ms either way). Each track says how fast it
+    renders live (x realtime, in one process, a worker's pace). tracks limits both sides to those tracks. Takes about
+    as long as rendering the bars twice. Also api.live_parity."""
     from . import parity
     song = os.path.abspath(song)
     if not os.path.exists(os.path.join(song, 'project.json')):

@@ -85,6 +85,22 @@ def op(mutates=False):
 BUSY_SAY = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try again "
             "in a moment\", then call this again in a minute or two (wait='10m' stands in line longer). The "
             "details, for you only: ")
+# ledger:M313: an op with no `wait` argument must not be told to pass one; it can stand in line from a shell instead
+BUSY_SAY_NO_WAIT = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try "
+                    "again in a moment\", then call this again in a minute or two ({op} has no wait argument; to "
+                    "stand in line, run it from a shell as `python -m ismail.machine run --cpu --wait 10m -- python "
+                    "-m ismail -p <project> {op} ...`). The details, for you only: ")
+
+
+def wait_seconds(wait):
+    """An op's `wait` argument ('10m', '600s', a bare number is minutes) as seconds; None for '', '0' or 'none'
+    (refuse at once when the machine is busy). render, heavy() and track_freeze read it this one way."""
+    if wait is None or str(wait).strip() in ('', '0', 'none', 'None'):
+        return None
+    try:
+        return machine.duration_s(wait)
+    except ValueError as e:
+        raise OpError(f"wait: {e}")
 
 
 def heavy(kind='cpu'):
@@ -95,21 +111,18 @@ def heavy(kind='cpu'):
         import functools
         import inspect
         dflt = inspect.signature(fn).parameters.get('wait')
+        say = BUSY_SAY if dflt is not None else BUSY_SAY_NO_WAIT.format(op=fn.__name__)
 
         @functools.wraps(fn)
         def wrapped(*a, **kw):
             proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
-            w = kw.get('wait', dflt.default if dflt is not None else None)
-            try:
-                wait_s = machine.duration_s(w) if w and str(w).strip() not in ('0', 'none', 'None') else None
-            except ValueError as e:
-                raise OpError(f"wait: {e}")
+            wait_s = wait_seconds(kw.get('wait', dflt.default if dflt is not None else None))
             try:
                 with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}", disk_path=proj or None,
                                   wait=wait_s):
                     return fn(*a, **kw)
             except machine.MachineBusy as e:     # ledger:M181: a newcomer's agent read a CPU table as the answer
-                raise machine.MachineBusy(BUSY_SAY + str(e))
+                raise machine.MachineBusy(say + str(e))
         return wrapped
     return deco
 
@@ -2067,10 +2080,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
     from .render import Renderer, write_wav, write_renders, prune_cache, RenderError
-    try:
-        wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
-    except ValueError as e:
-        raise OpError(f"wait: {e}")
+    wait_s = wait_seconds(wait)
     P = _load(project)
     if tracks:
         for t in tracks:
@@ -2239,6 +2249,10 @@ def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> st
     txt += '\n' + A.band_periods(path, g['bpm'])[1]
     ref = P.d.get('reference') or {}
     drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
+    # bar 1 two beats off (a snare on 2 and 4 reads the same): the harmony changes vote, from the bass stem on a ref
+    bass = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'bass.wav'))
+    on_ref = P.auto_source(source).split(':')[0] == 'ref' and ref.get('stems_dir') and os.path.exists(bass)
+    g, txt = A.downbeat_by_harmony(P.resolve_audio(source), g, txt, bass if on_ref else None)
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
         txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
     else:
@@ -2536,9 +2550,18 @@ from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standin
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
 from . import api_clash  # noqa: E402,F401  (registers notes_clash: semitone rubs and out-of-key notes, ledger:M282)
 from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell ledger, ledger:M305)
+from . import api_melody  # noqa: E402,F401  (registers melody_consensus: a lead over a backing, ledger:M314)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
 from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)
 from .stream import request_queue as _stream_requests  # noqa: E402,F401  (registers the request_* ops, ledger:M290)
 from .stream import venue_rules as _stream_rules  # noqa: E402,F401  (registers venue_rules, chat_commands, ledger:M291)
+
+
+def __getattr__(name):
+    """Every op is an attribute of ismail.api, also those registered by the modules above (api.live_parity,
+    api.sound_speak, api.master_cue ...), as they are in api.OPS (ledger:M277(e), M285(e))."""
+    if name in OPS:
+        return OPS[name]
+    raise AttributeError(f"module 'ismail.api' has no attribute {name!r}; ops_find(need='...') finds an op by purpose")

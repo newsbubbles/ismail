@@ -13,6 +13,59 @@
   routed to master carried a build that the mix bus had pulled down 9.5 dB, and the section read did not say so.
   Stems from another render are not read, and one line says so. The existing lines are unchanged. (ledger:M281 b)
 
+### instrument_fit takes wait; a band far off costs what it should
+
+- `instrument_fit` refused BUSY with a message to pass `wait='10m'`, then rejected the keyword. It now takes `wait`
+  as `render` does ('10m' default, '0' refuses at once), and so does `track_fit`. The parsing is one helper
+  (`api.wait_seconds`) shared by `render`, `track_freeze` and every heavy op. A heavy op without `wait`
+  (`mimic_measure`, `live_parity`) is no longer told to pass one: its BUSY reply names the shell work-around
+  `python -m ismail.machine run --cpu --wait 10m -- python -m ismail -p <project> <op> ...`. (ledger:M313)
+- The fit distance took the mean over 29 bands, so two sub bands 35 to 39 dB over the target cost about 2.5 and a
+  bass fit kept an octave-down square the target does not have. In `instrument_fit` each dB a band is past 20 dB
+  off now adds 0.15, summed, and the band the tables print as 25 Hz (24.8 Hz) counts for fmin=25 (it fell out of
+  the distance). A synthetic A1 bass with nothing under 40 Hz: a darker clean bass read 5.37 before and 5.13 now;
+  the same tone plus an octave-down square (+36 and +25 dB at 25 and 31 Hz) read 4.45 before (the better score)
+  and 9.46 now. The `instrument_fit` reply warns of any band more than 20 dB off. (ledger:M315)
+- `sound_compare` scores are unchanged on purpose: song sessions track its number across rounds, and a before and
+  after must stay comparable. Its reply now prints the same far-band warning, as text only. To score the way
+  `instrument_fit` does, pass `sound_compare(..., fit_score=True)` (in Python, `sounddesign.distance(...,
+  **sounddesign.FIT_SCORE)`, that is `far_cost=0.15, nominal_bands=True`). `distance` defaults to the old score,
+  so `track_fit` and `mimic_measure`'s leave-one-out check score as before too.
+
+### melody_consensus: a lead line over a backing in the same stem
+
+- New op `melody_consensus(source, reps, phrase_bars, steps_per_beat=4, low='C3', high='C7', track=None,
+  write_at=None)` (ledger:M314). On celestial_resort_1024's vocals stem, which also holds a backing part,
+  `analyze_melody` warned of a second part within 6 dB on half the notes and `notes_from_audio_loop` doubled the
+  lead at the octave. The op ports the song's prototype: every candidate pitch scores its first five harmonics
+  on a constant-Q spectrum, the scores are averaged over the bars where the phrase repeats (`reps`), and each
+  step takes the best pitch; a new note starts where the pitch changes or the start of a step is louder than
+  the step before. Before scoring, what sounds through nearly all of the phrase comes off (`held_pct=10`, each
+  bin's 10th percentile over the phrase), so a held chord stops winning. It returns notes_write rows (beats from
+  the phrase's first bar) and a short summary: notes per bar, how many repetitions pick each pitch on their own,
+  the margin over the runner-up, and the notes whose octave call was within 1.5 dB. `track=` writes the phrase
+  at every bar of `write_at` (default: `reps`). On the song's phrase A (bars 17, 25, 49, 57, G4 to C6) it gives
+  40 of the prototype's 41 notes, and names the one it reads an octave off as its only close call.
+
+### live_parity: a one-sample offset is the same take, and each track says its render speed
+
+- At 136 BPM a beat is 19455.88 samples, and an `@ms` nudge is never a whole number of samples. Two roundings put
+  notes one sample apart (ledger:M285(a)):
+  - The studio window's buffer started a pre-roll before the window, a fraction of a sample long. Some notes then
+    landed one sample off where the whole song's render has them. The buffer now starts on a whole song sample,
+    and a window at any tempo matches the whole song's render sample for sample (it did at 120 BPM only).
+  - A deck rounds each note to the engine's own samples, and the engine's bar line sits at a different fraction
+    of a sample than the song's. In a set this is inaudible. live_parity now starts its engine's clock so the
+    deck's first bar line has the song window's fraction, so its takes are sample for sample.
+- live_parity judges each part at its best lag. A take that lines up within 3 ms reads `ok (same, offset 1 sample
+  late)`; before, it read `DIFFERS: +1 samples late` at corr 1.000 and level within 0.01 dB. The fit is looked for
+  up to 100 ms either way, so a take 50 ms off still DIFFERS and says how far off it is. Before, it was looked
+  for up to 256 samples, and a take 50 ms late read "200 samples early".
+- Each track's line says how fast it renders live (`renders 41.3x realtime`), from the seconds its renders took in
+  the check (ledger:M285(e)).
+- Every op is an attribute of `ismail.api`, including those registered outside api.py: `api.live_parity`,
+  `api.sound_speak`, `api.master_cue`, `api.analyze_sections` and the rest (ledger:M277(e), M285(e)).
+
 ### mimic perform: vibrato by default, and phrase ends that fall
 
 - The default vibrato depth of `"perform": true` is now the median of the profile's notes that have vibrato,
@@ -137,6 +190,18 @@
   its own top. A row now reads '.' wherever it is under -100 dB on the features' level scale (silence reads about
   -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
   (ledger:M296)
+
+### analyze_grid: the harmony votes on bar 1 two beats apart
+
+- A snare on 2 and 4 reads the same under a two-beat shift, so on a four-on-the-floor house track the drum stem put
+  bar 1 two beats late (celestial_resort_1024: drum stem 0.916 s, the bass and chords change on beat 1 at
+  0.0687 s). `analyze_grid` now reads the bass root per beat (from the reference's bass stem when the source is the
+  reference and it has one, else the low band of the source, plus its chroma turns) and counts the changes on each
+  beat of the bar. The candidate two beats away wins with 1.5x the changes on its bar lines and at least max(3, 10%
+  of the bars) more; under 3 changes in all, harmony does not vote and the pick stays. One line says it:
+  "downbeat: drums say 0.9157 s, harmony says 0.0585 s (changes on beat 1 in 61 of 131 bars, on beat 3 in 15);
+  using 0.0585 s" on that track's drum stem, and on a move the "bar 1 starts at" line and the chosen candidate are
+  marked. (ledger:M312)
 
 ### The tell ledger
 

@@ -9,7 +9,7 @@ import time
 import numpy as np
 
 from . import machine
-from .api import op, OpError, _load
+from .api import op, OpError, _load, wait_seconds
 
 FX_READS = ('sidechain', 'source', 'modulator')
 
@@ -58,10 +58,7 @@ def track_freeze(project: str, tracks: list, into: str = 'frozen', bars: list = 
         t['solo'] = False
         if n in names:
             t['mute'] = False
-    try:
-        wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
-    except ValueError as e:
-        raise OpError(f"wait: {e}")
+    wait_s = wait_seconds(wait)
     try:
         R = Renderer(d, P.root, None if not bars else a, None if not bars else b + 1, names, cache=True)
         with machine.slot('cpu', f"track_freeze {os.path.basename(P.root)} {into}", disk_path=P.root, wait=wait_s):

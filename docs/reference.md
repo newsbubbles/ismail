@@ -115,8 +115,9 @@ Find any tool by what you need or by role with `ops_find`.
 
 - **The DAW.** Songs as code (notes, instrument patches, effect chains, automation in a project file), rendered and
   read back as text. Named effect stacks (`fx_stack_*`, `stack:<name>`) and an `autotune` effect. A second part
-  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
-  (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
+  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders and fits wait in line on a shared
+  machine (`render(wait=)`, `instrument_fit(wait=)`, `track_fit(wait=)`, `machine_status`) and flag tracks running
+  hot. Every mp3 is tagged with its provenance
   (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from. A finished song's stems
   and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to the
   reclaim folder, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone. Everything moved
@@ -325,6 +326,7 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | What is in a drum kit | `analyze_kit` (splits a drum stem into its pieces, with each one's pattern and audio) |
 | Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax; on a window render, sections are song bars and the error names the window) |
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
+| A lead line when its stem also carries a backing part (a pad, a chord, a second voice) | `melody_consensus` (harmonic-sum salience over a constant-Q spectrum, averaged over the bars where the phrase repeats, with what sounds through the whole phrase taken off; notes per step with an onset test, as notes_write rows or into a track with `track=`; says per bar how many notes, how sure, and where the octave call was close) |
 | Intonation, quarter tones (maqam steps), slides, vibrato | `analyze_melody(cents=True)` (each note's pitch as a float MIDI number, Hz and cents), `analyze_contour` (f0 per frame, in windows of up to 1000 rows) |
 | Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |
 | Do two parts rub a semitone apart, or step out of key (read from the notes, no render) | `notes_clash` (semitone and minor 9th clashes between parts for at least `min_overlap` beats, and out-of-key notes, each with bar and beat, the two parts and notes, overlap and velocity, most audible first; the key is the project's or found from the notes; drums and fixed-pitch pads skipped) |
@@ -344,7 +346,7 @@ Bring your own reference audio (`project_new(..., reference=<file>)`); none is i
 1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`. If it reports the record 15 cents or more off A440 (a sped-up sample), run `ref_retune()` first: otherwise every note reads as a pair of semitones.
 2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`. Measure the drums before writing them: `analyze_swing` and `analyze_kit(source='ref:drums')`.
 3. Transcribe with `notes_from_audio_loop`. Raw transcription copies echoes, leakage and distortion partials as hard notes, so it filters in three layers the agent can tune: partials are attributed to the note they belong to, quiet notes fall under level thresholds (`rel_db`, `min_rel_db`, `floor_db`), and a vote across loop repetitions drops what changes between them. A loud echo locked to the tempo repeats every loop and can survive all three; then the agent tightens the thresholds or asks. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
-4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity). `track_fit` tunes a part in context against the reference stem.
+4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity; a band more than 20 dB off costs extra and the reply warns of it; `sound_compare` keeps its old score so numbers across rounds compare, `fit_score=True` opts in). `track_fit` tunes a part in context against the reference stem.
 5. `stem_map_set`, `render(stems=True)`, `levels_from_ref` (faders from the reference's stem balance), `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
 
 ### How comparisons score
