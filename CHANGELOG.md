@@ -17,6 +17,21 @@
   at every bar of `write_at` (default: `reps`). On the song's phrase A (bars 17, 25, 49, 57, G4 to C6) it gives
   40 of the prototype's 41 notes, and names the one it reads an octave off as its only close call.
 
+### Velocity sets the level of rhodes and emily
+
+- `rhodes` was louder at low velocity than at full (C4, a 0.15 s note, dB against 1.0: 0.2 +1.4, 0.4 -1.0, 0.6 -1.8,
+  0.8 -1.1; C3 read up to +7 dB). The jRhodes3d samples are each normalised near full scale, so a soft layer reads 2
+  to 7 dB hotter than the hard one, and the voice had no velocity gain, only a 3 dB slope inside a layer. Each layer
+  is now matched in level to the key's hardest layer, so a layer change is timbre only, and the level follows the
+  played velocity over 30 dB (new param `vel_db`, 0 for one level): 0.1 -30.7, 0.2 -21.7, 0.4 -12.6, 0.6 -7.2,
+  0.8 -3.2, 1.0 0 dB at C4, within 1 dB of that at C3 and C5. Full velocity plays as before; softer notes in a song
+  that used rhodes come out quieter. (ledger:M310)
+- `emily` read one level from velocity 41 to 80 (one recorded layer of its 4, no level inside a layer). A layer now
+  plays as recorded at its top velocity and falls toward the layer below's recorded level at its bottom: at C4,
+  0.2 -13.6, 0.4 -8.2, 0.6 -3.2, 0.8 -0.2, 1.0 0 dB (was -10.8, -2.5, -2.5, +0.2). The samples are unchanged, and no
+  layer is added. Where a hard layer was recorded no louder in RMS than the one below (a hard pick's short spike,
+  on many keys from Eb3 up; its peak is still 5 to 6 dB higher), it stays as recorded.
+
 ### Level per velocity in voice_help; analyze_sections on a window render
 
 - `voice_help(name)` adds a line with the voice's level per velocity: one short note at 0.2, 0.4, 0.6, 0.8 and 1.0,
