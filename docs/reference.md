@@ -306,6 +306,10 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Question | Tool |
 |---|---|
 | Tempo, where bar 1 is, tuning, swing | `analyze_grid` (bar 1 voted by kick, harmony, section changes and the snare on 2 and 4), `align`, `analyze_swing` |
+
+`analyze_grid` also reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart, by autocorrelation of each band's onsets. When they disagree (a ratio other than 1, 2 or 1/2) it says so and names the thumb/bass band as the likely beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the thumb (122 BPM for a thumb at 92), and the line gives the `bpm_hint` to rerun with.
+
+`analyze_swing(follow=True)` reads a record that drifts (played without a click). A beat line follows the thumb, bass or kick from the project tempo (period and phase from the first 16 beats, then a phase-locked follower smoothed over 9 beats), and every 16th step is read on it. Parameters: `band_hz` is the band the figure is read in (`[lo, hi]` Hz, default `[1500, 6000]` for finger plucks; `[6000, 16000]` for hats), and `threshold` (default 0.35) is the share of the 95th percentile peak over which a step counts as a pluck (raise it, for example to 0.5, when a dense stem reads X on every step). It prints the hits and accents per step, the median offset per step against the plucks on the beats, the most-played 16-step strings and the timing inside them. On a click track drifting from 90 to 94 BPM, planted offsets of +20 and -15 ms read +21 and -13 ms. Without `follow`, `analyze_swing` adds one line when the beat drifts more than 3% over 8 beats.
 | Song form, what plays where | `analyze_structure` (arrangement map, sections, loop length, root per bar) |
 | Levels, bands and chords per bar | `analyze_bars`, `analyze_chords`, `analyze_key` |
 | Drum pattern | `analyze_drums` (step strings you can paste into `pattern_write`) |
