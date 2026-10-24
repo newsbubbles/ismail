@@ -62,6 +62,45 @@ ROLES = {
     'dev': [c[0] for c in CATEGORIES],
 }
 
+# the ops a filtered MCP server always serves, so an agent with a few shelves can still find and read what it lacks
+DISCOVERY = ('guide', 'ops_find')
+
+# what the running MCP server serves: None (every op) or (set of op names, how it was chosen); set by mcp_server
+_SERVED = None
+
+
+def ops_for(roles=(), shelves=()):
+    """The ops an MCP server filtered to these roles and shelves serves: every op on their shelves, plus DISCOVERY,
+    in OPS order. An unknown role or shelf raises OpError naming the valid ones."""
+    known = [c[0] for c in CATEGORIES]
+    bad = [r for r in roles if r not in ROLES]
+    if bad:
+        raise OpError(f"unknown role {', '.join(bad)}; roles: {', '.join(ROLES)}")
+    bad = [s for s in shelves if s not in known]
+    if bad:
+        raise OpError(f"unknown shelf {', '.join(bad)}; shelves: {', '.join(known)}")
+    want = set(shelves).union(*(ROLES[r] for r in roles))
+    return [n for n in OPS if n in DISCOVERY or category_of(n) in want]
+
+
+def serve_only(names, how=''):
+    """Tell ops_find what the running MCP server serves: these op names, chosen by `how` (names None: every op)."""
+    global _SERVED
+    _SERVED = None if names is None else (set(names), how)
+
+
+def _here(name):
+    return '' if _SERVED is None or name in _SERVED[0] else '  (not on this server)'
+
+
+def _served_note():
+    if _SERVED is None:
+        return []
+    return [f"note: this MCP server is filtered to {_SERVED[1]} and serves {len(_SERVED[0])} of {len(OPS)} ops. An op "
+            "marked (not on this server) needs the server started with its role or shelf (--roles or --shelves, or "
+            "ISMAIL_MCP_ROLES or ISMAIL_MCP_SHELVES), or the CLI: python -m ismail -p <project> <op>"]
+
+
 _STOP = set('a an the and or of to in on for with by at from as is are be it its this that my our your their i we '
             'you he she they me them do does how what which when where who can could should would want need make '
             'get see show let use using into out up between vs versus just some any all there here whether'.split())
@@ -159,21 +198,25 @@ def ops_find(need: str = None, role: str = None, category: str = None, n: int = 
         if not hits:
             return (f"nothing matches {need!r}. Try other words, or browse: ops_find(role=...) or "
                     f"ops_find(category=...); categories: {', '.join(shelves)}")
-        return '\n'.join([f"ops for: {need}"] + [f"  {x}  [{category_of(x)}]  {_first_line(x)}" for _, x in hits])
+        return '\n'.join([f"ops for: {need}"] + [f"  {x}  [{category_of(x)}]  {_first_line(x)}{_here(x)}"
+                                                 for _, x in hits] + _served_note())
     if category:
         c = shelves[category]
-        return '\n'.join([f"{category}: {c[1]}"] + [f"  {x}  {_first_line(x)}" for x in by_cat.get(category, [])])
+        return '\n'.join([f"{category}: {c[1]}"] + [f"  {x}  {_first_line(x)}{_here(x)}"
+                                                     for x in by_cat.get(category, [])] + _served_note())
     if role:
         L = [f"role {role}: the shelves to reach for first come first (ops_find(need=...) searches them all)"]
         for cat in ROLES[role]:
             names = by_cat.get(cat, [])
             L.append(f"{cat} ({len(names)}): {shelves[cat][1]}")
             if len(names) > 24:          # the stage and live shelves: names only, search for the rest
-                L.append('  ' + ' '.join(names))
+                L.append('  ' + ' '.join(x + ('*' if _here(x) else '') for x in names))
             else:
-                L += [f"  {x}  {_first_line(x)}" for x in names]
-        return '\n'.join(L)
+                L += [f"  {x}  {_first_line(x)}{_here(x)}" for x in names]
+        if any(_here(x) for c in ROLES[role] for x in by_cat.get(c, [])):
+            L.append('(* = not on this server)')
+        return '\n'.join(L + _served_note())
     L = ['shelves (ops_find(category=...) lists one; ops_find(need="...") searches every description):']
     L += [f"  {c} ({len(by_cat.get(c, []))}): {d}" for c, d, _ in CATEGORIES]
     L.append('roles (ops_find(role=...) shows the shelves a role reaches for first): ' + ', '.join(ROLES))
-    return '\n'.join(L)
+    return '\n'.join(L + _served_note())

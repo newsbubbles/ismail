@@ -32,6 +32,24 @@
   `request_list` and `request_where`, so request-to-air time reads straight off the queue. When one starts playing,
   the stream's `now` line says whose it is ("request from @name: now playing ..."); `on_screen=False` leaves it.
 
+### Fewer MCP tools for harnesses with a cap
+
+- `ismail mcp --roles dj,mc` or `--shelves live,stream` serves only those roles' or shelves' ops (the ones
+  `ops_find` already uses), always with `guide` and `ops_find`. `--list-roles` prints each role's and shelf's tool
+  count without starting; `--max-tools N` refuses to start over N and names the sizes; an unknown role or shelf is
+  refused with the valid ones. `ISMAIL_MCP_ROLES`, `ISMAIL_MCP_SHELVES` and `ISMAIL_MCP_MAX_TOOLS` do the same for a
+  harness that cannot pass arguments. On a filtered server `ops_find` marks the ops it does not serve.
+
+### The stage on a stream: an on-air page and GPU window capture
+
+- `?onair=<camera>&fps=30` on a stage page shows that camera full frame with no UI, drawn at a steady rate, the
+  pointer layer included, in a window titled "ismail on air <scene>". `stage_on_air` now also tells on-air pages to
+  cut; other pages, the headset's included, ignore it.
+- `stream_visual(capture='auto'|'wgc'|'gdi')`: `auto` captures a window with Windows Graphics Capture (ffmpeg 8
+  gfxcapture) where ffmpeg has it, so a WebGL page drawn on the GPU comes through, covered or not, cropped to a
+  browser window's web content. `wgc` asked for by name is refused without gfxcapture. With `auto` the visual page
+  now draws on the GPU instead of in software; `gdi` is the old grab, and the manual fallback on a hot GPU.
+
 ### MIDI files in and out
 
 - `midi_write`: the song, some tracks or a window of bars to a type 1 .mid any DAW opens (a track per part, tempo,

@@ -18,14 +18,15 @@ def test_a_cut_puts_the_camera_on_the_monitor_and_is_logged(stage):
     page = FakePage(stage['port'], 'room')
     try:
         out = OPS['stage_on_air'](scene='room', camera='cam_a', note='the opening')
-        c = page.seen[-1]
+        c, cut = page.seen[-2:]
         assert (c['type'], c['material'], c['camera']) == ('surface', 'monitor_screen', 'cam_a')
+        assert (cut['type'], cut['camera']) == ('on_air', 'cam_a')        # an on-air page (?onair) follows the cut
         assert out.startswith('on air: cam_a at ')
         OPS['stage_on_air'](scene='room', camera='cam_b', monitor='screen_2', fps=10)
-        assert (page.seen[-1]['material'], page.seen[-1]['fps']) == ('screen_2', 10)
+        assert (page.seen[-2]['material'], page.seen[-2]['fps']) == ('screen_2', 10)
         n = len(page.seen)
         OPS['stage_on_air'](scene='room', camera='cam_a', monitor=None)
-        assert len(page.seen) == n                     # no monitor: logged only
+        assert [c['type'] for c in page.seen[n:]] == ['on_air']          # no monitor: the on-air page only
         recs = [json.loads(x) for x in (stage['scenes'] / 'room' / 'on_air.jsonl').read_text().splitlines()]
         assert [r['camera'] for r in recs] == ['cam_a', 'cam_b', 'cam_a'] and recs[0]['note'] == 'the opening'
         lines = OPS['stage_on_air_log'](scene='room').splitlines()
