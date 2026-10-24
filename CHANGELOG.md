@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### melody_consensus: a lead line over a backing in the same stem
+
+- New op `melody_consensus(source, reps, phrase_bars, steps_per_beat=4, low='C3', high='C7', track=None,
+  write_at=None)` (ledger:M314). On celestial_resort_1024's vocals stem, which also holds a backing part,
+  `analyze_melody` warned of a second part within 6 dB on half the notes and `notes_from_audio_loop` doubled the
+  lead at the octave. The op ports the song's prototype: every candidate pitch scores its first five harmonics
+  on a constant-Q spectrum, the scores are averaged over the bars where the phrase repeats (`reps`), and each
+  step takes the best pitch; a new note starts where the pitch changes or the start of a step is louder than
+  the step before. Before scoring, what sounds through nearly all of the phrase comes off (`held_pct=10`, each
+  bin's 10th percentile over the phrase), so a held chord stops winning. It returns notes_write rows (beats from
+  the phrase's first bar) and a short summary: notes per bar, how many repetitions pick each pitch on their own,
+  the margin over the runner-up, and the notes whose octave call was within 1.5 dB. `track=` writes the phrase
+  at every bar of `write_at` (default: `reps`). On the song's phrase A (bars 17, 25, 49, 57, G4 to C6) it gives
+  40 of the prototype's 41 notes, and names the one it reads an octave off as its only close call.
+
 ### Level per velocity in voice_help; analyze_sections on a window render
 
 - `voice_help(name)` adds a line with the voice's level per velocity: one short note at 0.2, 0.4, 0.6, 0.8 and 1.0,

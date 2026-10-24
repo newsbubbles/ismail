@@ -34,7 +34,7 @@ CATEGORIES = [
                'and where two takes differ',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
       'region_measure')),
-    ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
+    ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop', 'melody_consensus')),
     ('compare', 'your render against the reference, stored and drilled into bar by bar, and the tells the person '
                'keeps hearing, measured every round', ('cmp_', 'ear_pass', 'tell_')),
     ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes, '
