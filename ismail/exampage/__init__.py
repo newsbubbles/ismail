@@ -8,7 +8,13 @@ tell), pins comments at a time and frequency (a click, or a dragged box), and th
 A round is a folder: manifest.json (what the page shows), key.json (never served before an answer), files/ (the
 pictures and the sound) and answers.jsonl (one line per submit).
 
+One server serves rounds from every song (ledger:M300). It looks for /eye/<name> in its own folder first, then in the
+round registry, a small JSON file of name -> round folder ($ISMAIL_EXAMPAGE_ROUNDS, else ~/.ismail/exampage/
+rounds.json) that it reads on every request. host() and `register` add a round to it; a round whose folder name is
+taken by another song's round gets the song's name in front (round2 -> songb-round2), and host() returns that URL.
+
   python -m ismail.exampage serve <rounds folder> [--port 8871] [--host 127.0.0.1]
+  python -m ismail.exampage register <round folder> [--port 8871]
 """
 import json
 import os
@@ -21,6 +27,97 @@ import time
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'words.html')
 PORT = 8871
 SAFE = re.compile(r'^[A-Za-z0-9_.-]+$')
+ROUNDS_ENV = 'ISMAIL_EXAMPAGE_ROUNDS'
+
+
+class CannotServe(RuntimeError):
+    """host() can't make a round reachable; the message says why and what to do."""
+
+
+# ------------------------------------------------------------------ the round registry (ledger:M300)
+
+def registry_path():
+    """$ISMAIL_EXAMPAGE_ROUNDS (read at each call), else ~/.ismail/exampage/rounds.json."""
+    return os.environ.get(ROUNDS_ENV) or os.path.join(os.path.expanduser('~'), '.ismail', 'exampage', 'rounds.json')
+
+
+def _live(d):
+    return bool(d) and os.path.isfile(os.path.join(d, 'manifest.json'))
+
+
+def _same(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def rounds():
+    """The registry: {name: round folder}, only safe names whose folders still hold a manifest."""
+    p = registry_path()
+    reg = {}
+    for i in range(10):                     # a read that lands while Windows swaps the file in tries again
+        try:
+            with open(p, encoding='utf8') as f:
+                reg = json.load(f)
+            break
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            if i == 9:
+                return {}
+            time.sleep(0.02)
+    if not isinstance(reg, dict):
+        return {}
+    return {k: v for k, v in reg.items() if isinstance(k, str) and isinstance(v, str) and SAFE.match(k) and _live(v)}
+
+
+def _write_rounds(reg):
+    p = registry_path()
+    os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+    tmp = f'{p}.{os.getpid()}.tmp'
+    with open(tmp, 'w', encoding='utf8') as f:
+        json.dump(reg, f, indent=1, sort_keys=True)
+    for i in range(50):
+        try:
+            return os.replace(tmp, p)
+        except PermissionError:             # Windows: the server is reading it this instant
+            if i == 49:
+                raise
+            time.sleep(0.02)
+
+
+def register(folder, server_root=None):
+    """Add the round in `folder` to the registry. -> the name it is served under: its folder name, or, when another
+    round already has that name (in the registry, or in `server_root`, the folder the running server was started
+    on, which it reads first), '<song>-<name>' with the song folder's name (then -2, -3, ...). A folder already in
+    the registry keeps its name, so its URL stays the same when the round is rebuilt."""
+    folder = os.path.abspath(folder)
+    base = os.path.basename(folder)
+    if not SAFE.match(base) or not _live(folder):
+        raise CannotServe(f"{folder} is not a round (no manifest.json, or its name is not letters, digits, '_', "
+                          "'-' or '.')")
+    reg = rounds()
+
+    def free(n):
+        own = server_root and os.path.join(server_root, n)
+        if own and _live(own) and not _same(own, folder):
+            return False
+        return n not in reg or _same(reg[n], folder)
+
+    mine = sorted((n for n, d in reg.items() if _same(d, folder) and free(n)), key=len)
+    if base in mine or (not mine and free(base)):
+        name = base
+    elif mine:
+        name = mine[0]
+    else:
+        parent = os.path.dirname(folder)
+        song = os.path.basename(os.path.dirname(parent)) or os.path.basename(parent)
+        stem = re.sub(r'[^A-Za-z0-9_.-]+', '-', song).strip('-.') or 'song'
+        name, k = f'{stem}-{base}', 2
+        while not free(name):
+            name, k = f'{stem}-{base}-{k}', k + 1
+    reg[name] = folder
+    _write_rounds(reg)
+    return name
+
 
 
 def build(out, items, title, intro='', seed=0, f_lo=0.0, f_hi=16000.0, labels=None):
@@ -131,8 +228,11 @@ def _handler(root):
                 self.wfile.write(body)
 
         def _round(self, name):
+            """The round's folder: in this server's own folder first, then in the registry (another song's)."""
+            if not SAFE.match(name):
+                return None
             d = os.path.join(root, name)
-            return d if SAFE.match(name) and os.path.isfile(os.path.join(d, 'manifest.json')) else None
+            return d if _live(d) else rounds().get(name)
 
         def _file(self, path):
             """A file with HTTP byte ranges, so long audio can seek (M12: http.server answered 200 to every Range)."""
@@ -157,11 +257,13 @@ def _handler(root):
         def do_GET(self):
             p = self.path.split('?')[0]
             if p == '/health':
-                return self._send(200, b'{"ok": true, "what": "ismail exam page"}', 'application/json')
+                return self._send(200, json.dumps({'ok': True, 'what': 'ismail exam page', 'root': root,
+                                                   'registry': True}).encode(), 'application/json')
             if p in ('/', '/eye', '/eye/'):
-                rounds = sorted(d for d in os.listdir(root) if self._round(d))
+                own = [d for d in os.listdir(root) if SAFE.match(d) and _live(os.path.join(root, d))]
+                names = sorted(set(own) | set(rounds()))
                 body = '<!doctype html><meta charset="utf-8"><title>Eye exams</title><ul>' + ''.join(
-                    f'<li><a href="/eye/{r}">{r}</a></li>' for r in rounds) + '</ul>'
+                    f'<li><a href="/eye/{r}">{r}</a></li>' for r in names) + '</ul>'
                 return self._send(200, body.encode(), 'text/html; charset=utf-8')
             m = re.match(r'^/eye/([^/]+)/?(.*)$', p)
             if not m or not self._round(m.group(1)):
@@ -205,31 +307,82 @@ def serve(root, port=PORT, host='127.0.0.1'):
     httpd.serve_forever()
 
 
-def running(port=PORT):
+def _health(port):
+    """What the exam page server on `port` says about itself ({} from one older than the registry), or None when
+    no exam page answers there."""
     import urllib.request
     try:
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=2) as r:
-            return b'exam page' in r.read()
+            body = r.read()
+    except OSError:
+        return None
+    if b'exam page' not in body:
+        return None
+    try:
+        h = json.loads(body)
+    except ValueError:
+        return {}
+    return h if isinstance(h, dict) else {}
+
+
+def running(port=PORT):
+    return _health(port) is not None
+
+
+def _served(port, name, folder):
+    """True when /eye/<name>/manifest.json on `port` is this folder's manifest, byte for byte."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/eye/{name}/manifest.json', timeout=5) as r:
+            got = r.read()
+        with open(os.path.join(folder, 'manifest.json'), 'rb') as f:
+            return got == f.read()
     except OSError:
         return False
 
 
-def host(root, port=PORT):
-    """Start the page server for `root` in the background unless one answers on `port`. -> its base URL."""
+def host(root, port=PORT, rnd=None):
+    """Make rounds reachable on 127.0.0.1:`port`: start the page server on `root` in the background unless one
+    answers there, then add the round `rnd` (a folder in `root`; every round in `root` when None) to the round
+    registry, which that server reads on each request, so one server serves rounds from every song (ledger:M300).
+    Each round is then read back through the server. -> the round's own URL when `rnd` is given (its name may carry
+    the song's name, see register()), else the base URL. Raises CannotServe, saying why, instead of returning a URL
+    that 404s: no server would start, the running server is older than the registry (restart it), or the round
+    can't be read back through it."""
     import subprocess
-    if not running(port):
+    root = os.path.abspath(root)
+    h = _health(port)
+    if h is None:
         os.makedirs(root, exist_ok=True)
         log = open(os.path.join(root, 'server.log'), 'a', encoding='utf8')
         flags = (subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008) if os.name == 'nt' else 0
-        subprocess.Popen([sys.executable, '-m', 'ismail.exampage', 'serve', os.path.abspath(root), '--port',
-                          str(port)], stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
+        subprocess.Popen([sys.executable, '-m', 'ismail.exampage', 'serve', root, '--port', str(port)],
+                         stdout=log, stderr=subprocess.STDOUT, creationflags=flags,
                          start_new_session=os.name != 'nt',
                          cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         for _ in range(50):
-            if running(port):
+            h = _health(port)
+            if h is not None:
                 break
             time.sleep(0.1)
-    return f'http://127.0.0.1:{port}/eye/'
+        if h is None:
+            raise CannotServe(f"the exam page server did not start on port {port} (is something else on that "
+                              f"port? see {os.path.join(root, 'server.log')})")
+    names = [rnd] if rnd is not None else sorted(d for d in os.listdir(root) if _live(os.path.join(root, d)))
+    urls = []
+    for n in names:
+        folder = os.path.join(root, n)
+        name = register(folder, h.get('root'))
+        if not _served(port, name, folder):
+            if not h.get('registry'):
+                raise CannotServe(
+                    f"the exam page server on port {port} is older than the round registry and serves another "
+                    f"folder, so /eye/{name} would 404. Restart it: stop the running one, then python -m "
+                    f"ismail.exampage serve {root} --port {port}. The new one serves rounds from every song.")
+            raise CannotServe(f"the exam page server on port {port} does not serve {folder} as /eye/{name} "
+                              f"(the registry is {registry_path()})")
+        urls.append(f'http://127.0.0.1:{port}/eye/{name}')
+    return urls[0] if rnd is not None else f'http://127.0.0.1:{port}/eye/'
 
 
 def main(argv):
@@ -238,5 +391,14 @@ def main(argv):
         port = int(a[a.index('--port') + 1]) if '--port' in a else PORT
         hst = a[a.index('--host') + 1] if '--host' in a else '127.0.0.1'
         serve(a[0], port, hst)
+    elif len(argv) >= 2 and argv[0] == 'register':
+        a = argv[1:]
+        port = int(a[a.index('--port') + 1]) if '--port' in a else PORT
+        d = os.path.abspath(a[0])
+        try:
+            print(host(os.path.dirname(d), port, os.path.basename(d)))
+        except CannotServe as e:
+            print(f'[exampage] {e}', file=sys.stderr)
+            sys.exit(1)
     else:
         print(__doc__)

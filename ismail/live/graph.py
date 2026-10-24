@@ -185,6 +185,11 @@ class Chain:
             x = p.process(x + dn, block_for(i))
         return x
 
+    def retime(self, bpm, origin):
+        """A live tempo change: beat-synced effects follow `bpm`, with song beat 0 at sample `origin`."""
+        for p in self.procs:
+            p.retime(bpm, origin)
+
     def describe(self, gr=True):
         parts = [f['type'] + ' (baked)' for f in self.bake]
         for i, f in enumerate(self.fx):
