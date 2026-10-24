@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### mimic: short notes no longer drift tens of cents off
+
+- mimic's slow random curves (pitch drift, vibrato rate and depth wander, swell, shimmer) were scaled by the std of
+  the note's own slice. A short slice of a slow curve is nearly flat, so it was stretched to full depth: a 0.1 s
+  cs80_lead A4 note sat 27 cents off at the median and 81 at the 95th percentile, against 13 and 37 now. The curves
+  are now scaled by the smoothing window's expected std, so a short note gets a short stretch of the same curve a
+  long note has. Notes of 10 s and more keep their depth within a few percent. Every mimic note changes (the random
+  draws differ), so this wants an ear round. (ledger:M306)
+
 ### MIDI out to synths and other apps, and MIDI clock
 
 - `live_midi_out`: a live track's notes (or a deck's part) to a MIDI output and channel while the set plays: a

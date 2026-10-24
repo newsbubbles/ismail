@@ -713,11 +713,14 @@ def _vibrato(rng, tc, delay, rate, depth, rate_sd, depth_sd, onset):
 
 
 def _smooth_noise(rng, n, rate_hz, sr_ctrl):
-    """Band-limited random walk-ish signal, unit std, at control rate."""
-    x = rng.standard_normal(n + 64)
+    """Band-limited random walk-ish signal, unit std in expectation, at control rate. Every value sees the whole
+    smoothing window, and the scale is the window's own (white noise through h has std sqrt(sum(h**2))), not the
+    slice's: a short note gets a short stretch of the same slow curve a long note has. Dividing by the slice's
+    own std stretched a nearly flat slice to unit std, so short notes came out tens of cents off (ledger:M306)."""
     k = max(1, int(sr_ctrl / max(rate_hz, 0.1)))
-    x = np.convolve(x, np.hanning(2 * k + 1), 'same')[32:32 + n]
-    return x / (x.std() + 1e-9)
+    h = np.hanning(2 * k + 1)
+    x = rng.standard_normal(n + 2 * k)
+    return np.convolve(x, h, 'valid') / np.sqrt(np.sum(h ** 2))
 
 
 def render(profile, freq, t, vel, gate, sr=SR, **params):
