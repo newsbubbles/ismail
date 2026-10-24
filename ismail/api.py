@@ -2469,6 +2469,7 @@ from . import api_freeze  # noqa: E402,F401  (registers track_freeze: tracks int
 from . import api_kit  # noqa: E402,F401  (registers kit: every public voice and effect by family, ledger:M295)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
+from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell ledger, ledger:M305)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
