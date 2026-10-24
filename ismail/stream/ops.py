@@ -339,7 +339,7 @@ def stream_end(venues: list = None) -> str:
 def stream_visual(mode: str = None, colors: list = None, background: str = None, image: str = None,
                   window: str = None, area: list = None, text_color: str = None, font_size: int = None,
                   chat_overlay: bool = None, width: int = None, height: int = None, fps: int = None,
-                  video_kbps: int = None, audio_kbps: int = None, encoder: str = None) -> str:
+                  video_kbps: int = None, audio_kbps: int = None, encoder: str = None, capture: str = None) -> str:
     """Set the stream's picture with raw numbers. While live this restarts the encoder: a 2-3 s blip on every site,
     so set everything in one call. mode: page (the visual page, drawn from the set's levels as stream_scene sets
     it: the one to change live with no blip), cqt (a piano-roll spectrum), spectrum (bars), waves, scope (a stereo
@@ -347,11 +347,16 @@ def stream_visual(mode: str = None, colors: list = None, background: str = None,
     image: a still behind it, or window: the title of a window to capture (a page the agent draws, the VR stage
     mirror). area: [x, y, w, h] of the visualizer, fractions of the frame. chat_overlay: the newest chat line in
     the corner. width/height/fps: 1280x720 at 30 by default. video_kbps: 4500 (Twitch takes 6000 at most).
-    encoder: auto (NVENC when the GPU has it), nvenc or x264. Look at the result with stream_look."""
+    encoder: auto (NVENC when the GPU has it), nvenc or x264. capture: how a window (or the page) is captured:
+    auto (wgc where ffmpeg has it), wgc (Windows Graphics Capture: GPU-drawn pages such as the stage's WebGL, and a
+    covered window, come through; the page draws on the GPU) or gdi (gdigrab: a GPU-drawn window comes out blank, so
+    the page draws in software). A Chrome or Edge window is cropped to its web content. Look at the result with
+    stream_look."""
     params = {k: v for k, v in dict(mode=mode, colors=colors, background=background, image=image, window=window,
                                      area=area, text_color=text_color, font_size=font_size,
                                      chat_overlay=chat_overlay, width=width, height=height, fps=fps,
-                                     video_kbps=video_kbps, audio_kbps=audio_kbps, encoder=encoder).items()
+                                     video_kbps=video_kbps, audio_kbps=audio_kbps, encoder=encoder,
+                                     capture=capture).items()
               if v is not None}
     res = _call('visual', timeout=30, **params)
     v = res['visual']
