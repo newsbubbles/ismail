@@ -144,6 +144,16 @@
   state is data there: `ear` and `exam`); `--check` and a test fail when the page is stale or a voice has no row.
   The `kit` op gives the rows as text, by family or for one voice. From the Sound Engineer's inventory (ledger M295).
 
+### A voice named with fn='perform' plays live as a performer (ledger:M284)
+
+- A code voice with `fn: 'perform'` played as a performer in the studio (the whole part at once) but note by note
+  live: each note replayed the gesture score from beat 0, so a deck sounded wrong (corr -0.09 against the studio
+  render on a samba deck) with no warning. The live path now marks a performer by the studio's own rule
+  (`instruments.performer_fn`: fn 'perform', or a module with perform() and no function named fn). A tiny gesture
+  voice on bars 3 to 5 went from corr 0.971 and -12 dB to corr 1.000 and 0.00 dB against the studio.
+- A kit pad whose voice is a performer cannot play live as in the studio (live renders a kit hit by hit):
+  `live_track` and `live_load` now say so and name the pads, with the fix (a track of its own).
+
 ### MIDI out to synths and other apps, and MIDI clock
 
 - `live_midi_out`: a live track's notes (or a deck's part) to a MIDI output and channel while the set plays: a
