@@ -339,11 +339,14 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     time-stretched) and loops unless loop=False. Cued (off air) by default while another deck is on air: listen
     with live_listen(deck=...), then bring it in with live_transition. The song's mix comes over as rendered:
     its automation (effect params and volume as ramps, instrument params rendered with the notes, the master fade;
-    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Placed
-    audio clips do not (the reply lists what was left out); the song's master chain (its limiter) runs on the deck.
+    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Audio
+    tracks (placed clips, track_freeze) play from the song's files bar by bar at the song's own speed; audio placed
+    on a track that also has notes does not (the reply lists what was left out). The song's master chain (its
+    limiter) runs on the deck.
     Loading replaces what a cued deck held. A cued deck plays from `at` (off air), so a song loaded early with
     at='next_bar' is already bars into itself when the transition brings it in: load it with at='bar:<the
-    transition's bar>' to start it from its top on air."""
+    transition's bar>' to start it from its top on air. deck_cost(song) says beforehand how long its first bar
+    takes to render here, and which track makes the wait."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)
@@ -359,6 +362,31 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     except (OSError, ValueError):
         pass
     return out
+
+
+@op()
+@heavy()
+def deck_cost(project: str, bars: list = None, bpm: float = None, workers: int = None, wait: str = '10m') -> str:
+    """What a song costs as a deck, before it plays: its first bar rendered offline the way the live engine renders
+    it, timed (no live_start, nothing played, no engine touched). Reach for it when planning a set or a reset: which
+    deck leaves a silent gap after live_load, how long, and which track makes it. project: the song's project
+    folder, as live_load takes it. bars=[a, b]: the deck window live_load will get (its first bar is measured);
+    bpm: the house tempo (default the song's). The report: each track's render seconds for that bar and its real-time
+    factor (render seconds / the bar's seconds; above 1 that track alone renders slower than it plays), its slowest
+    event, its first note (first-use cost), its effects' ms per mixer block; the total, the wait for the first bar
+    with `workers` render workers (live_start's default), and the mixer's load for this deck alone. Then: load a
+    heavy deck that many bars ahead and keep it cued, pick a lighter section, or track_freeze its heavy parts. The
+    numbers are this machine as it is now: a busy machine reads slower. wait: stand in line this long when the
+    machine is busy."""
+    from . import cost
+    song = os.path.abspath(project)
+    if bars is not None and (not isinstance(bars, (list, tuple)) or len(bars) != 2):
+        raise OpError("bars=[first, last], the deck window (inclusive), e.g. [17, 32]")
+    try:
+        r = cost.run(song, bars, bpm, workers, _song_performers(song))
+    except cost.CostError as e:
+        raise OpError(str(e))
+    return cost.report(r)
 
 
 def _song_performers(song):

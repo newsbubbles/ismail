@@ -1806,6 +1806,11 @@ class Engine:
                 f"{'ON AIR once its first bar is rendered (until then held cued; it says so if it slips)' if dk.held else 'CUED: off air, live_listen(deck=...) hears it'}")
         if info.get('bpm') and abs(float(info['bpm']) - self.bpm) > 0.01:
             head += f"\n  song tempo {info['bpm']:g} BPM plays at the house {self.bpm:g} (re-rendered, not stretched)"
+            if info.get('audio_tracks'):
+                head += (f"\n  audio tracks {', '.join(info['audio_tracks'])} are recordings at {info['bpm']:g} BPM: "
+                         f"each bar starts in its place and plays at its own speed, so at {self.bpm:g} a bar is "
+                         f"{'cut short' if self.bpm > float(info['bpm']) else 'run on into the next one'} (play it at "
+                         f"the song's tempo for the bars to join)")
         if note:
             head += f"\n  note: {note}" + ("; the deck stays off air until a whole bar is rendered, then goes on air on "
                                          "that bar line" if dk.held else '')
