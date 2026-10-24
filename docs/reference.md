@@ -433,7 +433,8 @@ ismail/
   mcp_server.py, guide.py
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
   phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
-  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer
+  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer; one
+                 server serves every song's rounds through a round registry
   feedback/      feedback pages answered by typing or voice, kept and transcribed; the feedback_* ops (api_feedback.py)
   capture.py     faults in a recording found before it is measured (soft-limited peaks, band-limited capture)
   sketch.py      first sketches from a brief on the showcase voices, versions 1, 2, 3, feeling words
