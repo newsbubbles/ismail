@@ -43,11 +43,7 @@ What each site's chat can do here:
    restart it carries silence and the picture, so a reset never drops a site.
 2. Set the picture first (`stream_visual`), because a change while live is a 2-3 s blip on every site. Use one
    call with everything: `mode` (cqt, spectrum, waves, scope, page, none), `colors`, `background` or `image` or
-   `window` (the title of a window to capture: the VR stage's mirror, or the stage's on-air page), `capture` (`auto`:
-   Windows Graphics Capture where ffmpeg has it, so a WebGL page drawn on the GPU comes through even when covered;
-   `gdi` is the old grab, which sees a GPU-drawn window as blank; `wgc` asked for by name is refused when ffmpeg has
-   no gfxcapture, never quietly swapped). A plain browser window (tabs and address bar) is cropped to its web content
-   by itself; pass its whole title as the window shows it. `area`. `page` is the visual page below. Set
+   `window` (the title of a window to capture: the VR stage's mirror), `area`. `page` is the visual page below. Set
    the text lines, which
    change live with no blip: `stream_text('title', ...)`, `('note', ...)` ("type !request in chat"), `('now', ...)`
    (the piece). `chat_overlay` puts the newest chat line in a corner by itself.
@@ -75,9 +71,6 @@ second; it never touches the mixer. You set what it draws with numbers, and it c
   on top.
 - On air, the page opens in its own small browser window (its own profile, muted) that the encoder captures, cropped
   to the page. Leave that window where it is; covering it is fine.
-- With `capture='auto'` the page draws on the GPU (WebGL), the same GPU that encodes the stream (NVENC), so both
-  share its heat. On a hot laptop GPU, `capture='gdi'` (the page drawn in software, grabbed the old way) is the manual
-  fallback for long streams until the heat is solved; it costs CPU instead.
 
 ## Chat: the MC
 
@@ -118,18 +111,28 @@ The MC and the DJ share one queue of requests, kept on disk, so it works across 
 - **The DJ** reads `request_next` at each phrase end, never mid-build. When it starts, `request_mark(id,
   'playing')` (the one before is marked done, and the stream's `now` line says whose request it is); `request_mark(id, 'skipped', note='why')` for one that does not fit,
   so the MC can tell the viewer. The DJ never reads raw chat.
+- **Credit.** When a song is made from what chat asked for, `request_credits(ids=[...], path='<song folder>')` adds
+  each viewer (name, venue, what they asked for) to its CREDITS.md. Ask them in chat first ("can I credit you for
+  the cello idea?"), and credit only those who say yes.
 
 The MC never touches the mixer: chat, the picture and helper renders share the machine, so they stay off the
 mixer's cores.
 
 ## Games and commands
 
-Chat commands are plain chat lines; the MC reads them from `chat_watch` and decides. Keep a few, and put them on
-screen with `stream_text('note', ...)`:
-- `!request <style or song>`: a request for the DJ, queued with `request_add`, one per person per 10 minutes.
-- `!vote <a|b>`: the MC opens a vote ("next: faster or deeper? !vote a / !vote b"), counts it for a minute, and
-  hands the DJ the result.
-- `!love`: counts like the person's phone love tap: the DJ keeps what plays a little longer.
+Chat commands are plain chat lines; the MC reads them from `chat_watch`. Keep a few, and put them on screen with
+`stream_text('note', ...)`:
+- `!request <style or song>` and `!vote <id>` are handled by rule: hand each batch from `chat_watch` to
+  `chat_commands(lines)` and say the replies it returns with `chat_say(text, reply_to=...)`. It queues the request,
+  refuses it with the reason (one waiting per person, one per 10 minutes, too long), or counts it as a vote when one
+  like it is waiting. A vote moves a request up the line. It acts on a line once, so handing it the same batch
+  again is safe. The rules are per venue: `venue_rules(venue='*')` shows them; change them before the set, not
+  during it.
+- `!vote <a|b>`: a vote of your own ("next: faster or deeper? !vote a / !vote b"). `chat_commands` leaves these to
+  you in `left`; count them for a minute and hand the DJ the result.
+- `!love`: counts like the person's phone love tap: the DJ keeps what plays a little longer. `chat_commands`
+  counts it for the request that plays (`request_next` shows the count) and gives no reply. One `!vote` or `!love`
+  per viewer per minute (`venue_rules(reward_s=)`), so nobody can spam them.
 
 ## When something fails
 
