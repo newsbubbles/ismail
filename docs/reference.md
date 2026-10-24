@@ -137,6 +137,14 @@ Find any tool by what you need or by role with `ops_find`.
   unless asked to keep them. A deck carries audio tracks (placed clips and frozen tracks), so a song of 20+ tracks
   becomes a light deck: freeze what does not need to move live. `bars=[a, b]` freezes a section; freezing into the
   same track again replaces it.
+- **Live streaming** (`ismail/stream`, the `stream_*`, `venue_*` and `chat_*` tools): the set out to several sites
+  at once, with a picture drawn from the music, and every site's chat read and answered in one place. A request
+  queue (`request_*`) carries chat's requests from the MC to the DJ: `request_add` from chat, `request_next` at a
+  phrase end, `request_mark` as it plays, `request_where` for "when does mine play?". It is an append-only log in
+  the stream home, so it survives a restart and both sessions see one line. `chat_commands` handles `!request` and
+  `!vote` by each venue's rules (`venue_rules`: requests per viewer, a cooldown, duplicates counted as votes), and
+  `request_credits` writes the viewers who asked into a song's CREDITS.md. The guide:
+  [live-streaming.md](../skills/ismail/references/live-streaming.md).
 - **The VR stage** (`ismail/stage`, the `stage_*` tools): a three.js WebXR page for a desktop browser or a headset,
   and a small server that carries the live link between the page and the agent. Scenes live in the song's folder.
   The agent drives the page with ops and reads what the person did and said with `stage_events`. Objects carry
@@ -431,7 +439,8 @@ ismail/
   mcp_server.py, guide.py
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
   phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
-  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer
+  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer; one
+                 server serves every song's rounds through a round registry
   feedback/      feedback pages answered by typing or voice, kept and transcribed; the feedback_* ops (api_feedback.py)
   capture.py     faults in a recording found before it is measured (soft-limited peaks, band-limited capture)
   sketch.py      first sketches from a brief on the showcase voices, versions 1, 2, 3, feeling words
