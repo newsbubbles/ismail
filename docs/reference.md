@@ -128,10 +128,28 @@ Find any tool by what you need or by role with `ops_find`.
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
   parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+- **MIDI out to synths and other apps.** `midi_ports` lists the inputs and outputs (a synth's USB MIDI, a loopMIDI
+  or IAC port into Ableton or FL Studio). `live_midi_out` sends a live track's notes (or a deck's part) to a port
+  and channel while the set plays, kits on channel 10, each note when its audio would reach the speakers, with or
+  without the track's own audio (`audio=False`) and a per-port `offset_ms` for the synth's delay; unrouting, a stop
+  and the set's end send every held note's note-off and All Notes Off. `live_midi_clock` sends MIDI clock (24 per
+  beat at the set's tempo, Start on the next bar line, Song Position with `position=True`, Stop at the end), so a
+  DAW or a drum machine follows the set. `midi_play` plays a song's notes (or some bars) to a port from the command
+  line, with clock if asked, no live set needed. Messages go out from their own thread (a sleep, then a short spin);
+  no new dependency on Windows (winmm), mido with python-rtmidi elsewhere.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`).
+- **What a deck costs.** `deck_cost(song, bars=, bpm=)` renders the deck's first bar offline the way the live engine
+  does and times it, without starting or touching an engine: each track's render seconds and real-time factor, the
+  wait for the first bar with the engine's render workers, and the mixer's load per block. It says which deck
+  leaves a silent gap after `live_load`, how long, and which track makes it.
+- **Frozen tracks.** `track_freeze(tracks, into=)` renders some tracks into one audio track (their effects, faders,
+  pans and automation as rendered; no buses, no master chain), bar `a` at 0 s of its file, and mutes the originals
+  unless asked to keep them. A deck carries audio tracks (placed clips and frozen tracks), so a song of 20+ tracks
+  becomes a light deck: freeze what does not need to move live. `bars=[a, b]` freezes a section; freezing into the
+  same track again replaces it.
 - **Live streaming** (`ismail/stream`, the `stream_*`, `venue_*` and `chat_*` tools): the set out to several sites
   at once, with a picture drawn from the music, and every site's chat read and answered in one place. A request
   queue (`request_*`) carries chat's requests from the MC to the DJ: `request_add` from chat, `request_next` at a
@@ -343,6 +361,7 @@ live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, note
   inside fixed ranges, and the ceiling stays at -1 dBFS.
 - **Decks.** `live_load` puts a whole ismail song on a cued deck while another plays; `live_transition` queues
   the mix (blend, bass swap, filter, cut) with a DJ strip per deck (isolator, filter knob, fader, transpose).
+  Audio tracks (placed clips, `track_freeze`) come over too, read from the song's files bar by bar.
 - **Studio and live.** The studio code is the source of truth. Effects run live as block-by-block twins held to
   the studio versions by tests; an effect with no live twin is baked into each rendered note. A voice with
   `perform()` plays whole phrases live (legato, slides), with bends and vibrato from the clip's `expr` lanes.

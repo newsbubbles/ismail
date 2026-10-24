@@ -425,7 +425,9 @@ air; only you hear it, through `live_listen(deck=...)`.
    fade), its group buses and its master chain (the limiter runs on the deck). It is cued while another deck is
    on air, and a cued deck plays from `at`: a song loaded early with `at='next_bar'` is bars into itself when it
    comes in, so load it with `at='bar:<the transition's bar>'` to bring it in from its top. The reply lists what
-   did not come over (placed audio clips, effects whose source track was muted). A track with instrument
+   did not come over (audio placed on a track that also has notes, effects whose source track was muted). Audio
+   tracks (placed clips, frozen tracks) come over, read from the song's files bar by bar at the song's own speed:
+   play them at the song's tempo. A track with instrument
    automation renders its whole section as one event: load the deck several bars before it plays. A performer
    voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends; other
    `inst.*` automation on a performer, and `inst.lane.*` on a voice that is not one, stay behind (listed under
@@ -435,6 +437,10 @@ air; only you hear it, through `live_listen(deck=...)`.
    A deck loaded straight on air waits off air until a whole bar of it is rendered, then goes on air on that bar
    line: load too close and the audience hears it start bars late, and the next reply says so. A big song (20+
    tracks) wants 10 to 20 bars of lead; load it while the other deck plays, and keep it cued.
+   Before the set (or before a reset), `deck_cost(song, bars=[a, b])` for each deck says how long its first bar
+   takes to render here and which track makes the wait: load a deck that many bars ahead, pick a lighter section,
+   or lighten the heavy track. It starts no engine and plays nothing, so it is safe while a set runs (it does use
+   CPU for a few seconds).
    Before a set, check each song's sections with `live_parity(song, bars=[a, b])`: a drum bus that had lost its
    dry signal left only the bass audible, and only the user heard it.
 2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).
@@ -452,6 +458,13 @@ air; only you hear it, through `live_listen(deck=...)`.
    is asleep a few seconds after it ends. Load the next song onto it (the load replaces its tracks): no need to
    remove the deck or its tracks mid-set. If you do clear a deck, do it before queueing its next load, never at
    the same time: removals made beside a load took the freshly loaded tracks.
+
+A song of 20+ tracks, or one with placed audio on a track that has notes, makes a heavy or incomplete deck. Before
+the set, freeze what does not need to move live: `track_freeze(song, tracks=[...], into='bed')` renders them into
+one audio track (their effects and faders as rendered, no buses, no master chain) and mutes the originals; the deck
+then loads the frozen track plus the parts you will play with (lead, bass, drums you mute or filter). Freeze a copy
+of the song's project, not the song itself, when the song is still being worked on. Freezing into `bed` again
+replaces it.
 
 A studio song is not automatically a light deck. Before `live_load`, look at how much automation the song carries:
 One song's hundreds of per-beat effect ramps (bass cutoff, resonance, drive, pump depth) used 90 to 130% of the
@@ -601,6 +614,40 @@ straight to the speakers.
 - **Other software as the keyboard** (a DAW, a sequencer, a Web MIDI page): on Windows, loopMIDI makes a virtual
   port (name it, e.g. "ismail keys"); whatever sends MIDI to that port plays through `live_midi` like a real
   keyboard.
+
+## MIDI out: synths and other apps play with the set
+
+When the person wants a part played by their own synth, or by a plugin in their DAW, or wants Ableton, FL Studio or
+a drum machine to run in time with the set, send MIDI out. ismail's notes stay the score; their instrument is the
+sound.
+
+- `midi_ports()` lists the outputs (and inputs). A hardware synth's USB MIDI shows up by name; to reach a DAW on
+  the same computer, a virtual port: loopMIDI on Windows (the person adds a port in its window, e.g. "ismail out"),
+  the IAC Driver on a Mac. 'Microsoft GS Wavetable Synth' is the General MIDI synth built into Windows: it sounds
+  from the speakers at once, so say so before sending to it.
+- `live_midi_out(track='bass', port='ismail out')` sends the track's notes from now (the first beat not yet
+  mixed; `at='next_bar'` and the rest as `live_queue` takes them), on the lowest free channel (10 for a kit or a
+  drum); `channel=` picks one. A deck's part is `track='A.bass'`. Each note leaves when its audio would reach the
+  speakers, so the synth and the set line up; the notes keep their velocity, length and the deck's transpose.
+- `audio=False` takes the track off the speakers (and the render workers): the synth is its sound. Keep `audio`
+  on to layer both, or while the person checks the line-up.
+- **Lining up by ear.** A DAW adds its own buffer, a hardware synth very little. Play the kick from ismail and the
+  routed part together and ask whether the synth is early or late; `offset_ms=` (per port, -500 to 2000) moves
+  that port's messages later, or earlier when negative. Ask in their words ("does the bass sit on the kick, or
+  just after it?"), change it in steps of 10 to 20 ms.
+- `remove=True` stops the route: every held note gets its note-off and All Notes Off on its channel, and the
+  track's audio comes back as its notes render again (a few seconds). A stop and the set's end do the same.
+- **Clock.** `live_midi_clock(port='ismail out')` sends 24 pulses per beat at the set's tempo at once (the other
+  app locks to it) and Start on the next bar line, which becomes its bar 1. `position=True` sends that bar's Song
+  Position first and Continue, so a DAW that follows song position shows the same bar number. `on=False` sends
+  Stop; the set's end sends Stop. The person turns on clock in (sync) for that port in their app: Ableton's
+  Preferences, Link/Tempo/MIDI, the port's Sync, then EXT; FL Studio's MIDI settings, the port as an input with
+  its sync on, then external sync. The tempo is the set's; one tempo per set.
+- `live_status` shows each route (notes sent, audio, offset) and the clock (pulses), with how late the sender put
+  messages out. A port error (unplugged mid-set) shows there too.
+- **Without a set.** `midi_play(project, port=..., bars=[a, b])` plays a song's notes to a port from here, in real
+  time, `clock=True` for clock with it: to try a synth or a channel before a set. It blocks until the last note
+  ends.
 
 ## Playing for a screen recording
 

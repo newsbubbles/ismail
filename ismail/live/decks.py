@@ -145,6 +145,46 @@ def _sum_lanes(a, b):
     return [[float(x), float(u + v)] for x, u, v in zip(xs, ia, ib)]
 
 
+def placed_audio(root, d, t, beat0, beat1, bpb):
+    """An audio track's clips as a deck plays them -> (instrument, notes): the built-in placed_audio performer,
+    which reads each clip's sound file by song time, and one gate note per bar of [beat0, beat1) that a clip sounds
+    in, in beats from beat0. Each clip sits where the studio puts it: at its beat, moved by the track's offset_ms,
+    from offset_sec into its file, for length_beats or to the file's end."""
+    import soundfile as sf
+    spb = 60.0 / float(d['bpm'])
+    bank = d.get('sounds') or {}
+    clips, bars = [], set()
+    for c in t.get('audio') or []:
+        meta = bank.get(c.get('sound'))
+        if meta is None:
+            raise DeckError(f"an audio clip places sound {c.get('sound')!r}, which is not in the song's sound bank "
+                            f"(sound_list); have: {sorted(bank)}")
+        path = os.path.join(root, meta['file'])
+        try:
+            info = sf.info(path)
+        except (RuntimeError, OSError) as e:
+            raise DeckError(f"sound {c['sound']!r}: its file {path} does not open ({e})")
+        shift = float(t.get('offset_ms', 0.0)) / 1000.0
+        dur = info.frames / info.samplerate - float(c.get('offset_sec') or 0.0)
+        if c.get('length_beats'):
+            dur = min(dur, float(c['length_beats']) * spb)
+        if dur <= 0:
+            continue
+        sb = float(c['at_beat']) + shift / spb
+        eb = sb + dur / spb
+        clips.append({'file': meta['file'].replace('\\', '/'), 'at_beat': float(c['at_beat']), 'shift_sec': shift,
+                      'offset_sec': float(c.get('offset_sec') or 0.0), 'length_beats': c.get('length_beats'),
+                      'gain_db': float(c.get('gain_db') or 0.0)})
+        j0 = max(int(math.floor(max(sb, beat0) / bpb + 1e-9)), 0)
+        j1 = int(math.ceil(min(eb, beat1) / bpb - 1e-9))
+        bars.update(range(j0, j1))
+    notes = [(j * bpb - beat0, 60, min((j + 1) * bpb, beat1) - j * bpb, 100) for j in sorted(bars)
+             if beat0 <= j * bpb < beat1]
+    inst = {'type': 'code', 'voice': 'placed_audio', 'performer': True, 'tail': 0.0,
+            'params': {'clips': clips, 'song_bpm': float(d['bpm'])}}
+    return inst, notes
+
+
 def read_song(path, deck, bars, house_bpb, performers=()):
     """-> (song summary, buses [(name, fx, volume_db)], tracks [dict], clip specs, notes on what was skipped)."""
     root = os.path.abspath(path)
@@ -182,14 +222,17 @@ def read_song(path, deck, bars, house_bpb, performers=()):
             else:
                 skipped['automation'].append(f"bus {b} {key}")
     master_fade = ((d.get('master') or {}).get('automation') or {}).get('volume_db')
-    tracks, clips = [], []
+    tracks, clips, audio_tracks = [], [], []
     solo = any(t.get('solo') for t in d['tracks'].values())
     for name, t in d['tracks'].items():
         if t.get('mute') or (solo and not t.get('solo')):
             skipped['muted'].append(name)
             continue
-        skipped['placed audio'] += len(t.get('audio') or [])
-        if not t.get('instrument'):
+        audio_track = bool(t.get('audio')) and not t.get('instrument')
+        if not audio_track:
+            # placed audio beside notes stays behind (track_freeze puts it on an audio track of its own)
+            skipped['placed audio'] += len(t.get('audio') or [])
+        if not t.get('instrument') and not audio_track:
             skipped['no instrument'].append(name)
             continue
         for key, pts in (t.get('automation') or {}).items():
@@ -197,23 +240,31 @@ def read_song(path, deck, bars, house_bpb, performers=()):
                 auto.setdefault(f"track:{deck}.{name}", {})[key] = pts
             else:
                 skipped['automation'].append(f"{name} {key}")
-        # where each note sounds: its beat moved by the track's and its own offset, as the studio places it
-        tn = placed(t.get('notes', []), float(d['bpm']), t.get('offset_ms', 0.0))
-        notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in tn if beat0 <= n[0] < beat1]
         context = []
-        if name in performers and notes:
-            # a performer renders what came before as context: held notes keep their real start, short ones ring in
-            context = [(n[0] - beat0, n[1], n[2], n[3]) for n in tn
-                       if beat0 - LEAD_IN_BEATS <= n[0] < beat0 or (n[0] < beat0 < n[0] + n[2])]
+        if audio_track:
+            # an audio track (placed clips, a track_freeze) plays through the placed_audio voice: it reads the song's
+            # own files by song time, one gate note per bar the clips sound in
+            inst, notes = placed_audio(root, d, t, beat0, beat1, bpb)
+            audio_tracks.append(name)
         else:
-            # a note still sounding at the window's start (a drone, a pad, a held string) comes in on its first beat
-            # with what is left of it, as in a studio render of the same window; one with less than a beat left is
-            # a tail
-            notes += [(0.0, n[1], min(n[0] + n[2], beat1) - beat0, n[3]) for n in tn
-                      if n[0] < beat0 and n[0] + n[2] - beat0 >= HELD_MIN_BEATS]
+            inst = t['instrument']
+            # where each note sounds: its beat moved by the track's and its own offset, as the studio places it
+            tn = placed(t.get('notes', []), float(d['bpm']), t.get('offset_ms', 0.0))
+            notes = [(n[0] - beat0, n[1], n[2], n[3]) for n in tn if beat0 <= n[0] < beat1]
+            if name in performers and notes:
+                # a performer renders what came before as context: held notes keep their real start, short ones
+                # ring in
+                context = [(n[0] - beat0, n[1], n[2], n[3]) for n in tn
+                           if beat0 - LEAD_IN_BEATS <= n[0] < beat0 or (n[0] < beat0 < n[0] + n[2])]
+            else:
+                # a note still sounding at the window's start (a drone, a pad, a held string) comes in on its first
+                # beat with what is left of it, as in a studio render of the same window; one with less than a beat
+                # left is a tail
+                notes += [(0.0, n[1], min(n[0] + n[2], beat1) - beat0, n[3]) for n in tn
+                          if n[0] < beat0 and n[0] + n[2] - beat0 >= HELD_MIN_BEATS]
         full = f"{deck}.{name}"
         out = t.get('output', 'master')
-        tracks.append({'track': full, 'instrument': t['instrument'], 'fx': _rename_fx(t.get('fx'), deck, tnames),
+        tracks.append({'track': full, 'instrument': inst, 'fx': _rename_fx(t.get('fx'), deck, tnames),
                        'volume_db': min(6.0, float(t.get('volume_db', 0.0))), 'pan': float(t.get('pan', 0.0)),
                        'sends': {f"{deck}.{b}": float(v) for b, v in (t.get('sends') or {}).items()},
                        'output': None if out in (None, 'master') else f"{deck}.{out}", 'root': root})
@@ -239,7 +290,8 @@ def read_song(path, deck, bars, house_bpb, performers=()):
     song = {'name': d.get('name') or os.path.basename(root.rstrip('/\\')), 'bars': [b0, b1],
             'bpm': d.get('bpm'), 'root': root, 'tracks': [t['track'] for t in tracks],
             'master_fx': _rename_fx((d.get('master') or {}).get('fx'), deck, tnames),
-            'automation': {k: v for k, v in auto.items() if k.split(':', 1)[1] in kept}, 'beats': [beat0, beat1]}
+            'automation': {k: v for k, v in auto.items() if k.split(':', 1)[1] in kept}, 'beats': [beat0, beat1],
+            'audio_tracks': [n for n in audio_tracks if f"{deck}.{n}" in kept]}
     return song, buses, tracks, clips, skipped
 
 

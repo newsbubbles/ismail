@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### MIDI out to synths and other apps, and MIDI clock
+
+- `live_midi_out`: a live track's notes (or a deck's part) to a MIDI output and channel while the set plays: a
+  hardware synth, or a loopMIDI / IAC port into Ableton or FL Studio. Each note goes out when its audio would reach
+  the speakers (the engine's clock, its lookahead and the output's latency), transposed with its deck, kits on
+  channel 10. `audio=False` takes the track off the speakers and the render workers; `offset_ms` per port meets a
+  synth's own delay. Unroute, a removed track, a stop and the set's end send each held note's note-off and All
+  Notes Off (CC 123); closing a port resets it.
+- `live_midi_clock`: MIDI clock out at 24 pulses per beat at the set's tempo, pulsing at once so the receiver locks,
+  Start right before the first pulse of the next bar line (or the bar's Song Position Pointer then Continue, with
+  `position=True`), Stop when turned off and at the set's end.
+- `midi_ports` lists the MIDI inputs and outputs; `midi_play` plays a song's notes (or some bars) to a port in real
+  time from the command line, with clock if asked, to try a synth without a live set.
+- The sender runs on its own thread: it sleeps to about 1.5 ms before each message, then spins. On a loaded laptop
+  (90% CPU) clock pulses went out 0.03 to 0.12 ms late at the median, under 2 ms at the 99th percentile. No new
+  dependency: winmm on Windows, mido with python-rtmidi elsewhere (the error says what to install).
+
+### What a deck costs, before it plays
+
+- `deck_cost(project, bars=, bpm=, workers=)`: the deck's first bar loaded on a silent engine in the op's own
+  process (no `live_start`, no workers, no device, nothing played), warmed as a started engine is, and timed: each
+  track's render seconds for the bar and its real-time factor, its slowest event, its first note, its effects' ms
+  per mixer block; the total, the wait for the first bar with the engine's render workers, and the mixer's load.
+  The reset gap after a `live_load` was mostly that first bar, and the agent could not see it coming. (ledger:M293,
+  the Live DJ's stream set of 10-22.)
+
+### Frozen tracks, and placed audio on decks
+
+- `track_freeze(project, tracks, into=)` renders tracks into one audio track a live deck can play: their mix as
+  rendered (effects, faders, pans, automation), without the buses and the master chain, bar `a` at 0 s of
+  `sounds/frozen_<into>.wav`. Options: `originals='mute'|'keep'`, `bars=[a, b]`; freezing into the same track
+  again replaces it and lifts the mutes it no longer needs. A send or a bus every frozen track shares comes over;
+  the reply names what did not. (ledger:M292, the Live DJ's stream set of 10-22.)
+- `live_load` now carries audio tracks (placed clips and frozen tracks): the built-in `placed_audio` voice reads
+  the song's own files by song time, one bar at a time, sample for sample with a studio render. Placed audio on a
+  track that also has notes still stays behind, and the reply says so.
+
 ### Picture rounds from every song on one server
 
 - The exam page server on 8871 (the only port the phone's `/eye/` reaches) served one folder, so a second song's
