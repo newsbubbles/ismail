@@ -35,6 +35,31 @@ ZOOM_HINT = ("\nclose numbers but it still sounds different, or a voice or playe
              "(references/listening.md, When to zoom)")
 
 
+def _tail_s(y, floor_db=-50.0):
+    """Seconds at the end of y under floor_db against its peak (a release tail or silence past the sound)."""
+    a = np.abs(y).max(axis=0)
+    hop = max(1, int(SD.SR * 0.01))
+    n = len(a) // hop
+    if n < 2:
+        return 0.0
+    blk = a[:n * hop].reshape(n, hop).max(axis=1)
+    loud = np.nonzero(blk > blk.max() * 10 ** (floor_db / 20))[0]
+    return (n - 1 - int(loud[-1])) * hop / SD.SR if len(loud) else 0.0
+
+
+def _window_hint(ya, yb, a_cut, b_cut):
+    """Score the window, not the file (metal 10-22): a whole file's statistics over time count its release tail."""
+    da, db = ya.shape[1] / SD.SR, yb.shape[1] / SD.SR
+    ta, tb = (0.0 if a_cut else _tail_s(ya)), (0.0 if b_cut else _tail_s(yb))
+    if (a_cut and b_cut) or (abs(da - db) <= 0.5 and max(ta, tb) <= 0.5):
+        return ''
+    return (f"\nwindow: A is {da:.1f} s" + (f" ({ta:.1f} s of tail under -50 dB)" if ta > 0.5 else '')
+            + f", B {db:.1f} s" + (f" ({tb:.1f} s of tail)" if tb > 0.5 else '')
+            + ". Every statistic over time here counts the whole of each, release tail included. If the person "
+              "hears a window (an exam clip), pass a_window/b_window (or a_span/b_span) for exactly that window: "
+              "score the window, not the file")
+
+
 @op()
 def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window: list = None, a_span: list = None,
                   b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0) -> str:
@@ -42,11 +67,15 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
     centroid, stereo width, and one distance number. a/b are sources ('sound:<name>', 'ref:drums', 'track:x',
     ...); window=[t0, t1] seconds or span=[start_bar, end_bar] (fractional) selects a slice. Reach for it when one
     part or one hit does not sound like the reference or the genre (a snare that sounds dated, a lead that does not
-    sit like the record's): yours against theirs, on the window where it plays."""
+    sit like the record's): yours against theirs, on the window where it plays. Score the window, not the file:
+    the envelope and every statistic over time count all of each sound, so a render or stem that runs past what
+    the person hears (its release tail) reads apart from the clip they heard; the reply says when the lengths or
+    tails differ and no window was given."""
     P = _load(project)
-    da = SD.descriptor(_audio(P, a, a_window, a_span))
-    db = SD.descriptor(_audio(P, b, b_window, b_span))
-    return SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
+    ya, yb = _audio(P, a, a_window, a_span), _audio(P, b, b_window, b_span)
+    da, db = SD.descriptor(ya), SD.descriptor(yb)
+    return (SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1]
+            + _window_hint(ya, yb, bool(a_window or a_span), bool(b_window or b_span)) + ZOOM_HINT)
 
 
 @op(mutates=True)

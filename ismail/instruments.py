@@ -145,9 +145,11 @@ def normalize(inst):
         bad = set(inst.get('params') or {}) - set(mimic.DEFAULT_PARAMS)
         if bad:
             raise InstrumentError(f"unknown mimic params {sorted(bad)}; valid: {sorted(mimic.DEFAULT_PARAMS)}")
-        unknown = set(inst) - {'type', 'profile', 'params', 'tail', 'gain_db', 'pan', 'fx'}
+        unknown = set(inst) - {'type', 'profile', 'params', 'tail', 'gain_db', 'pan', 'fx', 'perform', 'performer'}
         if unknown:
-            raise InstrumentError(f"unknown mimic keys {sorted(unknown)}; valid: profile, params, tail, gain_db, pan")
+            raise InstrumentError(f"unknown mimic keys {sorted(unknown)}; valid: profile, params, tail, gain_db, pan, "
+                                  "perform")
+        _check_mimic_perform(inst)
         return dict({"tail": 1.0, "gain_db": 0.0, "pan": 0.0, "params": {}}, **inst)
     raise InstrumentError(f"unknown instrument type {t!r}; use one of {', '.join(INSTRUMENT_TYPES)}")
 
@@ -714,13 +716,49 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
     return out
 
 
-def render_mimic(p, notes, total_n, sr, root=None):
+MIMIC_OUTLIER_DB = 6.0      # a mimic take this far over the takes around it is named in the render summary
+
+
+def _check_mimic_perform(inst):
+    """'perform': true, or a dict of phrase performer params (ismail/mimic_perform.py, ledger M308). With it on,
+    only the mimic params that mean the same for a phrase are allowed."""
+    pf = inst.get('perform')
+    if pf is None or pf is False:
+        return
+    from . import mimic_perform as mp
+    if not (pf is True or isinstance(pf, dict)):
+        raise InstrumentError("mimic 'perform' is true (play the track as phrases) or a dict of performer params, "
+                              f"e.g. {{\"vib\": 8, \"breath_gap\": 0.2}}; params: {sorted(mp.DEFAULTS)}")
+    if isinstance(pf, dict):
+        bad = set(pf) - set(mp.DEFAULTS)
+        if bad:
+            raise InstrumentError(f"unknown mimic perform params {sorted(bad)}; valid: {sorted(mp.DEFAULTS)}")
+    bad = set(inst.get('params') or {}) - set(mp.MIMIC_OK)
+    if bad:
+        raise InstrumentError(f"mimic params {sorted(bad)} shape single notes and do nothing with perform on; "
+                              f"with perform the mimic params are {sorted(mp.MIMIC_OK)} and the performer's own go "
+                              f"in 'perform': {sorted(mp.DEFAULTS)}")
+
+
+def render_mimic(p, notes, total_n, sr, root=None, auto=None, bpm=120.0, beat0=0.0, report=None):
+    """report: a list that gets one line per note take far louder than its neighbours (mimic_outliers)."""
     from . import mimic
     try:
         prof = mimic.load_profile(p['profile'], root)
     except ValueError as e:
         raise InstrumentError(str(e))
+    if p.get('perform'):
+        # the whole track as phrases: slurs, tonguing, breath, delayed vibrato, lanes (ismail/mimic_perform.py)
+        from . import mimic_perform
+        try:
+            mimic_perform.check_profile(prof, p['profile'])
+        except mimic_perform.PerformError as e:
+            raise InstrumentError(str(e))
+        lanes = {k[5:]: v for k, v in (auto or {}).items() if k.startswith('lane.')}
+        return mimic_perform.perform(prof, notes, total_n, sr, bpm=bpm, lanes=lanes, beat0=beat0,
+                                     mimic_params=p.get('params'), perform=p['perform'])
     out = np.zeros((2, total_n))
+    takes = []
     for st, m, d, v in notes:
         s0 = int(round(st * sr))
         n = int((d + p['tail']) * sr)             # the whole note, as in render_code
@@ -729,15 +767,45 @@ def render_mimic(p, notes, total_n, sr, root=None):
         y = mimic.render(prof, midi_to_hz(m), np.arange(n) / sr, v / 127, d, sr, **(p.get('params') or {}))
         k = min(y.shape[1], n, total_n - s0)
         out[:, s0:s0 + k] += y[:, :k]
+        if report is not None:
+            held = y[:, :max(1, min(int(d * sr), y.shape[1]))]
+            takes.append((st, int(m), int(v), round(float(d), 4),
+                          10 * np.log10(np.mean(held ** 2) + 1e-20) - 20 * np.log10(max(v, 1) / 127)))
+    if report is not None:
+        report.extend(mimic_outliers(takes))
     return out
+
+
+def mimic_outliers(takes, semis=2, over_db=MIMIC_OUTLIER_DB):
+    """takes: [(start_sec, midi, vel, dur_sec, level_db per unit velocity)]. A mimic note's random variation is
+    seeded by its pitch, velocity and length, so every repeat of a take is the same take: compare each distinct take
+    with the other takes within `semis` semitones and name the ones over their median by more than over_db."""
+    from .notation import midi_to_name
+    by = {}
+    for st, m, v, d, lv in takes:
+        by.setdefault((m, v, d), []).append((st, lv))
+    keys = list(by)
+    lines = []
+    for key in keys:
+        m, v, d = key
+        near = [by[o][0][1] for o in keys if o != key and abs(o[0] - m) <= semis]
+        if len(near) < 2:
+            continue
+        over = by[key][0][1] - float(np.median(near))
+        if over > over_db:
+            lines.append((over, f"mimic note {midi_to_name(m)} vel {v} ({len(by[key])}x, first at {by[key][0][0]:.1f} s)"
+                                f" sits {over:.1f} dB over the {len(near)} takes within {semis} semitones (per unit "
+                                f"velocity); a velocity a step away draws another take"))
+    return [t for _, t in sorted(lines, reverse=True)]
 
 
 # ------------------------------------------------------------------ entry point
 
-def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None, beat0=0.0, bpb=4):
+def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=None, beat0=0.0, bpb=4, report=None):
     """inst: normalized instrument; notes: [(start_sec, midi, dur_sec, vel)]; -> (2, total_n). root = project
     directory (song voices in <root>/voices/). beat0: the song beat at sample 0 (performers key notes on it; synths
-    and drums seed on where a note sits in its bar of bpb beats)."""
+    and drums seed on where a note sits in its bar of bpb beats). report: a list for lines about single notes in
+    the render summary (mimic takes far louder than their neighbours)."""
     auto = auto or {}
     t = inst['type']
     if t == 'synth':
@@ -747,7 +815,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
     elif t == 'code':
         out = render_code(inst, notes, total_n, sr, bpm, root, auto, beat0)
     elif t == 'mimic':
-        out = render_mimic(inst, notes, total_n, sr, root)
+        out = render_mimic(inst, notes, total_n, sr, root, auto, bpm, beat0, report=report)
     elif t == 'kit':
         out = np.zeros((2, total_n))
         by = {}
@@ -756,7 +824,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
         for key, nts in by.items():
             if key not in inst['map']:
                 continue  # unmapped pitches are silent; notes_read flags them
-            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root, beat0, bpb)
+            out += render_instrument(inst['map'][key], nts, total_n, None, bpm, sr, root, beat0, bpb, report)
     elif t in DRUM_DEFAULTS:
         out = np.zeros((2, total_n))
         for st, m, d, v in notes:
