@@ -255,19 +255,32 @@ def _project_fx(project, spec):
 
 
 def _mark_performer(inst, project):
-    """A code voice whose module has perform() and no voice function plays whole phrases: flag it so the engine
-    groups overlapping notes into one event and passes clip expr lanes (the module is imported here, in the op
-    process, never in the engine)."""
+    """A code voice the studio plays with perform() (fn='perform', or a module with perform() and no function named
+    fn: instruments.performer_fn) plays whole phrases: flag it so the engine groups overlapping notes into one event
+    and passes clip expr lanes (the module is imported here, in the op process, never in the engine)."""
     if not isinstance(inst, dict) or inst.get('type') != 'code' or not inst.get('voice'):
         return inst
-    from .. import voices
+    from .. import instruments, voices
     try:
         mod = voices.load(inst['voice'], os.path.abspath(project))
     except Exception:
         return inst
-    if callable(getattr(mod, 'perform', None)) and not callable(getattr(mod, inst.get('fn') or 'voice', None)):
+    if instruments.performer_fn(mod, inst.get('fn')) is not None:
         return dict(inst, performer=True)
     return inst
+
+
+def _performer_gaps(inst, project, where):
+    """Warnings for the performers the live engine cannot play as the studio does: a kit pad whose code voice is a
+    performer gets the pad's whole part in the studio, but live renders a kit hit by hit (ledger:M284)."""
+    if not isinstance(inst, dict) or inst.get('type') != 'kit':
+        return []
+    pads = [k for k, v in (inst.get('map') or {}).items() if _mark_performer(v, project) is not v]
+    if not pads:
+        return []
+    return [f"warning: {where}: kit pad(s) {', '.join(map(str, pads))} play a performer voice (perform()); the studio "
+            f"gives such a pad its whole part, live plays it hit by hit and will not match. Put that voice on a "
+            f"track of its own to play it live as in the studio."]
 
 
 @op()
@@ -306,6 +319,7 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
         instrument = _mark_performer(instrument, project)
+    gaps = _performer_gaps(instrument, project, f"track {track!r}") if instrument is not None else []
     if output is not None and not (isinstance(output, str) and output):
         raise OpError(f"output {output!r}: the name of a live bus (live_bus creates one)")
     out = _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
@@ -315,6 +329,8 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         cost = X.chain_costs([stack or fx])
         if cost:
             out = str(out) + '\n' + '\n'.join(cost)
+    if gaps:
+        out = str(out) + '\n' + '\n'.join(gaps)
     return out
 
 
@@ -353,6 +369,9 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
         song = cand if os.path.exists(cand) else os.path.abspath(song)
     out = _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
                 performers=_song_performers(song), timeout=120)
+    gaps = _song_performer_gaps(song)
+    if gaps:
+        out = str(out) + '\n' + '\n'.join(gaps)
     try:                                                    # its saved stacks, and what they cost here (ledger:M177)
         from .. import api_fxstack as X
         with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
@@ -399,6 +418,16 @@ def _song_performers(song):
         return []
     return [n for n, t in tracks.items() if isinstance(t.get('instrument'), dict) and
             _mark_performer(t['instrument'], song).get('performer')]
+
+
+def _song_performer_gaps(song):
+    """_performer_gaps for each of a song's tracks, as live_load says them."""
+    try:
+        with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
+            tracks = json.load(f).get('tracks', {})
+    except (OSError, ValueError):
+        return []
+    return [w for n, t in tracks.items() for w in _performer_gaps(t.get('instrument'), song, f"track {n!r}")]
 
 
 @op()
