@@ -2542,3 +2542,11 @@ from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* 
 from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)
 from .stream import request_queue as _stream_requests  # noqa: E402,F401  (registers the request_* ops, ledger:M290)
 from .stream import venue_rules as _stream_rules  # noqa: E402,F401  (registers venue_rules, chat_commands, ledger:M291)
+
+
+def __getattr__(name):
+    """Every op is an attribute of ismail.api, also those registered by the modules above (api.live_parity,
+    api.sound_speak, api.master_cue ...), as they are in api.OPS (ledger:M277(e), M285(e))."""
+    if name in OPS:
+        return OPS[name]
+    raise AttributeError(f"module 'ismail.api' has no attribute {name!r}; ops_find(need='...') finds an op by purpose")

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### live_parity: a one-sample offset is the same take, and each track says its render speed
+
+- At 136 BPM a beat is 19455.88 samples, and an `@ms` nudge is never a whole number of samples. Two roundings put
+  notes one sample apart (ledger:M285(a)):
+  - The studio window's buffer started a pre-roll before the window, a fraction of a sample long. Some notes then
+    landed one sample off where the whole song's render has them. The buffer now starts on a whole song sample,
+    and a window at any tempo matches the whole song's render sample for sample (it did at 120 BPM only).
+  - A deck rounds each note to the engine's own samples, and the engine's bar line sits at a different fraction
+    of a sample than the song's. In a set this is inaudible. live_parity now starts its engine's clock so the
+    deck's first bar line has the song window's fraction, so its takes are sample for sample.
+- live_parity judges each part at its best lag. A take that lines up within 3 ms reads `ok (same, offset 1 sample
+  late)`; before, it read `DIFFERS: +1 samples late` at corr 1.000 and level within 0.01 dB. The fit is looked for
+  up to 100 ms either way, so a take 50 ms off still DIFFERS and says how far off it is. Before, it was looked
+  for up to 256 samples, and a take 50 ms late read "200 samples early".
+- Each track's line says how fast it renders live (`renders 41.3x realtime`), from the seconds its renders took in
+  the check (ledger:M285(e)).
+- Every op is an attribute of `ismail.api`, including those registered outside api.py: `api.live_parity`,
+  `api.sound_speak`, `api.master_cue`, `api.analyze_sections` and the rest (ledger:M277(e), M285(e)).
+
 ### mimic perform: vibrato by default, and phrase ends that fall
 
 - The default vibrato depth of `"perform": true` is now the median of the profile's notes that have vibrato,
