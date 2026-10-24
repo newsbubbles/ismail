@@ -256,7 +256,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 |---|---|---|
 | keys | `grand_piano` | grand piano calibrated from measured notes (partials, decay times, inharmonicity, stereo image, hammer knock, dampers); `fn: voice_sym` is an undamped sympathetic string |
 | keys | `additive_piano` | a lighter additive piano with no data file |
-| keys | `rhodes` | a 1977 Rhodes Mark I, sampled (jRhodes3d); fetch the samples with `samples_fetch` |
+| keys | `rhodes` | a 1977 Rhodes Mark I, sampled (jRhodes3d); velocity picks the layer (timbre) and sets the level over `vel_db` (30) dB from 1.0 to 0.1; fetch the samples with `samples_fetch` |
 | strings | `violin`, `cello`, `contrabass` | mimic profiles measured from real recordings (use `{"type": "mimic", "profile": "violin"}`); open strings, measured room and vibrato included; `params.players` makes a section |
 | winds | `clarinet` | mimic profile measured from VSCO 2 CE (CC0); not told apart from the real note in a blind pair (one listener, 2026-10-07) |
 | winds | `bassoon` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
@@ -269,7 +269,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 | drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
 | drums | `toms` | performer: the Big Rusty toms (Karoryfer, CC0) retuned to the note, so the note is the drum's pitch (F#1-A3 heard as real); lanes `pos` (0 center .. 1 rim) and `stroke` (stick, mallet, brush, rimshot, rim click, shell, dead) per hit; velocity picks the recorded layer. Not told apart from the real drum in a blind exam of 5 pairs (one listener, 2026-10-14). About 2 s of rendering per hit. Finds its samples in `$TOM_SAMPLES`, the project's `ref/`, or `samples_fetch('big_rusty')` |
-| guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
+| guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; velocity picks one of 4 recorded layers and moves the level inside it, toward the layer below; fetch with `samples_fetch` |
 
 Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters, and gives its level per velocity (a short note probed at 0.2 to 1.0, in dB against 1.0), so a balance change is one step.
 
@@ -308,11 +308,17 @@ python -m ismail -p song track_add name=fiddle 'instrument={"type": "mimic", "pr
 
 Tested leave-one-out on violin, cello and double bass recordings, a mimic note rebuilt without ever hearing that note lands as close to the real one as a real neighbouring note repitched, or closer (violin 11.2 vs 14.6, cello 12.5 vs 13.0, double bass 10.9 vs 12.8 on `sound_compare`'s distance). The defaults were then tuned by ear over four rounds of eye exams (open, not blind: the real note next to versions that each change one named thing); the current default was picked closest on every note of the last round. Struck and plucked instruments (piano) are harder: with 12 notes across 7 octaves a piano's note-to-note colour can't be predicted and mimic stays behind a sampler there (16.3 vs 11.6); the `grand_piano` voice remains the better piano. A few notes at one dynamic teach one dynamic: record soft and loud notes if velocity matters, and more notes than you think for instruments whose colour changes from note to note.
 
+**Phrases (`"perform": true`).** By default mimic plays each note on its own. For a legato line on a sustained (blown or bowed) profile, `{"type": "mimic", "profile": "clarinet", "perform": true}` plays the track as phrases through a performer that reads the same profile (partial levels, body, air spectrum, attack map): overlapping notes slur (one continuous tone, the pitch glides in `slur_ms`, no second attack), a gap shorter than `breath_gap` (0.16 s) is tongued (the tone dips and speaks again with the measured chiff), a longer gap is a new breath. The vibrato waits `vib_delay` (0.45 s) into a note and grows over `vib_grow`, with a breath pulse; its depth defaults to the median of the profile's notes that have vibrato, leaned down when most of them are straight (3.7 c on the clarinet, about the measured depth on the horn and the strings). A phrase of 0.5 s or more tapers at its end by `taper_db` (5 dB, read after the room) over the last 35 % of its last note or its last 0.3 s, whichever is longer. Lanes, as automation `inst.lane.<name>` (and clip `expr` live): `level` (dB, a little brighter when up), `vib` (cents peak, read at each note start), `scoop` (semitones below, read at note start), `tongue` (0..1 onset hardness), `breath` (dB on the air), `bend` (semitones). `"perform": {"vib": 8, "breath_gap": 0.2}` sets performer params (`instrument_help(type='mimic')` lists them); with perform on, only the mimic `params` that mean the same for a phrase are accepted (`bright`, `vel_bright`, `vib`, `vib_rate`, `vib_delay`, `width`, `noise`, `room`, `room_mix`, `seed`, plus the ring and open strings). A chord splits into lines, each phrased on its own. A decaying profile (piano, harp) refuses perform. Left out, every render is as it was. (From the bossa_gilberto_studio flute performer.)
+
 ## Hearing: audio as text
 
 | Question | Tool |
 |---|---|
 | Tempo, where bar 1 is, tuning, swing | `analyze_grid` (bar 1 voted by kick, harmony, section changes and the snare on 2 and 4), `align`, `analyze_swing` |
+
+`analyze_grid` also reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart, by autocorrelation of each band's onsets. When they disagree (a ratio other than 1, 2 or 1/2) it says so and names the thumb/bass band as the likely beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the thumb (122 BPM for a thumb at 92), and the line gives the `bpm_hint` to rerun with.
+
+`analyze_swing(follow=True)` reads a record that drifts (played without a click). A beat line follows the thumb, bass or kick from the project tempo (period and phase from the first 16 beats, then a phase-locked follower smoothed over 9 beats), and every 16th step is read on it. Parameters: `band_hz` is the band the figure is read in (`[lo, hi]` Hz, default `[1500, 6000]` for finger plucks; `[6000, 16000]` for hats), and `threshold` (default 0.35) is the share of the 95th percentile peak over which a step counts as a pluck (raise it, for example to 0.5, when a dense stem reads X on every step). It prints the hits and accents per step, the median offset per step against the plucks on the beats, the most-played 16-step strings and the timing inside them. On a click track drifting from 90 to 94 BPM, planted offsets of +20 and -15 ms read +21 and -13 ms. Without `follow`, `analyze_swing` adds one line when the beat drifts more than 3% over 8 beats.
 | Song form, what plays where | `analyze_structure` (arrangement map, sections, loop length, root per bar) |
 | Levels, bands and chords per bar | `analyze_bars`, `analyze_chords`, `analyze_key` |
 | Drum pattern | `analyze_drums` (step strings you can paste into `pattern_write`) |
@@ -321,6 +327,7 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
 | Intonation, quarter tones (maqam steps), slides, vibrato | `analyze_melody(cents=True)` (each note's pitch as a float MIDI number, Hz and cents), `analyze_contour` (f0 per frame, in windows of up to 1000 rows) |
 | Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |
+| Do two parts rub a semitone apart, or step out of key (read from the notes, no render) | `notes_clash` (semitone and minor 9th clashes between parts for at least `min_overlap` beats, and out-of-key notes, each with bar and beat, the two parts and notes, overlap and velocity, most audible first; the key is the project's or found from the notes; drums and fixed-pitch pads skipped) |
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
 | Vowels of a voice | `analyze_formants` |
@@ -452,6 +459,7 @@ ismail/
                  block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
+  mimic_perform.py  the phrase performer for sustained mimic profiles ("perform": true)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
                  (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
                  fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices

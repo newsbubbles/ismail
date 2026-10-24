@@ -1437,14 +1437,19 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
                 'so C1 = MIDI 24 (GM drum charts number C1 as 36): a drum voice that picks its piece by MIDI number '
                 '(69 + 12*log2(freq/440)) adds 12 before looking it up in a GM chart, or maps by name.')
     if type == 'mimic':
-        from . import mimic
+        from . import mimic, mimic_perform
         return ('mimic: {"type":"mimic","profile":"<name>","params":{},"tail":1.0} plays an instrument measured from '
                 'recordings (mimic_measure makes <project>/voices/<name>.mimic.json; voices_list shows the profiles). '
                 'Partials with their own envelopes read a body curve at their current frequency, plus measured noise; '
                 'unmeasured pitches blend the two nearest measured notes. params (defaults): ' +
                 json.dumps(mimic.DEFAULT_PARAMS) + '. Velocity 0..1 against the measured velocity: louder and brighter '
                 '(vel_bright dB per octave of partial number). For sustained kinds the note length is the bow/breath '
-                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring).')
+                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring). '
+                '"perform": true plays a sustained (blown or bowed) profile as phrases, for legato lines: overlapping '
+                'notes slur, a gap under breath_gap tongues, a longer gap is a new breath, the vibrato waits and grows; '
+                'lanes (automation inst.lane.<name>): ' + json.dumps(mimic_perform.INFO['lanes']) + '. "perform": '
+                '{...} sets performer params (defaults): ' + json.dumps(mimic_perform.DEFAULTS) + '; with perform on, '
+                'params takes only ' + ', '.join(mimic_perform.MIMIC_OK) + '. Decaying profiles refuse perform.')
     if type in inst_mod.DRUM_DEFAULTS:
         return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
             " (times in s, freqs in Hz, drive in dB). A drum synth ignores note pitch (any pitch triggers it; put" \
@@ -2224,9 +2229,14 @@ def _grid(P, bpm, offset_sec):
 @op()
 def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
     """Estimate tempo, the time of bar 1 (kick, harmony, section changes and snare on 2 and 4 vote), the tuning
-    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set."""
+    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set. It also
+    reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when they disagree
+    and which is likely the beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the
+    thumb (122 BPM for 92)."""
     P = _load(project)
-    g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
+    path = P.resolve_audio(source)
+    g, txt = A.beat_grid(path, bpm_hint, P.bpb)
+    txt += '\n' + A.band_periods(path, g['bpm'])[1]
     ref = P.d.get('reference') or {}
     drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
     # bar 1 two beats off (a snare on 2 and 4 reads the same): the harmony changes vote, from the bass stem on a ref
@@ -2528,6 +2538,7 @@ from . import api_freeze  # noqa: E402,F401  (registers track_freeze: tracks int
 from . import api_kit  # noqa: E402,F401  (registers kit: every public voice and effect by family, ledger:M295)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
+from . import api_clash  # noqa: E402,F401  (registers notes_clash: semitone rubs and out-of-key notes, ledger:M282)
 from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell ledger, ledger:M305)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
@@ -2535,3 +2546,11 @@ from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* 
 from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)
 from .stream import request_queue as _stream_requests  # noqa: E402,F401  (registers the request_* ops, ledger:M290)
 from .stream import venue_rules as _stream_rules  # noqa: E402,F401  (registers venue_rules, chat_commands, ledger:M291)
+
+
+def __getattr__(name):
+    """Every op is an attribute of ismail.api, also those registered by the modules above (api.live_parity,
+    api.sound_speak, api.master_cue ...), as they are in api.OPS (ledger:M277(e), M285(e))."""
+    if name in OPS:
+        return OPS[name]
+    raise AttributeError(f"module 'ismail.api' has no attribute {name!r}; ops_find(need='...') finds an op by purpose")

@@ -555,6 +555,305 @@ def swing(path, bpm, offset, sr=ASR):
                   f"8ths {show(s8, pos[0.5][1])}. Write swung notes that late (straight = 0); do not guess.")
 
 
+# ------------------------------------------------------------------ thumb and finger bands, a drifting beat line
+
+THUMB_BAND = (55.0, 190.0)       # a guitar's thumb on the low strings, a bass line, a kick
+FINGER_BAND = (1500.0, 6000.0)   # finger plucks and chord strokes (hats and snares on a drum stem)
+_RATIOS = ((1.0, 'the same rate as'), (2.0, '2x'), (0.5, '1/2'), (1.5, '3/2'), (2 / 3, '2/3'), (4 / 3, '4/3'),
+           (0.75, '3/4'), (3.0, '3x'), (1 / 3, '1/3'), (4.0, '4x'), (0.25, '1/4'))
+
+
+def _band_rise(y, sr, lo, hi, hop, n_fft):
+    """Rise of one band's energy in dB over two frames (positive part), one number per frame: a stroke (a 10 to 20 dB
+    jump of the whole band) stands out from the noise of quiet bins."""
+    S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop))
+    f = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    E = 10 * np.log10((S[(f >= lo) & (f < hi)] ** 2).sum(0) + 1e-10)
+    E = np.convolve(E, np.ones(3) / 3, mode='same')
+    return np.r_[0.0, 0.0, np.maximum(0, E[2:] - E[:-2])]
+
+
+def _autocorr(x):
+    x = x - x.mean()
+    n = len(x)
+    F = np.fft.rfft(x, 2 * n)
+    ac = np.fft.irfft(F * np.conj(F))[:n]
+    return ac / (ac[0] + 1e-12)
+
+
+def _unit(x):
+    s = np.percentile(x, 99)
+    return x / (s if s > 0 else (x.max() if x.max() > 0 else 1.0))
+
+
+def _period(env, fps, lo_bpm=55.0, hi_bpm=200.0):
+    """(bpm, strength) of the strongest beat-range period of an onset envelope by autocorrelation, or (None, 0).
+    Every multiple of a pulse peaks too, so among the peaks within 10% of the strongest the shortest lag wins."""
+    if not np.any(env > 0):
+        return None, 0.0
+    ac = _autocorr(env)
+    a, b = int(np.floor(fps * 60 / hi_bpm)), int(np.ceil(fps * 60 / lo_bpm))
+    if b + 2 >= len(ac):
+        return None, 0.0
+    seg = ac[a:b + 1]
+    pk = [i for i in range(1, len(seg) - 1) if seg[i] >= seg[i - 1] and seg[i] > seg[i + 1] and seg[i] > 0]
+    if not pk:
+        return None, 0.0
+    top = max(seg[i] for i in pk)
+    j = a + min(i for i in pk if seg[i] >= 0.9 * top)
+    den = ac[j - 1] - 2 * ac[j] + ac[j + 1]
+    d = 0.5 * (ac[j - 1] - ac[j + 1]) / den if den < 0 else 0.0
+    return float(60 * fps / (j + d)), float(ac[j])
+
+
+def _relation(r):
+    """(simple ratio, its name) within 3% of r, or (None, 'x<r>')."""
+    q = min(_RATIOS, key=lambda x: abs(np.log(x[0] / r)))
+    return q if abs(np.log(q[0] / r)) < 0.03 else (None, f'x{r:.2f}')
+
+
+def band_periods(path, picked_bpm=None):
+    """The beat period of the thumb band (55-190 Hz) and of the finger band (1.5-6 kHz) read apart, by
+    autocorrelation of each band's onsets, and whether they agree. A whole-mix tempo locks onto the strongest gap: on
+    a bossa guitar that is the finger figure's 3 sixteenths (3-3-2), which read 122 BPM for a thumb at 92 (M287).
+    Returns (data, text); the text names the band that is likely the beat when they disagree."""
+    y = load(path)
+    if len(y) < 4 * ASR:
+        return {}, "band periods: under 4 s of audio, not read"
+    hop = 128
+    fps = ASR / hop
+    data = {}
+    for name, (lo, hi) in (('thumb', THUMB_BAND), ('finger', FINGER_BAND)):
+        bpm, s = _period(_band_rise(y, ASR, lo, hi, hop, 1024), fps)
+        data[name] = {'bpm': round(bpm, 2) if bpm and s >= 0.1 else None, 'strength': round(s, 2)}
+    th, fi = data['thumb']['bpm'], data['finger']['bpm']
+
+    def show(label, d):
+        return (f"  {label}: {d['bpm']:.1f} BPM (strength {d['strength']:.2f})" if d['bpm'] else
+                f"  {label}: no clear period (strength {d['strength']:.2f})")
+    L = ["band periods (each band's onsets on their own, by autocorrelation; the tempo above reads the whole mix):",
+         show('thumb/bass band 55-190 Hz', data['thumb']), show('finger band 1.5-6 kHz', data['finger'])]
+    data['agree'] = None
+    if th and fi:
+        r, lab = _relation(fi / th)
+        data['finger_over_thumb'] = round(fi / th, 3)
+        if r == 1.0:
+            data['agree'] = True
+            L.append(f"  bands agree: both read about {th:.1f} BPM")
+        elif r in (2.0, 0.5):
+            data['agree'] = True
+            L.append(f"  bands agree up to an octave: the finger band runs at {lab} the thumb band (8ths over "
+                     f"quarters, or a half-time pulse); not a conflict")
+        else:
+            data['agree'] = False
+            why = {4 / 3: '3-sixteenth gaps, as in a 3-3-2 figure or a clave', 0.75: 'a figure grouped in fours over '
+                   'a pulse in threes', 1.5: 'triplets or dotted 8ths', 2 / 3: 'a figure grouped in threes'}.get(
+                       r, 'a figure that does not divide the pulse evenly')
+            L.append(f"  BANDS DISAGREE: the finger band runs at {lab} of the thumb band ({why}). The thumb/bass band "
+                     f"is likely the beat (on a bossa guitar, or wherever a thumb, a bass or a kick keeps time); the "
+                     f"finger band reads the figure, not the pulse.")
+    if picked_bpm and th:
+        r, lab = _relation(picked_bpm / th)
+        on_finger = bool(fi) and _relation(picked_bpm / fi)[0] == 1.0
+        if r == 1.0:
+            if data['agree'] is False:
+                L.append(f"  the tempo above ({picked_bpm:.2f}) follows the thumb band: keep it")
+        elif on_finger or r not in (2.0, 0.5) or data['agree'] is False:
+            what = ('follows the finger band' if on_finger else f"reads {lab}{'' if lab.endswith('x') else ' of'} the thumb band" if r is not None
+                    else 'follows neither band')
+            L.append(f"  the tempo above ({picked_bpm:.2f}) {what}, not the thumb: if the thumb/bass band is "
+                     f"the beat, rerun with bpm_hint={th:.1f}")
+    return data, '\n'.join(L)
+
+
+def beat_line(y, sr, bpm, hop=64, low_band=THUMB_BAND, high_band=FINGER_BAND):
+    """A beat line that follows a drifting tempo (ported from a bossa reference's prototype, M287). The period comes
+    from the low band's autocorrelation within 8% of bpm; the start phase is where a comb over the first 24 beats
+    collects the most low-band rise (the thumb, bass or kick is on every beat, the figure is not); then a
+    phase-locked follower steps one period at a time, snaps to the strongest rise of both bands within 10% of a
+    period and lets the period follow slowly; the snapped beats are smoothed over 9 beats (a whole-mix beat tracker
+    locked onto a 3+3+2 figure and read 150 BPM for 120). Returns (smoothed beats, snapped beats, low envelope, high
+    envelope, frame times), times in s."""
+    from scipy.ndimage import maximum_filter1d
+    from scipy.signal import savgol_filter
+    n_fft = 1024 if sr > 32000 else 512
+    low = _band_rise(y, sr, *low_band, hop, n_fft)
+    high = _band_rise(y, sr, *high_band, hop, n_fft)
+    hop_s = hop / sr
+    tt = np.arange(len(low)) * hop_s
+    P0 = 60 / bpm
+    if tt[-1] < 12 * P0:
+        raise AnalysisError(f"beat line: under 12 beats of audio at {bpm:.1f} BPM")
+    # the period and the phase come from the first 16 beats: on a drifting record the whole take's mean period
+    # walks a comb off the beats within a few of them
+    ac = _autocorr(low[:int(16 * P0 / hop_s)])
+    lags = np.arange(len(ac)) * hop_s
+    m = (lags > P0 * 0.92) & (lags < P0 * 1.08)
+    P = float(lags[m][np.argmax(ac[m])])
+    nb0 = int(min(8, tt[-1] / P - 1))
+    lowmax = maximum_filter1d(low, 5, mode='nearest')
+    phs = np.arange(0, P, hop_s)
+    idx = np.clip(np.round((phs[:, None] + np.arange(nb0)[None, :] * P) / hop_s).astype(int), 0, len(low) - 1)
+    last = float(phs[int(np.argmax(lowmax[idx].sum(1)))])
+    both = _unit(low) + _unit(high)
+    snapped, strength = [last], [1.0]
+    while last + P < tt[-1] - 0.05:
+        pred = last + P
+        a, b = np.searchsorted(tt, [pred - 0.1 * P, pred + 0.1 * P])
+        if b <= a:
+            break
+        i = a + int(np.argmax(both[a:b]))
+        val = float(both[i])
+        if val > 0.3 * np.median(strength[-16:]):
+            bt = float(tt[i])
+            P = 0.9 * P + 0.1 * (bt - last)
+        else:
+            bt = pred
+        snapped.append(bt)
+        strength.append(val)
+        last = bt
+    snapped = np.array(snapped)
+    if len(snapped) < 12:
+        raise AnalysisError(f"beat line: only {len(snapped)} beats followed (12 needed)")
+    return savgol_filter(snapped, 9, 2), snapped, low, high, tt
+
+
+def tempo_drift(path, bpm, sr=ASR):
+    """Median tempo and the 8-beat rolling min and max on the followed beat line, for a 'this grid drifts' check."""
+    sm = beat_line(load(path, sr=sr), sr, bpm)[0]
+    loc = 60 / np.diff(sm)
+    roll = np.array([np.median(loc[max(0, i - 4):i + 4]) for i in range(len(loc))])
+    return {'bpm': float(np.median(loc)), 'min': float(roll.min()), 'max': float(roll.max()),
+            'spread_pct': float(100 * (roll.max() / roll.min() - 1))}
+
+
+def _stepread(env, tt, sm, frac=0.4):
+    """For every 16th step on a beat line: the peak of env within +-frac of a 16th, and where it is (ms, + late)."""
+    out = []
+    for k in range(len(sm) - 1):
+        span = sm[k + 1] - sm[k]
+        for st in range(4):
+            c = sm[k] + span * st / 4
+            h = span / 4 * frac
+            a, b = np.searchsorted(tt, c - h, 'left'), np.searchsorted(tt, c + h, 'right')
+            if b <= a:
+                out.append((k, st, 0.0, 0.0))
+                continue
+            i = a + int(np.argmax(env[a:b]))
+            out.append((k, st, float(env[i]), float((tt[i] - c) * 1000)))
+    return out
+
+
+def swing_follow(path, bpm, band=None, thr=0.35, sr=ASR):
+    """Per-16th microtiming on a beat line that follows a drifting tempo (analyze_swing(follow=True)): the thumb or
+    kick (55-190 Hz) sets the beat line, the figure is read in `band` (default 1.5-6 kHz, finger plucks; use
+    [6000, 16000] for hats). Every step's peak is read on the line; offsets are against the plucks on the beats.
+    Prints hits and accents per step, the median offset per step, and the most-played 16-step strings with the timing
+    inside them. Ported from a bossa reference's prototype (M287): a planted +20 / -15 ms read +18 / -22 ms there."""
+    from collections import Counter
+    y = load(path, sr=sr)
+    lo, hi = band or FINGER_BAND
+    sm, snapped, low, high, tt = beat_line(y, sr, bpm, high_band=(float(lo), float(hi)))
+    ibi = np.diff(sm)
+    loc = 60 / ibi
+    roll = np.array([np.median(loc[max(0, i - 4):i + 4]) for i in range(len(loc))])
+    th_dev = (snapped - sm) * 1000
+    L = [f"swing on a followed beat line in {os.path.basename(path)} (thumb/kick band 55-190 Hz sets the beat, the "
+         f"figure is read in {lo:.0f}-{hi:.0f} Hz):",
+         f"beats {len(sm)} from {sm[0]:.1f}s to {sm[-1]:.1f}s; median tempo {np.median(loc):.2f} BPM (16th = "
+         f"{np.median(ibi) / 4 * 1000:.0f} ms); 8-beat rolling min {roll.min():.1f} max {roll.max():.1f} BPM",
+         f"beats against their smoothed line: sd {th_dev[4:-4].std():.1f} ms, 90% within "
+         f"{np.percentile(np.abs(th_dev[4:-4]), 90):.1f} ms"]
+    T, F = _stepread(low, tt, sm), _stepread(high, tt, sm)
+
+    def fold(R, r):
+        acc, off = [[] for _ in range(16)], [[] for _ in range(16)]
+        for (k, st, val, ms) in R:
+            p = ((k + r) % 4) * 4 + st
+            acc[p].append(val)
+            off[p].append(ms)
+        return acc, off
+    # rotation: step 1 is the beat whose figure accent stands out most against the other beats
+    best = None
+    for r in range(4):
+        acc, _ = fold(F, r)
+        s = np.mean(acc[0]) - np.mean([np.mean(acc[i]) for i in (4, 8, 12)])
+        if best is None or s > best[0]:
+            best = (s, r)
+    r = best[1]
+    Ta, To = fold(T, r)
+    Fa, Fo = fold(F, r)
+    fthr = thr * np.percentile([x[2] for x in F], 95)       # a step counts as a pluck when its peak is over this
+    tthr = 0.35 * np.percentile([x[2] for x in T], 95)
+
+    def digits(acc):
+        m = np.array([np.mean(a) for a in acc])
+        db = 20 * np.log10(m / (m.max() + 1e-12) + 1e-9)
+        return ''.join(str(max(0, min(9, int(round(9 + d / 2))))) for d in db), db   # 2 dB per digit
+
+    def hits(share):
+        return ''.join('X' if s >= 0.6 else ('x' if s >= 0.3 else '.') for s in share)
+    fd, fdb = digits(Fa)
+    td, _ = digits(Ta)
+    share = np.array([np.mean(np.array(a) > fthr) for a in Fa])
+    tshare = np.array([np.mean(np.array(a) > tthr) for a in Ta])
+    L += [f"{(len(sm) - 1) / 4:.1f} cycles of 4 beats (rotation {r}); a pluck = a step peak over {thr:.0%} of the "
+          f"95th percentile",
+          "step         1...2...3...4...",
+          f"thumb hits   {hits(tshare)}   accent {td}  (9 = loudest step, 2 dB per digit)",
+          f"finger hits  {hits(share)}   accent {fd}"]
+    onb = [ms for i in (0, 4, 8, 12) for ms, val in zip(Fo[i], Fa[i]) if val > fthr]
+    bias = float(np.median(onb)) if onb else 0.0
+    L.append(f"offsets are against the plucks on the beats (the beat line read them at {bias:+.1f} ms); "
+             f"per step: share of cycles with a pluck, accent dB, median offset ms (+ late), IQR")
+    rows = {}
+    for i in range(16):
+        o = np.array([ms - bias for ms, val in zip(Fo[i], Fa[i]) if val > fthr])
+        if len(o) >= 3:
+            q1, q3 = np.percentile(o, [25, 75])
+            rows[i + 1] = {'share': round(float(share[i]), 2), 'accent_db': round(float(fdb[i]), 1),
+                           'off_ms': round(float(np.median(o)), 1), 'iqr': [round(float(q1), 1), round(float(q3), 1)]}
+            L.append(f"  step {i + 1:2d}: {share[i]:4.0%}  {fdb[i]:+5.1f} dB  {np.median(o):+6.1f} ms  "
+                     f"[{q1:+.0f}, {q3:+.0f}]")
+    acc8 = [[] for _ in range(32)]
+    for (k, st, val, ms) in F:
+        acc8[((k + r) % 8) * 4 + st].append(val)
+    s8 = hits([np.mean(np.array(a) > fthr) if a else 0.0 for a in acc8])
+    L.append(f"8-beat fold  {s8[:16]} {s8[16:]}")
+    plb = [ms - bias for i in range(16) if i % 4 for ms, val in zip(Fo[i], Fa[i]) if val > fthr]
+    if plb:
+        L.append(f"plucks between the beats: median {np.median(plb):+.1f} ms against an even 16th")
+    # the strings actually played: one 16-step string per full 4-beat cycle, counted
+    cyc, cofs = {}, {}
+    for (k, st, val, ms) in F:
+        c, pos = divmod(k + r, 4)
+        cyc.setdefault(c, ['.'] * 16)[pos * 4 + st] = 'X' if val > fthr else '.'
+        cofs.setdefault(c, {})[pos * 4 + st] = ms
+    last_c = max(cyc)
+    full = [''.join(x) for c, x in cyc.items() if 0 < c < last_c]
+    cnt = Counter(full)
+    L.append(f"most played 16-step strings ({len(full)} full cycles, {len(cnt)} distinct):")
+    for pat, nn in cnt.most_common(6):
+        L.append(f"  {pat}  {nn:3d}  {100 * nn / max(1, len(full)):.0f}%")
+    timing = {}
+    for pat, nn in cnt.most_common(3):
+        if nn < 3:
+            break
+        cs = [c for c, x in cyc.items() if ''.join(x) == pat and 0 < c < last_c]
+        hit = [i for i, ch in enumerate(pat) if ch == 'X']
+        med = [float(np.median([cofs[c][i] for c in cs if i in cofs[c]])) for i in hit]
+        on = [m for i, m in zip(hit, med) if i % 4 == 0]
+        b0 = float(np.median(on)) if on else 0.0
+        timing[pat] = {i + 1: round(m - b0, 1) for i, m in zip(hit, med)}
+        L.append(f"  timing in the {nn} cycles of {pat}: " +
+                 ', '.join(f"step {i + 1} {m - b0:+.0f} ms" for i, m in zip(hit, med)))
+    data = {'bpm': round(float(np.median(loc)), 2), 'bpm_roll': [round(float(roll.min()), 1), round(float(roll.max()), 1)],
+            'rotation': r, 'bias_ms': round(bias, 1), 'steps': rows, 'fingers8': s8,
+            'top_patterns': [[p, n] for p, n in cnt.most_common(10)], 'timing': timing,
+            'beats': [round(float(b), 3) for b in sm]}
+    return data, '\n'.join(L)
+
+
 def key_estimate(path, t0=None, t1=None):
     y = load(path)
     if t0 is not None:

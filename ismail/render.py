@@ -146,9 +146,12 @@ class Renderer:
         self.pre_beats = 0 if self.full else min(PRE_ROLL_BEATS, self.win_b0)
         self.r_b0 = self.win_b0 - self.pre_beats             # beat where rendering starts
         tail = project.get('tail_sec', 2.0)
-        t0 = 0.0 if self.full else self.offset + self.r_b0 * self.spb
+        # a window's buffer starts on a whole song sample: every note then rounds to the sample it has in the whole
+        # song's render (a pre-roll that is a fraction of a sample long moved some notes by one, ledger:M285(a))
+        t0 = 0.0 if self.full else np.floor((self.offset + self.r_b0 * self.spb) * self.sr + 1e-6) / self.sr
         t1 = self.offset + self.win_b1 * self.spb + tail
         self.t0 = t0
+        self.b_t0 = (t0 - self.offset) / self.spb             # the song beat at the buffer's first sample
         self.n = int((t1 - t0) * self.sr)
         # sample index (may be negative) where song beat 0 falls inside the render buffer
         self.offset_samples_in_window = int(round((self.offset - t0) * self.sr))
@@ -280,7 +283,7 @@ class Renderer:
         for key, pts in auto.items():
             if not pts:
                 continue
-            curve = automation_curve(pts, key, self.r_b0 if not self.full else -self.offset / self.spb,
+            curve = automation_curve(pts, key, self.b_t0,
                                      n, self.bpm, self.sr, self.offset)
             if key.startswith('inst.'):
                 inst_auto[key[5:]] = curve
@@ -295,8 +298,7 @@ class Renderer:
             if notes:
                 rep = []
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
-                                                  self.r_b0 if not self.full else -self.offset / self.spb, self.bpb,
-                                                  rep)
+                                                  self.b_t0, self.bpb, rep)
                 if rep:
                     self.notes_report[name] = rep
         for clip in tr.get('audio', []):
@@ -381,7 +383,7 @@ class Renderer:
             for key, pts in (bus.get('automation') or {}).items():
                 if not pts:
                     continue
-                curve = automation_curve(pts, key, self.r_b0 if not self.full else -self.offset / self.spb,
+                curve = automation_curve(pts, key, self.b_t0,
                                          self.n, self.bpm, self.sr, self.offset)
                 if key.startswith('fx.'):
                     _, i, pname = key.split('.', 2)
@@ -413,7 +415,7 @@ class Renderer:
         vol = m.get('volume_db', 0.0)
         pts = (m.get('automation') or {}).get('volume_db')
         if pts:  # master fade: dB offset curve, like track volume automation
-            vol = vol + automation_curve(pts, 'volume_db', self.r_b0 if not self.full else -self.offset / self.spb,
+            vol = vol + automation_curve(pts, 'volume_db', self.b_t0,
                                          self.n, self.bpm, self.sr, self.offset)
         master = master * dsp.undb(vol)
         # stems carry the master gain curve (fades), so they line up with stems separated from a finished master

@@ -72,8 +72,12 @@ def _perform(inst, notes, total, bpm, root, expr, beat0=0.0):
     """A performer voice (module with perform(notes, total_n, sr, bpm, lanes, **params)) plays the whole event.
     beat0: the song beat at sample 0, for a voice that keys its randomness on it."""
     from .. import dsp, voices
-    mod = voices.load(inst['voice'], root)
     lanes = {k: _lane_curve(p, total) for k, p in (expr or {}).items()}
+    if inst.get('type') == 'mimic':
+        # a mimic with perform on plays phrases (ismail/mimic_perform.py): its lanes are the studio's inst.lane.*
+        return instruments.render_instrument(inst, notes, total, {'lane.' + k: v for k, v in lanes.items()}, bpm,
+                                             SR, root, beat0)
+    mod = voices.load(inst['voice'], root)
     kw = instruments.performer_kw(mod.perform, inst.get('params'), beat0, root)
     y = np.asarray(mod.perform(notes, total, SR, bpm=bpm, lanes=lanes, **kw), dtype=np.float64)
     y = np.stack([y, y]) if y.ndim == 1 else y
