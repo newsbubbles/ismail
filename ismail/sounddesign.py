@@ -86,27 +86,79 @@ def descriptor(y, sr=SR, env_ms=400, env_step_ms=10):
     return {'bands': bands, 'env': env, 'centroid': cent, 'width': width, 'peak': np.array(peak)}
 
 
-def distance(da, db, w_bands=1.0, w_env=0.5, w_width=5.0, fmin=25.0, fmax=16000.0, w_peak=0.4):
-    msk = (THIRD_OCT >= fmin) & (THIRD_OCT <= fmax)
+FAR_DB = 20.0       # a band this far off is a different sound there, not a shade of the same one (ledger:M315)
+# how instrument_fit scores (ledger:M315). distance() defaults to the score sound_compare has always given, so song
+# sessions that track sound_compare numbers across rounds keep comparable numbers; a fit opts in with **FIT_SCORE.
+FIT_SCORE = {'far_cost': 0.15, 'nominal_bands': True}
+
+
+def band_mask(fmin=25.0, fmax=16000.0, nominal=True):
+    """The 1/3-octave bands inside [fmin, fmax]. nominal=True picks them by their nominal names: the band the tables
+    print as '25H' sits at 24.8 Hz and counts for fmin=25 (it fell out of the distance while the table showed it,
+    ledger:M315). nominal=False is the old pick by centre frequency, which leaves it out."""
+    if not nominal:
+        return (THIRD_OCT >= fmin) & (THIRD_OCT <= fmax)
+    q = 2 ** (1 / 12)
+    return (THIRD_OCT >= fmin / q) & (THIRD_OCT <= fmax * q)
+
+
+def far_bands(da, db, fmin=25.0, fmax=16000.0, far_db=FAR_DB):
+    """[(centre Hz, A-B dB)] for the bands inside [fmin, fmax] (nominal names) where A and B differ by more than
+    far_db (either one above the floor)."""
+    msk = band_mask(fmin, fmax) & ((da['bands'] > -50) | (db['bands'] > -50))
+    diff = da['bands'] - db['bands']
+    return [(float(c), float(x)) for c, x, m in zip(THIRD_OCT, diff, msk) if m and abs(x) > far_db]
+
+
+def far_warning(da, db, fmin=25.0, fmax=16000.0, name_a='A', name_b='B', far_db=FAR_DB):
+    """One line naming each band more than far_db apart, or '' (ledger:M315: a fit kept an octave-down square 35 to
+    39 dB over its target at 25 to 31 Hz). Text only: it changes no distance."""
+    far = far_bands(da, db, fmin, fmax, far_db)
+    if not far:
+        return ''
+    shown = ', '.join(f"{c:.0f} Hz {x:+.0f} dB" for c, x in far)
+    return (f"WARNING: {len(far)} band(s) differ by more than {far_db:.0f} dB ({name_a} - {name_b}): {shown}. A "
+            f"difference that big is a part the other does not have (an extra sub octave, a missing top); check the "
+            f"instrument there before trusting the distance")
+
+
+def distance(da, db, w_bands=1.0, w_env=0.5, w_width=5.0, fmin=25.0, fmax=16000.0, w_peak=0.4, far_db=FAR_DB,
+             far_cost=0.0, nominal_bands=False):
+    """Distance between two descriptors: mean abs band dB, envelope, width and pitch clarity. far_cost: added for
+    each dB a band is past far_db off, summed, not averaged (two sub bands 37 dB over then cost as much as ten bands
+    3 dB off, where the mean alone spread them over the 29 bands and a fit kept them, ledger:M315). nominal_bands:
+    pick the bands by nominal name (band_mask). The defaults (0.0, False) give the score sound_compare has always
+    given; instrument_fit passes FIT_SCORE."""
+    msk = band_mask(fmin, fmax, nominal_bands)
     # ignore bands where both are near the floor
     live = msk & ((da['bands'] > -50) | (db['bands'] > -50))
     band = float(np.mean(np.abs(da['bands'][live] - db['bands'][live]))) if live.any() else 0.0
+    off = np.abs(da['bands'][live] - db['bands'][live])
+    excess = float(np.sum(np.maximum(off - far_db, 0.0))) if live.any() else 0.0
     n = min(len(da['env']), len(db['env']))
     live_e = (da['env'][:n] > -50) | (db['env'][:n] > -50)
     env = float(np.mean(np.abs(da['env'][:n][live_e] - db['env'][:n][live_e]))) if live_e.any() else 0.0
     pm = msk & (THIRD_OCT >= 100) & (THIRD_OCT <= 5000) & (da['bands'] > -40) & (db['bands'] > -40)
     peak = float(np.mean(np.abs(da['peak'][pm] - db['peak'][pm]))) if pm.any() else 0.0
     d = w_bands * band + w_env * env + w_width * abs(da['width'] - db['width']) + w_peak * peak
+    if far_cost:
+        d += far_cost * excess
     return d, {'band_db': band, 'env_db': env, 'width': da['width'] - db['width'], 'peak_db': peak,
+               'far_excess_db': excess, 'far_cost': far_cost,
                'peak_a': float(np.mean(da['peak'][pm])) if pm.any() else 0.0,
                'peak_b': float(np.mean(db['peak'][pm])) if pm.any() else 0.0}
 
 
-def compare_text(da, db, name_a='A', name_b='B', fmin=25.0, fmax=16000.0):
-    d, parts = distance(da, db, fmin=fmin, fmax=fmax)
+def compare_text(da, db, name_a='A', name_b='B', fmin=25.0, fmax=16000.0, warn=True, **score):
+    """(distance, text). score: distance's far_cost / nominal_bands (instrument_fit passes FIT_SCORE). warn: add the
+    far-band warning line (text only)."""
+    d, parts = distance(da, db, fmin=fmin, fmax=fmax, **score)
+    far_note = (f"; {parts['far_excess_db']:.0f} dB past {FAR_DB:.0f} dB off in the far bands, "
+                f"{parts['far_cost']:g} per dB" if parts['far_cost'] and parts['far_excess_db'] > 0 else '')
+    w = far_warning(da, db, fmin, fmax, name_a, name_b) if warn else ''
     L = [f"distance {d:.2f} (bands {parts['band_db']:.1f} dB mean abs, envelope {parts['env_db']:.1f} dB mean abs, "
          f"width {da['width']:.2f} vs {db['width']:.2f}, pitch clarity {parts['peak_a']:.1f} vs {parts['peak_b']:.1f} dB"
-         f" peak-over-median: lower = smeared by detune/noise/distortion)",
+         f" peak-over-median: lower = smeared by detune/noise/distortion{far_note})"] + ([w] if w else []) + [
          f"{'band':>8} {name_a[:8]:>8} {name_b[:8]:>8} {'A-B':>6}"]
     for c, a, b in zip(THIRD_OCT, da['bands'], db['bands']):
         if c > 20000 or (a <= -59 and b <= -59):
@@ -174,7 +226,7 @@ def fit(inst, params, target_desc, notes_sec, length_s, fx=None, bpm=120.0, iter
             return 1e9, cand
         if np.max(np.abs(y)) < 1e-6:
             return 1e9, cand
-        return distance(descriptor(y), target_desc, fmin=fmin, fmax=fmax)[0], cand
+        return distance(descriptor(y), target_desc, fmin=fmin, fmax=fmax, **FIT_SCORE)[0], cand
 
     start_v = np.array([float(_get(full, k)) for k in paths])
     start_v = np.clip(start_v, lo, hi)
