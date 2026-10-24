@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### The machine board's lock serves callers in order
+
+- With about 23 jobs waiting, a new `python -m ismail.machine run` could lose the race for the board's lock again
+  and again and exit 75 after 10 s (one agent needed about 15 tries). Now each caller takes a ticket in
+  `<board>/lockq` and the lock goes to the oldest ticket first; the callers behind it back off with jitter by
+  their place in line. Waiters in line read the board without the lock and take it only when their turn may have
+  come, and nothing slow runs inside it (the GPU and CPU readings come from their caches). With 30 callers taking
+  the lock nonstop, every new caller got it within about 1.5 s in tests.
+- A lock whose holder's process is gone is broken after 2 s instead of 30 s; a ticket whose owner died or passed
+  its deadline is skipped. The lock waits up to 30 s (was 10 s). Exit 75 still means "not started, nothing
+  registered", and the lock's message now says what to do: retry in a minute or `run --wait 30m`.
+
 ### The kit page
 
 - `docs/KIT.md` (and `docs/kit.json`, the same data): every public voice and effect by family, with its type, what
