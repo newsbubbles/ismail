@@ -1319,9 +1319,65 @@ def voices_list(project: str = None) -> str:
     return '\n'.join(L)
 
 
+VEL_PROBE = (0.2, 0.4, 0.6, 0.8, 1.0)
+_VEL_CACHE = {}
+
+
+def _probe_pitch(meta):
+    """C4, or the middle of the voice's INFO range when C4 is outside it ('Db2-D6 (...)')."""
+    from .notation import pitch_to_midi, NotationError
+    m = re.match(r'\s*([A-Ga-g][#b]?-?\d)\s*-\s*([A-Ga-g][#b]?-?\d)', str(meta.get('range') or ''))
+    if not m:
+        return 60
+    try:
+        lo, hi = pitch_to_midi(m.group(1)), pitch_to_midi(m.group(2))
+    except NotationError:
+        return 60
+    return 60 if lo <= 60 <= hi else (lo + hi) // 2
+
+
+def vel_levels(name, root=None, pitch=None, dur=0.15):
+    """A code voice's level per velocity: one short note at each of VEL_PROBE, RMS dB against velocity 1.0 (bossa
+    10-21: velocity x1.3 / x0.78 moved a balance +2.2 dB, not the +4.3 a linear map gives). Cached per voice files.
+    -> (pitch, {vel: dB or None when silent})."""
+    from . import voices
+    from . import sounddesign as SD
+    from .notation import midi_to_name
+    _, _, meta, _ = voices.info(name, root)
+    pitch = _probe_pitch(meta) if pitch is None else pitch
+    inst = inst_mod.normalize({'type': 'code', 'voice': name, 'fn': (voices.entry_fns(name, root) or ['voice'])[0],
+                               'params': {}, 'tail': 0.25})
+    key = (name, voices.fingerprint(inst, root), root, pitch, dur)
+    if key not in _VEL_CACHE:
+        rms = {}
+        for v in VEL_PROBE:
+            y = SD.render_oneshot(inst, [(0.0, pitch, dur, v * 127)], dur + 0.25, root=root)
+            rms[v] = float(np.sqrt(np.mean(y ** 2)))
+        top = rms[VEL_PROBE[-1]]
+        _VEL_CACHE[key] = {v: (20 * np.log10(r / top) if r > 1e-9 and top > 1e-9 else None) for v, r in rms.items()}
+    return midi_to_name(pitch), _VEL_CACHE[key]
+
+
+def _vel_line(name, root):
+    try:
+        at, lv = vel_levels(name, root)
+    except Exception as e:                 # a sampled voice without its samples, a performer that needs lanes
+        return f"level per velocity: not probed ({type(e).__name__}: {str(e)[:120]})"
+    if all(d is None for d in lv.values()):
+        return f"level per velocity: silent on {at} (a voice that plays only some pitches, like a kit)"
+    vs = list(lv)
+    steps = [f"{lv[b] - lv[a]:+.1f}" for a, b in zip(vs, vs[1:]) if lv[a] is not None and lv[b] is not None]
+    return (f"level per velocity ({at}, a short note, RMS against velocity 1.0): "
+            + ', '.join(f"{v:.1f} {'silent' if d is None else f'{d:+.1f} dB'}" for v, d in lv.items())
+            + f"; steps of 0.2: {' '.join(steps)} dB. A balance change is one step: read the dB you want off this "
+              "curve, not velocity x ratio as if level were linear in velocity")
+
+
 @op()
 def voice_help(project: str = None, name: str = 'grand_piano') -> str:
-    """Everything about one voice module: where it comes from, what velocity does, its functions and parameters."""
+    """Everything about one voice module: where it comes from, what velocity does, its functions and parameters,
+    and its level per velocity (a short note probed at velocity 0.2 to 1.0, in dB against 1.0), so a balance
+    change is one step."""
     from . import voices
     try:
         origin, path, meta, doc = voices.info(name, _voice_root(project))
@@ -1336,6 +1392,7 @@ def voice_help(project: str = None, name: str = 'grand_piano') -> str:
         L.append("rigs (instrument='preset:<preset>', then these fx in order):")
         for rn, r in rigs.items():
             L.append(f"  {rn} [preset:{r.get('preset', '')}] {r.get('note', '')}\n    fx: {json.dumps(r['fx'])}")
+    L.append(_vel_line(name, _voice_root(project)))
     if doc and doc.split('\n')[0] != L[1]:
         L.append(doc)
     return '\n'.join(L)

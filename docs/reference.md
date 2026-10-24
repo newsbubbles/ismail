@@ -271,7 +271,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | drums | `toms` | performer: the Big Rusty toms (Karoryfer, CC0) retuned to the note, so the note is the drum's pitch (F#1-A3 heard as real); lanes `pos` (0 center .. 1 rim) and `stroke` (stick, mallet, brush, rimshot, rim click, shell, dead) per hit; velocity picks the recorded layer. Not told apart from the real drum in a blind exam of 5 pairs (one listener, 2026-10-14). About 2 s of rendering per hit. Finds its samples in `$TOM_SAMPLES`, the project's `ref/`, or `samples_fetch('big_rusty')` |
 | guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
 
-Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
+Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters, and gives its level per velocity (a short note probed at 0.2 to 1.0, in dB against 1.0), so a balance change is one step.
 
 Voices are looked up in this order:
 
@@ -317,7 +317,7 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Levels, bands and chords per bar | `analyze_bars`, `analyze_chords`, `analyze_key` |
 | Drum pattern | `analyze_drums` (step strings you can paste into `pattern_write`) |
 | What is in a drum kit | `analyze_kit` (splits a drum stem into its pieces, with each one's pattern and audio) |
-| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax) |
+| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax; on a window render, sections are song bars and the error names the window) |
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
 | Intonation, quarter tones (maqam steps), slides, vibrato | `analyze_melody(cents=True)` (each note's pitch as a float MIDI number, Hz and cents), `analyze_contour` (f0 per frame, in windows of up to 1000 rows) |
 | Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |

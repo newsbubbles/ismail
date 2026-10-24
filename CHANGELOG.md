@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Level per velocity in voice_help; analyze_sections on a window render
+
+- `voice_help(name)` adds a line with the voice's level per velocity: one short note at 0.2, 0.4, 0.6, 0.8 and 1.0,
+  RMS in dB against 1.0, and the step between each. Velocity is not linear in level: x1.3 / x0.78 moved a balance
+  +2.2 dB, not +4.3 (bossa_gilberto_studio), so read the dB off the curve and make a balance change in one step.
+  Probed at C4 (or the middle of the voice's `range`), cached per voice file; a kit says it is silent there.
+- `analyze_sections` on a window render (a `bars=[a, b]` render, in `renders/windows.json`): sections outside the
+  window are refused with where the file starts ("starts at song bar 69 and holds bars 69-92 ... bars 1-4 of this
+  file are [69, 72]"), and the default blocks follow the window instead of starting at bar 1.
+
 ### Blind tests: real or fake per clip, climb back to one note, score the window
 
 - `exam_check(choices=, question=)` and `phone_exam` read the exam's one overall choice. On pairs labelled 1A, 1B,
