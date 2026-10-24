@@ -24,12 +24,12 @@ def levels(prof):
 
 
 def test_neighbouring_takes_stay_within_the_cap(violin, monkeypatch):
-    capped = levels(violin)
+    capped, cap = levels(violin), mimic.LEVEL_CAP_DB
     monkeypatch.setattr(mimic, 'LEVEL_CAP_DB', 1e9)          # the variation as it was
     free = levels(violin)
-    assert free.max() - free.min() > 6.0, free
+    assert free.max() - free.min() > cap + 2, free   # the free variation goes well past the cap
     # the cap, plus a little for the brighter tone of a higher velocity
-    assert capped.max() - capped.min() <= mimic.LEVEL_CAP_DB + 0.5, capped
+    assert capped.max() - capped.min() <= cap + 0.5, capped
     assert capped.std() > 0.3, capped                      # the takes still differ
 
 
