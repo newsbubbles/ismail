@@ -145,9 +145,11 @@ def normalize(inst):
         bad = set(inst.get('params') or {}) - set(mimic.DEFAULT_PARAMS)
         if bad:
             raise InstrumentError(f"unknown mimic params {sorted(bad)}; valid: {sorted(mimic.DEFAULT_PARAMS)}")
-        unknown = set(inst) - {'type', 'profile', 'params', 'tail', 'gain_db', 'pan', 'fx'}
+        unknown = set(inst) - {'type', 'profile', 'params', 'tail', 'gain_db', 'pan', 'fx', 'perform', 'performer'}
         if unknown:
-            raise InstrumentError(f"unknown mimic keys {sorted(unknown)}; valid: profile, params, tail, gain_db, pan")
+            raise InstrumentError(f"unknown mimic keys {sorted(unknown)}; valid: profile, params, tail, gain_db, pan, "
+                                  "perform")
+        _check_mimic_perform(inst)
         return dict({"tail": 1.0, "gain_db": 0.0, "pan": 0.0, "params": {}}, **inst)
     raise InstrumentError(f"unknown instrument type {t!r}; use one of {', '.join(INSTRUMENT_TYPES)}")
 
@@ -705,12 +707,43 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
     return out
 
 
-def render_mimic(p, notes, total_n, sr, root=None):
+def _check_mimic_perform(inst):
+    """'perform': true, or a dict of phrase performer params (ismail/mimic_perform.py, ledger M308). With it on,
+    only the mimic params that mean the same for a phrase are allowed."""
+    pf = inst.get('perform')
+    if pf is None or pf is False:
+        return
+    from . import mimic_perform as mp
+    if not (pf is True or isinstance(pf, dict)):
+        raise InstrumentError("mimic 'perform' is true (play the track as phrases) or a dict of performer params, "
+                              f"e.g. {{\"vib\": 8, \"breath_gap\": 0.2}}; params: {sorted(mp.DEFAULTS)}")
+    if isinstance(pf, dict):
+        bad = set(pf) - set(mp.DEFAULTS)
+        if bad:
+            raise InstrumentError(f"unknown mimic perform params {sorted(bad)}; valid: {sorted(mp.DEFAULTS)}")
+    bad = set(inst.get('params') or {}) - set(mp.MIMIC_OK)
+    if bad:
+        raise InstrumentError(f"mimic params {sorted(bad)} shape single notes and do nothing with perform on; "
+                              f"with perform the mimic params are {sorted(mp.MIMIC_OK)} and the performer's own go "
+                              f"in 'perform': {sorted(mp.DEFAULTS)}")
+
+
+def render_mimic(p, notes, total_n, sr, root=None, auto=None, bpm=120.0, beat0=0.0):
     from . import mimic
     try:
         prof = mimic.load_profile(p['profile'], root)
     except ValueError as e:
         raise InstrumentError(str(e))
+    if p.get('perform'):
+        # the whole track as phrases: slurs, tonguing, breath, delayed vibrato, lanes (ismail/mimic_perform.py)
+        from . import mimic_perform
+        try:
+            mimic_perform.check_profile(prof, p['profile'])
+        except mimic_perform.PerformError as e:
+            raise InstrumentError(str(e))
+        lanes = {k[5:]: v for k, v in (auto or {}).items() if k.startswith('lane.')}
+        return mimic_perform.perform(prof, notes, total_n, sr, bpm=bpm, lanes=lanes, beat0=beat0,
+                                     mimic_params=p.get('params'), perform=p['perform'])
     out = np.zeros((2, total_n))
     for st, m, d, v in notes:
         s0 = int(round(st * sr))
@@ -738,7 +771,7 @@ def render_instrument(inst, notes, total_n, auto=None, bpm=120.0, sr=SR, root=No
     elif t == 'code':
         out = render_code(inst, notes, total_n, sr, bpm, root, auto, beat0)
     elif t == 'mimic':
-        out = render_mimic(inst, notes, total_n, sr, root)
+        out = render_mimic(inst, notes, total_n, sr, root, auto, bpm, beat0)
     elif t == 'kit':
         out = np.zeros((2, total_n))
         by = {}
