@@ -85,6 +85,22 @@ def op(mutates=False):
 BUSY_SAY = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try again "
             "in a moment\", then call this again in a minute or two (wait='10m' stands in line longer). The "
             "details, for you only: ")
+# ledger:M313: an op with no `wait` argument must not be told to pass one; it can stand in line from a shell instead
+BUSY_SAY_NO_WAIT = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try "
+                    "again in a moment\", then call this again in a minute or two ({op} has no wait argument; to "
+                    "stand in line, run it from a shell as `python -m ismail.machine run --cpu --wait 10m -- python "
+                    "-m ismail -p <project> {op} ...`). The details, for you only: ")
+
+
+def wait_seconds(wait):
+    """An op's `wait` argument ('10m', '600s', a bare number is minutes) as seconds; None for '', '0' or 'none'
+    (refuse at once when the machine is busy). render, heavy() and track_freeze read it this one way."""
+    if wait is None or str(wait).strip() in ('', '0', 'none', 'None'):
+        return None
+    try:
+        return machine.duration_s(wait)
+    except ValueError as e:
+        raise OpError(f"wait: {e}")
 
 
 def heavy(kind='cpu'):
@@ -95,21 +111,18 @@ def heavy(kind='cpu'):
         import functools
         import inspect
         dflt = inspect.signature(fn).parameters.get('wait')
+        say = BUSY_SAY if dflt is not None else BUSY_SAY_NO_WAIT.format(op=fn.__name__)
 
         @functools.wraps(fn)
         def wrapped(*a, **kw):
             proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
-            w = kw.get('wait', dflt.default if dflt is not None else None)
-            try:
-                wait_s = machine.duration_s(w) if w and str(w).strip() not in ('0', 'none', 'None') else None
-            except ValueError as e:
-                raise OpError(f"wait: {e}")
+            wait_s = wait_seconds(kw.get('wait', dflt.default if dflt is not None else None))
             try:
                 with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}", disk_path=proj or None,
                                   wait=wait_s):
                     return fn(*a, **kw)
             except machine.MachineBusy as e:     # ledger:M181: a newcomer's agent read a CPU table as the answer
-                raise machine.MachineBusy(BUSY_SAY + str(e))
+                raise machine.MachineBusy(say + str(e))
         return wrapped
     return deco
 
@@ -1319,9 +1332,65 @@ def voices_list(project: str = None) -> str:
     return '\n'.join(L)
 
 
+VEL_PROBE = (0.2, 0.4, 0.6, 0.8, 1.0)
+_VEL_CACHE = {}
+
+
+def _probe_pitch(meta):
+    """C4, or the middle of the voice's INFO range when C4 is outside it ('Db2-D6 (...)')."""
+    from .notation import pitch_to_midi, NotationError
+    m = re.match(r'\s*([A-Ga-g][#b]?-?\d)\s*-\s*([A-Ga-g][#b]?-?\d)', str(meta.get('range') or ''))
+    if not m:
+        return 60
+    try:
+        lo, hi = pitch_to_midi(m.group(1)), pitch_to_midi(m.group(2))
+    except NotationError:
+        return 60
+    return 60 if lo <= 60 <= hi else (lo + hi) // 2
+
+
+def vel_levels(name, root=None, pitch=None, dur=0.15):
+    """A code voice's level per velocity: one short note at each of VEL_PROBE, RMS dB against velocity 1.0 (bossa
+    10-21: velocity x1.3 / x0.78 moved a balance +2.2 dB, not the +4.3 a linear map gives). Cached per voice files.
+    -> (pitch, {vel: dB or None when silent})."""
+    from . import voices
+    from . import sounddesign as SD
+    from .notation import midi_to_name
+    _, _, meta, _ = voices.info(name, root)
+    pitch = _probe_pitch(meta) if pitch is None else pitch
+    inst = inst_mod.normalize({'type': 'code', 'voice': name, 'fn': (voices.entry_fns(name, root) or ['voice'])[0],
+                               'params': {}, 'tail': 0.25})
+    key = (name, voices.fingerprint(inst, root), root, pitch, dur)
+    if key not in _VEL_CACHE:
+        rms = {}
+        for v in VEL_PROBE:
+            y = SD.render_oneshot(inst, [(0.0, pitch, dur, v * 127)], dur + 0.25, root=root)
+            rms[v] = float(np.sqrt(np.mean(y ** 2)))
+        top = rms[VEL_PROBE[-1]]
+        _VEL_CACHE[key] = {v: (20 * np.log10(r / top) if r > 1e-9 and top > 1e-9 else None) for v, r in rms.items()}
+    return midi_to_name(pitch), _VEL_CACHE[key]
+
+
+def _vel_line(name, root):
+    try:
+        at, lv = vel_levels(name, root)
+    except Exception as e:                 # a sampled voice without its samples, a performer that needs lanes
+        return f"level per velocity: not probed ({type(e).__name__}: {str(e)[:120]})"
+    if all(d is None for d in lv.values()):
+        return f"level per velocity: silent on {at} (a voice that plays only some pitches, like a kit)"
+    vs = list(lv)
+    steps = [f"{lv[b] - lv[a]:+.1f}" for a, b in zip(vs, vs[1:]) if lv[a] is not None and lv[b] is not None]
+    return (f"level per velocity ({at}, a short note, RMS against velocity 1.0): "
+            + ', '.join(f"{v:.1f} {'silent' if d is None else f'{d:+.1f} dB'}" for v, d in lv.items())
+            + f"; steps of 0.2: {' '.join(steps)} dB. A balance change is one step: read the dB you want off this "
+              "curve, not velocity x ratio as if level were linear in velocity")
+
+
 @op()
 def voice_help(project: str = None, name: str = 'grand_piano') -> str:
-    """Everything about one voice module: where it comes from, what velocity does, its functions and parameters."""
+    """Everything about one voice module: where it comes from, what velocity does, its functions and parameters,
+    and its level per velocity (a short note probed at velocity 0.2 to 1.0, in dB against 1.0), so a balance
+    change is one step."""
     from . import voices
     try:
         origin, path, meta, doc = voices.info(name, _voice_root(project))
@@ -1336,6 +1405,7 @@ def voice_help(project: str = None, name: str = 'grand_piano') -> str:
         L.append("rigs (instrument='preset:<preset>', then these fx in order):")
         for rn, r in rigs.items():
             L.append(f"  {rn} [preset:{r.get('preset', '')}] {r.get('note', '')}\n    fx: {json.dumps(r['fx'])}")
+    L.append(_vel_line(name, _voice_root(project)))
     if doc and doc.split('\n')[0] != L[1]:
         L.append(doc)
     return '\n'.join(L)
@@ -1380,14 +1450,19 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
                 'so C1 = MIDI 24 (GM drum charts number C1 as 36): a drum voice that picks its piece by MIDI number '
                 '(69 + 12*log2(freq/440)) adds 12 before looking it up in a GM chart, or maps by name.')
     if type == 'mimic':
-        from . import mimic
+        from . import mimic, mimic_perform
         return ('mimic: {"type":"mimic","profile":"<name>","params":{},"tail":1.0} plays an instrument measured from '
                 'recordings (mimic_measure makes <project>/voices/<name>.mimic.json; voices_list shows the profiles). '
                 'Partials with their own envelopes read a body curve at their current frequency, plus measured noise; '
                 'unmeasured pitches blend the two nearest measured notes. params (defaults): ' +
                 json.dumps(mimic.DEFAULT_PARAMS) + '. Velocity 0..1 against the measured velocity: louder and brighter '
                 '(vel_bright dB per octave of partial number). For sustained kinds the note length is the bow/breath '
-                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring).')
+                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring). '
+                '"perform": true plays a sustained (blown or bowed) profile as phrases, for legato lines: overlapping '
+                'notes slur, a gap under breath_gap tongues, a longer gap is a new breath, the vibrato waits and grows; '
+                'lanes (automation inst.lane.<name>): ' + json.dumps(mimic_perform.INFO['lanes']) + '. "perform": '
+                '{...} sets performer params (defaults): ' + json.dumps(mimic_perform.DEFAULTS) + '; with perform on, '
+                'params takes only ' + ', '.join(mimic_perform.MIMIC_OK) + '. Decaying profiles refuse perform.')
     if type in inst_mod.DRUM_DEFAULTS:
         return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
             " (times in s, freqs in Hz, drive in dB). A drum synth ignores note pitch (any pitch triggers it; put" \
@@ -2005,10 +2080,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
     from .render import Renderer, write_wav, write_renders, prune_cache, RenderError
-    try:
-        wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
-    except ValueError as e:
-        raise OpError(f"wait: {e}")
+    wait_s = wait_seconds(wait)
     P = _load(project)
     if tracks:
         for t in tracks:
@@ -2087,6 +2159,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
             L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")
+    for trk, lines in R.notes_report.items():
+        for ln in lines[:3]:
+            L.append(f"  {trk}: {ln}")
     for trk, k in R.early.items():
         L.append(f"  {trk}: {k} nudged notes would sound before 0 s and start at 0 s instead; "
                  f"project_set(offset_sec=...) a little later than now gives their lead-in room")
@@ -2164,11 +2239,20 @@ def _grid(P, bpm, offset_sec):
 @op()
 def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
     """Estimate tempo, the time of bar 1 (kick, harmony, section changes and snare on 2 and 4 vote), the tuning
-    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set."""
+    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set. It also
+    reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when they disagree
+    and which is likely the beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the
+    thumb (122 BPM for 92)."""
     P = _load(project)
-    g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
+    path = P.resolve_audio(source)
+    g, txt = A.beat_grid(path, bpm_hint, P.bpb)
+    txt += '\n' + A.band_periods(path, g['bpm'])[1]
     ref = P.d.get('reference') or {}
     drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
+    # bar 1 two beats off (a snare on 2 and 4 reads the same): the harmony changes vote, from the bass stem on a ref
+    bass = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'bass.wav'))
+    on_ref = P.auto_source(source).split(':')[0] == 'ref' and ref.get('stems_dir') and os.path.exists(bass)
+    g, txt = A.downbeat_by_harmony(P.resolve_audio(source), g, txt, bass if on_ref else None)
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
         txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
     else:
@@ -2461,11 +2545,23 @@ from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listen
 from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
 from . import api_midi  # noqa: E402,F401  (registers midi_write, midi_read, midi_ports, midi_play: ledger:M113)
 from . import api_freeze  # noqa: E402,F401  (registers track_freeze: tracks into one audio track a deck plays, ledger:M292)
+from . import api_kit  # noqa: E402,F401  (registers kit: every public voice and effect by family, ledger:M295)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
+from . import api_clash  # noqa: E402,F401  (registers notes_clash: semitone rubs and out-of-key notes, ledger:M282)
+from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell ledger, ledger:M305)
+from . import api_melody  # noqa: E402,F401  (registers melody_consensus: a lead over a backing, ledger:M314)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
 from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)
 from .stream import request_queue as _stream_requests  # noqa: E402,F401  (registers the request_* ops, ledger:M290)
 from .stream import venue_rules as _stream_rules  # noqa: E402,F401  (registers venue_rules, chat_commands, ledger:M291)
+
+
+def __getattr__(name):
+    """Every op is an attribute of ismail.api, also those registered by the modules above (api.live_parity,
+    api.sound_speak, api.master_cue ...), as they are in api.OPS (ledger:M277(e), M285(e))."""
+    if name in OPS:
+        return OPS[name]
+    raise AttributeError(f"module 'ismail.api' has no attribute {name!r}; ops_find(need='...') finds an op by purpose")

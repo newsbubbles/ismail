@@ -11,6 +11,288 @@
   long note has. Notes of 10 s and more keep their depth within a few percent. Every mimic note changes (the random
   draws differ), so this wants an ear round. (ledger:M306)
 
+### master_cue ends at its true-peak ceiling, and its mp3 under it
+
+- `master_cue` gets a lookahead true-peak catch as its last stage (ledger:M280; M271 h and M277 a ask the same):
+  the 4x oversampled peak of each sample, the gain it needs min-filtered over +-1.5 ms, a 25 ms release and a
+  1.5 ms moving average, no re-gain after it. Ported from `songs/planet_rock_axel_f_remix/work/master.py`. The
+  limiter's rounds before it now get up to 6 rounds, each aiming lower by what the last re-gain put back over (at
+  most 1.5 dB under the ceiling), so the catch only takes what a target too loud for the mix leaves; the report
+  says what it took and where the loudness lands. The wav ends at the ceiling, `tp`.
+- `mp3=True` also writes `<out>.mp3` (320k, ffmpeg lame) from a copy caught again at `tp - mp3_catch_db`
+  (`mp3_catch_db=1.2`), because a 320k encode lands up to 1.25 dB over its wav. Only the mp3 gets the extra catch;
+  the wav stays as mastered, at its full loudness. The report gives the copy's catch and the decoded mp3's true peak,
+  with a warning if it is still over `tp`. The margin is from a sweep of 90 masters per margin with ismail's encoder
+  (5 synthetic dense mixes, 3 seeds, 44.1 and 48 kHz, 0 to 4 dB of limiting asked): the mp3 peaked 0.1 to 1.25 dB
+  over its wav (median about 0.5); a margin of 1.0 left 1 mp3 in 90 over -1 dBTP in one run and peaked at -1.03 in
+  another, and 1.2 left none (the worst at -1.18). `mp3_margin_db` (0 by default) still lowers the wav's own ceiling.
+- On the test mix (4 s at -18.6 LUFS, 3 dB of limiting asked at -1 dBTP): before, the wav peaked at -0.71 dBTP and
+  its 320k mp3 at 0.00; now the wav is at -1.08 at the same loudness (-7.7 LUFS), and the mp3 from the same call at
+  -1.61 (its copy caught 1.17 dB). A mix already under the ceiling keeps its loudness.
+- This changes existing masters only where the old rounds left the wav over the ceiling: it now ends under it, at
+  the same loudness or a little under when the target is too loud for the mix. `tp_catch=False` is the master from
+  before, sample for sample. Only `master_cue(mp3=True)` gets the mp3 catch; `render`'s mp3 previews
+  (`render.write_mp3`) are unchanged. Tests: `tests/test_master_cue.py` (the mp3 test skips without ffmpeg; CI has
+  it on Linux).
+
+### Section reads find the path and name the loudest part
+
+- `analyze_sections` looks up a relative path in the working directory first, then in the project. On the
+  planet_rock remix, `songs/<slug>/proj/renders/mix_v7.wav` run from the repo root read "not found". A path in
+  neither place now gives an error that names both places it looked. (ledger:M281 a)
+- `analyze_sections` with stems adds a last block, one line per section, that names the loudest one or two parts
+  and their rms against the mix's. For a render with `stems=True` the parts are the tracks routed to the master
+  and each bus (a track on a bus counts inside the bus); for the reference they are its stems. On the remix a vox
+  routed to master carried a build that the mix bus had pulled down 9.5 dB, and the section read did not say so.
+  Stems from another render are not read, and one line says so. The existing lines are unchanged. (ledger:M281 b)
+
+### instrument_fit takes wait; a band far off costs what it should
+
+- `instrument_fit` refused BUSY with a message to pass `wait='10m'`, then rejected the keyword. It now takes `wait`
+  as `render` does ('10m' default, '0' refuses at once), and so does `track_fit`. The parsing is one helper
+  (`api.wait_seconds`) shared by `render`, `track_freeze` and every heavy op. A heavy op without `wait`
+  (`mimic_measure`, `live_parity`) is no longer told to pass one: its BUSY reply names the shell work-around
+  `python -m ismail.machine run --cpu --wait 10m -- python -m ismail -p <project> <op> ...`. (ledger:M313)
+- The fit distance took the mean over 29 bands, so two sub bands 35 to 39 dB over the target cost about 2.5 and a
+  bass fit kept an octave-down square the target does not have. In `instrument_fit` each dB a band is past 20 dB
+  off now adds 0.15, summed, and the band the tables print as 25 Hz (24.8 Hz) counts for fmin=25 (it fell out of
+  the distance). A synthetic A1 bass with nothing under 40 Hz: a darker clean bass read 5.37 before and 5.13 now;
+  the same tone plus an octave-down square (+36 and +25 dB at 25 and 31 Hz) read 4.45 before (the better score)
+  and 9.46 now. The `instrument_fit` reply warns of any band more than 20 dB off. (ledger:M315)
+- `sound_compare` scores are unchanged on purpose: song sessions track its number across rounds, and a before and
+  after must stay comparable. Its reply now prints the same far-band warning, as text only. To score the way
+  `instrument_fit` does, pass `sound_compare(..., fit_score=True)` (in Python, `sounddesign.distance(...,
+  **sounddesign.FIT_SCORE)`, that is `far_cost=0.15, nominal_bands=True`). `distance` defaults to the old score,
+  so `track_fit` and `mimic_measure`'s leave-one-out check score as before too.
+
+### melody_consensus: a lead line over a backing in the same stem
+
+- New op `melody_consensus(source, reps, phrase_bars, steps_per_beat=4, low='C3', high='C7', track=None,
+  write_at=None)` (ledger:M314). On celestial_resort_1024's vocals stem, which also holds a backing part,
+  `analyze_melody` warned of a second part within 6 dB on half the notes and `notes_from_audio_loop` doubled the
+  lead at the octave. The op ports the song's prototype: every candidate pitch scores its first five harmonics
+  on a constant-Q spectrum, the scores are averaged over the bars where the phrase repeats (`reps`), and each
+  step takes the best pitch; a new note starts where the pitch changes or the start of a step is louder than
+  the step before. Before scoring, what sounds through nearly all of the phrase comes off (`held_pct=10`, each
+  bin's 10th percentile over the phrase), so a held chord stops winning. It returns notes_write rows (beats from
+  the phrase's first bar) and a short summary: notes per bar, how many repetitions pick each pitch on their own,
+  the margin over the runner-up, and the notes whose octave call was within 1.5 dB. `track=` writes the phrase
+  at every bar of `write_at` (default: `reps`). On the song's phrase A (bars 17, 25, 49, 57, G4 to C6) it gives
+  40 of the prototype's 41 notes, and names the one it reads an octave off as its only close call.
+
+### live_parity: a one-sample offset is the same take, and each track says its render speed
+
+- At 136 BPM a beat is 19455.88 samples, and an `@ms` nudge is never a whole number of samples. Two roundings put
+  notes one sample apart (ledger:M285(a)):
+  - The studio window's buffer started a pre-roll before the window, a fraction of a sample long. Some notes then
+    landed one sample off where the whole song's render has them. The buffer now starts on a whole song sample,
+    and a window at any tempo matches the whole song's render sample for sample (it did at 120 BPM only).
+  - A deck rounds each note to the engine's own samples, and the engine's bar line sits at a different fraction
+    of a sample than the song's. In a set this is inaudible. live_parity now starts its engine's clock so the
+    deck's first bar line has the song window's fraction, so its takes are sample for sample.
+- live_parity judges each part at its best lag. A take that lines up within 3 ms reads `ok (same, offset 1 sample
+  late)`; before, it read `DIFFERS: +1 samples late` at corr 1.000 and level within 0.01 dB. The fit is looked for
+  up to 100 ms either way, so a take 50 ms off still DIFFERS and says how far off it is. Before, it was looked
+  for up to 256 samples, and a take 50 ms late read "200 samples early".
+- Each track's line says how fast it renders live (`renders 41.3x realtime`), from the seconds its renders took in
+  the check (ledger:M285(e)).
+- Every op is an attribute of `ismail.api`, including those registered outside api.py: `api.live_parity`,
+  `api.sound_speak`, `api.master_cue`, `api.analyze_sections` and the rest (ledger:M277(e), M285(e)).
+
+### mimic perform: vibrato by default, and phrase ends that fall
+
+- The default vibrato depth of `"perform": true` is now the median of the profile's notes that have vibrato,
+  times (0.5 + 0.5 x the share of notes that have it). The median over all notes gave 0 c on the clarinet (vibrato
+  on 4 of its 11 notes), so a performed line was a straight tone and the vibrato bloom never showed. Default before
+  and after: clarinet 0.0 to 3.7 c, bassoon 5.0 to 4.5 c, horn 5.0 to 4.9 c, cello 9.6 to 9.3 c, violin 12.7 to
+  14.1 c, contrabass 5.0 to 5.0 c. `"perform": {"vib": N}` still sets it.
+- A phrase end now falls by `taper_db` with the room on. A clarinet D5 phrase end fell 0.4 dB against the 5 dB
+  setting: the tone was steady (no vibrato), so dry and room summed partly out of phase, and the end's pitch sag
+  moved it across the room's response so the sum came back up just as the level fell (3.4 dB with the room off,
+  3.3 dB with the room on and no sag). The performer now runs the room per line, reads each phrase end after the
+  room and takes off what the taper is short of (it only lowers). A phrase ending on a short note (under 0.5 s)
+  had no taper at all; the taper now spans the last 35 % of the last note or the phrase's last 0.3 s, whichever is
+  longer, and holds its full depth over the last 15 % of that. On four phrase ends with the room on (one note, the
+  ear round's D5, a short last note, tongued notes into a long one) the end falls 5.9 to 8.6 dB, against 2.8 to
+  6.8 dB before. Found by the Sound Engineer's #346 ear round build.
+
+### Reading a drifting, thumb-led record
+
+- `analyze_grid` reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when
+  they disagree. On a bossa guitar the whole-mix tempo locked onto the 3-3-2 finger figure (122 BPM for a thumb at
+  92); now the extra lines name the thumb/bass band as the likely beat and give the `bpm_hint` to rerun with. The
+  existing lines are unchanged; the new ones come before the swing line. On the Bim Bom guitar stem: thumb band
+  92.5 BPM, tempo read 121.92, "rerun with bpm_hint=92.5". (ledger:M287 a)
+- `analyze_swing(follow=True)` follows a beat line on a record that drifts instead of one fixed grid, reads every
+  16th step on it in `band_hz` (default 1.5-6 kHz) and prints the hits, accents and median offset per step and the
+  most-played 16-step strings with the timing inside them; `threshold` sets what counts as a pluck. Ported from
+  the bossa reference's prototype. On a click track drifting from 90 to 94 BPM, planted +20 and -15 ms offsets read
+  +21 and -13 ms. Without `follow`, one line says when the beat drifts more than 3%. (ledger:M287 b)
+
+### Notes that clash, read from the arrangement
+
+- `notes_clash` (ledger:M282): notes from different pitched parts that sound together a semitone apart (a minor
+  2nd, a minor 9th, or those plus octaves; a close major 7th is a chord colour and not listed) for at least
+  `min_overlap` beats (0.1 by default, so passing tones drop out), and notes out of the key. The key is the one
+  given, the project's or the sketch's, else found from the notes; a minor key allows its raised 7th. Each finding
+  gives the bar and beat, the two parts and their notes, the overlap and the velocities; a place in the bar that
+  repeats is one finding with its bars. Sorted by how audible (the quieter note's level times the square root of
+  the overlap), top `n` per list, counts for all. Drums, fixed-pitch samples and synths, drum and effect voices,
+  unmapped pads and muted tracks are skipped and named; a kit's pitched pads are read. Ported from the
+  planet_rock_studio prototype: on that song it lists the same 37 clashes in the deck and the 7 kept in the studio
+  version, and no note out of G minor.
+
+### mimic plays phrases: perform=true for legato winds and strings
+
+- `{"type": "mimic", "profile": ..., "perform": true}` renders a track as phrases instead of note by note, for any
+  sustained (blown or bowed) profile. Overlapping notes slur (one continuous tone, the pitch glides, no second
+  attack), a gap under `breath_gap` (0.16 s) is tongued, a longer gap is a new breath. The vibrato waits and grows
+  (the profile's measured vibrato by default) with a breath pulse, and a long last note tapers. Lanes, as
+  automation `inst.lane.<name>` or clip `expr` live: `level`, `vib`, `scoop`, `tongue`, `breath` and `bend`, the
+  tenor sax's names where they overlap. `"perform": {...}` sets performer params (`instrument_help(type='mimic')`
+  lists them). A decaying profile (piano, harp) refuses it with a pointing error; left out, every render is as it
+  was. On a clarinet slur the second note's harmonics in the first 70 ms after the join sit 9.9 dB under their
+  held level note by note (a new attack) and 2.3 dB under performed. (ledger:M308, from the
+  bossa_gilberto_studio flute performer, after Nate's "the flute sounds a little bit midi" of 10-23.)
+
+### Velocity sets the level of rhodes and emily
+
+- `rhodes` was louder at low velocity than at full (C4, a 0.15 s note, dB against 1.0: 0.2 +1.4, 0.4 -1.0, 0.6 -1.8,
+  0.8 -1.1; C3 read up to +7 dB). The jRhodes3d samples are each normalised near full scale, so a soft layer reads 2
+  to 7 dB hotter than the hard one, and the voice had no velocity gain, only a 3 dB slope inside a layer. Each layer
+  is now matched in level to the key's hardest layer, so a layer change is timbre only, and the level follows the
+  played velocity over 30 dB (new param `vel_db`, 0 for one level): 0.1 -30.7, 0.2 -21.7, 0.4 -12.6, 0.6 -7.2,
+  0.8 -3.2, 1.0 0 dB at C4, within 1 dB of that at C3 and C5. Full velocity plays as before; softer notes in a song
+  that used rhodes come out quieter. (ledger:M310)
+- `emily` read one level from velocity 41 to 80 (one recorded layer of its 4, no level inside a layer). A layer now
+  plays as recorded at its top velocity and falls toward the layer below's recorded level at its bottom: at C4,
+  0.2 -13.6, 0.4 -8.2, 0.6 -3.2, 0.8 -0.2, 1.0 0 dB (was -10.8, -2.5, -2.5, +0.2). The samples are unchanged, and no
+  layer is added. Where a hard layer was recorded no louder in RMS than the one below (a hard pick's short spike,
+  on many keys from Eb3 up; its peak is still 5 to 6 dB higher), it stays as recorded.
+
+### Level per velocity in voice_help; analyze_sections on a window render
+
+- `voice_help(name)` adds a line with the voice's level per velocity: one short note at 0.2, 0.4, 0.6, 0.8 and 1.0,
+  RMS in dB against 1.0, and the step between each. Velocity is not linear in level: x1.3 / x0.78 moved a balance
+  +2.2 dB, not +4.3 (bossa_gilberto_studio), so read the dB off the curve and make a balance change in one step.
+  Probed at C4 (or the middle of the voice's `range`), cached per voice file; a kit says it is silent there.
+- `analyze_sections` on a window render (a `bars=[a, b]` render, in `renders/windows.json`): sections outside the
+  window are refused with where the file starts ("starts at song bar 69 and holds bars 69-92 ... bars 1-4 of this
+  file are [69, 72]"), and the default blocks follow the window instead of starting at bar 1.
+
+### Blind tests: real or fake per clip, climb back to one note, score the window
+
+- `exam_check(choices=, question=)` and `phone_exam` read the exam's one overall choice. On pairs labelled 1A, 1B,
+  2A ... whose real side moves between pairs, a choice that asks which side is real ('A is the real band' / 'B is
+  the real band', or bare 'A' / 'B' under a "which is real?" question) fails: it has no answer. A side choice about
+  anything else warns. Choices that name no side ('pair 1', "can't tell", 'A lot'), a single pair, or a real side
+  that never moves pass. `phone_exam(check=False)` still warns in its reply. From Nate's note on metal round 3.
+- `sound_compare` says when the two sounds differ in length or one holds a release tail and no window was given:
+  statistics over time count the whole file, so pass the window the person heard.
+- blind-tests.md: ask "real or fake?" for each clip of a pair; after two band-level rounds the person still wins,
+  climb back to an isolated note of the part they name; score the window, not the file.
+
+### A mimic chord's first notes start fast
+
+- mimic's attack map (every built-in profile and harp-like ones have one) ran on librosa.stft and istft, and
+  librosa's first stft in a process costs seconds (its lazy imports and numba). A deck's first bars paid that on their
+  first mimic note: 8 to 10 s of CPU for a first 8-note harp chord, 2.1 to 2.3 s now. The attack map now runs on a
+  numpy STFT of the same window, padding and overlap-add (within -300 dB of librosa's). Each note also builds its
+  time grid once rather than per partial, and the notes of a chord share their FFT frequency grid: the warm chord is
+  about 4% faster. The sound is unchanged: the 8-note chord is within -327 dB of before.
+  (ledger:M302)
+
+### Mimic takes stay within 3 dB of each other
+
+- A mimic note's random variation is seeded by its pitch, velocity and gate, and one velocity could draw a take 8 dB
+  louder than its neighbours, every repeat of it as loud (cs80_lead D5 vel 90). Two causes: on a note shorter than
+  the slow wanders, the "unit std" swell, shimmer and vibrato curves are short pieces scaled up, so their means became
+  level offsets; and a steady tone met the per-note room IR in or out of phase. The note's level while the key is
+  down is now held within 1.5 dB either way of the same note without the random parts, room included
+  (`mimic.LEVEL_CAP_DB = 3`). Brightness, partial timing, swells and the room's colour still vary per note.
+  Violin D5, vel 84 to 93, 0.3 s: 8.4 dB spread per unit velocity before, 3.2 after.
+- The render summary names a mimic take that still sits more than 6 dB over the takes within 2 semitones of it
+  (per unit velocity), with its velocity and first time, and says a velocity a step away draws another take.
+- A change to mimic.py now clears the render cache of mimic tracks, as one to the other synthesis files does.
+  (ledger:M301)
+
+### An empty stem group reads silent in analyze_structure
+
+- `analyze_structure(source='render')` printed a stem group with no tracks (no 'vocals' in the stem map, say) as all
+  '9' and listed it among every section's loud stems: its rows were scaled to their own top, and digital silence was
+  its own top. A row now reads '.' wherever it is under -100 dB on the features' level scale (silence reads about
+  -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
+  (ledger:M296)
+
+### analyze_grid: the harmony votes on bar 1 two beats apart
+
+- A snare on 2 and 4 reads the same under a two-beat shift, so on a four-on-the-floor house track the drum stem put
+  bar 1 two beats late (celestial_resort_1024: drum stem 0.916 s, the bass and chords change on beat 1 at
+  0.0687 s). `analyze_grid` now reads the bass root per beat (from the reference's bass stem when the source is the
+  reference and it has one, else the low band of the source, plus its chroma turns) and counts the changes on each
+  beat of the bar. The candidate two beats away wins with 1.5x the changes on its bar lines and at least max(3, 10%
+  of the bars) more; under 3 changes in all, harmony does not vote and the pick stays. One line says it:
+  "downbeat: drums say 0.9157 s, harmony says 0.0585 s (changes on beat 1 in 61 of 131 bars, on beat 3 in 15);
+  using 0.0585 s" on that track's drum stem, and on a move the "bar 1 starts at" line and the chosen candidate are
+  marked. (ledger:M312)
+
+### The tell ledger
+
+- `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the
+  person keeps naming in a sound is logged per song in `<song>/notes/tells.jsonl` (append-only, the Sound
+  Engineer's prototype shape from the metal song), with their words, where they said them, and a measured gap each
+  round. `tell_measure(reply=)` pulls the number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply
+  or a saved report. `tell_show` flags NOT MOVING on an open tell named twice or more whose gap did not shrink
+  between its last two measures, or that was never measured. Closing is refused without a passed verdict after the
+  last measure, and `tell_check` names unknown ids, times out of order and malformed rows with what to do next.
+- `tell_import(project, path)` adopts an existing tells.jsonl into an empty ledger. A song whose log is already at
+  `<song>/notes/tells.jsonl` (the metal seed) is read in place.
+- recreate.md: run `tell_show` before every round, log a measured row per open tell each round, and give a NOT
+  MOVING tell a different method.
+
+### Jobs waiting in line cost almost nothing
+
+- 23 `python -m ismail.machine run --wait` waiters used 8.4% of the CPU together while the machine was at 99%: each
+  took its own 2 s CPU sample and ran nvidia-smi every 5 s. Now one CPU sample (10 s) and one GPU reading (5 s) serve
+  every process on the machine: the caller that finds the last reading old claims the sampling with a file next to
+  it, and the others read the last reading meanwhile. A claim left by a process that died is cleared after 15 s.
+- A waiter far back in line looks at the board less often (5 s near the front, up to 60 s further back), and the
+  line is woken when a job ends, a waiter leaves it or the priority changes: the board touches `<board>/gen` and a
+  waiter asleep in line looks at that file's time every 0.25 s. With 23 waiters over 30 s: 2 CPU samples instead of
+  23, 6 nvidia-smi runs instead of 91, 26 looks at the board instead of 134, and the next job started 0.2 s after a
+  job ended instead of 3.6 s.
+
+### The machine board's lock serves callers in order
+
+- With about 23 jobs waiting, a new `python -m ismail.machine run` could lose the race for the board's lock again
+  and again and exit 75 after 10 s (one agent needed about 15 tries). Now each caller takes a ticket in
+  `<board>/lockq` and the lock goes to the oldest ticket first; the callers behind it back off with jitter by
+  their place in line. Waiters in line read the board without the lock and take it only when their turn may have
+  come, and nothing slow runs inside it (the GPU and CPU readings come from their caches). With 30 callers taking
+  the lock nonstop, every new caller got it within about 1.5 s in tests.
+- A lock whose holder's process is gone is broken after 2 s instead of 30 s; a ticket whose owner died or passed
+  its deadline is skipped. The lock waits up to 30 s (was 10 s). Exit 75 still means "not started, nothing
+  registered", and the lock's message now says what to do: retry in a minute or `run --wait 30m`.
+
+### The kit page
+
+- `docs/KIT.md` (and `docs/kit.json`, the same data): every public voice and effect by family, with its type, what
+  it is modeled on (an instrument type), its ear state and the exam or ledger row that judged it, its range, its cost
+  and the gaps open in each family. Generated by `python -m ismail.kit` from showcase.json, presets, each voice's
+  INFO and mimic profile, fx.py and the live engine, plus the hand-kept rows in `ismail/kit_tables.json` (the ear
+  state is data there: `ear` and `exam`); `--check` and a test fail when the page is stale or a voice has no row.
+  The `kit` op gives the rows as text, by family or for one voice. From the Sound Engineer's inventory (ledger M295).
+
+### A voice named with fn='perform' plays live as a performer (ledger:M284)
+
+- A code voice with `fn: 'perform'` played as a performer in the studio (the whole part at once) but note by note
+  live: each note replayed the gesture score from beat 0, so a deck sounded wrong (corr -0.09 against the studio
+  render on a samba deck) with no warning. The live path now marks a performer by the studio's own rule
+  (`instruments.performer_fn`: fn 'perform', or a module with perform() and no function named fn). A tiny gesture
+  voice on bars 3 to 5 went from corr 0.971 and -12 dB to corr 1.000 and 0.00 dB against the studio.
+- A kit pad whose voice is a performer cannot play live as in the studio (live renders a kit hit by hit):
+  `live_track` and `live_load` now say so and name the pads, with the fix (a track of its own).
+
 ### MIDI out to synths and other apps, and MIDI clock
 
 - `live_midi_out`: a live track's notes (or a deck's part) to a MIDI output and channel while the set plays: a
@@ -58,6 +340,24 @@
   server would start, or the running one is older than the registry), says why instead of returning a link that
   404s. Old URLs and `python -m ismail.exampage serve <folder>` work as before; `python -m ismail.exampage register
   <round folder>` registers a round by hand. `/health` now gives the server's folder and `"registry": true`.
+
+### Live: tempo changes
+
+- `live_tempo(project, bpm, at='next_bar')` changes a running set's tempo at a bar, with no restart and no gap.
+  Clips are in beats, so every part stays on the beat: the notes from the change bar on render again at the new
+  tempo while the ones before it play up to it. When those renders cannot be ready in time, the change moves to a
+  later bar and the reply names it. The reply says the bar, which tracks render again and which effects follow.
+- One tempo map drives every beat and sample conversion: queued moves, fx changes, ramps and deck changes after
+  the change bar move with it, and `live_status` lists the changes still to come.
+- Beat-synced effects follow at the bar: delays in beats, gates, `every_beats` ducks, filter, phaser, flanger and
+  tremolo LFOs in beats. Played keys keep their sounds; nothing of theirs renders again.
+- A recording's `.json` lists each change as `[bar, bpm, seconds into the file]`; `live_listen` keeps to one tempo
+  per window and says when it left bars out.
+- The engine's clock (op `clock`, which `listen_heard` places words with) gives the tempo at the beat heard, not
+  at the mix position half a second ahead, so words land on their bars across a change.
+- Known gaps: `ramp_beats` is refused (queue step changes at successive bars), echoes already in a delay jump
+  once, a note held across the change keeps its old render, and `@ms` offsets in clips convert at the tempo when
+  queued.
 
 ### Chat commands by rule, votes and credit for requests
 

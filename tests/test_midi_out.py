@@ -267,3 +267,44 @@ def test_midi_play_sends_a_song_to_a_port(tmp_path, monkeypatch):
     assert abs(t_c4 - t_start) < 0.01                                   # bar 1 starts with Start
     with pytest.raises(api.OpError, match=r"no MIDI output 'nope'; outputs: \['Test Synth'\]"):
         api.OPS['midi_play'](p, port='nope')
+
+
+def test_clock_pulses_follow_a_tempo_change(tmp_path):
+    """live_tempo (#243) moves the clock with it: 120 to 150 BPM at bar 3 changes the pulse gap on that
+    bar's downbeat, with no drift after."""
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    clk = Clock()
+    FakePort.opened, FakePort.clock = {}, clk
+    e.mout = MidiOut(e, outputs=lambda: list(PORTS), opener=FakePort, now=clk, thread=False)
+    e.clk = clk
+    run(e, 0.3)
+    e.cmd_midi_clock(port='loop')
+    run(e, 0.5)
+    out = e.cmd_tempo(150, at='bar:3')
+    assert 'at bar 3' in out
+    run(e, 7.0)
+    pulses = np.array([t for t, b in msgs(FakePort.opened['Test Loop'], MS.PULSE)])
+    tc = speaker_time(e, 8)                                  # bar 3 reaches the speakers here
+    before, after = pulses[pulses < tc - 1e-9], pulses[pulses >= tc - 1e-9]
+    assert len(before) > 48 and len(after) > 48
+    assert np.allclose(np.diff(before), 60 / 120 / 24, atol=1.5 / SR)
+    assert np.allclose(np.diff(after), 60 / 150 / 24, atol=1.5 / SR)
+    assert after[0] == pytest.approx(tc, abs=1e-9)           # a pulse on the change bar's downbeat
+    k = np.arange(len(after))
+    assert np.allclose(after, tc + k * 60 / 150 / 24, atol=1.5 / SR)     # no drift after it
+
+
+def test_a_change_queued_now_never_moves_pulses_already_planned(tmp_path):
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    clk = Clock()
+    FakePort.opened, FakePort.clock = {}, clk
+    e.mout = MidiOut(e, outputs=lambda: list(PORTS), opener=FakePort, now=clk, thread=False)
+    e.clk = clk
+    run(e, 0.3)
+    e.cmd_midi_clock(port='loop')
+    run(e, 1.0)
+    e.cmd_tempo(90, at='now')
+    run(e, 3.0)
+    pulses = np.array([t for t, b in msgs(FakePort.opened['Test Loop'], MS.PULSE)])
+    g = np.diff(pulses)
+    assert np.all(g > 0) and np.all((np.abs(g - 60 / 120 / 24) < 1.5 / SR) | (np.abs(g - 60 / 90 / 24) < 1.5 / SR))

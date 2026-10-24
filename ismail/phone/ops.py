@@ -675,10 +675,12 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
                floor_from: str = None, measured: dict = None, unmeasured: str = None) -> str:
     """A blind exam on the phone: clips [{label, path, note?}] each with a play button (the live stream pauses while
     one plays, and rejoins live after), word chips to tick per clip, one choice (e.g. ['A is the record', 'B is the
-    record', "can't tell"]), a note, and Submit. The answers arrive as kind 'exam' {id, answers}, and are appended
-    to answers_path when given (the exam's own answers file, so no "done" is needed). Label clips blind (A, B).
-    It runs exam_check first and refuses on NOT READY: give key={label: class} and secrets=[source names] so the
-    blind-leak checks run too. check=False only when the person asked to see it anyway.
+    record', "can't tell"] on a single pair), a note, and Submit. The answers arrive as kind 'exam' {id, answers},
+    and are appended to answers_path when given (the exam's own answers file, so no "done" is needed). Label clips
+    blind (A, B). It runs exam_check first and refuses on NOT READY: give key={label: class} and secrets=[source names] so the
+    blind-leak checks run too. check=False only when the person asked to see it anyway. On several pairs whose real
+    side moves, ask "real or fake?" per clip (chips): one overall "A or B is real" choice is refused (Nate, metal
+    round 3), and with check=False the reply still warns.
     floor='auto' adds device floor pairs, the real clip against a 64 or 128 kb/s MP3 copy of itself or against
     itself: the full set on the first floor round, then one rotating pair; 'full' gives the full set again (a new
     listening device, or a floor answer that changed). Each costs a slot of the 5-6 pair budget. Clips must be
@@ -711,11 +713,20 @@ def phone_exam(title: str, clips: list, question: str = '', chips: list = None, 
                                      for i, c in enumerate(cl) if c.get('label') not in floor_labels],
                               key={k: v for k, v in key.items() if k not in floor_labels} if key else key,
                               secrets=secrets,
-                              answers_path=answers_path, texts=texts)
+                              answers_path=answers_path, texts=texts, choices=choices,
+                              question=' '.join([title, question or '']))
         if not ready:
             raise OpError('the exam was not shown, its pre-flight failed:\n' + '\n'.join(lines))
+    side = None
+    if not check and choices and key:                   # shown anyway: still say the overall choice names nothing
+        from .. import exam_check as EC
+        cl = [c if isinstance(c, dict) else {'path': c} for c in clips or []]
+        side = EC.side_choice(choices, ' '.join([title, question or '']),
+                              [(c.get('label'), key.get(str(c.get('label')))) for c in cl])
     out = _call('exam', timeout=float(wait or 0) + 15, title=title, clips=clips, question=question, chips=chips,
                 choices=choices, answers_path=answers_path, exam_id=exam_id, wait=wait, who=sender)
+    if side:
+        out += f"\nWARN {side[1]}"
     if answers_path:
         os.makedirs(os.path.dirname(os.path.abspath(answers_path)), exist_ok=True)
         with open(answers_path + '.measured.json', 'w', encoding='utf8') as f:

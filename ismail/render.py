@@ -146,9 +146,12 @@ class Renderer:
         self.pre_beats = 0 if self.full else min(PRE_ROLL_BEATS, self.win_b0)
         self.r_b0 = self.win_b0 - self.pre_beats             # beat where rendering starts
         tail = project.get('tail_sec', 2.0)
-        t0 = 0.0 if self.full else self.offset + self.r_b0 * self.spb
+        # a window's buffer starts on a whole song sample: every note then rounds to the sample it has in the whole
+        # song's render (a pre-roll that is a fraction of a sample long moved some notes by one, ledger:M285(a))
+        t0 = 0.0 if self.full else np.floor((self.offset + self.r_b0 * self.spb) * self.sr + 1e-6) / self.sr
         t1 = self.offset + self.win_b1 * self.spb + tail
         self.t0 = t0
+        self.b_t0 = (t0 - self.offset) / self.spb             # the song beat at the buffer's first sample
         self.n = int((t1 - t0) * self.sr)
         # sample index (may be negative) where song beat 0 falls inside the render buffer
         self.offset_samples_in_window = int(round((self.offset - t0) * self.sr))
@@ -160,6 +163,7 @@ class Renderer:
         self.cache_dir = os.path.join(root, 'cache')
         self.stats = {}
         self.early = {}          # track -> notes nudged before the song's first sample (moved to it)
+        self.notes_report = {}   # track -> summary lines about single notes (a mimic take far over its neighbours)
         instruments.set_resolvers(self.load_sound, self.load_table)
 
     # ------------------------------------------------------------------ sounds
@@ -279,7 +283,7 @@ class Renderer:
         for key, pts in auto.items():
             if not pts:
                 continue
-            curve = automation_curve(pts, key, self.r_b0 if not self.full else -self.offset / self.spb,
+            curve = automation_curve(pts, key, self.b_t0,
                                      n, self.bpm, self.sr, self.offset)
             if key.startswith('inst.'):
                 inst_auto[key[5:]] = curve
@@ -292,8 +296,11 @@ class Renderer:
         if inst is not None:
             notes = self.track_notes_sec(tr, name)
             if notes:
+                rep = []
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
-                                                  self.r_b0 if not self.full else -self.offset / self.spb, self.bpb)
+                                                  self.b_t0, self.bpb, rep)
+                if rep:
+                    self.notes_report[name] = rep
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
             s0 = int(round((self.beat_to_win_sec(clip['at_beat']) + tr.get('offset_ms', 0.0) / 1000.0) * self.sr))
@@ -337,15 +344,22 @@ class Renderer:
             keys[name] = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
             path = os.path.join(self.cache_dir, keys[name] + '.npy')
             t0 = time.time()
+            rpath = path[:-4] + '.notes.json'
             if self.use_cache and os.path.exists(path):
                 y = np.load(path).astype(np.float64)
                 cached = True
+                if os.path.exists(rpath):        # a cached track repeats its note lines
+                    with open(rpath, encoding='utf-8') as fh:
+                        self.notes_report[name] = json.load(fh)
             else:
                 y = self.render_track(name, tr)
                 cached = False
                 if self.use_cache:
                     os.makedirs(self.cache_dir, exist_ok=True)
                     np.save(path, y.astype(np.float32))
+                    if self.notes_report.get(name):
+                        with open(rpath, 'w', encoding='utf-8') as fh:
+                            json.dump(self.notes_report[name], fh)
             if name in sources:
                 self.post_fx[name] = y
             self.stats[name] = {'sec': round(time.time() - t0, 2), 'cached': cached}
@@ -369,7 +383,7 @@ class Renderer:
             for key, pts in (bus.get('automation') or {}).items():
                 if not pts:
                     continue
-                curve = automation_curve(pts, key, self.r_b0 if not self.full else -self.offset / self.spb,
+                curve = automation_curve(pts, key, self.b_t0,
                                          self.n, self.bpm, self.sr, self.offset)
                 if key.startswith('fx.'):
                     _, i, pname = key.split('.', 2)
@@ -401,7 +415,7 @@ class Renderer:
         vol = m.get('volume_db', 0.0)
         pts = (m.get('automation') or {}).get('volume_db')
         if pts:  # master fade: dB offset curve, like track volume automation
-            vol = vol + automation_curve(pts, 'volume_db', self.r_b0 if not self.full else -self.offset / self.spb,
+            vol = vol + automation_curve(pts, 'volume_db', self.b_t0,
                                          self.n, self.bpm, self.sr, self.offset)
         master = master * dsp.undb(vol)
         # stems carry the master gain curve (fades), so they line up with stems separated from a finished master
@@ -422,7 +436,7 @@ def _code_hash():
     # any change to the synthesis/effect code invalidates cached track renders
     h = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py'):
+    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py', 'mimic.py'):
         with open(os.path.join(here, f), 'rb') as fh:
             h.update(fh.read())
     return h.hexdigest()[:12]

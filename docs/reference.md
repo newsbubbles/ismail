@@ -115,8 +115,9 @@ Find any tool by what you need or by role with `ops_find`.
 
 - **The DAW.** Songs as code (notes, instrument patches, effect chains, automation in a project file), rendered and
   read back as text. Named effect stacks (`fx_stack_*`, `stack:<name>`) and an `autotune` effect. A second part
-  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
-  (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
+  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders and fits wait in line on a shared
+  machine (`render(wait=)`, `instrument_fit(wait=)`, `track_fit(wait=)`, `machine_status`) and flag tracks running
+  hot. Every mp3 is tagged with its provenance
   (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from. A finished song's stems
   and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to the
   reclaim folder, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone. Everything moved
@@ -124,10 +125,24 @@ Find any tool by what you need or by role with `ops_find`.
   Windows, `songs/_reclaim` elsewhere, `$ISMAIL_RECLAIM` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
   file's path from the drive root, with a `manifest.json` and a `README.txt` line per folder, and `machine_disk`
   lists its folders with their sizes. The person deletes a folder there; nothing in ismail deletes.
+- **Mastering for delivery.** `master_cue(source, lufs=-16, tp=-1, mp3=False, mp3_catch_db=1.2)` cuts, fades and
+  resamples a finished cue, applies one fixed gain to the loudness target, and limits only the true-peak excess,
+  with a lookahead true-peak catch (4x oversampled) as its last stage, so the wav ends at the ceiling `tp`.
+  `mp3=True` also writes a 320k mp3 from a copy caught again at `tp - mp3_catch_db`: a 320k encode lands up to
+  1.25 dB over its wav, and 1.2 kept every measured mp3 under `tp`. Only the mp3 gets that catch; the wav keeps
+  its loudness. `mp3_margin_db` lowers the wav's own ceiling (0 by default); `tp_catch=False` is the master from
+  before the catch.
 - **MIDI files in and out.** `midi_write` puts the song (or some tracks, or a window of bars) into a type 1 .mid
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
   parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+- **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
+  woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
+  tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with
+  the exam that judged it, its range, its cost, and the gaps open in each family. The `kit` op gives the same rows
+  as text (`kit(family='woodwinds')`, `kit(voice='cello')`). Generated from the sources and the hand-kept rows in
+  `ismail/kit_tables.json` by `python -m ismail.kit` (data in [kit.json](kit.json)); `--check` fails when the page
+  is stale, and so does a test.
 - **MIDI out to synths and other apps.** `midi_ports` lists the inputs and outputs (a synth's USB MIDI, a loopMIDI
   or IAC port into Ableton or FL Studio). `live_midi_out` sends a live track's notes (or a deck's part) to a port
   and channel while the set plays, kits on channel 10, each note when its audio would reach the speakers, with or
@@ -170,8 +185,15 @@ Find any tool by what you need or by role with `ops_find`.
   standing watch on its inbox with `phone_watch`.
 - **Exams**: blind exams on the phone (`phone_exam`, with floor pairs: the real clip against a 64 or 128 kb/s MP3
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
-  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
+  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown (it also fails one overall
+  "A or B is real" choice on pairs whose real side moves: ask "real or fake?" per clip); and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **The tell ledger** (`tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`,
+  `tell_check`, `tell_import`): the faults the person keeps naming in a sound ("boxy"), one append-only log per song
+  (`<song>/notes/tells.jsonl`) with their words, where they said them, and a measured gap each round. `tell_measure`
+  pulls its number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply or a saved report.
+  `tell_show` flags NOT MOVING on an open tell named twice whose gap did not shrink, closing needs a passed verdict
+  after the last measure, and `tell_check` validates the log.
 - **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
   questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
   browser (an app's browser pane has no microphone), with every typed answer and voice clip saved in the song and
@@ -242,7 +264,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 |---|---|---|
 | keys | `grand_piano` | grand piano calibrated from measured notes (partials, decay times, inharmonicity, stereo image, hammer knock, dampers); `fn: voice_sym` is an undamped sympathetic string |
 | keys | `additive_piano` | a lighter additive piano with no data file |
-| keys | `rhodes` | a 1977 Rhodes Mark I, sampled (jRhodes3d); fetch the samples with `samples_fetch` |
+| keys | `rhodes` | a 1977 Rhodes Mark I, sampled (jRhodes3d); velocity picks the layer (timbre) and sets the level over `vel_db` (30) dB from 1.0 to 0.1; fetch the samples with `samples_fetch` |
 | strings | `violin`, `cello`, `contrabass` | mimic profiles measured from real recordings (use `{"type": "mimic", "profile": "violin"}`); open strings, measured room and vibrato included; `params.players` makes a section |
 | winds | `clarinet` | mimic profile measured from VSCO 2 CE (CC0); not told apart from the real note in a blind pair (one listener, 2026-10-07) |
 | winds | `bassoon` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
@@ -255,9 +277,9 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | drums | `kit70` | performer: a 1970 acoustic kit as modal resonator banks that keep ringing across the part (a ride builds wash); preset `kit70` and its fitted EQ |
 | drums | `rusty` | performer: Big Rusty Drums (Karoryfer, CC0), a 1980s kit sampled with velocity layers, round robins and mics; fetch with `samples_fetch` |
 | drums | `toms` | performer: the Big Rusty toms (Karoryfer, CC0) retuned to the note, so the note is the drum's pitch (F#1-A3 heard as real); lanes `pos` (0 center .. 1 rim) and `stroke` (stick, mallet, brush, rimshot, rim click, shell, dead) per hit; velocity picks the recorded layer. Not told apart from the real drum in a blind exam of 5 pairs (one listener, 2026-10-14). About 2 s of rendering per hit. Finds its samples in `$TOM_SAMPLES`, the project's `ref/`, or `samples_fetch('big_rusty')` |
-| guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; fetch with `samples_fetch` |
+| guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; velocity picks one of 4 recorded layers and moves the level inside it, toward the layer below; fetch with `samples_fetch` |
 
-Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
+Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters, and gives its level per velocity (a short note probed at 0.2 to 1.0, in dB against 1.0), so a balance change is one step.
 
 Voices are looked up in this order:
 
@@ -294,19 +316,27 @@ python -m ismail -p song track_add name=fiddle 'instrument={"type": "mimic", "pr
 
 Tested leave-one-out on violin, cello and double bass recordings, a mimic note rebuilt without ever hearing that note lands as close to the real one as a real neighbouring note repitched, or closer (violin 11.2 vs 14.6, cello 12.5 vs 13.0, double bass 10.9 vs 12.8 on `sound_compare`'s distance). The defaults were then tuned by ear over four rounds of eye exams (open, not blind: the real note next to versions that each change one named thing); the current default was picked closest on every note of the last round. Struck and plucked instruments (piano) are harder: with 12 notes across 7 octaves a piano's note-to-note colour can't be predicted and mimic stays behind a sampler there (16.3 vs 11.6); the `grand_piano` voice remains the better piano. A few notes at one dynamic teach one dynamic: record soft and loud notes if velocity matters, and more notes than you think for instruments whose colour changes from note to note.
 
+**Phrases (`"perform": true`).** By default mimic plays each note on its own. For a legato line on a sustained (blown or bowed) profile, `{"type": "mimic", "profile": "clarinet", "perform": true}` plays the track as phrases through a performer that reads the same profile (partial levels, body, air spectrum, attack map): overlapping notes slur (one continuous tone, the pitch glides in `slur_ms`, no second attack), a gap shorter than `breath_gap` (0.16 s) is tongued (the tone dips and speaks again with the measured chiff), a longer gap is a new breath. The vibrato waits `vib_delay` (0.45 s) into a note and grows over `vib_grow`, with a breath pulse; its depth defaults to the median of the profile's notes that have vibrato, leaned down when most of them are straight (3.7 c on the clarinet, about the measured depth on the horn and the strings). A phrase of 0.5 s or more tapers at its end by `taper_db` (5 dB, read after the room) over the last 35 % of its last note or its last 0.3 s, whichever is longer. Lanes, as automation `inst.lane.<name>` (and clip `expr` live): `level` (dB, a little brighter when up), `vib` (cents peak, read at each note start), `scoop` (semitones below, read at note start), `tongue` (0..1 onset hardness), `breath` (dB on the air), `bend` (semitones). `"perform": {"vib": 8, "breath_gap": 0.2}` sets performer params (`instrument_help(type='mimic')` lists them); with perform on, only the mimic `params` that mean the same for a phrase are accepted (`bright`, `vel_bright`, `vib`, `vib_rate`, `vib_delay`, `width`, `noise`, `room`, `room_mix`, `seed`, plus the ring and open strings). A chord splits into lines, each phrased on its own. A decaying profile (piano, harp) refuses perform. Left out, every render is as it was. (From the bossa_gilberto_studio flute performer.)
+
 ## Hearing: audio as text
 
 | Question | Tool |
 |---|---|
 | Tempo, where bar 1 is, tuning, swing | `analyze_grid` (bar 1 voted by kick, harmony, section changes and the snare on 2 and 4), `align`, `analyze_swing` |
+
+`analyze_grid` also reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart, by autocorrelation of each band's onsets. When they disagree (a ratio other than 1, 2 or 1/2) it says so and names the thumb/bass band as the likely beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the thumb (122 BPM for a thumb at 92), and the line gives the `bpm_hint` to rerun with.
+
+`analyze_swing(follow=True)` reads a record that drifts (played without a click). A beat line follows the thumb, bass or kick from the project tempo (period and phase from the first 16 beats, then a phase-locked follower smoothed over 9 beats), and every 16th step is read on it. Parameters: `band_hz` is the band the figure is read in (`[lo, hi]` Hz, default `[1500, 6000]` for finger plucks; `[6000, 16000]` for hats), and `threshold` (default 0.35) is the share of the 95th percentile peak over which a step counts as a pluck (raise it, for example to 0.5, when a dense stem reads X on every step). It prints the hits and accents per step, the median offset per step against the plucks on the beats, the most-played 16-step strings and the timing inside them. On a click track drifting from 90 to 94 BPM, planted offsets of +20 and -15 ms read +21 and -13 ms. Without `follow`, `analyze_swing` adds one line when the beat drifts more than 3% over 8 beats.
 | Song form, what plays where | `analyze_structure` (arrangement map, sections, loop length, root per bar) |
 | Levels, bands and chords per bar | `analyze_bars`, `analyze_chords`, `analyze_key` |
 | Drum pattern | `analyze_drums` (step strings you can paste into `pattern_write`) |
 | What is in a drum kit | `analyze_kit` (splits a drum stem into its pieces, with each one's pattern and audio) |
-| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax) |
+| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax; on a window render, sections are song bars and the error names the window) |
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
+| A lead line when its stem also carries a backing part (a pad, a chord, a second voice) | `melody_consensus` (harmonic-sum salience over a constant-Q spectrum, averaged over the bars where the phrase repeats, with what sounds through the whole phrase taken off; notes per step with an onset test, as notes_write rows or into a track with `track=`; says per bar how many notes, how sure, and where the octave call was close) |
 | Intonation, quarter tones (maqam steps), slides, vibrato | `analyze_melody(cents=True)` (each note's pitch as a float MIDI number, Hz and cents), `analyze_contour` (f0 per frame, in windows of up to 1000 rows) |
 | Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |
+| Do two parts rub a semitone apart, or step out of key (read from the notes, no render) | `notes_clash` (semitone and minor 9th clashes between parts for at least `min_overlap` beats, and out-of-key notes, each with bar and beat, the two parts and notes, overlap and velocity, most audible first; the key is the project's or found from the notes; drums and fixed-pitch pads skipped) |
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
 | Vowels of a voice | `analyze_formants` |
@@ -323,7 +353,7 @@ Bring your own reference audio (`project_new(..., reference=<file>)`); none is i
 1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`. If it reports the record 15 cents or more off A440 (a sped-up sample), run `ref_retune()` first: otherwise every note reads as a pair of semitones.
 2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`. Measure the drums before writing them: `analyze_swing` and `analyze_kit(source='ref:drums')`.
 3. Transcribe with `notes_from_audio_loop`. Raw transcription copies echoes, leakage and distortion partials as hard notes, so it filters in three layers the agent can tune: partials are attributed to the note they belong to, quiet notes fall under level thresholds (`rel_db`, `min_rel_db`, `floor_db`), and a vote across loop repetitions drops what changes between them. A loud echo locked to the tempo repeats every loop and can survive all three; then the agent tightens the thresholds or asks. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
-4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity). `track_fit` tunes a part in context against the reference stem.
+4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity; a band more than 20 dB off costs extra and the reply warns of it; `sound_compare` keeps its old score so numbers across rounds compare, `fit_score=True` opts in). `track_fit` tunes a part in context against the reference stem.
 5. `stem_map_set`, `render(stems=True)`, `levels_from_ref` (faders from the reference's stem balance), `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
 
 ### How comparisons score
@@ -438,12 +468,15 @@ ismail/
                  block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
+  mimic_perform.py  the phrase performer for sustained mimic profiles ("perform": true)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
                  (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
                  fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
+  kit.py         the kit page: voices and effects by family (docs/KIT.md, docs/kit.json), from kit_tables.json;
+                 api_kit.py the kit op
   audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup

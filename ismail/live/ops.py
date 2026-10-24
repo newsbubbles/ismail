@@ -120,8 +120,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
                priority: str = 'above_normal') -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
-    between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
-    it). device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
+    between your calls: clips loop until replaced. bpm is the starting tempo: live_tempo changes it while it plays.
+    device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
     analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always
     passes the safety chain: trim, loudness cap, limiter, ceiling -1 dBFS. trim_db (-30 to +12) and cap_db (sustained
     RMS dBFS, -40 to -8) set this set's level; left out, they come from ISMAIL_LIVE_TRIM_DB / ISMAIL_LIVE_CAP_DB in
@@ -147,7 +147,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
     if workers is None:
         workers = min(4, max(2, (os.cpu_count() or 4) - 4))
     if _alive(project):
-        return "already running (live_stop first to change tempo or device)\n" + _call(project, 'status')
+        return ("already running (live_tempo changes the tempo, live_device the output)\n"
+                + _call(project, 'status'))
     others = []
     for rec in _other_engines(project):
         mins = (time.time() - rec.get('started', time.time())) / 60
@@ -254,19 +255,35 @@ def _project_fx(project, spec):
 
 
 def _mark_performer(inst, project):
-    """A code voice whose module has perform() and no voice function plays whole phrases: flag it so the engine
-    groups overlapping notes into one event and passes clip expr lanes (the module is imported here, in the op
-    process, never in the engine)."""
+    """A code voice the studio plays with perform() (fn='perform', or a module with perform() and no function named
+    fn: instruments.performer_fn) plays whole phrases: flag it so the engine groups overlapping notes into one event
+    and passes clip expr lanes (the module is imported here, in the op process, never in the engine). A mimic with
+    perform on plays phrases the same way."""
+    if isinstance(inst, dict) and inst.get('type') == 'mimic' and inst.get('perform'):
+        return dict(inst, performer=True)
     if not isinstance(inst, dict) or inst.get('type') != 'code' or not inst.get('voice'):
         return inst
-    from .. import voices
+    from .. import instruments, voices
     try:
         mod = voices.load(inst['voice'], os.path.abspath(project))
     except Exception:
         return inst
-    if callable(getattr(mod, 'perform', None)) and not callable(getattr(mod, inst.get('fn') or 'voice', None)):
+    if instruments.performer_fn(mod, inst.get('fn')) is not None:
         return dict(inst, performer=True)
     return inst
+
+
+def _performer_gaps(inst, project, where):
+    """Warnings for the performers the live engine cannot play as the studio does: a kit pad whose code voice is a
+    performer gets the pad's whole part in the studio, but live renders a kit hit by hit (ledger:M284)."""
+    if not isinstance(inst, dict) or inst.get('type') != 'kit':
+        return []
+    pads = [k for k, v in (inst.get('map') or {}).items() if _mark_performer(v, project) is not v]
+    if not pads:
+        return []
+    return [f"warning: {where}: kit pad(s) {', '.join(map(str, pads))} play a performer voice (perform()); the studio "
+            f"gives such a pad its whole part, live plays it hit by hit and will not match. Put that voice on a "
+            f"track of its own to play it live as in the studio."]
 
 
 @op()
@@ -305,6 +322,7 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         # a folder without project.json still has song voices in <folder>/voices: check against that root
         instrument = api._resolve_instrument(instrument, P or type('Root', (), {'root': os.path.abspath(project)})())
         instrument = _mark_performer(instrument, project)
+    gaps = _performer_gaps(instrument, project, f"track {track!r}") if instrument is not None else []
     if output is not None and not (isinstance(output, str) and output):
         raise OpError(f"output {output!r}: the name of a live bus (live_bus creates one)")
     out = _call(project, 'track', track=track, instrument=instrument, volume_db=volume_db, pan=pan, remove=remove,
@@ -314,6 +332,8 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
         cost = X.chain_costs([stack or fx])
         if cost:
             out = str(out) + '\n' + '\n'.join(cost)
+    if gaps:
+        out = str(out) + '\n' + '\n'.join(gaps)
     return out
 
 
@@ -352,6 +372,9 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
         song = cand if os.path.exists(cand) else os.path.abspath(song)
     out = _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
                 performers=_song_performers(song), timeout=120)
+    gaps = _song_performer_gaps(song)
+    if gaps:
+        out = str(out) + '\n' + '\n'.join(gaps)
     try:                                                    # its saved stacks, and what they cost here (ledger:M177)
         from .. import api_fxstack as X
         with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
@@ -398,6 +421,16 @@ def _song_performers(song):
         return []
     return [n for n, t in tracks.items() if isinstance(t.get('instrument'), dict) and
             _mark_performer(t['instrument'], song).get('performer')]
+
+
+def _song_performer_gaps(song):
+    """_performer_gaps for each of a song's tracks, as live_load says them."""
+    try:
+        with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
+            tracks = json.load(f).get('tracks', {})
+    except (OSError, ValueError):
+        return []
+    return [w for n, t in tracks.items() for w in _performer_gaps(t.get('instrument'), song, f"track {n!r}")]
 
 
 @op()
@@ -472,6 +505,19 @@ def live_fx(project: str, target: str = None, index=None, params: dict = None, r
 
 
 @op()
+def live_tempo(project: str, bpm: float, at: str = 'next_bar', ramp_beats: float = 0) -> str:
+    """Change the running set's tempo, with no restart and no gap. at: when, in live_queue's words (next_bar,
+    next_4, bar:N, now ...). Clips are written in beats, so every part keeps its notes on the beat: from the change
+    bar on they render again at the new tempo, while the notes before it keep playing up to it. When those renders
+    cannot be ready in time, the change moves to a later bar and the reply names it. Beat-synced effects (delays in
+    beats, gates, ducks every_beats, LFOs in beats) follow at the same bar; played keys (live_midi) keep their
+    sounds. A change replaces any change queued at or after its bar. ramp_beats: not built; for a gradual change
+    queue a few step changes at successive bars. The reply says what changes at which bar and what renders again;
+    live_status lists the tempo changes still to come."""
+    return _call(project, 'tempo', bpm=bpm, at=at, ramp_beats=ramp_beats)
+
+
+@op()
 def live_queue(project: str, clips: list = None, section: str = None, cancel_section: str = None,
                cancel_at: str = None) -> str:
     """Queue clips (a batch; all or nothing). Each clip: {track, notes and/or lanes, bars, loop, at}.
@@ -535,9 +581,17 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
             raise OpError(f"no recording {path} with its .json sidecar; recordings: " + ', '.join(
                 sorted(x for x in os.listdir(os.path.join(os.path.abspath(project), 'live')) if x.endswith('.wav'))))
         bpb, first = meta['beats_per_bar'], meta['first_bar']
-        g = A.Grid(meta['bpm'], -(first - 1) * bpb * 60.0 / meta['bpm'], bpb)
         if not isinstance(bars, (list, tuple)) or len(bars) != 2:
             raise OpError(f"with recording=, bars is [first, last] in set bars; this take starts at bar {first}")
+        # tempo segments [bar, bpm, seconds into the file]; the analysis grid has one tempo, so bars stay in one
+        segs = [[first, meta['bpm'], 0.0]] + [x for x in meta.get('tempo', []) if x[0] > first]
+        cross = [x for x in segs[1:] if bars[0] < x[0] <= bars[1]]
+        if cross:
+            c = cross[0][0]
+            raise OpError(f"bars {bars[0]}-{bars[1]} cross the tempo change at bar {c:g} (to {cross[0][1]:g} BPM): "
+                          f"ask for [{bars[0]}, {c - 1:g}] and [{c:g}, {bars[1]}] separately")
+        bar0, bpm, sec = [x for x in segs if x[0] <= bars[0]][-1] if bars[0] >= first else segs[0]
+        g = A.Grid(bpm, sec - (bar0 - 1) * bpb * 60.0 / bpm, bpb)
         kw = {'band': band} if view == 'envelope' else {}
         head = f"{os.path.basename(path)} bars {bars[0]}-{bars[1]} ({view})"
         return head + '\n' + VIEWS[view](path, g, list(bars), **kw)[1]
@@ -547,7 +601,7 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
     rng = [d['first'], d['last']]
     kw = {'band': band} if view == 'envelope' else {}
     txt = VIEWS[view](d['path'], g, rng, **kw)[1]
-    return f"live bars {d['first']}-{d['last']} ({view})\n" + txt
+    return f"live bars {d['first']}-{d['last']} ({view})\n" + (f"note: {d['note']}\n" if d.get('note') else '') + txt
 
 
 @op()
@@ -563,8 +617,10 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
     on a silent engine of its own (no live_start needed, nothing is late), then compares each track, each bus and
     the mix: level, envelope, octave bands, and the residual (how close to sample for sample; -100 dB and below is
     identical; under -80 dB nobody can tell). Judged from the second bar: in the first, the studio rings in what came before the window and a
-    deck starts clean (its own line, 'edge'). tracks limits both sides to those tracks. Takes about as long as
-    rendering the bars twice."""
+    deck starts clean (its own line, 'edge'). Each part is judged at its best lag: within 3 ms it reads 'ok (same,
+    offset N samples ...)', further off it DIFFERS (looked for up to 100 ms either way). Each track says how fast it
+    renders live (x realtime, in one process, a worker's pace). tracks limits both sides to those tracks. Takes about
+    as long as rendering the bars twice. Also api.live_parity."""
     from . import parity
     song = os.path.abspath(song)
     if not os.path.exists(os.path.join(song, 'project.json')):

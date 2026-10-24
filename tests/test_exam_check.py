@@ -231,3 +231,76 @@ def test_phone_exam_asks_for_the_measurement_or_why_only_the_ear_can_tell(tmp_pa
                  unmeasured='a breath texture no meter reads')
     log = [json.loads(l) for l in (tmp_path / 'home' / 'ear_first.jsonl').read_text(encoding='utf8').splitlines()]
     assert [(r['exam_id'], r['who'], r['why']) for r in log] == [('e2', 'voice', 'a breath texture no meter reads')]
+
+
+def metal_round(tmp_path):
+    """Three pairs, the record on A, then B, then A (metal round 3's shape)."""
+    clips, key = [], {}
+    for i, side in enumerate('ABA', 1):
+        for ab, f in zip('AB', (200 + 20 * i, 210 + 20 * i)):
+            clips.append({'label': f'{i}{ab}', 'path': tone(tmp_path / f'c{i}{ab}.wav', f)})
+            key[f'{i}{ab}'] = 'record' if ab == side else 'mine'
+    return clips, key
+
+
+def test_one_overall_side_choice_fails_when_the_real_side_moves_between_pairs(tmp_path):
+    """Nate, metal round 3 (10-22 voice note): "you don't have A or B be the real band every time"."""
+    clips, key = metal_round(tmp_path)
+    ok, lines = EC.run(clips=clips, key=key, choices=['A is the real band', 'B is the real band', "can't tell"])
+    out = text(lines)
+    assert not ok, out
+    assert "asks which side is 'record'" in out and 'A in pairs 1, 3; B in pair 2' in out
+    assert 'real or fake?' in out
+    # bare sides under a "which is real?" question fail too
+    ok, lines = EC.run(clips=clips, key=key, choices=['A', 'B', "can't tell"], question='Which one is the real band?')
+    assert not ok and 'moves between pairs' in text(lines)
+    # bare sides about something else: a warning, the exam can still go
+    ok, lines = EC.run(clips=clips, key=key, choices=['A', 'B'], question='Which side did you like more?')
+    assert ok and 'WARN one overall choice names sides' in text(lines), text(lines)
+
+
+def test_legitimate_single_choices_are_not_flagged(tmp_path):
+    clips, key = metal_round(tmp_path)
+    for choices in (['pair 1', 'pair 2', 'pair 3', 'none'], ['yes', 'no', "can't tell"],
+                    ['A lot', 'A little', 'not at all'], ['real', 'fake']):
+        ok, lines = EC.run(clips=clips, key=key, choices=choices, question='Which is the real band?')
+        assert ok and 'one overall choice' not in text(lines), (choices, text(lines))
+    # one pair: "A is the record" has an answer
+    assert EC.side_choice(['A is the record', 'B is the record'], '', [('1A', 'record'), ('1B', 'mine')]) is None
+    # the record on the same side in every pair: the side choice names one class (the order check is another line)
+    same = [('1A', 'record'), ('1B', 'mine'), ('2A', 'record'), ('2B', 'mine')]
+    assert EC.side_choice(['A is the record', 'B is the record'], '', same) is None
+    # clips not labelled by pair, or no key: nothing to read
+    assert EC.side_choice(['A', 'B'], 'which is real', [('A', 'record'), ('B', 'mine')]) is None
+    assert EC.side_choice(['A', 'B'], 'which is real', [('1A', None), ('1B', None), ('2A', None)]) is None
+    lvl, msg = EC.side_choice(['clip A', 'clip B'], 'which is ours?', [('1A', 'real'), ('1B', 'fake'),
+                                                                       ('2A', 'fake'), ('2B', 'real')])
+    assert lvl == 'FAIL' and "'real'" in msg
+
+
+def test_phone_exam_refuses_the_overall_side_choice_and_warns_when_shown_anyway(tmp_path, monkeypatch):
+    import pytest
+    from ismail.api import OpError
+    from ismail.phone import ops as P
+    monkeypatch.setattr(P, '_call', lambda *a, **k: 'shown')
+    clips, key = metal_round(tmp_path)
+    kw = dict(question='Which is the real one?', choices=['A is the real band', 'B is the real band', "can't tell"],
+              key=key, unmeasured='a test of the page')
+    with pytest.raises(OpError, match='moves between pairs'):
+        P.phone_exam('round 3', clips, **kw)
+    out = P.phone_exam('round 3', clips, check=False, **kw)
+    assert out.startswith('shown') and 'WARN one overall choice' in out
+    assert P.phone_exam('round 3', clips, check=False, **dict(kw, choices=None)) == 'shown'
+
+
+def test_sound_compare_says_when_a_whole_file_holds_a_tail_past_the_window():
+    """Score the window, not the file (metal 10-22: 15.7 dB of steadiness over the file, 3.0 over the window)."""
+    from ismail import api_sound as A
+    from ismail import sounddesign as SD
+    sr = SD.SR
+    note = np.vstack([np.sin(2 * np.pi * 220 * np.arange(sr) / sr)] * 2) * 0.3
+    tail = np.hstack([note, np.zeros((2, 2 * sr))])
+    hint = A._window_hint(tail, note, False, False)
+    assert 'A is 3.0 s (2.0 s of tail' in hint and 'a_window/b_window' in hint
+    assert A._window_hint(note, note.copy(), False, False) == ''
+    assert A._window_hint(tail, note, True, True) == ''

@@ -20,8 +20,8 @@ CATEGORIES = [
     ('write', 'tracks, notes, patterns, buses, automation, stem maps',
      ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
       'notes_transform', 'pattern_write', 'automation_', 'stem_map_set', 'audio_place')),
-    ('sounds', 'choosing and making sounds: voices, instruments, presets, effects, samples, speech',
-     ('voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
+    ('sounds', 'choosing and making sounds: the kit by family, voices, instruments, presets, effects, samples, speech',
+     ('kit', 'voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
       'samples_', 'sound_list', 'sound_make', 'sound_import', 'sound_speak', 'sound_autotune')),
     ('fit', 'matching a sound or a level to a recording, measured',
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
@@ -31,11 +31,12 @@ CATEGORIES = [
              'MIDI inputs and outputs, a song played to a synth or a DAW',
      ('midi_write', 'midi_read', 'midi_ports', 'midi_play')),
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
-               'and where two takes differ',
+               'and where two takes differ; and the arrangement checked for parts that clash',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
-      'region_measure')),
-    ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
-    ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_', 'ear_pass')),
+      'region_measure', 'notes_clash')),
+    ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop', 'melody_consensus')),
+    ('compare', 'your render against the reference, stored and drilled into bar by bar, and the tells the person '
+               'keeps hearing, measured every round', ('cmp_', 'ear_pass', 'tell_')),
     ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes, '
              'feedback pages they answer by voice or typing', ('exam_', 'feedback_')),
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
