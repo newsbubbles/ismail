@@ -68,7 +68,15 @@ CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
 NOVICE = ('someone new to computers is never asked to close things (they may not be able to, and it alarms '
           'them): wait quietly and say "the computer is busy, one moment"')
-WAIT_POLL_S = 5.0                  # a waiting job looks again this often
+WAIT_POLL_S = 5.0                  # a waiting job near the front of its line looks again this often
+WAIT_POLL_MAX_S = 60.0             # ... one further back looks less often, down to this (ledger:M307: it is woken
+                                   # when a job ends or a waiter leaves the line, so it misses nothing)
+WAKE_TICK_S = 0.25                 # a waiter asleep in line looks at the board's generation file (one stat) this often
+WAKE_SPREAD_S = 1.0                # woken, a waiter behind the front spreads its look over this long
+GEN_FILE = 'gen'                   # <board>/gen: touched when a job ends or a waiter leaves the line (ledger:M307)
+CPU_FRESH_S = 10.0                 # one CPU sample serves every process this long (<board>/cpu.json)
+GPU_FRESH_S = 5.0                  # one nvidia-smi reading serves every process this long (<board>/gpu.json)
+CLAIM_STALE_S = 15.0               # a reading's claim older than this was left by a sampler that died
 THREADS = 2                        # numeric threads per heavy job
 DISK_FLOOR_GB = 15.0               # no new heavy job while a drive jobs write to has less free than this
 DISK_WARN_GB = 30.0                # the board warns below this
@@ -141,10 +149,82 @@ def _gpu_query():
 _gpu_cache = [0.0, None]
 
 
+def _load_reading(path):
+    try:
+        with open(path, encoding='utf8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) and isinstance(d.get('t'), (int, float)) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _claim(path):
+    """-> 'mine' (made the claim file), 'theirs' (another caller holds it) or 'none' (the board cannot be written:
+    sample without one). A claim left by a sampler that died is removed after CLAIM_STALE_S. A claim only saves
+    work: two samplers at once cost one sample more, never a wrong reading."""
+    try:
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return 'mine'
+    except FileExistsError:
+        pass
+    except OSError:                                    # Windows: a claim being removed, or a board we cannot write
+        return 'theirs' if os.path.exists(path) else 'none'
+    try:
+        if time.time() - os.path.getmtime(path) > CLAIM_STALE_S:
+            _drop(path, patience=0)
+    except OSError:                                    # its sampler let go just now
+        pass
+    return 'theirs'
+
+
+def _shared_reading(name, fresh_s, take):
+    """-> {'t': when it was taken, ...}: a reading every process on this machine shares (ledger:M307: 23 waiters in
+    line each sampled the CPU for 2 s and ran nvidia-smi every 5 s, 8.4% of the CPU together while it was at 99%).
+    <board>/<name>.json holds the last one. A caller that finds it older than fresh_s claims the sampling with an
+    O_EXCL file <board>/<name>.json.claim and takes a new one; the callers that find the claim taken use the last
+    reading, a few seconds older (or, when there is none yet, wait for the first)."""
+    os.makedirs(board_dir(), exist_ok=True)
+    path = os.path.join(board_dir(), name + '.json')
+    claim = path + '.claim'
+    t_give = time.time() + CLAIM_STALE_S
+    while True:
+        d = _load_reading(path)
+        if d is not None and 0 <= time.time() - d['t'] < fresh_s:
+            return d
+        who = _claim(claim)
+        if who == 'theirs' and d is not None:
+            return d                                   # its sampler is at work: the last reading does for now
+        if who == 'theirs' and time.time() < t_give:
+            time.sleep(0.05)                           # the first reading is coming
+            continue
+        if who == 'theirs':
+            who = 'none'                               # no reading came: take one without the claim
+        try:
+            if who == 'mine':
+                d2 = _load_reading(path)               # a sampler finished between our look and our claim
+                if d2 is not None and 0 <= time.time() - d2['t'] < fresh_s:
+                    return d2
+            d = dict(take())
+            d['t'] = time.time()
+            try:
+                tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+                with open(tmp, 'w', encoding='utf8') as f:
+                    json.dump(d, f)
+                os.replace(tmp, path)
+            except OSError:                            # a reader holds it open (Windows), or a full disk
+                pass
+            return d
+        finally:
+            if who == 'mine':
+                _drop(claim, patience=0.5)
+
+
 def gpu():
-    if time.time() - _gpu_cache[0] > 5 and not (getattr(_locking, 'held', False) and _gpu_cache[0]):
-        # never nvidia-smi inside the board lock (ledger:M303): its holder uses the reading taken before it
-        _gpu_cache[:] = [time.time(), _gpu_query()]
+    if time.time() - _gpu_cache[0] > GPU_FRESH_S and not (getattr(_locking, 'held', False) and _gpu_cache[0]):
+        # never nvidia-smi inside the board lock (ledger:M303): its holder uses the reading taken before it. One
+        # nvidia-smi serves every process for GPU_FRESH_S (ledger:M307)
+        d = _shared_reading('gpu', GPU_FRESH_S, lambda: {'gpu': _gpu_query()})
+        _gpu_cache[:] = [d['t'], d.get('gpu')]
     return _gpu_cache[1]
 
 
@@ -162,19 +242,18 @@ _cpu_cache = [0.0, None]
 
 
 def cpu_load():
-    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached 10 s
-    in this process and on the board for every process (each CLI call is a new process: each paid 2 s of sampling)."""
-    if _cpu_cache[1] is not None and (time.time() - _cpu_cache[0] < 10 or getattr(_locking, 'held', False)):
+    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached
+    CPU_FRESH_S in this process and on the board for every process (each CLI call is a new process: each paid 2 s
+    of sampling). One caller samples at a time and the others read its sample (ledger:M307)."""
+    if _cpu_cache[1] is not None and (time.time() - _cpu_cache[0] < CPU_FRESH_S or getattr(_locking, 'held', False)):
         return _cpu_cache[1]                           # inside the board lock: the sample taken before it
-    shared = os.path.join(board_dir(), 'cpu.json')
-    try:
-        with open(shared, encoding='utf8') as f:
-            d = json.load(f)
-        if time.time() - d['t'] < 10:
-            _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
-            return _cpu_cache[1]
-    except (OSError, ValueError, KeyError):
-        pass
+    d = _shared_reading('cpu', CPU_FRESH_S, _cpu_sample)
+    _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
+    return _cpu_cache[1]
+
+
+def _cpu_sample():
+    """One CPU sample, CPU_SAMPLE_S long: the whole machine and the top 4 processes."""
     procs = []
     for p in psutil.process_iter(['name']):
         try:
@@ -193,16 +272,7 @@ def cpu_load():
         if c >= 1.0 and p.pid and p.info.get('name') not in ('System Idle Process', 'idle'):
             top.append((c, p.info.get('name') or '?', p.pid))
     top.sort(reverse=True)
-    _cpu_cache[:] = [time.time(), (total, top[:4])]
-    try:
-        os.makedirs(board_dir(), exist_ok=True)
-        tmp = shared + f".{os.getpid()}.tmp"
-        with open(tmp, 'w', encoding='utf8') as f:
-            json.dump({'t': _cpu_cache[0], 'busy': total, 'top': top[:4]}, f)
-        os.replace(tmp, shared)
-    except OSError:
-        pass
-    return _cpu_cache[1]
+    return {'busy': total, 'top': top[:4]}
 
 
 def _top_text(top):
@@ -410,6 +480,7 @@ def jobs():
         else:
             try:
                 os.remove(p)
+                _bump()                # a dead job's slot is free: wake the line
             except OSError:
                 pass
     return out
@@ -460,6 +531,7 @@ def set_priority(who, for_s, by, why=''):
     with _board_lock():
         with open(os.path.join(board_dir(), 'priority.json'), 'w', encoding='utf8') as f:
             json.dump(p, f)
+    _bump()                            # the line's order changed
     return p
 
 
@@ -497,6 +569,7 @@ def priority_match(who=None):
 def clear_priority():
     with _board_lock():
         _remove(os.path.join(board_dir(), 'priority.json'))
+    _bump()
 
 
 def waiters():
@@ -517,6 +590,7 @@ def waiters():
             else:
                 try:
                     os.remove(p)
+                    _bump()            # a dead waiter left the line: the ones behind it move up
                 except OSError:
                     pass
     pr = priority()
@@ -533,6 +607,53 @@ def _ahead(kind, who, since, me=None):
     mine = _rank(who, since, pr)
     return [w for w in waiters() if w.get('id') != me and (w['kind'] == kind or (kind == 'cpu' and w['kind'] == 'live'))
             and _rank(w['who'], w['since'], pr) < mine]
+
+
+def _gen():
+    """The board's generation: the time <board>/gen was last touched (0 when never). One stat."""
+    try:
+        return os.stat(os.path.join(board_dir(), GEN_FILE)).st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _bump():
+    """Wake the waiters (ledger:M307): a job ended, a waiter left the line or the priority changed, so the line may
+    have moved. A waiter asleep in line stats <board>/gen every WAKE_TICK_S and looks at the board when it changes."""
+    p = os.path.join(board_dir(), GEN_FILE)
+    t = time.time_ns()
+    try:
+        os.utime(p, ns=(t, t))
+    except FileNotFoundError:
+        try:
+            os.close(os.open(p, os.O_CREAT | os.O_WRONLY))
+            os.utime(p, ns=(t, t))
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def _wait_poll(kind, who, since, me):
+    """-> (seconds, behind): how long a waiter sleeps before it looks at the board again (ledger:M307). Near the
+    front of its line (it could be next) WAIT_POLL_S; `behind` places further back it cannot start before the jobs
+    ahead of it, and a job ending wakes it anyway, so it looks (1 + behind) times less often, down to
+    WAIT_POLL_MAX_S. 23 waiters looked at the board 4.6 times a second together; now about once."""
+    behind = max(0, len(_ahead(kind, who, since, me)) - SLOTS.get(kind, 1) + 1)
+    s = min(WAIT_POLL_S * (1 + behind), max(WAIT_POLL_S, WAIT_POLL_MAX_S))
+    return s * random.uniform(0.75, 1.25), behind      # jitter: the waiters do not all look at once
+
+
+def _nap(seconds, gen):
+    """Sleep up to `seconds`; wake early when the board's generation is no longer `gen`. -> True when woken."""
+    t_end = time.time() + seconds
+    while True:
+        left = t_end - time.time()
+        if left <= 0:
+            return False
+        time.sleep(min(WAKE_TICK_S, left))
+        if _gen() != gen:
+            return True
 
 
 STALE_LOCK_S = 30.0    # a board lock older than this was left by a holder that died mid-update
@@ -1502,8 +1623,13 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         return MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the machine op shows the "
                            f"board), wait in line (`run --wait 30m`), do lighter work meanwhile, or pass force=True only "
                            f"if the user says so.")
+    def rest(gen):             # until the next look, or until a job ends or a waiter leaves the line (ledger:M307)
+        seconds, behind = _wait_poll(kind, who, since, wid)
+        if _nap(seconds, gen) and behind:
+            time.sleep(random.uniform(0, WAKE_SPREAD_S))   # the front looks at once; those behind it spread out
     try:
         while True:
+            gen = _gen()               # before the look: a job that ends while this one looks still wakes it
             if kind == 'cpu' and not force:
                 cpu_load()             # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
             # look first without the lock (ledger:M303): a job that cannot start yet, and a waiter whose turn has not
@@ -1512,7 +1638,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
             if why and final(why):
                 raise busy(why)
             if why and wid is not None:        # in line already, and not this job's turn: look again later
-                time.sleep(WAIT_POLL_S * random.uniform(0.75, 1.25))
+                rest(gen)
                 continue
             with _board_lock():
                 why = why or ask()     # still free under the lock? (another job may have taken the slot meanwhile)
@@ -1537,10 +1663,11 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
                     with open(wpath, 'w', encoding='utf8') as f:
                         json.dump({'id': wid, 'kind': kind, 'what': what, 'who': who, 'pid': me.pid,
                                    'pid_start': me.create_time(), 'since': since}, f)
-            time.sleep(WAIT_POLL_S * random.uniform(0.75, 1.25))   # jitter: the waiters do not all look at once
+            rest(gen)
     finally:
         if wpath:
             _remove(wpath)
+            _bump()                    # out of the line (started or gave up): the ones behind move up
     g = gpu()
     state = {'gpu_temp': g['temp'], 'gpu_clock': g['clock'], 'gpu_reasons': hex(g['reasons']),
              'gpu_trouble': gpu_trouble(g) or None} if g else {}
@@ -1567,6 +1694,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         used = meter.stop()
         for f in (path, path[:-5] + '.tmp'):
             _remove(f)
+        _bump()                        # a slot is free: wake the line (ledger:M307)
         _record(job, job['started'] - since, state, used, outcome)
 
 
