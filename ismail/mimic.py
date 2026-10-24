@@ -813,6 +813,8 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
     mono = bool(p['mono'])
     players = max(1, int(p['players']))
     phi_c = phi0 = None
+    ts = np.arange(n) / sr                               # sample times, shared by every partial and layer
+    ar = np.arange(n)
     for pl in range(players):
         prng = np.random.default_rng(seed + 7919 * (pl + 1))
         cents = 0.0 if players == 1 else prng.uniform(-1, 1) * p['detune']
@@ -821,7 +823,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         vib = _vibrato(prng, tc, delay, vr, vib_d, vib_rsd, vib_dsd, vib_on) if vib_d > 0 else np.zeros(ncs)
         vib += drift * _smooth_noise(prng, ncs, 1.5, sr_c)
         f0c = freq * 2 ** ((cents + vib) / 1200)
-        f0s = np.interp(np.arange(n) / sr, tc, f0c)
+        f0s = np.interp(ts, tc, f0c)
         phase = 2 * np.pi * np.cumsum(f0s) / sr
         pan = 0.0 if players == 1 else prng.uniform(-0.6, 0.6)
         if mono:
@@ -857,7 +859,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
             tot_env += amp_c ** 2
             # compute the partial only while it sounds: a long tail after the release is mostly silence
             m = min(n, (int(np.nonzero(amp_c >= 1e-5)[0][-1]) + 2) * CTRL)
-            amp = np.interp(np.arange(m) / sr, tc, amp_c)
+            amp = np.interp(ts[:m], tc, amp_c)
             ph0 = prng.uniform(0, 2 * np.pi)
             dphi = p['width'] * prng.uniform(-np.pi / 2, np.pi / 2) if k > 1 else 0.0
             dl = 1 + p['width'] * prng.uniform(-0.12, 0.12)
@@ -869,7 +871,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
                 g = 10 ** (bdb[i] / 20)
                 # struck together, the strings start in phase: the first cancellation comes 1/(2*beat) s later,
                 # the dip a listener hears as the note "fading out in the middle"
-                th2 = th + 2 * np.pi * bhz[i] * np.arange(m) / sr
+                th2 = th + 2 * np.pi * bhz[i] * ar[:m] / sr
                 mg = (g - 1) / (g + 1)
                 yl[:m] += amp * (np.sin(th) + mg * np.sin(th2)) / np.sqrt(1 + mg * mg) * dl
                 if not one:
@@ -912,8 +914,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         sus_env = 10 ** ((harm_db - ref_db) / 20)
     atk_t = max(float(np.mean(atk[:3])), 0.01)
     atk_env = np.exp(-np.maximum(tc, 0) / (0.5 * atk_t + 0.015))
-    fr = np.fft.rfftfreq(n, 1 / sr)
-    lf = np.log2(np.maximum(fr, 1.0))
+    fr, lf = _freq_grid(n, sr)
     layers = [(ns, sus_env, ref_db)]
     if not ('atk_tf' in a and 'atk_tf' in b):       # the calibrated attack map replaces the generic burst
         layers.append((na, atk_env, ref_db))
@@ -923,7 +924,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         for ch in range(1 if mono else 2):
             wn = rng.standard_normal(n)
             shaped = np.fft.irfft(np.fft.rfft(wn) * g, n)
-            out[ch] += shaped * np.interp(np.arange(n) / sr, tc, envc)
+            out[ch] += shaped * np.interp(ts, tc, envc)
         if mono:
             out[1] = out[0]
     if 'atk_tf' in a and 'atk_tf' in b and p['knock'] > 0:
@@ -953,6 +954,54 @@ def _env_decaying(te, atk, t1, t2, gate, damp_t):
     return env
 
 
+_FREQ_GRIDS = {}
+
+
+def _freq_grid(n, sr):
+    """rfft bin frequencies of an n-sample note and their log2 (floored at 1 Hz): the notes of a chord share n."""
+    v = _FREQ_GRIDS.get((n, sr))
+    if v is None:
+        fr = np.fft.rfftfreq(n, 1 / sr)
+        v = (fr, np.log2(np.maximum(fr, 1.0)))
+        if len(_FREQ_GRIDS) > 32:
+            _FREQ_GRIDS.clear()
+        _FREQ_GRIDS[(n, sr)] = v
+    return v
+
+
+def _hann(nfft):
+    """Periodic Hann window (scipy get_window('hann', nfft), as librosa's stft uses)."""
+    return 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(nfft) / nfft)
+
+
+def _stft(x, nfft, hop, win):
+    """librosa.stft(x, n_fft=nfft, hop_length=hop, center=True) with zero padding, as (frames, bins). numpy only:
+    librosa's first stft in a process costs seconds (lazy imports, numba), and that landed on a deck's first bars."""
+    xp = np.pad(x, nfft // 2)
+    nfr = 1 + (len(xp) - nfft) // hop
+    frames = np.lib.stride_tricks.sliding_window_view(xp, nfft)[::hop][:nfr]
+    return np.fft.rfft(frames * win, axis=1)
+
+
+def _istft(Z, nfft, hop, win, length):
+    """librosa.istft(Z.T, hop_length=hop, n_fft=nfft, center=True, length=length) for (frames, bins) Z."""
+    pad = nfft // 2
+    nfr = min(len(Z), int(np.ceil((length + 2 * pad) / hop)))
+    frames = np.fft.irfft(Z[:nfr], n=nfft, axis=1) * win
+    y = np.zeros(nfft + hop * (nfr - 1))
+    wss = np.zeros_like(y)
+    w2 = win ** 2
+    for j in range(nfr):
+        y[j * hop:j * hop + nfft] += frames[j]
+        wss[j * hop:j * hop + nfft] += w2
+    y, wss = y[pad:pad + length], wss[pad:pad + length]
+    if len(y) < length:
+        y, wss = np.pad(y, (0, length - len(y))), np.pad(wss, (0, length - len(wss)))
+    nz = wss > np.finfo(wss.dtype).tiny
+    y[nz] /= wss[nz]
+    return y
+
+
 def _rms_window(out, kind, sr):
     t0, t1 = (0.3, 2.0) if kind == 'sustained' else (0.03, 1.0)
     seg = out.mean(axis=0)[int(t0 * sr):int(t1 * sr)]
@@ -962,7 +1011,6 @@ def _rms_window(out, kind, sr):
 def _attack_noise(a, b, w, rng, n, sr, gain, rms_now):
     """The attack map as STFT-shaped noise. Levels were measured with the recording at atk_ref_db rms over the
     calibration window; scale to this render's rms there."""
-    import librosa
     ta = 10 ** (np.array(a['atk_tf']) / 10)
     tb = 10 ** (np.array(b['atk_tf']) / 10)
     var = ta * (1 - w) + tb * w                            # variance density per band x frame
@@ -979,12 +1027,14 @@ def _attack_noise(a, b, w, rng, n, sr, gain, rms_now):
     sh = ATK_NFFT // (2 * ATK_HOP)
     need = ATK_NFFT + ATK_HOP * (ATK_FRAMES - 1)
     res = np.zeros((2, n))
+    win = _hann(ATK_NFFT)
     for ch in range(2):
         wn = rng.standard_normal(need + ATK_NFFT)
-        Z = librosa.stft(wn, n_fft=ATK_NFFT, hop_length=ATK_HOP, center=True)
-        Gc = np.zeros((G.shape[0], Z.shape[1]))
-        Gc[:, sh:sh + G.shape[1]] = G[:, :max(0, min(G.shape[1], Z.shape[1] - sh))]
-        z = librosa.istft(Z * Gc, hop_length=ATK_HOP, n_fft=ATK_NFFT, center=True, length=len(wn))
+        Z = _stft(wn, ATK_NFFT, ATK_HOP, win)               # (frames, bins)
+        Gc = np.zeros((Z.shape[0], G.shape[0]))
+        k = max(0, min(G.shape[1], Z.shape[0] - sh))
+        Gc[sh:sh + k] = G[:, :k].T
+        z = _istft(Z * Gc, ATK_NFFT, ATK_HOP, win, len(wn))
         m = min(n, need)
         res[ch, :m] = z[:m]
     return res

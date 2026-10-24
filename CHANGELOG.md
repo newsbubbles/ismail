@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### A mimic chord's first notes start fast
+
+- mimic's attack map (every built-in profile and harp-like ones have one) ran on librosa.stft and istft, and
+  librosa's first stft in a process costs seconds (its lazy imports and numba). A deck's first bars paid that on their
+  first mimic note: 8 to 10 s of CPU for a first 8-note harp chord, 2.1 to 2.3 s now. The attack map now runs on a
+  numpy STFT of the same window, padding and overlap-add (within -300 dB of librosa's). Each note also builds its
+  time grid once rather than per partial, and the notes of a chord share their FFT frequency grid: the warm chord is
+  about 4% faster. The sound is unchanged: the 8-note chord is within -327 dB of before.
+  (ledger:M302)
+
 ### Mimic takes stay within 3 dB of each other
 
 - A mimic note's random variation is seeded by its pitch, velocity and gate, and one velocity could draw a take 8 dB
