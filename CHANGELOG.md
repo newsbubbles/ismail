@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### mimic perform: vibrato by default, and phrase ends that fall
+
+- The default vibrato depth of `"perform": true` is now the median of the profile's notes that have vibrato,
+  times (0.5 + 0.5 x the share of notes that have it). The median over all notes gave 0 c on the clarinet (vibrato
+  on 4 of its 11 notes), so a performed line was a straight tone and the vibrato bloom never showed. Default before
+  and after: clarinet 0.0 to 3.7 c, bassoon 5.0 to 4.5 c, horn 5.0 to 4.9 c, cello 9.6 to 9.3 c, violin 12.7 to
+  14.1 c, contrabass 5.0 to 5.0 c. `"perform": {"vib": N}` still sets it.
+- A phrase end now falls by `taper_db` with the room on. A clarinet D5 phrase end fell 0.4 dB against the 5 dB
+  setting: the tone was steady (no vibrato), so dry and room summed partly out of phase, and the end's pitch sag
+  moved it across the room's response so the sum came back up just as the level fell (3.4 dB with the room off,
+  3.3 dB with the room on and no sag). The performer now runs the room per line, reads each phrase end after the
+  room and takes off what the taper is short of (it only lowers). A phrase ending on a short note (under 0.5 s)
+  had no taper at all; the taper now spans the last 35 % of the last note or the phrase's last 0.3 s, whichever is
+  longer, and holds its full depth over the last 15 % of that. On four phrase ends with the room on (one note, the
+  ear round's D5, a short last note, tongued notes into a long one) the end falls 5.9 to 8.6 dB, against 2.8 to
+  6.8 dB before. Found by the Sound Engineer's #346 ear round build.
+
 ### Reading a drifting, thumb-led record
 
 - `analyze_grid` reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when

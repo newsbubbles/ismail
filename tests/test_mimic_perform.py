@@ -177,3 +177,48 @@ def test_live_plays_a_performed_mimic_as_a_performer():
     y = worker._perform(I.normalize(dict(marked, params={'room': 0})), SLUR, int(2.2 * SR), 120.0, None,
                         {'level': [[0.0, 0.0], [1.0, 0.0]]})
     assert y.shape == (2, int(2.2 * SR)) and np.sqrt(np.mean(y ** 2)) > 1e-3
+
+
+def test_the_default_vibrato_is_heard_when_a_minority_of_notes_has_it():
+    # the clarinet has vibrato on 4 of its 11 notes (5.0-6.3 c): the median over all its notes was 0 c, a straight
+    # tone, and the bloom never showed (the Sound Engineer's #346 ear round build)
+    prof = mimic.load_profile(PROF)
+    ds = [float(n.get('vib_depth') or 0.0) for n in prof['notes']]
+    assert np.median(ds) < 0.5 and sum(d > 2 for d in ds) < len(ds) / 2
+    dep, rate = mimic_perform._measured_vibrato(prof)
+    assert 3.0 < dep < max(ds) and 4.0 < rate < 9.0, (dep, rate)
+    straight = dict(prof, notes=[dict(n, vib_depth=0.0, vib_rate=0.0) for n in prof['notes']])
+    assert mimic_perform._measured_vibrato(straight) == (0.0, 5.5)
+    # rendered with the defaults, a long note's late part wobbles where its start does not
+    y = render(inst(perform={'drift_cents': 0.0, 'breathe_db': 0.0}), [(0.1, 70, 1.6, 90)], 2.0)
+    early, late = cents_wobble(y, 70, 0.2, 0.4), cents_wobble(y, 70, 1.0, 1.25)
+    assert late > 2 * early and late > 1.5, (early, late)
+
+
+def end_fall_db(y, ph):
+    """How far a phrase's end falls: the median 10 ms level over the 0.3 s before its taper starts, against the
+    last 40 ms before its written end (the taper's span as mimic_perform reads it)."""
+    p_end = max(s + d for s, _, d, _ in ph)
+    plen = p_end - ph[0][0]
+    span = max(0.35 * (p_end - ph[-1][0]), min(0.3, 0.35 * plen))
+    e = frames_db(y.mean(0))
+
+    def med(a, b):
+        return float(np.median(e[int(round(a * 100)):int(round(b * 100))]))
+    return med(p_end - span - 0.3, p_end - span) - med(p_end - 0.04, p_end)
+
+
+@pytest.mark.parametrize('ph', [
+    [(0.1, 69, 0.85, 95)],                                                     # one note
+    [(0.3, 69, 0.41, 92), (0.65, 72, 0.41, 97), (1.0, 76, 0.41, 102), (1.35, 74, 1.6, 92)],   # the ear round's D5
+    [(0.1, 65, 0.5, 92), (0.55, 67, 0.5, 97), (1.0, 69, 0.25, 92)],            # a short last note
+    [(0.1, 72, 0.3, 92), (0.45, 74, 0.3, 97), (0.8, 76, 0.3, 92), (1.15, 72, 1.1, 95)],   # tongued, then long
+], ids=['one_note', 'slurs_to_D5', 'short_last_note', 'tongued_then_long'])
+def test_a_phrase_end_falls_by_the_taper_with_the_room_on(ph):
+    # the ear round's D5 fell 0.4 dB against the 5 dB setting: its pitch sag moved a steady tone across the
+    # room's response and the dry and wet sum stopped cancelling just as the level fell
+    end = max(s + d for s, _, d, _ in ph)
+    y = render({'type': 'mimic', 'profile': PROF, 'perform': True}, ph, end + 0.4)
+    fall = end_fall_db(y, ph)
+    print('phrase end fall, dB:', round(fall, 2))
+    assert fall >= mimic_perform.DEFAULTS['taper_db'], fall

@@ -38,7 +38,8 @@ INFO = {
               "scoop": "semitones below, read at note start", "tongue": "0..1 onset hardness",
               "breath": "dB on the air noise", "bend": "semitones added to the pitch"},
     "params": {"bright": "dB/octave of partial number, added", "vel_bright": "dB/octave per velocity unit",
-               "vib": "vibrato cents peak (null = the profile's measured median)",
+               "vib": "vibrato cents peak (null = the profile's: the median of its notes with vibrato, times "
+                      "0.5 + 0.5 x the share of notes that have it)",
                "vib_rate": "Hz (null = the profile's measured median, else 5.5)",
                "vib_delay": "s into a note before vibrato starts", "vib_grow": "s for it to reach full depth",
                "vib_am_db": "breath pulse with the vibrato, dB at full depth",
@@ -48,7 +49,8 @@ INFO = {
                "breath_gap": "s: a gap shorter than this is tongued, longer is a new breath",
                "noise": "dB on the measured air", "lead_ms": "air before the tone speaks at a breath onset",
                "drift_cents": "slow pitch wander", "breathe_db": "slow level wander",
-               "taper_db": "level fall over the last 35 % of a phrase's long last note",
+               "taper_db": "dB the phrase end falls by (read after the room), over the last 35 % of the last note "
+                           "or the phrase's last 0.3 s, whichever is longer",
                "end_sag_cents": "pitch sag at that taper", "chord_ms": "notes starting this close are a chord",
                "room": "room RT60 s (null = the profile's)", "room_mix": "dB", "width": "0..1",
                "seed": "seed"},
@@ -128,12 +130,61 @@ def _source_db(prof, midi, vel, kk, P):
             + 20 * np.log10(max(vel, 1e-3) / max(vref, 1e-3)) + prof.get('norm_db', 0.0)), (a, b, w)
 
 
+VIB_FLOOR_C = 2.0     # mimic's analysis writes 0 for a note whose vibrato is 2 c or less: that note has none
+
+
 def _measured_vibrato(prof):
-    """The profile's typical vibrato: median depth over its measured notes (cents peak), median rate of those
-    that have one."""
-    ds = [float(n.get('vib_depth') or 0.0) for n in prof['notes']]
-    rs = [float(n.get('vib_rate') or 0.0) for n in prof['notes'] if (n.get('vib_rate') or 0) > 0]
-    return float(np.median(ds)) if ds else 0.0, float(np.median(rs)) if rs else 5.5
+    """The profile's typical vibrato (cents peak, Hz): the median depth of the notes that have one, times
+    (0.5 + 0.5 x the share of notes that have one); the median rate of those notes.
+
+    The median over all notes gave 0 c whenever most samples were played straight: the clarinet's has vibrato on 4
+    of its 11 notes (5.0-6.3 c), so a performed line had none and the bloom never showed (the Sound Engineer's
+    #346 ear round build). The player's own depth, leaned down for a mostly straight player but never below half
+    of it, keeps the bloom audible wherever the profile shows real vibrato: 3.7 c on the clarinet, 4.5 c on the
+    bassoon (12 of 19), within 0.8 c of the measured depth where nearly every note has it (horn, strings)."""
+    notes = prof['notes']
+    ds = [float(n.get('vib_depth') or 0.0) for n in notes]
+    on = [d for d in ds if d > VIB_FLOOR_C]
+    rs = [float(n.get('vib_rate') or 0.0) for n, d in zip(notes, ds)
+          if d > VIB_FLOOR_C and (n.get('vib_rate') or 0) > 0]
+    depth = float(np.median(on)) * (0.5 + 0.5 * len(on) / len(ds)) if on else 0.0
+    return depth, float(np.median(rs)) if rs else 5.5
+
+
+def _median_db(y, a, b, sr):
+    """median level of 10 ms frames in y[:, a:b], dB (a stretch shorter than a frame is one frame)"""
+    f = max(1, int(0.01 * sr))
+    m = max(1, (b - a) // f)
+    x = (y[:, a:a + m * f] ** 2).sum(axis=0)
+    return float(np.median(10 * np.log10(x[:len(x) // m * m].reshape(m, -1).mean(axis=1) + 1e-20)))
+
+
+def _hold_tapers(y, tapers, starts, sr):
+    """Hold each phrase end to its taper after the room, in place on one line's output y (2, n).
+
+    Why: a steady tone (no vibrato yet) meets one fixed complex gain of the room per partial, so dry and wet sum
+    partly in or out of phase. The end's pitch sag moves the partials across the room's response, the sum changes,
+    and that can undo the taper: a clarinet D5 phrase end fell 0.4 dB against the 5 dB setting (3.4 dB with the
+    room off, 3.3 dB with the room on and no sag; the Sound Engineer's #346 ear round build). Here the level after
+    the room is read (median of 10 ms frames) over the held stretch before the taper and over the end, where the
+    fall is full; when it fell less than it should, the rest is taken off with the taper's own shape, held through
+    the release and the room tail, and eased back over 50 ms before the line's next phrase. It only ever lowers."""
+    n = y.shape[1]
+    for tp in tapers:
+        h0, t0, e0, end = (int(np.clip(tp[k], 0, n)) for k in ('h0', 't0', 'e0', 'end'))
+        if not (h0 < t0 < e0 < end) or tp['want'] <= 0:
+            continue
+        fell = _median_db(y, h0, t0, sr) - _median_db(y, e0, end, sr)
+        short = min(float(tp['want'] - fell), 12.0)
+        if short <= 0.05:
+            continue
+        s1 = min([s for s in starts if s > end] + [n])
+        x = np.clip(np.arange(s1 - t0) / (0.85 * tp['span'] * sr), 0, 1)
+        g = -short * x ** 1.3
+        ease = min(int(0.05 * sr), s1 - end)
+        if s1 < n and ease > 0:
+            g[len(g) - ease:] *= np.linspace(1.0, 0.0, ease)
+        y[:, t0:s1] *= 10 ** (g / 20)
 
 
 def lines(ns, chord_s):
@@ -208,18 +259,34 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
     def lane_at(name, i, default):
         return float(lane_vec(name, np.array([int(i)]), default)[0])
 
-    all_ph = []
-    for ln in lines(ns, float(P['chord_ms']) / 1000):
-        all_ph += phrases(ln, float(P['breath_gap']))
-
     rel = float(P['release'])
     lead = float(P['lead_ms']) / 1000.0
     nyq = min(sr / 2 * 0.95, 20000)
     sr_c = sr / CR
-    for ph in all_ph:
+    all_ph = []                                            # (line, phrase), a line's phrases in time order
+    for li, ln in enumerate(lines(ns, float(P['chord_ms']) / 1000)):
+        all_ph += [(li, ph) for ph in phrases(ln, float(P['breath_gap']))]
+    # the room, ring and sympathetic strings, as mimic's own post stage has them, run per line, so that each
+    # phrase end can be held to its taper after the room (_hold_tapers)
+    post['room'], post['room_mix'] = P['room'], float(P['room_mix'])
+    buf = np.zeros((2, total_n))
+    tapers, starts = [], []
+
+    def flush():
+        y = mimic._post(buf, prof, post, sr, seed)
+        _hold_tapers(y, tapers, starts, sr)
+        out[:] += y
+        buf[:] = 0.0
+        tapers.clear()
+        starts.clear()
+
+    for k, (li, ph) in enumerate(all_ph):
+        if k and li != all_ph[k - 1][0]:
+            flush()
         p0 = ph[0][0] - lead                               # the air starts a little before the tone speaks
         p_end = max(st + d for st, _, d, _, _ in ph)
         a0 = int(round(p0 * sr))
+        starts.append(a0)
         b0 = int(round((p_end + rel + 0.05) * sr))
         if b0 <= 0 or a0 >= total_n:
             continue
@@ -290,14 +357,28 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
         i_end = min(nc - 1, int(round((p_end - p0) * sr_c)))
         tail = tc[i_end:] - tc[i_end]
         env[i_end:] *= np.clip(1 - tail / max(rel, 1e-3), 0, 1) ** 1.6
-        # the taper before the stop: the last 35 % of a long last note falls, the pitch sags a little
-        lst, lm, ld, lv, _ = ph[-1]
-        if ld >= 0.5:
-            ti0 = int(round((lst + ld * 0.65 - p0) * sr_c))
-            x = np.clip((tc[ti0:] - tc[ti0]) / max(ld * 0.35, 0.05), 0, 1)
+        # the taper before the stop: a phrase of 0.5 s or more falls over the last 35 % of its last note, or over
+        # its last 0.3 s when that note is short (the fall then starts in the notes before it; a short last note
+        # had no taper at all), and the pitch sags a little. The fall is full by 85 % of the span and holds there.
+        plen = p_end - ph[0][0]
+        span = max(0.35 * (p_end - ph[-1][0]), min(0.3, 0.35 * plen))
+        if plen >= 0.5:
+            ti0 = max(0, int(round((p_end - span - p0) * sr_c)))
+            x = np.clip((tc[ti0:] - tc[ti0]) / (0.85 * span), 0, 1)
             art_db[ti0:] += -float(P['taper_db']) * x ** 1.3
             bend[ti0:] += -float(P['end_sag_cents']) / 100 * x ** 2
         lvl_lane = lane_vec('level', gidx, 0.0)
+        if plen >= 0.5:
+            # what the end must fall by, read after the room: the taper plus what the level lane falls there
+            # the held level: the last note's own sustain before the taper, or the 0.5 s before it when that is
+            # longer (a short last note)
+            i_last = int(round((ph[-1][0] - p0) * sr_c))
+            h0 = max(first_i + int(0.12 * sr_c), min(ti0 - int(0.5 * sr_c), i_last + int(0.12 * sr_c)))
+            e0 = max(ti0 + 1, int(round((p_end - 0.15 * span - p0) * sr_c)))
+            if h0 < ti0 < e0 < i_end:
+                want = float(P['taper_db']) + float(np.mean(lvl_lane[h0:ti0]) - np.mean(lvl_lane[e0:i_end]))
+                tapers.append(dict(h0=a0 + h0 * CR, t0=a0 + ti0 * CR, e0=a0 + e0 * CR, end=a0 + i_end * CR,
+                                   span=span, want=want))
         breath_lane = lane_vec('breath', gidx, 0.0)
         bend += lane_vec('bend', gidx, 0.0)
         wander_db = float(P['breathe_db']) * _wander(prng, nc, 0.7, sr_c)
@@ -401,8 +482,6 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
             y2[:, s0:s0 + m_] += an[:, :m_]
         s_a, s_b = max(0, a0), min(total_n, b0)
         if s_b > s_a:
-            out[:, s_a:s_b] += y2[:, s_a - a0:s_b - a0]
-
-    # the room, ring and sympathetic strings, as mimic's own post stage has them
-    post['room'], post['room_mix'] = P['room'], float(P['room_mix'])
-    return mimic._post(out, prof, post, sr, seed)
+            buf[:, s_a:s_b] += y2[:, s_a - a0:s_b - a0]
+    flush()
+    return out
