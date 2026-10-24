@@ -17,6 +17,81 @@
   at every bar of `write_at` (default: `reps`). On the song's phrase A (bars 17, 25, 49, 57, G4 to C6) it gives
   40 of the prototype's 41 notes, and names the one it reads an octave off as its only close call.
 
+### live_parity: a one-sample offset is the same take, and each track says its render speed
+
+- At 136 BPM a beat is 19455.88 samples, and an `@ms` nudge is never a whole number of samples. Two roundings put
+  notes one sample apart (ledger:M285(a)):
+  - The studio window's buffer started a pre-roll before the window, a fraction of a sample long. Some notes then
+    landed one sample off where the whole song's render has them. The buffer now starts on a whole song sample,
+    and a window at any tempo matches the whole song's render sample for sample (it did at 120 BPM only).
+  - A deck rounds each note to the engine's own samples, and the engine's bar line sits at a different fraction
+    of a sample than the song's. In a set this is inaudible. live_parity now starts its engine's clock so the
+    deck's first bar line has the song window's fraction, so its takes are sample for sample.
+- live_parity judges each part at its best lag. A take that lines up within 3 ms reads `ok (same, offset 1 sample
+  late)`; before, it read `DIFFERS: +1 samples late` at corr 1.000 and level within 0.01 dB. The fit is looked for
+  up to 100 ms either way, so a take 50 ms off still DIFFERS and says how far off it is. Before, it was looked
+  for up to 256 samples, and a take 50 ms late read "200 samples early".
+- Each track's line says how fast it renders live (`renders 41.3x realtime`), from the seconds its renders took in
+  the check (ledger:M285(e)).
+- Every op is an attribute of `ismail.api`, including those registered outside api.py: `api.live_parity`,
+  `api.sound_speak`, `api.master_cue`, `api.analyze_sections` and the rest (ledger:M277(e), M285(e)).
+
+### mimic perform: vibrato by default, and phrase ends that fall
+
+- The default vibrato depth of `"perform": true` is now the median of the profile's notes that have vibrato,
+  times (0.5 + 0.5 x the share of notes that have it). The median over all notes gave 0 c on the clarinet (vibrato
+  on 4 of its 11 notes), so a performed line was a straight tone and the vibrato bloom never showed. Default before
+  and after: clarinet 0.0 to 3.7 c, bassoon 5.0 to 4.5 c, horn 5.0 to 4.9 c, cello 9.6 to 9.3 c, violin 12.7 to
+  14.1 c, contrabass 5.0 to 5.0 c. `"perform": {"vib": N}` still sets it.
+- A phrase end now falls by `taper_db` with the room on. A clarinet D5 phrase end fell 0.4 dB against the 5 dB
+  setting: the tone was steady (no vibrato), so dry and room summed partly out of phase, and the end's pitch sag
+  moved it across the room's response so the sum came back up just as the level fell (3.4 dB with the room off,
+  3.3 dB with the room on and no sag). The performer now runs the room per line, reads each phrase end after the
+  room and takes off what the taper is short of (it only lowers). A phrase ending on a short note (under 0.5 s)
+  had no taper at all; the taper now spans the last 35 % of the last note or the phrase's last 0.3 s, whichever is
+  longer, and holds its full depth over the last 15 % of that. On four phrase ends with the room on (one note, the
+  ear round's D5, a short last note, tongued notes into a long one) the end falls 5.9 to 8.6 dB, against 2.8 to
+  6.8 dB before. Found by the Sound Engineer's #346 ear round build.
+
+### Reading a drifting, thumb-led record
+
+- `analyze_grid` reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when
+  they disagree. On a bossa guitar the whole-mix tempo locked onto the 3-3-2 finger figure (122 BPM for a thumb at
+  92); now the extra lines name the thumb/bass band as the likely beat and give the `bpm_hint` to rerun with. The
+  existing lines are unchanged; the new ones come before the swing line. On the Bim Bom guitar stem: thumb band
+  92.5 BPM, tempo read 121.92, "rerun with bpm_hint=92.5". (ledger:M287 a)
+- `analyze_swing(follow=True)` follows a beat line on a record that drifts instead of one fixed grid, reads every
+  16th step on it in `band_hz` (default 1.5-6 kHz) and prints the hits, accents and median offset per step and the
+  most-played 16-step strings with the timing inside them; `threshold` sets what counts as a pluck. Ported from
+  the bossa reference's prototype. On a click track drifting from 90 to 94 BPM, planted +20 and -15 ms offsets read
+  +21 and -13 ms. Without `follow`, one line says when the beat drifts more than 3%. (ledger:M287 b)
+
+### Notes that clash, read from the arrangement
+
+- `notes_clash` (ledger:M282): notes from different pitched parts that sound together a semitone apart (a minor
+  2nd, a minor 9th, or those plus octaves; a close major 7th is a chord colour and not listed) for at least
+  `min_overlap` beats (0.1 by default, so passing tones drop out), and notes out of the key. The key is the one
+  given, the project's or the sketch's, else found from the notes; a minor key allows its raised 7th. Each finding
+  gives the bar and beat, the two parts and their notes, the overlap and the velocities; a place in the bar that
+  repeats is one finding with its bars. Sorted by how audible (the quieter note's level times the square root of
+  the overlap), top `n` per list, counts for all. Drums, fixed-pitch samples and synths, drum and effect voices,
+  unmapped pads and muted tracks are skipped and named; a kit's pitched pads are read. Ported from the
+  planet_rock_studio prototype: on that song it lists the same 37 clashes in the deck and the 7 kept in the studio
+  version, and no note out of G minor.
+
+### mimic plays phrases: perform=true for legato winds and strings
+
+- `{"type": "mimic", "profile": ..., "perform": true}` renders a track as phrases instead of note by note, for any
+  sustained (blown or bowed) profile. Overlapping notes slur (one continuous tone, the pitch glides, no second
+  attack), a gap under `breath_gap` (0.16 s) is tongued, a longer gap is a new breath. The vibrato waits and grows
+  (the profile's measured vibrato by default) with a breath pulse, and a long last note tapers. Lanes, as
+  automation `inst.lane.<name>` or clip `expr` live: `level`, `vib`, `scoop`, `tongue`, `breath` and `bend`, the
+  tenor sax's names where they overlap. `"perform": {...}` sets performer params (`instrument_help(type='mimic')`
+  lists them). A decaying profile (piano, harp) refuses it with a pointing error; left out, every render is as it
+  was. On a clarinet slur the second note's harmonics in the first 70 ms after the join sit 9.9 dB under their
+  held level note by note (a new attack) and 2.3 dB under performed. (ledger:M308, from the
+  bossa_gilberto_studio flute performer, after Nate's "the flute sounds a little bit midi" of 10-23.)
+
 ### Velocity sets the level of rhodes and emily
 
 - `rhodes` was louder at low velocity than at full (C4, a 0.15 s note, dB against 1.0: 0.2 +1.4, 0.4 -1.0, 0.6 -1.8,
@@ -86,6 +161,18 @@
   -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
   (ledger:M296)
 
+### analyze_grid: the harmony votes on bar 1 two beats apart
+
+- A snare on 2 and 4 reads the same under a two-beat shift, so on a four-on-the-floor house track the drum stem put
+  bar 1 two beats late (celestial_resort_1024: drum stem 0.916 s, the bass and chords change on beat 1 at
+  0.0687 s). `analyze_grid` now reads the bass root per beat (from the reference's bass stem when the source is the
+  reference and it has one, else the low band of the source, plus its chroma turns) and counts the changes on each
+  beat of the bar. The candidate two beats away wins with 1.5x the changes on its bar lines and at least max(3, 10%
+  of the bars) more; under 3 changes in all, harmony does not vote and the pick stays. One line says it:
+  "downbeat: drums say 0.9157 s, harmony says 0.0585 s (changes on beat 1 in 61 of 131 bars, on beat 3 in 15);
+  using 0.0585 s" on that track's drum stem, and on a move the "bar 1 starts at" line and the chosen candidate are
+  marked. (ledger:M312)
+
 ### The tell ledger
 
 - `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the
@@ -132,6 +219,16 @@
   INFO and mimic profile, fx.py and the live engine, plus the hand-kept rows in `ismail/kit_tables.json` (the ear
   state is data there: `ear` and `exam`); `--check` and a test fail when the page is stale or a voice has no row.
   The `kit` op gives the rows as text, by family or for one voice. From the Sound Engineer's inventory (ledger M295).
+
+### A voice named with fn='perform' plays live as a performer (ledger:M284)
+
+- A code voice with `fn: 'perform'` played as a performer in the studio (the whole part at once) but note by note
+  live: each note replayed the gesture score from beat 0, so a deck sounded wrong (corr -0.09 against the studio
+  render on a samba deck) with no warning. The live path now marks a performer by the studio's own rule
+  (`instruments.performer_fn`: fn 'perform', or a module with perform() and no function named fn). A tiny gesture
+  voice on bars 3 to 5 went from corr 0.971 and -12 dB to corr 1.000 and 0.00 dB against the studio.
+- A kit pad whose voice is a performer cannot play live as in the studio (live renders a kit hit by hit):
+  `live_track` and `live_load` now say so and name the pads, with the fix (a track of its own).
 
 ### MIDI out to synths and other apps, and MIDI clock
 

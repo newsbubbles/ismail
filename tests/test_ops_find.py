@@ -39,6 +39,8 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('credit the viewers who asked for a song', 'request_credits'),
     ('level of one band in one moment of a sound', 'region_measure'),
     ('is every part of my render in tune', 'analyze_tuning'),
+    ('two parts clash a semitone apart', 'notes_clash'),
+    ('a weird leftover melody, notes out of key', 'notes_clash'),
     ('can the narrator be heard over the mix', 'analyze_voice_heard'),
     ('speech on the beat, each syllable on a 16th', 'sound_speak'),
     ('what instruments exist', 'kit'),

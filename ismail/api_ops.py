@@ -31,9 +31,9 @@ CATEGORIES = [
              'MIDI inputs and outputs, a song played to a synth or a DAW',
      ('midi_write', 'midi_read', 'midi_ports', 'midi_play')),
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
-               'and where two takes differ',
+               'and where two takes differ; and the arrangement checked for parts that clash',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
-      'region_measure')),
+      'region_measure', 'notes_clash')),
     ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop', 'melody_consensus')),
     ('compare', 'your render against the reference, stored and drilled into bar by bar, and the tells the person '
                'keeps hearing, measured every round', ('cmp_', 'ear_pass', 'tell_')),
