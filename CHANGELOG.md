@@ -14,6 +14,122 @@
 - blind-tests.md: ask "real or fake?" for each clip of a pair; after two band-level rounds the person still wins,
   climb back to an isolated note of the part they name; score the window, not the file.
 
+### A mimic chord's first notes start fast
+
+- mimic's attack map (every built-in profile and harp-like ones have one) ran on librosa.stft and istft, and
+  librosa's first stft in a process costs seconds (its lazy imports and numba). A deck's first bars paid that on their
+  first mimic note: 8 to 10 s of CPU for a first 8-note harp chord, 2.1 to 2.3 s now. The attack map now runs on a
+  numpy STFT of the same window, padding and overlap-add (within -300 dB of librosa's). Each note also builds its
+  time grid once rather than per partial, and the notes of a chord share their FFT frequency grid: the warm chord is
+  about 4% faster. The sound is unchanged: the 8-note chord is within -327 dB of before.
+  (ledger:M302)
+
+### Mimic takes stay within 3 dB of each other
+
+- A mimic note's random variation is seeded by its pitch, velocity and gate, and one velocity could draw a take 8 dB
+  louder than its neighbours, every repeat of it as loud (cs80_lead D5 vel 90). Two causes: on a note shorter than
+  the slow wanders, the "unit std" swell, shimmer and vibrato curves are short pieces scaled up, so their means became
+  level offsets; and a steady tone met the per-note room IR in or out of phase. The note's level while the key is
+  down is now held within 1.5 dB either way of the same note without the random parts, room included
+  (`mimic.LEVEL_CAP_DB = 3`). Brightness, partial timing, swells and the room's colour still vary per note.
+  Violin D5, vel 84 to 93, 0.3 s: 8.4 dB spread per unit velocity before, 3.2 after.
+- The render summary names a mimic take that still sits more than 6 dB over the takes within 2 semitones of it
+  (per unit velocity), with its velocity and first time, and says a velocity a step away draws another take.
+- A change to mimic.py now clears the render cache of mimic tracks, as one to the other synthesis files does.
+  (ledger:M301)
+
+### An empty stem group reads silent in analyze_structure
+
+- `analyze_structure(source='render')` printed a stem group with no tracks (no 'vocals' in the stem map, say) as all
+  '9' and listed it among every section's loud stems: its rows were scaled to their own top, and digital silence was
+  its own top. A row now reads '.' wherever it is under -100 dB on the features' level scale (silence reads about
+  -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
+  (ledger:M296)
+
+### The tell ledger
+
+- `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the
+  person keeps naming in a sound is logged per song in `<song>/notes/tells.jsonl` (append-only, the Sound
+  Engineer's prototype shape from the metal song), with their words, where they said them, and a measured gap each
+  round. `tell_measure(reply=)` pulls the number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply
+  or a saved report. `tell_show` flags NOT MOVING on an open tell named twice or more whose gap did not shrink
+  between its last two measures, or that was never measured. Closing is refused without a passed verdict after the
+  last measure, and `tell_check` names unknown ids, times out of order and malformed rows with what to do next.
+- `tell_import(project, path)` adopts an existing tells.jsonl into an empty ledger. A song whose log is already at
+  `<song>/notes/tells.jsonl` (the metal seed) is read in place.
+- recreate.md: run `tell_show` before every round, log a measured row per open tell each round, and give a NOT
+  MOVING tell a different method.
+
+### Jobs waiting in line cost almost nothing
+
+- 23 `python -m ismail.machine run --wait` waiters used 8.4% of the CPU together while the machine was at 99%: each
+  took its own 2 s CPU sample and ran nvidia-smi every 5 s. Now one CPU sample (10 s) and one GPU reading (5 s) serve
+  every process on the machine: the caller that finds the last reading old claims the sampling with a file next to
+  it, and the others read the last reading meanwhile. A claim left by a process that died is cleared after 15 s.
+- A waiter far back in line looks at the board less often (5 s near the front, up to 60 s further back), and the
+  line is woken when a job ends, a waiter leaves it or the priority changes: the board touches `<board>/gen` and a
+  waiter asleep in line looks at that file's time every 0.25 s. With 23 waiters over 30 s: 2 CPU samples instead of
+  23, 6 nvidia-smi runs instead of 91, 26 looks at the board instead of 134, and the next job started 0.2 s after a
+  job ended instead of 3.6 s.
+
+### The machine board's lock serves callers in order
+
+- With about 23 jobs waiting, a new `python -m ismail.machine run` could lose the race for the board's lock again
+  and again and exit 75 after 10 s (one agent needed about 15 tries). Now each caller takes a ticket in
+  `<board>/lockq` and the lock goes to the oldest ticket first; the callers behind it back off with jitter by
+  their place in line. Waiters in line read the board without the lock and take it only when their turn may have
+  come, and nothing slow runs inside it (the GPU and CPU readings come from their caches). With 30 callers taking
+  the lock nonstop, every new caller got it within about 1.5 s in tests.
+- A lock whose holder's process is gone is broken after 2 s instead of 30 s; a ticket whose owner died or passed
+  its deadline is skipped. The lock waits up to 30 s (was 10 s). Exit 75 still means "not started, nothing
+  registered", and the lock's message now says what to do: retry in a minute or `run --wait 30m`.
+
+### The kit page
+
+- `docs/KIT.md` (and `docs/kit.json`, the same data): every public voice and effect by family, with its type, what
+  it is modeled on (an instrument type), its ear state and the exam or ledger row that judged it, its range, its cost
+  and the gaps open in each family. Generated by `python -m ismail.kit` from showcase.json, presets, each voice's
+  INFO and mimic profile, fx.py and the live engine, plus the hand-kept rows in `ismail/kit_tables.json` (the ear
+  state is data there: `ear` and `exam`); `--check` and a test fail when the page is stale or a voice has no row.
+  The `kit` op gives the rows as text, by family or for one voice. From the Sound Engineer's inventory (ledger M295).
+
+### MIDI out to synths and other apps, and MIDI clock
+
+- `live_midi_out`: a live track's notes (or a deck's part) to a MIDI output and channel while the set plays: a
+  hardware synth, or a loopMIDI / IAC port into Ableton or FL Studio. Each note goes out when its audio would reach
+  the speakers (the engine's clock, its lookahead and the output's latency), transposed with its deck, kits on
+  channel 10. `audio=False` takes the track off the speakers and the render workers; `offset_ms` per port meets a
+  synth's own delay. Unroute, a removed track, a stop and the set's end send each held note's note-off and All
+  Notes Off (CC 123); closing a port resets it.
+- `live_midi_clock`: MIDI clock out at 24 pulses per beat at the set's tempo, pulsing at once so the receiver locks,
+  Start right before the first pulse of the next bar line (or the bar's Song Position Pointer then Continue, with
+  `position=True`), Stop when turned off and at the set's end.
+- `midi_ports` lists the MIDI inputs and outputs; `midi_play` plays a song's notes (or some bars) to a port in real
+  time from the command line, with clock if asked, to try a synth without a live set.
+- The sender runs on its own thread: it sleeps to about 1.5 ms before each message, then spins. On a loaded laptop
+  (90% CPU) clock pulses went out 0.03 to 0.12 ms late at the median, under 2 ms at the 99th percentile. No new
+  dependency: winmm on Windows, mido with python-rtmidi elsewhere (the error says what to install).
+
+### What a deck costs, before it plays
+
+- `deck_cost(project, bars=, bpm=, workers=)`: the deck's first bar loaded on a silent engine in the op's own
+  process (no `live_start`, no workers, no device, nothing played), warmed as a started engine is, and timed: each
+  track's render seconds for the bar and its real-time factor, its slowest event, its first note, its effects' ms
+  per mixer block; the total, the wait for the first bar with the engine's render workers, and the mixer's load.
+  The reset gap after a `live_load` was mostly that first bar, and the agent could not see it coming. (ledger:M293,
+  the Live DJ's stream set of 10-22.)
+
+### Frozen tracks, and placed audio on decks
+
+- `track_freeze(project, tracks, into=)` renders tracks into one audio track a live deck can play: their mix as
+  rendered (effects, faders, pans, automation), without the buses and the master chain, bar `a` at 0 s of
+  `sounds/frozen_<into>.wav`. Options: `originals='mute'|'keep'`, `bars=[a, b]`; freezing into the same track
+  again replaces it and lifts the mutes it no longer needs. A send or a bus every frozen track shares comes over;
+  the reply names what did not. (ledger:M292, the Live DJ's stream set of 10-22.)
+- `live_load` now carries audio tracks (placed clips and frozen tracks): the built-in `placed_audio` voice reads
+  the song's own files by song time, one bar at a time, sample for sample with a studio render. Placed audio on a
+  track that also has notes still stays behind, and the reply says so.
+
 ### Picture rounds from every song on one server
 
 - The exam page server on 8871 (the only port the phone's `/eye/` reaches) served one folder, so a second song's
@@ -24,6 +140,24 @@
   server would start, or the running one is older than the registry), says why instead of returning a link that
   404s. Old URLs and `python -m ismail.exampage serve <folder>` work as before; `python -m ismail.exampage register
   <round folder>` registers a round by hand. `/health` now gives the server's folder and `"registry": true`.
+
+### Live: tempo changes
+
+- `live_tempo(project, bpm, at='next_bar')` changes a running set's tempo at a bar, with no restart and no gap.
+  Clips are in beats, so every part stays on the beat: the notes from the change bar on render again at the new
+  tempo while the ones before it play up to it. When those renders cannot be ready in time, the change moves to a
+  later bar and the reply names it. The reply says the bar, which tracks render again and which effects follow.
+- One tempo map drives every beat and sample conversion: queued moves, fx changes, ramps and deck changes after
+  the change bar move with it, and `live_status` lists the changes still to come.
+- Beat-synced effects follow at the bar: delays in beats, gates, `every_beats` ducks, filter, phaser, flanger and
+  tremolo LFOs in beats. Played keys keep their sounds; nothing of theirs renders again.
+- A recording's `.json` lists each change as `[bar, bpm, seconds into the file]`; `live_listen` keeps to one tempo
+  per window and says when it left bars out.
+- The engine's clock (op `clock`, which `listen_heard` places words with) gives the tempo at the beat heard, not
+  at the mix position half a second ahead, so words land on their bars across a change.
+- Known gaps: `ramp_beats` is refused (queue step changes at successive bars), echoes already in a delay jump
+  once, a note held across the change keeps its old render, and `@ms` offsets in clips convert at the tempo when
+  queued.
 
 ### Chat commands by rule, votes and credit for requests
 

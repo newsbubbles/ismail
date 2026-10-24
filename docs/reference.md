@@ -128,10 +128,35 @@ Find any tool by what you need or by role with `ops_find`.
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
   parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+- **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
+  woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
+  tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with
+  the exam that judged it, its range, its cost, and the gaps open in each family. The `kit` op gives the same rows
+  as text (`kit(family='woodwinds')`, `kit(voice='cello')`). Generated from the sources and the hand-kept rows in
+  `ismail/kit_tables.json` by `python -m ismail.kit` (data in [kit.json](kit.json)); `--check` fails when the page
+  is stale, and so does a test.
+- **MIDI out to synths and other apps.** `midi_ports` lists the inputs and outputs (a synth's USB MIDI, a loopMIDI
+  or IAC port into Ableton or FL Studio). `live_midi_out` sends a live track's notes (or a deck's part) to a port
+  and channel while the set plays, kits on channel 10, each note when its audio would reach the speakers, with or
+  without the track's own audio (`audio=False`) and a per-port `offset_ms` for the synth's delay; unrouting, a stop
+  and the set's end send every held note's note-off and All Notes Off. `live_midi_clock` sends MIDI clock (24 per
+  beat at the set's tempo, Start on the next bar line, Song Position with `position=True`, Stop at the end), so a
+  DAW or a drum machine follows the set. `midi_play` plays a song's notes (or some bars) to a port from the command
+  line, with clock if asked, no live set needed. Messages go out from their own thread (a sleep, then a short spin);
+  no new dependency on Windows (winmm), mido with python-rtmidi elsewhere.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`).
+- **What a deck costs.** `deck_cost(song, bars=, bpm=)` renders the deck's first bar offline the way the live engine
+  does and times it, without starting or touching an engine: each track's render seconds and real-time factor, the
+  wait for the first bar with the engine's render workers, and the mixer's load per block. It says which deck
+  leaves a silent gap after `live_load`, how long, and which track makes it.
+- **Frozen tracks.** `track_freeze(tracks, into=)` renders some tracks into one audio track (their effects, faders,
+  pans and automation as rendered; no buses, no master chain), bar `a` at 0 s of its file, and mutes the originals
+  unless asked to keep them. A deck carries audio tracks (placed clips and frozen tracks), so a song of 20+ tracks
+  becomes a light deck: freeze what does not need to move live. `bars=[a, b]` freezes a section; freezing into the
+  same track again replaces it.
 - **Live streaming** (`ismail/stream`, the `stream_*`, `venue_*` and `chat_*` tools): the set out to several sites
   at once, with a picture drawn from the music, and every site's chat read and answered in one place. A request
   queue (`request_*`) carries chat's requests from the MC to the DJ: `request_add` from chat, `request_next` at a
@@ -155,6 +180,12 @@ Find any tool by what you need or by role with `ops_find`.
   rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown (it also fails one overall
   "A or B is real" choice on pairs whose real side moves: ask "real or fake?" per clip); and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **The tell ledger** (`tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`,
+  `tell_check`, `tell_import`): the faults the person keeps naming in a sound ("boxy"), one append-only log per song
+  (`<song>/notes/tells.jsonl`) with their words, where they said them, and a measured gap each round. `tell_measure`
+  pulls its number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply or a saved report.
+  `tell_show` flags NOT MOVING on an open tell named twice whose gap did not shrink, closing needs a passed verdict
+  after the last measure, and `tell_check` validates the log.
 - **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
   questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
   browser (an app's browser pane has no microphone), with every typed answer and voice clip saved in the song and
@@ -344,6 +375,7 @@ live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, note
   inside fixed ranges, and the ceiling stays at -1 dBFS.
 - **Decks.** `live_load` puts a whole ismail song on a cued deck while another plays; `live_transition` queues
   the mix (blend, bass swap, filter, cut) with a DJ strip per deck (isolator, filter knob, fader, transpose).
+  Audio tracks (placed clips, `track_freeze`) come over too, read from the song's files bar by bar.
 - **Studio and live.** The studio code is the source of truth. Effects run live as block-by-block twins held to
   the studio versions by tests; an effect with no live twin is baked into each rendered note. A voice with
   `perform()` plays whole phrases live (legato, slides), with bends and vibrato from the clip's `expr` lanes.
@@ -426,6 +458,8 @@ ismail/
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
+  kit.py         the kit page: voices and effects by family (docs/KIT.md, docs/kit.json), from kit_tables.json;
+                 api_kit.py the kit op
   audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup

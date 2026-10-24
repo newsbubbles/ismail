@@ -126,8 +126,7 @@ already use (Claude Code, Codex, Cursor, any MCP client) on one side and to you 
 
 - **The DAW.** Your agent can't hear, so it reads. It writes music as notes, sounds and code, renders it, and reads
   every render back as text. A song is code, so "change bar 12" changes bar 12 and nothing else. Then it plays it
-  live, on decks. Instruments and effects are Python code the agent writes, so it builds what a song needs instead
-  of loading VST or AU plugins.
+  live, on decks.
 - **The VR stage.** A scene in your headset or browser that agents build while you stand in it. Objects carry their
   own behaviour, and when you dance, they put your moves on a character.
 - **The phone page.** The set in your pocket, with the screen off. Talk back through your earbuds; the agent puts
@@ -189,6 +188,7 @@ Extras and per-client setup are in [docs/reference.md](docs/reference.md).
 | to set it up as an agent | [AGENTS.md](AGENTS.md), then [setup.md](skills/ismail/references/setup.md) |
 | how to make music with it (the playbook) | [skills/ismail/SKILL.md](skills/ismail/SKILL.md) |
 | what is built, every tool area, install details | [docs/reference.md](docs/reference.md) |
+| every instrument and effect by family, how each did by ear, what is missing | [docs/KIT.md](docs/KIT.md) |
 | why it works this way, with the numbers | [docs/why.md](docs/why.md) |
 | what is done and what is next | [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md) |
 | to change ismail itself | [development.md](skills/ismail/references/development.md) |
@@ -203,8 +203,9 @@ Extras and per-client setup are in [docs/reference.md](docs/reference.md).
   one sentence.
 - Mimic needs more notes for instruments whose colour changes from note to note, like the piano (the `grand_piano`
   voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
-- One tempo per project. MIDI files go in and out (`midi_write`, `midi_read`) and a live set takes MIDI from a
-  keyboard, but no MIDI out to synths or other apps yet and no MIDI clock.
+- One tempo per project. MIDI files go in and out (`midi_write`, `midi_read`), and a live set takes MIDI from a
+  keyboard and sends its notes and MIDI clock out to synths and other apps (`live_midi_out`, `live_midi_clock`),
+  but no clock in or Ableton Link yet, no CC or pitch bend out, no plugin hosting.
 - The agent's own changes to a live set land between its turns, 5 to 30 seconds apart (your taps on the phone or
   the stage act at once).
 - The VR stage is tested on one headset (Quest 3) with one person.

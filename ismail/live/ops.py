@@ -120,8 +120,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
                priority: str = 'above_normal') -> str:
     """Start the live engine for `project` (any folder; a project.json there lends its sound bank, song voices and
     'track:<name>' instruments). It plays from bar 1 immediately, silent until you queue clips, and keeps playing
-    between your calls: clips loop until replaced. Tempo is fixed for the run (live_stop, then start again to change
-    it). device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
+    between your calls: clips loop until replaced. bpm is the starting tempo: live_tempo changes it while it plays.
+    device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
     analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always
     passes the safety chain: trim, loudness cap, limiter, ceiling -1 dBFS. trim_db (-30 to +12) and cap_db (sustained
     RMS dBFS, -40 to -8) set this set's level; left out, they come from ISMAIL_LIVE_TRIM_DB / ISMAIL_LIVE_CAP_DB in
@@ -147,7 +147,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
     if workers is None:
         workers = min(4, max(2, (os.cpu_count() or 4) - 4))
     if _alive(project):
-        return "already running (live_stop first to change tempo or device)\n" + _call(project, 'status')
+        return ("already running (live_tempo changes the tempo, live_device the output)\n"
+                + _call(project, 'status'))
     others = []
     for rec in _other_engines(project):
         mins = (time.time() - rec.get('started', time.time())) / 60
@@ -339,11 +340,14 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     time-stretched) and loops unless loop=False. Cued (off air) by default while another deck is on air: listen
     with live_listen(deck=...), then bring it in with live_transition. The song's mix comes over as rendered:
     its automation (effect params and volume as ramps, instrument params rendered with the notes, the master fade;
-    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Placed
-    audio clips do not (the reply lists what was left out); the song's master chain (its limiter) runs on the deck.
+    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Audio
+    tracks (placed clips, track_freeze) play from the song's files bar by bar at the song's own speed; audio placed
+    on a track that also has notes does not (the reply lists what was left out). The song's master chain (its
+    limiter) runs on the deck.
     Loading replaces what a cued deck held. A cued deck plays from `at` (off air), so a song loaded early with
     at='next_bar' is already bars into itself when the transition brings it in: load it with at='bar:<the
-    transition's bar>' to start it from its top on air."""
+    transition's bar>' to start it from its top on air. deck_cost(song) says beforehand how long its first bar
+    takes to render here, and which track makes the wait."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
         song = cand if os.path.exists(cand) else os.path.abspath(song)
@@ -359,6 +363,31 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     except (OSError, ValueError):
         pass
     return out
+
+
+@op()
+@heavy()
+def deck_cost(project: str, bars: list = None, bpm: float = None, workers: int = None, wait: str = '10m') -> str:
+    """What a song costs as a deck, before it plays: its first bar rendered offline the way the live engine renders
+    it, timed (no live_start, nothing played, no engine touched). Reach for it when planning a set or a reset: which
+    deck leaves a silent gap after live_load, how long, and which track makes it. project: the song's project
+    folder, as live_load takes it. bars=[a, b]: the deck window live_load will get (its first bar is measured);
+    bpm: the house tempo (default the song's). The report: each track's render seconds for that bar and its real-time
+    factor (render seconds / the bar's seconds; above 1 that track alone renders slower than it plays), its slowest
+    event, its first note (first-use cost), its effects' ms per mixer block; the total, the wait for the first bar
+    with `workers` render workers (live_start's default), and the mixer's load for this deck alone. Then: load a
+    heavy deck that many bars ahead and keep it cued, pick a lighter section, or track_freeze its heavy parts. The
+    numbers are this machine as it is now: a busy machine reads slower. wait: stand in line this long when the
+    machine is busy."""
+    from . import cost
+    song = os.path.abspath(project)
+    if bars is not None and (not isinstance(bars, (list, tuple)) or len(bars) != 2):
+        raise OpError("bars=[first, last], the deck window (inclusive), e.g. [17, 32]")
+    try:
+        r = cost.run(song, bars, bpm, workers, _song_performers(song))
+    except cost.CostError as e:
+        raise OpError(str(e))
+    return cost.report(r)
 
 
 def _song_performers(song):
@@ -444,6 +473,19 @@ def live_fx(project: str, target: str = None, index=None, params: dict = None, r
 
 
 @op()
+def live_tempo(project: str, bpm: float, at: str = 'next_bar', ramp_beats: float = 0) -> str:
+    """Change the running set's tempo, with no restart and no gap. at: when, in live_queue's words (next_bar,
+    next_4, bar:N, now ...). Clips are written in beats, so every part keeps its notes on the beat: from the change
+    bar on they render again at the new tempo, while the notes before it keep playing up to it. When those renders
+    cannot be ready in time, the change moves to a later bar and the reply names it. Beat-synced effects (delays in
+    beats, gates, ducks every_beats, LFOs in beats) follow at the same bar; played keys (live_midi) keep their
+    sounds. A change replaces any change queued at or after its bar. ramp_beats: not built; for a gradual change
+    queue a few step changes at successive bars. The reply says what changes at which bar and what renders again;
+    live_status lists the tempo changes still to come."""
+    return _call(project, 'tempo', bpm=bpm, at=at, ramp_beats=ramp_beats)
+
+
+@op()
 def live_queue(project: str, clips: list = None, section: str = None, cancel_section: str = None,
                cancel_at: str = None) -> str:
     """Queue clips (a batch; all or nothing). Each clip: {track, notes and/or lanes, bars, loop, at}.
@@ -507,9 +549,17 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
             raise OpError(f"no recording {path} with its .json sidecar; recordings: " + ', '.join(
                 sorted(x for x in os.listdir(os.path.join(os.path.abspath(project), 'live')) if x.endswith('.wav'))))
         bpb, first = meta['beats_per_bar'], meta['first_bar']
-        g = A.Grid(meta['bpm'], -(first - 1) * bpb * 60.0 / meta['bpm'], bpb)
         if not isinstance(bars, (list, tuple)) or len(bars) != 2:
             raise OpError(f"with recording=, bars is [first, last] in set bars; this take starts at bar {first}")
+        # tempo segments [bar, bpm, seconds into the file]; the analysis grid has one tempo, so bars stay in one
+        segs = [[first, meta['bpm'], 0.0]] + [x for x in meta.get('tempo', []) if x[0] > first]
+        cross = [x for x in segs[1:] if bars[0] < x[0] <= bars[1]]
+        if cross:
+            c = cross[0][0]
+            raise OpError(f"bars {bars[0]}-{bars[1]} cross the tempo change at bar {c:g} (to {cross[0][1]:g} BPM): "
+                          f"ask for [{bars[0]}, {c - 1:g}] and [{c:g}, {bars[1]}] separately")
+        bar0, bpm, sec = [x for x in segs if x[0] <= bars[0]][-1] if bars[0] >= first else segs[0]
+        g = A.Grid(bpm, sec - (bar0 - 1) * bpb * 60.0 / bpm, bpb)
         kw = {'band': band} if view == 'envelope' else {}
         head = f"{os.path.basename(path)} bars {bars[0]}-{bars[1]} ({view})"
         return head + '\n' + VIEWS[view](path, g, list(bars), **kw)[1]
@@ -519,7 +569,7 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
     rng = [d['first'], d['last']]
     kw = {'band': band} if view == 'envelope' else {}
     txt = VIEWS[view](d['path'], g, rng, **kw)[1]
-    return f"live bars {d['first']}-{d['last']} ({view})\n" + txt
+    return f"live bars {d['first']}-{d['last']} ({view})\n" + (f"note: {d['note']}\n" if d.get('note') else '') + txt
 
 
 @op()
@@ -659,6 +709,41 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
         instrument = _check_instrument(project, instrument)
     return _call(project, 'midi', source=source, track=track, instrument=instrument, volume_db=volume_db,
                  transpose=transpose, channel=channel, remove=remove)
+
+
+@op()
+def live_midi_out(project: str, track: str = None, port: str = None, channel: int = None, audio: bool = None,
+                  offset_ms: float = None, at: str = 'now', remove: bool = False) -> str:
+    """Send a live track's notes out as MIDI to a port: a hardware synth, or a loopMIDI port (Windows) or the IAC
+    bus (Mac) into Ableton, FL Studio or any DAW, whose instrument then plays the part. Reach for it when the person
+    wants a set's part played by their own synth or plugin, or ismail's notes in their DAW while the set plays.
+    track: a live track, or a deck's part ('A.bass'); port: an output's name or a unique part of it (midi_ports
+    lists them); channel: 1 to 16 (default: 10 for a kit or drum, else the lowest free one on that port). Every note
+    its clips play from `at` (default 'now': the first beat the mixer has not mixed) goes out with its velocity and
+    length, transposed with its deck, at the moment its audio would reach the speakers, so the synth lines up with
+    the set. audio=False takes the track off the speakers and the render workers (the synth is its sound); True
+    brings it back (from its next renders, a few seconds). offset_ms: moves every message on that port later, or
+    earlier when negative, to meet a synth's or a DAW's own delay (-500 to 2000; set it by ear against the kick).
+    Call again to change channel, audio or offset; another port moves it. remove=True stops it: each held note gets
+    its note-off, then All Notes Off (CC 123) on its channel. A stop or the set's end does the same. With no track:
+    the outputs, the routes and the clock. Clock out: live_midi_clock."""
+    return _call(project, 'midi_out', track=track, port=port, channel=channel, audio=audio, offset_ms=offset_ms,
+                 at=at, remove=remove)
+
+
+@op()
+def live_midi_clock(project: str, port: str = None, on: bool = True, position: bool = False,
+                    offset_ms: float = None) -> str:
+    """Send MIDI clock from the live set to a port, so Ableton, FL Studio or a drum machine follows the set's tempo
+    and starts on its bar line. Reach for it when another app or a hardware box should play in time with the set.
+    24 pulses per quarter note at the set's tempo (one tempo per set) start at once, so the receiver can lock to it;
+    Start goes out right before the first pulse of the next bar line, which becomes the other app's bar 1.
+    position=True sends that bar's Song Position Pointer first and Continue instead of Start, for a DAW that follows
+    song position (it lands on the same bar number). on=False sends Stop; the set's end sends Stop too. offset_ms:
+    as live_midi_out (shared by the port). The other app must take clock in from that port: in Ableton, the
+    port's Sync on (Preferences, Link/Tempo/MIDI), then EXT; in FL Studio, the port enabled as an input in MIDI
+    settings with its sync on, then external sync. With no port: what is sending (live_status says it too)."""
+    return _call(project, 'midi_clock', port=port, on=on, position=position, offset_ms=offset_ms)
 
 
 @op()

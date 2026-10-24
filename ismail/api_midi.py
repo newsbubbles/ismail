@@ -1,10 +1,15 @@
-"""MIDI files in and out (Nate 10-23, "full midi like ableton"; ledger:M113; plan in
-D:/ismail-hq/proposals/midi-parity.md, steps 1 and 2): midi_write puts a song or some of its tracks into a type 1
-.mid any DAW opens, midi_read lists a .mid and writes its parts into tracks. Registered into api.OPS on import; the
-file format is in midifile.py."""
+"""MIDI files and ports (Nate 10-23, "full midi like ableton"; ledger:M113; plan in
+D:/ismail-hq/proposals/midi-parity.md, steps 1 to 3): midi_write puts a song or some of its tracks into a type 1
+.mid any DAW opens, midi_read lists a .mid and writes its parts into tracks, midi_ports lists the MIDI inputs and
+outputs, midi_play plays a song's notes to an output in real time. Registered into api.OPS on import; the file
+format is in midifile.py, the ports in midi.py, the timed sender in midisend.py. A live set's MIDI out and clock:
+live_midi_out, live_midi_clock (live/ops.py)."""
 import os
+import time
 
+from . import midi as M
 from . import midifile as MF
+from . import midisend as MS
 from .api import op, OpError, _load, _clear
 from .notation import midi_to_name, pitch_to_midi, placed, fmt_num
 
@@ -185,3 +190,113 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         warn.append(f"the file's meter is {fmt_num(fbpb)} beats a bar, the project's {bpb}: notes keep their beats, so "
                     f"bar numbers differ")
     return '\n'.join([f"read {os.path.basename(path)} into bar {bar} ({mode})"] + out + warn)
+
+
+@op()
+def midi_ports() -> str:
+    """The MIDI ports this computer has now, by name: inputs (keyboards, pads, virtual ports that send to ismail)
+    and outputs (synths, sound modules, loopMIDI or IAC ports into a DAW, that ismail sends to). Inputs play through
+    a live set with live_midi; outputs take a live track's notes (live_midi_out), the set's clock (live_midi_clock),
+    or a song's notes from here (midi_play). On Windows, loopMIDI makes a virtual port that is both: ismail sends to
+    it, and the DAW takes it as an input."""
+    ins, outs = M.sources(), M.outputs()
+    miss = M.backend_missing()
+    none = f"  none{' (' + miss + ')' if miss else ''}"
+    L = ["MIDI outputs (ismail sends to these):"] + ([f"  {n}" for n in outs] or [none])
+    L += ["MIDI inputs (these send to ismail):"] + ([f"  {n}" for n in ins] or [none])
+    if any('wavetable' in n.lower() for n in outs):
+        L.append("'Microsoft GS Wavetable Synth' is the General MIDI synth built into Windows: it sounds from the "
+                 "speakers at once")
+    if not miss and not [n for n in outs if 'wavetable' not in n.lower()]:
+        L.append("no port into another app yet: on Windows, loopMIDI (tobias-erichsen.de) makes one; on a Mac, the "
+                 "IAC Driver in Audio MIDI Setup")
+    return '\n'.join(L)
+
+
+@op()
+def midi_play(project: str, port: str, tracks: list = None, bars: list = None, channel: int = None,
+              clock: bool = False, max_s: float = 600) -> str:
+    """Play the song's notes to a MIDI output in real time, from here, with no live set: to hear a part on a
+    hardware synth, or through a loopMIDI / IAC port on an instrument in Ableton or FL Studio, or to check a port
+    and a channel before a set. Blocks until the last note ends (Ctrl+C stops it; every note gets its note-off).
+    port: an output's name or a unique part of it (midi_ports). tracks: names (default every unmuted track with
+    notes); bars: [a, b] plays those bars, bar a first (default the whole song). Channels as midi_write: kits on 10,
+    other tracks 1 to 16 in order; channel=<1-16> puts every track on that one (one synth). Notes land where they
+    sound, nudges included, at the project's tempo. clock=True also sends MIDI clock (24 per beat, one beat of
+    pulses before Start, Stop at the end) so a drum machine or a DAW on external sync plays along. max_s: refuses a
+    longer span (choose bars). The reply says how late the messages went out."""
+    P = _load(project)
+    names = tracks or [n for n, t in P.d['tracks'].items() if t.get('notes') and not t.get('mute')]
+    if not names:
+        raise OpError("no unmuted track has notes; write some (notes_write) or name tracks=[...]")
+    for n in names:
+        P.track(n)
+    if channel is not None and not 1 <= int(channel) <= 16:
+        raise OpError("channel: 1 to 16 (10 is drums), or leave it out for one channel per track")
+    bpm = P.d['bpm']
+    spb = 60.0 / bpm
+    a, b = bars or [1, P.d['length_bars']]
+    b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
+    parts, free, lines, melodic = [], [c for c in range(16) if c != DRUM_CH], [], 0
+    for n in names:
+        tr = P.track(n)
+        sel = [x for x in tr['notes'] if b0 <= x[0] < b1]
+        if not sel:
+            continue
+        if channel is not None:
+            ch = int(channel) - 1
+        elif _is_kit(tr):
+            ch = DRUM_CH
+        else:
+            ch = free[melodic % len(free)]
+            melodic += 1
+        notes = [(max(0.0, s - b0), p, d, v) for s, p, d, v in placed(sel, bpm, tr.get('offset_ms') or 0.0)]
+        parts.append((n, ch, notes))
+        lines.append(f"  {n}: {len(notes)} notes, channel {ch + 1}")
+    if not parts:
+        raise OpError(f"no notes in bars {a}-{b} on {names}; widen bars")
+    end_beat = max(s + d for _, _, ns in parts for s, _, d, _ in ns)
+    if end_beat * spb > max_s:
+        raise OpError(f"bars {a}-{b} play {end_beat * spb:.0f} s, over max_s={max_s:g}; choose bars=[a, b] or raise "
+                      f"max_s")
+    try:
+        name = M.find_output(port)
+        out = M.Output(name)
+    except M.MidiError as e:
+        raise OpError(str(e))
+    sched = MS.Scheduler()
+    held = MS.Notes(out)
+    t0 = sched.now() + 0.3 + (spb if clock else 0.0)
+    tok = 0
+    for _, ch, ns in parts:
+        for s, p, d, v in ns:
+            tok += 1
+            sched.at(t0 + s * spb, lambda c=ch, p=p, v=v, k=tok: held.on(c, p, v, k))
+            sched.at(t0 + (s + max(d, 1 / 64)) * spb, lambda c=ch, p=p, k=tok: held.off(c, p, k))
+    if clock:
+        sched.at(t0, lambda: out.send(bytes([MS.START])))
+        for k in MS.pulses(-1.0, end_beat):
+            sched.at(t0 + k / MS.PPQN * spb, lambda: out.send(bytes([MS.PULSE])))
+    stopped = False
+    sched.start()
+    try:
+        while sched.pending():
+            time.sleep(0.02)
+    except KeyboardInterrupt:
+        stopped = True
+    finally:
+        sched.stop()
+        sched.drop()
+        try:
+            held.release(channels={ch for _, ch, _ in parts})
+            if clock:
+                out.send(bytes([MS.STOP]))
+        finally:
+            out.close()
+    late = sched.lateness()
+    head = (f"{'stopped' if stopped else 'played'} {held.ons} notes to {name!r}, bars {a}-{b} at {fmt_num(bpm)} BPM"
+            f" ({end_beat * spb:.1f} s)" + (", with clock (Start, 24 per beat, Stop)" if clock else ''))
+    return '\n'.join([head] + lines + [f"timing: messages went out {late['median_ms']:.2f} ms late at the median, "
+                                       f"{late['p99_ms']:.2f} ms at the 99th percentile, {late['max_ms']:.2f} ms at "
+                                       f"most ({late['n']} messages)"]
+                     + ([f"port errors: {'; '.join(sched.errors)}"] if sched.errors else []))
