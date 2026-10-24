@@ -221,6 +221,15 @@
    "exam": "M169 (songs/_migration/m169_exam/results_w.md)",
    "heard": "picked out, but \"good enough\""
   },
+  "flute": {
+   "family": "woodwinds",
+   "type": "measured",
+   "engine": "additive air-jet performer (phrases, slurs, tonguing, breaths)",
+   "modeled_on": "concert flute, C foot",
+   "ear": "usable",
+   "exam": "blind picture rounds 8-13 (real picked 20, 18, 16, 19, 11, 15 of 22); ear A/B bossa_flute_ab_1024; ledger:M321",
+   "heard": "blind A/B in a mix against another flute voice: good in 2 of 3 windows; a sighted pass in a mix (\"fingers on a real flute\"); no blind round of the flute alone against a player yet"
+  },
   "horn": {
    "family": "brass",
    "type": "mimic",
@@ -609,9 +618,9 @@
   },
   {
    "family": "woodwinds",
-   "gap": "flute, piccolo, oboe, cor anglais, recorder, pan pipes",
-   "cite": "M169 (flute, oboe FAILED); M180",
-   "under_way": "flute, oboe, cane_flute, panpipe mimics song-local"
+   "gap": "piccolo, oboe, cor anglais, recorder, pan pipes",
+   "cite": "M169 (flute, oboe FAILED); M180; the flute performer M321",
+   "under_way": "oboe, cane_flute, panpipe mimics song-local"
   },
   {
    "family": "brass",

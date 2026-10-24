@@ -47,8 +47,8 @@
   "untested": "no ear test found"
  },
  "summary": {
-  "voices": 44,
-  "voices_with_ear_state": 11,
+  "voices": 45,
+  "voices_with_ear_state": 12,
   "by_family": {
    "analog synths": {
     "passed": 0,
@@ -122,7 +122,7 @@
    },
    "woodwinds": {
     "passed": 1,
-    "usable": 1,
+    "usable": 2,
     "failed": 0,
     "pending": 0,
     "untested": 0
@@ -1312,6 +1312,42 @@
    "functions": null,
    "lanes": null,
    "info_error": null
+  },
+  {
+   "name": "flute",
+   "family": "woodwinds",
+   "type": "measured",
+   "engine": "additive air-jet performer (phrases, slurs, tonguing, breaths)",
+   "modeled_on": "concert flute, C foot",
+   "ear": "usable",
+   "exam": "blind picture rounds 8-13 (real picked 20, 18, 16, 19, 11, 15 of 22); ear A/B bossa_flute_ab_1024; ledger:M321",
+   "heard": "blind A/B in a mix against another flute voice: good in 2 of 3 windows; a sighted pass in a mix (\"fingers on a real flute\"); no blind round of the flute alone against a player yet",
+   "range": "B3-Db7 (MIDI 59-97, the Iowa set); C4-C7 is the normal range, the top fifth is thin and loud",
+   "range_from": "voice INFO",
+   "cost": "not measured; INFO says: 3 to 6x realtime on one CPU core (slurred lines at 120 BPM, 44.1 kHz, 2026-10-24 on a shared laptop; peak memory about 55 MB for 4 bars, 135 MB for a 64 s line); the cost is per phrase (harmonics up to 15 kHz and 21 narrow air bands)",
+   "needs": null,
+   "showcase": false,
+   "standin": null,
+   "roles": [],
+   "use": {
+    "type": "code",
+    "voice": "flute"
+   },
+   "source": "measured: University of Iowa MIS flute; Philharmonia Orchestra flute samples (numbers only); solo flute recordings on Wikimedia Commons (public domain; Scott Goff, CC BY-SA 2.0) and Freesound (cms4f, CC0)",
+   "functions": [
+    "perform"
+   ],
+   "lanes": [
+    "bend",
+    "breath",
+    "fall",
+    "flutter",
+    "level",
+    "scoop",
+    "tongue",
+    "vib"
+   ],
+   "info_error": null
   }
  ],
  "effects": [
@@ -1961,9 +1997,9 @@
   },
   {
    "family": "woodwinds",
-   "gap": "flute, piccolo, oboe, cor anglais, recorder, pan pipes",
-   "cite": "M169 (flute, oboe FAILED); M180",
-   "under_way": "flute, oboe, cane_flute, panpipe mimics song-local"
+   "gap": "piccolo, oboe, cor anglais, recorder, pan pipes",
+   "cite": "M169 (flute, oboe FAILED); M180; the flute performer M321",
+   "under_way": "oboe, cane_flute, panpipe mimics song-local"
   },
   {
    "family": "brass",

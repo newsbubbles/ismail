@@ -27,8 +27,13 @@ EXACT = [('saw_lead', MEL), ('pad', MEL), ('pluck', MEL), GLIDE, ('fm_bell', MEL
          ('kit_basic', KIT), ('grand_piano', MEL), ('additive_piano', MEL), ('growl', BASS), ('sfx', FX),
          ({'type': 'code', 'voice': 'transitions', 'tail': 3.0}, '0 C1 1 100; 1 D1 1 100; 2 E1 1 100; 3 F1 1 100'),
          ({'type': 'sprite', 'oscs': [{'wave': 'square'}]}, MEL), ({'type': 'mimic', 'profile': 'cello'}, BASS)]
+FLUTE = {'type': 'code', 'voice': 'flute', 'tail': 1.5}
+# a phrase per bar (the last note leaves a gap): a performer's window ends on a phrase's end, as the song does there
+FLUTE_MEL = '0 C5 0.5 100; 0.5 E5 0.5 90; 1 G5 1 100; 2 C6 0.5 80; 2.5 B5 0.25 70; 3 G5 0.5 90'
+# (preset or instrument, voice, rig whose fx it plays through or None, notes)
 PERFORMERS = [('strat70_lead', 'electric', 'lead', MEL.replace('4', '3').replace('5', '4')),
-              ('pbass70', 'electric', 'bass', BASS), ('kit70', 'kit70', 'kit', KIT70)]
+              ('pbass70', 'electric', 'bass', BASS), ('kit70', 'kit70', 'kit', KIT70),
+              (FLUTE, 'flute', None, MEL.replace('4', '5'))]
 
 
 def song(root, instrument, notes, fx=(), sound=None):
@@ -61,9 +66,10 @@ def test_a_sampler_plays_live_sample_for_sample(tmp_path):
     assert parity.verdict(res['track:p']) == 'ok' and res['track:p']['resid_db'] < -80, res['track:p']
 
 
-@pytest.mark.parametrize('preset, voice, rig, notes', PERFORMERS, ids=[p for p, *_ in PERFORMERS])
+@pytest.mark.parametrize('preset, voice, rig, notes', PERFORMERS, ids=[p if isinstance(p, str) else v for p, v, *_ in PERFORMERS])
 def test_a_performer_plays_live_as_in_the_studio_by_ear(tmp_path, preset, voice, rig, notes):
-    root = song(str(tmp_path / 's'), f'preset:{preset}', notes, voices.load(voice).INFO['rigs'][rig]['fx'])
+    inst = f'preset:{preset}' if isinstance(preset, str) else preset
+    root = song(str(tmp_path / 's'), inst, notes, voices.load(voice).INFO['rigs'][rig]['fx'] if rig else ())
     res, _, _ = parity.run(root, [2, 3])
     assert parity.verdict(res['track:p']) == 'ok', res['track:p']
 
@@ -83,11 +89,13 @@ def test_a_section_with_a_bus_sends_and_track_effects_plays_live_as_in_the_studi
     assert res['track:d']['resid_db'] < -80
 
 
-@pytest.mark.parametrize('inst, notes', [('snare', MEL), ('saw_lead', MEL), ('sfx', FX)])
+@pytest.mark.parametrize('inst, notes', [('snare', MEL), ('saw_lead', MEL), ('sfx', FX), (FLUTE, FLUTE_MEL)],
+                         ids=['snare', 'saw_lead', 'sfx', 'flute'])
 def test_a_window_renders_its_bars_as_the_whole_song_does(tmp_path, inst, notes):
     """Random phase and noise are seeded on where a note sits in its bar, and a voice gets each note whole: a
-    window render (and so a live deck) sounds as those bars do in the song, not like a new take."""
-    root = song(str(tmp_path / 's'), f'preset:{inst}', notes)
+    window render (and so a live deck) sounds as those bars do in the song, not like a new take. A performer (the
+    flute) keys its draws on song time and is given the notes before the window, so its window matches too."""
+    root = song(str(tmp_path / 's'), f'preset:{inst}' if isinstance(inst, str) else inst, notes)
     d = json.load(open(os.path.join(root, 'project.json')))
     full, _ = Renderer(d, root, None, None, None, False).run()
     win, _ = Renderer(d, root, 2, 4, None, False).run()
