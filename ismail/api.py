@@ -1437,14 +1437,19 @@ def instrument_help(project: str = None, type: str = 'synth') -> str:
                 'so C1 = MIDI 24 (GM drum charts number C1 as 36): a drum voice that picks its piece by MIDI number '
                 '(69 + 12*log2(freq/440)) adds 12 before looking it up in a GM chart, or maps by name.')
     if type == 'mimic':
-        from . import mimic
+        from . import mimic, mimic_perform
         return ('mimic: {"type":"mimic","profile":"<name>","params":{},"tail":1.0} plays an instrument measured from '
                 'recordings (mimic_measure makes <project>/voices/<name>.mimic.json; voices_list shows the profiles). '
                 'Partials with their own envelopes read a body curve at their current frequency, plus measured noise; '
                 'unmeasured pitches blend the two nearest measured notes. params (defaults): ' +
                 json.dumps(mimic.DEFAULT_PARAMS) + '. Velocity 0..1 against the measured velocity: louder and brighter '
                 '(vel_bright dB per octave of partial number). For sustained kinds the note length is the bow/breath '
-                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring).')
+                'length; decaying kinds ring and are damped `damp` s after the note ends (null = let ring). '
+                '"perform": true plays a sustained (blown or bowed) profile as phrases, for legato lines: overlapping '
+                'notes slur, a gap under breath_gap tongues, a longer gap is a new breath, the vibrato waits and grows; '
+                'lanes (automation inst.lane.<name>): ' + json.dumps(mimic_perform.INFO['lanes']) + '. "perform": '
+                '{...} sets performer params (defaults): ' + json.dumps(mimic_perform.DEFAULTS) + '; with perform on, '
+                'params takes only ' + ', '.join(mimic_perform.MIMIC_OK) + '. Decaying profiles refuse perform.')
     if type in inst_mod.DRUM_DEFAULTS:
         return f"{type} params (defaults): " + json.dumps(inst_mod.DRUM_DEFAULTS[type]) + \
             " (times in s, freqs in Hz, drive in dB). A drum synth ignores note pitch (any pitch triggers it; put" \

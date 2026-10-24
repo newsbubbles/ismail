@@ -308,6 +308,8 @@ python -m ismail -p song track_add name=fiddle 'instrument={"type": "mimic", "pr
 
 Tested leave-one-out on violin, cello and double bass recordings, a mimic note rebuilt without ever hearing that note lands as close to the real one as a real neighbouring note repitched, or closer (violin 11.2 vs 14.6, cello 12.5 vs 13.0, double bass 10.9 vs 12.8 on `sound_compare`'s distance). The defaults were then tuned by ear over four rounds of eye exams (open, not blind: the real note next to versions that each change one named thing); the current default was picked closest on every note of the last round. Struck and plucked instruments (piano) are harder: with 12 notes across 7 octaves a piano's note-to-note colour can't be predicted and mimic stays behind a sampler there (16.3 vs 11.6); the `grand_piano` voice remains the better piano. A few notes at one dynamic teach one dynamic: record soft and loud notes if velocity matters, and more notes than you think for instruments whose colour changes from note to note.
 
+**Phrases (`"perform": true`).** By default mimic plays each note on its own. For a legato line on a sustained (blown or bowed) profile, `{"type": "mimic", "profile": "clarinet", "perform": true}` plays the track as phrases through a performer that reads the same profile (partial levels, body, air spectrum, attack map): overlapping notes slur (one continuous tone, the pitch glides in `slur_ms`, no second attack), a gap shorter than `breath_gap` (0.16 s) is tongued (the tone dips and speaks again with the measured chiff), a longer gap is a new breath. The vibrato waits `vib_delay` (0.45 s) into a note and grows over `vib_grow`, with a breath pulse; it defaults to the profile's measured vibrato. A long last note tapers. Lanes, as automation `inst.lane.<name>` (and clip `expr` live): `level` (dB, a little brighter when up), `vib` (cents peak, read at each note start), `scoop` (semitones below, read at note start), `tongue` (0..1 onset hardness), `breath` (dB on the air), `bend` (semitones). `"perform": {"vib": 8, "breath_gap": 0.2}` sets performer params (`instrument_help(type='mimic')` lists them); with perform on, only the mimic `params` that mean the same for a phrase are accepted (`bright`, `vel_bright`, `vib`, `vib_rate`, `vib_delay`, `width`, `noise`, `room`, `room_mix`, `seed`, plus the ring and open strings). A chord splits into lines, each phrased on its own. A decaying profile (piano, harp) refuses perform. Left out, every render is as it was. (From the bossa_gilberto_studio flute performer.)
+
 ## Hearing: audio as text
 
 | Question | Tool |
@@ -452,6 +454,7 @@ ismail/
                  block-by-block effect twins (fx_blocks.py, dsp_blocks.py)
   video/         optional music-video pipeline: sync, edit engine, Blender shot kit, CLI
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
+  mimic_perform.py  the phrase performer for sustained mimic profiles ("perform": true)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
                  (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
                  fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices

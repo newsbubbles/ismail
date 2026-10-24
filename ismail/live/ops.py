@@ -257,7 +257,9 @@ def _project_fx(project, spec):
 def _mark_performer(inst, project):
     """A code voice whose module has perform() and no voice function plays whole phrases: flag it so the engine
     groups overlapping notes into one event and passes clip expr lanes (the module is imported here, in the op
-    process, never in the engine)."""
+    process, never in the engine). A mimic with perform on plays phrases the same way."""
+    if isinstance(inst, dict) and inst.get('type') == 'mimic' and inst.get('perform'):
+        return dict(inst, performer=True)
     if not isinstance(inst, dict) or inst.get('type') != 'code' or not inst.get('voice'):
         return inst
     from .. import voices

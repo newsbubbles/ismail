@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### mimic plays phrases: perform=true for legato winds and strings
+
+- `{"type": "mimic", "profile": ..., "perform": true}` renders a track as phrases instead of note by note, for any
+  sustained (blown or bowed) profile. Overlapping notes slur (one continuous tone, the pitch glides, no second
+  attack), a gap under `breath_gap` (0.16 s) is tongued, a longer gap is a new breath. The vibrato waits and grows
+  (the profile's measured vibrato by default) with a breath pulse, and a long last note tapers. Lanes, as
+  automation `inst.lane.<name>` or clip `expr` live: `level`, `vib`, `scoop`, `tongue`, `breath` and `bend`, the
+  tenor sax's names where they overlap. `"perform": {...}` sets performer params (`instrument_help(type='mimic')`
+  lists them). A decaying profile (piano, harp) refuses it with a pointing error; left out, every render is as it
+  was. On a clarinet slur the second note's harmonics in the first 70 ms after the join sit 9.9 dB under their
+  held level note by note (a new attack) and 2.3 dB under performed. (ledger:M308, from the
+  bossa_gilberto_studio flute performer, after Nate's "the flute sounds a little bit midi" of 10-23.)
+
 ### Velocity sets the level of rhodes and emily
 
 - `rhodes` was louder at low velocity than at full (C4, a 0.15 s note, dB against 1.0: 0.2 +1.4, 0.4 -1.0, 0.6 -1.8,
