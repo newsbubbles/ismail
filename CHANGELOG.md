@@ -26,6 +26,36 @@
   (`render.write_mp3`) are unchanged. Tests: `tests/test_master_cue.py` (the mp3 test skips without ffmpeg; CI has
   it on Linux).
 
+### Section reads find the path and name the loudest part
+
+- `analyze_sections` looks up a relative path in the working directory first, then in the project. On the
+  planet_rock remix, `songs/<slug>/proj/renders/mix_v7.wav` run from the repo root read "not found". A path in
+  neither place now gives an error that names both places it looked. (ledger:M281 a)
+- `analyze_sections` with stems adds a last block, one line per section, that names the loudest one or two parts
+  and their rms against the mix's. For a render with `stems=True` the parts are the tracks routed to the master
+  and each bus (a track on a bus counts inside the bus); for the reference they are its stems. On the remix a vox
+  routed to master carried a build that the mix bus had pulled down 9.5 dB, and the section read did not say so.
+  Stems from another render are not read, and one line says so. The existing lines are unchanged. (ledger:M281 b)
+
+### instrument_fit takes wait; a band far off costs what it should
+
+- `instrument_fit` refused BUSY with a message to pass `wait='10m'`, then rejected the keyword. It now takes `wait`
+  as `render` does ('10m' default, '0' refuses at once), and so does `track_fit`. The parsing is one helper
+  (`api.wait_seconds`) shared by `render`, `track_freeze` and every heavy op. A heavy op without `wait`
+  (`mimic_measure`, `live_parity`) is no longer told to pass one: its BUSY reply names the shell work-around
+  `python -m ismail.machine run --cpu --wait 10m -- python -m ismail -p <project> <op> ...`. (ledger:M313)
+- The fit distance took the mean over 29 bands, so two sub bands 35 to 39 dB over the target cost about 2.5 and a
+  bass fit kept an octave-down square the target does not have. In `instrument_fit` each dB a band is past 20 dB
+  off now adds 0.15, summed, and the band the tables print as 25 Hz (24.8 Hz) counts for fmin=25 (it fell out of
+  the distance). A synthetic A1 bass with nothing under 40 Hz: a darker clean bass read 5.37 before and 5.13 now;
+  the same tone plus an octave-down square (+36 and +25 dB at 25 and 31 Hz) read 4.45 before (the better score)
+  and 9.46 now. The `instrument_fit` reply warns of any band more than 20 dB off. (ledger:M315)
+- `sound_compare` scores are unchanged on purpose: song sessions track its number across rounds, and a before and
+  after must stay comparable. Its reply now prints the same far-band warning, as text only. To score the way
+  `instrument_fit` does, pass `sound_compare(..., fit_score=True)` (in Python, `sounddesign.distance(...,
+  **sounddesign.FIT_SCORE)`, that is `far_cost=0.15, nominal_bands=True`). `distance` defaults to the old score,
+  so `track_fit` and `mimic_measure`'s leave-one-out check score as before too.
+
 ### melody_consensus: a lead line over a backing in the same stem
 
 - New op `melody_consensus(source, reps, phrase_bars, steps_per_beat=4, low='C3', high='C7', track=None,

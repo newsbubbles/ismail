@@ -85,6 +85,22 @@ def op(mutates=False):
 BUSY_SAY = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try again "
             "in a moment\", then call this again in a minute or two (wait='10m' stands in line longer). The "
             "details, for you only: ")
+# ledger:M313: an op with no `wait` argument must not be told to pass one; it can stand in line from a shell instead
+BUSY_SAY_NO_WAIT = ("BUSY: the computer is busy with other work. Say to the person: \"the computer is busy, I'll try "
+                    "again in a moment\", then call this again in a minute or two ({op} has no wait argument; to "
+                    "stand in line, run it from a shell as `python -m ismail.machine run --cpu --wait 10m -- python "
+                    "-m ismail -p <project> {op} ...`). The details, for you only: ")
+
+
+def wait_seconds(wait):
+    """An op's `wait` argument ('10m', '600s', a bare number is minutes) as seconds; None for '', '0' or 'none'
+    (refuse at once when the machine is busy). render, heavy() and track_freeze read it this one way."""
+    if wait is None or str(wait).strip() in ('', '0', 'none', 'None'):
+        return None
+    try:
+        return machine.duration_s(wait)
+    except ValueError as e:
+        raise OpError(f"wait: {e}")
 
 
 def heavy(kind='cpu'):
@@ -95,21 +111,18 @@ def heavy(kind='cpu'):
         import functools
         import inspect
         dflt = inspect.signature(fn).parameters.get('wait')
+        say = BUSY_SAY if dflt is not None else BUSY_SAY_NO_WAIT.format(op=fn.__name__)
 
         @functools.wraps(fn)
         def wrapped(*a, **kw):
             proj = str(kw.get('project', a[0] if a else '')).replace(os.sep, '/').rstrip('/')
-            w = kw.get('wait', dflt.default if dflt is not None else None)
-            try:
-                wait_s = machine.duration_s(w) if w and str(w).strip() not in ('0', 'none', 'None') else None
-            except ValueError as e:
-                raise OpError(f"wait: {e}")
+            wait_s = wait_seconds(kw.get('wait', dflt.default if dflt is not None else None))
             try:
                 with machine.slot(kind, f"{fn.__name__} {os.path.basename(proj)}", disk_path=proj or None,
                                   wait=wait_s):
                     return fn(*a, **kw)
             except machine.MachineBusy as e:     # ledger:M181: a newcomer's agent read a CPU table as the answer
-                raise machine.MachineBusy(BUSY_SAY + str(e))
+                raise machine.MachineBusy(say + str(e))
         return wrapped
     return deco
 
@@ -2067,10 +2080,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     if mp3 not in ('none', 'also', 'only'):
         raise OpError("mp3 must be 'none', 'also' (wav + mp3) or 'only' (the named render as mp3 only)")
     from .render import Renderer, write_wav, write_renders, prune_cache, RenderError
-    try:
-        wait_s = machine.duration_s(wait) if str(wait).strip() not in ('', '0', 'none', 'None') else None
-    except ValueError as e:
-        raise OpError(f"wait: {e}")
+    wait_s = wait_seconds(wait)
     P = _load(project)
     if tracks:
         for t in tracks:

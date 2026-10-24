@@ -231,8 +231,14 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
     """Loudness per section: rms, peak, loudest and quietest 400 ms, and the song's dynamic range. sections =
     {"intro": [1, 4], "climax": [25, 28], ...} (bars inclusive); omitted = blocks of `block` bars. Flags the
     section right before the loudest when it is 2 dB or more quieter on average but peaks within 3 dB of it (a build
-    as loud as its climax: the climax will not arrive, and this only showed up here) and sections so quiet they vanish at normal volume."""
+    as loud as its climax: the climax will not arrive, and this only showed up here) and sections so quiet they vanish at normal volume.
+    A relative path is looked up in the working directory first, then in the project. With stems (the render's,
+    from render(stems=True), or the reference's after separate) a last block names the loudest one or two parts
+    per section and their rms against the mix's: for a render, the tracks routed to the master and each bus (a
+    track on a bus counts inside it), so a part straight to master that carries a build the bus pulled down shows."""
     P = _load(project)
+    label = source = P.auto_source(source)
+    source = _cwd_first(P, source)
     y, sr = _segment(P, source)
     path, g = P.source(source)
     total = P.d.get('length_bars') or int((y.shape[1] / sr - g.offset) / (g.bpb * g.spb)) + 1
@@ -242,7 +248,7 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
         secs = [(n, int(a), int(b)) for n, (a, b) in sections.items()]
         out = [f"{n} [{a}, {b}]" for n, a, b in secs if a < w0 or b > w1]
         if win and out:
-            raise OpError(f"{source!r} is a window render: its file starts at song bar {w0} and holds bars {w0}-{w1} "
+            raise OpError(f"{label!r} is a window render: its file starts at song bar {w0} and holds bars {w0}-{w1} "
                           f"(renders/windows.json). Sections take song bars, so {', '.join(out[:3])} "
                           f"{'falls' if len(out) == 1 else 'fall'} outside it: bars 1-4 of this file are "
                           f"[{w0}, {w0 + 3}]. Shift the sections by {w0 - 1} bars, or render the full song")
@@ -259,9 +265,9 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
         rows.append((n, a, b, _db(s), 20 * np.log10(np.abs(s).max() + 1e-12), win.max(), win.min()))
     if not rows:
         raise OpError("no section had 400 ms of audio; check sections against the render length"
-                      + (f" ({source!r} holds song bars {w0}-{w1})" if win else ''))
+                      + (f" ({label!r} holds song bars {w0}-{w1})" if win else ''))
     top = max(rows, key=lambda r: r[3])
-    L = [f"sections of {source} (dB; loudest/quietest = 400 ms windows):",
+    L = [f"sections of {label} (dB; loudest/quietest = 400 ms windows):",
          f"  {'section':<12} {'bars':>7} {'rms':>6} {'peak':>6} {'loudest':>8} {'quietest':>9}"]
     for n, a, b, rms, pk, hi, lo in rows:
         L.append(f"  {n:<12} {f'{a}-{b}':>7} {rms:6.1f} {pk:6.1f} {hi:8.1f} {lo:9.1f}")
@@ -281,7 +287,78 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
         if r is not rows[-1] and r[3] < top[3] - 35:
             L.append(f"WARNING {r[0]} sits {top[3] - r[3]:.0f} dB under the loudest section: inaudible at normal "
                      f"volume unless it is a deliberate near-silence")
+    L += _loudest_parts(P, label, path, g, rows)
     return '\n'.join(L)
+
+
+_KEYWORD_SOURCES = ('render', 'ref')
+_KEYWORD_PREFIXES = ('ref:', 'track:', 'sound:')
+
+
+def _cwd_first(P, source):
+    """A relative path as an absolute one: the working directory first, then the project (ledger:M281 a: a path
+    written from the repo root read "not found" because only the project was tried). Keywords and absolute paths
+    come back as they are; a path in neither place raises, naming both."""
+    if source in _KEYWORD_SOURCES or source.startswith(_KEYWORD_PREFIXES) or os.path.isabs(source):
+        return source
+    here = audiofile.find(os.path.abspath(source))
+    if os.path.exists(here):
+        return here
+    there = audiofile.find(os.path.normpath(os.path.join(P.root, source)))
+    if os.path.exists(there):
+        return there
+    raise OpError(f"audio source {source!r} not found: looked in the working directory ({here}) and in the project "
+                  f"({there}). Pass an absolute path, or render | ref | ref:<stem> | track:<name> | sound:<name>")
+
+
+def _section_parts(P, source, path):
+    """([(name, path)] of the parts summed into this mix, note). A render's parts are its tracks routed to the master
+    and its buses (a track on a bus is inside the bus, before the bus's level and fx, so it is not counted alone);
+    only stems written with this render (same window, written from a minute before it to ten minutes after) are
+    read. The reference's parts are its demucs stems. ([], '') when there are none; note is one line or ''."""
+    if source == 'ref':
+        return [(s, p) for s, p in ref_stems(P).items() if s != 'mix'], ''
+    rd = os.path.join(P.root, 'renders')
+    if os.path.normcase(os.path.dirname(os.path.abspath(path))) != os.path.normcase(os.path.abspath(rd)):
+        return [], ''
+    have = audiofile.listing(os.path.join(rd, 'stems'))
+    parts = [(t, have[t]) for t, tr in P.d['tracks'].items() if tr.get('output', 'master') == 'master' and t in have]
+    parts += [(f'bus:{b}', have['bus_' + b]) for b in P.d.get('buses', {}) if 'bus_' + b in have]
+    if not parts:
+        return [], ''
+    t0, win = os.path.getmtime(path), P.render_window(path)
+    fresh = [(n, p) for n, p in parts if t0 - 60 <= os.path.getmtime(p) <= t0 + 600 and P.render_window(p) == win]
+    if not fresh:
+        return [], (f"parts per section: the stems in renders/stems come from another render than "
+                    f"{os.path.basename(path)}; render(stems=True) to name the loudest part of each section")
+    return fresh, ''
+
+
+def _loudest_parts(P, source, path, g, rows):
+    """Lines naming the loudest one or two parts per section, rms against the mix's (ledger:M281 b: a vox routed to
+    master carried a build the mix bus had pulled down 9.5 dB, and the section read did not say so). [] without
+    stems."""
+    parts, note = _section_parts(P, source, path)
+    if not parts:
+        return [note] if note else []
+    lv = {r[0]: [] for r in rows}
+    for name, p in parts:            # one section of one stem in memory at a time: a long song has many stems
+        with sf.SoundFile(p) as f:
+            for n, a, b, *_ in rows:
+                i0 = max(int(g.bar_time(a) * f.samplerate), 0)
+                if i0 >= f.frames:
+                    continue
+                f.seek(i0)
+                s = f.read(max(int(g.bar_time(b + 1) * f.samplerate), 0) - i0, dtype='float32', always_2d=True)
+                if len(s):
+                    lv[n].append((_db(s), name))
+    what = 'reference stems' if source == 'ref' else 'tracks to the master and buses'
+    L = [f"loudest parts per section (rms dB against the mix's; {what}):"]
+    for n, a, b, rms, *_ in rows:
+        top = sorted((v for v in lv[n] if v[0] > -70), reverse=True)[:2]
+        said = ', '.join(f"{name} {round(v - rms, 1) + 0.0:+.1f}" for v, name in top)
+        L.append(f"  {n:<12} " + (said or 'no part sounds'))
+    return L
 
 
 @op(mutates=True)
