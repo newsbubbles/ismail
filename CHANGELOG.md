@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Frozen tracks, and placed audio on decks
+
+- `track_freeze(project, tracks, into=)` renders tracks into one audio track a live deck can play: their mix as
+  rendered (effects, faders, pans, automation), without the buses and the master chain, bar `a` at 0 s of
+  `sounds/frozen_<into>.wav`. Options: `originals='mute'|'keep'`, `bars=[a, b]`; freezing into the same track
+  again replaces it and lifts the mutes it no longer needs. A send or a bus every frozen track shares comes over;
+  the reply names what did not. (ledger:M292, the Live DJ's stream set of 10-22.)
+- `live_load` now carries audio tracks (placed clips and frozen tracks): the built-in `placed_audio` voice reads
+  the song's own files by song time, one bar at a time, sample for sample with a studio render. Placed audio on a
+  track that also has notes still stays behind, and the reply says so.
+
 ### Picture rounds from every song on one server
 
 - The exam page server on 8871 (the only port the phone's `/eye/` reaches) served one folder, so a second song's

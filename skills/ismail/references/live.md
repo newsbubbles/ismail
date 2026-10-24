@@ -422,7 +422,9 @@ air; only you hear it, through `live_listen(deck=...)`.
    fade), its group buses and its master chain (the limiter runs on the deck). It is cued while another deck is
    on air, and a cued deck plays from `at`: a song loaded early with `at='next_bar'` is bars into itself when it
    comes in, so load it with `at='bar:<the transition's bar>'` to bring it in from its top. The reply lists what
-   did not come over (placed audio clips, effects whose source track was muted). A track with instrument
+   did not come over (audio placed on a track that also has notes, effects whose source track was muted). Audio
+   tracks (placed clips, frozen tracks) come over, read from the song's files bar by bar at the song's own speed:
+   play them at the song's tempo. A track with instrument
    automation renders its whole section as one event: load the deck several bars before it plays. A performer
    voice's studio lanes (`inst.lane.bend` ...) arrive as its clip's `expr`, so a guitar keeps its bends; other
    `inst.*` automation on a performer, and `inst.lane.*` on a voice that is not one, stay behind (listed under
@@ -449,6 +451,13 @@ air; only you hear it, through `live_listen(deck=...)`.
    is asleep a few seconds after it ends. Load the next song onto it (the load replaces its tracks): no need to
    remove the deck or its tracks mid-set. If you do clear a deck, do it before queueing its next load, never at
    the same time: removals made beside a load took the freshly loaded tracks.
+
+A song of 20+ tracks, or one with placed audio on a track that has notes, makes a heavy or incomplete deck. Before
+the set, freeze what does not need to move live: `track_freeze(song, tracks=[...], into='bed')` renders them into
+one audio track (their effects and faders as rendered, no buses, no master chain) and mutes the originals; the deck
+then loads the frozen track plus the parts you will play with (lead, bass, drums you mute or filter). Freeze a copy
+of the song's project, not the song itself, when the song is still being worked on. Freezing into `bed` again
+replaces it.
 
 A studio song is not automatically a light deck. Before `live_load`, look at how much automation the song carries:
 One song's hundreds of per-beat effect ramps (bass cutoff, resonance, drive, pump depth) used 90 to 130% of the

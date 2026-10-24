@@ -339,8 +339,10 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     time-stretched) and loops unless loop=False. Cued (off air) by default while another deck is on air: listen
     with live_listen(deck=...), then bring it in with live_transition. The song's mix comes over as rendered:
     its automation (effect params and volume as ramps, instrument params rendered with the notes, the master fade;
-    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Placed
-    audio clips do not (the reply lists what was left out); the song's master chain (its limiter) runs on the deck.
+    repeated every pass on a looping deck) and its group buses (a reverb on a drum bus keeps the dry drums). Audio
+    tracks (placed clips, track_freeze) play from the song's files bar by bar at the song's own speed; audio placed
+    on a track that also has notes does not (the reply lists what was left out). The song's master chain (its
+    limiter) runs on the deck.
     Loading replaces what a cued deck held. A cued deck plays from `at` (off air), so a song loaded early with
     at='next_bar' is already bars into itself when the transition brings it in: load it with at='bar:<the
     transition's bar>' to start it from its top on air."""
