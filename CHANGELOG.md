@@ -9,21 +9,22 @@
   1.5 ms moving average, no re-gain after it. Ported from `songs/planet_rock_axel_f_remix/work/master.py`. The
   limiter's rounds before it now get up to 6 rounds, each aiming lower by what the last re-gain put back over (at
   most 1.5 dB under the ceiling), so the catch only takes what a target too loud for the mix leaves; the report
-  says what it took and where the loudness lands.
-- `mp3_margin_db=1.2`: the limiter and the catch aim at `tp - mp3_margin_db`, so the 320k mp3 of the wav stays under
-  `tp`. Measured with ismail's own encoder (ffmpeg libmp3lame 320k, `render.write_mp3`) on synthetic dense mixes
-  (saw chords, kick, snare, 16th hats; 5 mixes, 3 seeds, 44.1 and 48 kHz, 0 to 4 dB of limiting asked): the mp3
-  peaked 0.1 to 1.25 dB over its wav (median about 0.5). With 3 plain rounds and the catch, margins of 0.8, 1.0 and
-  1.2 left 4, 1 and 0 of 90 mp3s over -1 dBTP; with the rounds as shipped, 1.0 left none but its worst mp3 was at
-  -1.03, and 1.2's worst at -1.18. `mp3_margin_db=0` when the wav itself is the delivery.
-- On the test mix (4 s at -18.6 LUFS, 3 dB of limiting asked at -1 dBTP): before, wav -0.71 dBTP and mp3 0.00;
-  with the catch and margin 0, wav -1.08 and mp3 -0.30 at the same loudness; with the default, wav -2.24 and mp3
-  -1.42, 0.6 LU under the target (the extra 1.2 dB of limiting is more than the rounds can re-gain). A mix already under the ceiling keeps its
-  loudness (the rounds re-gain to the target).
-- This changes existing masters: a master whose peak after the gain lands between `tp - 1.2` and `tp` is now
-  limited by up to 1.2 dB (same loudness), and one the old rounds left over the ceiling now ends under it.
-  `tp_catch=False, mp3_margin_db=0` is the master from before, sample for sample. Tests:
-  `tests/test_master_cue.py` (the mp3 test skips without ffmpeg; CI has it on Linux).
+  says what it took and where the loudness lands. The wav ends at the ceiling, `tp`.
+- `mp3=True` also writes `<out>.mp3` (320k, ffmpeg lame) from a copy caught again at `tp - mp3_catch_db`
+  (`mp3_catch_db=1.2`), because a 320k encode lands up to 1.25 dB over its wav. Only the mp3 gets the extra catch;
+  the wav stays as mastered, at its full loudness. The report gives the copy's catch and the decoded mp3's true peak,
+  with a warning if it is still over `tp`. The margin is from a sweep of 90 masters per margin with ismail's encoder
+  (5 synthetic dense mixes, 3 seeds, 44.1 and 48 kHz, 0 to 4 dB of limiting asked): the mp3 peaked 0.1 to 1.25 dB
+  over its wav (median about 0.5); a margin of 1.0 left 1 mp3 in 90 over -1 dBTP in one run and peaked at -1.03 in
+  another, and 1.2 left none (the worst at -1.18). `mp3_margin_db` (0 by default) still lowers the wav's own ceiling.
+- On the test mix (4 s at -18.6 LUFS, 3 dB of limiting asked at -1 dBTP): before, the wav peaked at -0.71 dBTP and
+  its 320k mp3 at 0.00; now the wav is at -1.08 at the same loudness (-7.7 LUFS), and the mp3 from the same call at
+  -1.61 (its copy caught 1.17 dB). A mix already under the ceiling keeps its loudness.
+- This changes existing masters only where the old rounds left the wav over the ceiling: it now ends under it, at
+  the same loudness or a little under when the target is too loud for the mix. `tp_catch=False` is the master from
+  before, sample for sample. Only `master_cue(mp3=True)` gets the mp3 catch; `render`'s mp3 previews
+  (`render.write_mp3`) are unchanged. Tests: `tests/test_master_cue.py` (the mp3 test skips without ffmpeg; CI has
+  it on Linux).
 
 ### melody_consensus: a lead line over a backing in the same stem
 

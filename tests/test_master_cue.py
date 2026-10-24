@@ -105,49 +105,54 @@ def _lufs(path):
 
 
 def test_a_dense_mix_ends_at_its_true_peak_ceiling(tmp_path):
-    """ledger:M280: 3 dB of limiting asked on a dense mix. The limiter's rounds alone stop 0.3 dB over (the
-    master before the catch); now the wav ends at -1 dBTP, and with the mp3 margin under it."""
+    """ledger:M280: 3 dB of limiting asked on a dense mix. The limiter's rounds alone stop 0.3 dB over (the master
+    from before, still reached with tp_catch=False); by default the wav now ends at -1 dBTP."""
     src, plr = _dense(str(tmp_path / 'mix.wav'))
     lufs = -1.0 + 3.0 - plr
-    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'old.wav'), mp3_margin_db=0, tp_catch=False)
+    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'old.wav'), tp_catch=False)
     y, _ = sf.read(str(tmp_path / 'old.wav'), always_2d=True)
     assert M.true_peak_db(y) > -0.9                 # the shortfall the catch is for
-    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'wav.wav'), mp3_margin_db=0)
+    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'wav.wav'))
     y, _ = sf.read(str(tmp_path / 'wav.wav'), always_2d=True)
     assert M.true_peak_db(y) <= -1.0 + 0.05
-    assert 'WARNING' not in out
-    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'))
-    y, _ = sf.read(str(tmp_path / 'm.wav'), always_2d=True)
-    assert M.true_peak_db(y) <= -1.0 - M.MP3_MARGIN_DB + 0.05
-    out = OPS['master_cue'](source=src, lufs=lufs + 1, tp=-1.0, out=str(tmp_path / 'loud.wav'), mp3_margin_db=0)
+    assert 'WARNING' not in out and 'mp3 ->' not in out
+    out = OPS['master_cue'](source=src, lufs=lufs + 1, tp=-1.0, out=str(tmp_path / 'loud.wav'))
     y, _ = sf.read(str(tmp_path / 'loud.wav'), always_2d=True)
     assert 'true-peak catch took' in out           # 4 dB asked: the rounds stop over, the catch takes the rest
     assert M.true_peak_db(y) <= -1.0 + 0.05
+    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'), mp3_margin_db=1.2)
+    y, _ = sf.read(str(tmp_path / 'm.wav'), always_2d=True)
+    assert M.true_peak_db(y) <= -2.2 + 0.05         # the wav's own ceiling can still be lowered
 
 
-def test_the_320k_mp3_of_the_default_master_stays_under_the_ceiling(tmp_path):
+def test_the_mp3_gets_its_own_catch_and_the_wav_stays_as_mastered(tmp_path):
     import shutil
     import subprocess
     exe = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
     if not exe:
         pytest.skip("no ffmpeg on PATH (CI installs it on Linux only): the mp3 encoder ismail uses is ffmpeg's lame")
-    from ismail.render import write_mp3
     src, plr = _dense(str(tmp_path / 'mix.wav'))
-    wav = str(tmp_path / 'm.wav')
-    OPS['master_cue'](source=src, lufs=-1.0 + 3.0 - plr, tp=-1.0, out=wav)
-    write_mp3(wav, str(tmp_path / 'm.mp3'))
+    lufs = -1.0 + 3.0 - plr
+    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'), mp3=True)
+    assert 'mp3 -> ' in out and 'decoded true peak' in out and 'WARNING' not in out
     subprocess.run([exe, '-y', '-loglevel', 'error', '-i', str(tmp_path / 'm.mp3'), '-c:a', 'pcm_f32le',
                     str(tmp_path / 'dec.wav')], check=True)
     d, _ = sf.read(str(tmp_path / 'dec.wav'), always_2d=True)
     assert M.true_peak_db(d) <= -1.0
+    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'w.wav'))
+    a, _ = sf.read(str(tmp_path / 'm.wav'), always_2d=True)
+    b, _ = sf.read(str(tmp_path / 'w.wav'), always_2d=True)
+    assert np.array_equal(a, b)                     # only the mp3 got the extra catch
+    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'), mp3=True)
+    assert sorted(os.path.splitext(f)[1] for f in os.listdir(tmp_path / 'old')) == ['.mp3', '.wav']
 
 
 def test_a_mix_already_under_the_ceiling_keeps_its_loudness(tmp_path):
-    """The catch and the margin must not over-limit: a master whose gain alone peaks 0.3 dB under -1 dBTP loses
-    under 0.3 LU against the master before the catch."""
+    """The catch must not over-limit: a master whose gain alone peaks 0.3 dB under -1 dBTP loses under 0.3 LU
+    against the master before the catch."""
     src, plr = _dense(str(tmp_path / 'mix.wav'), seed=2)
     lufs = -1.0 - 0.3 - plr
-    OPS['master_cue'](source=src, lufs=lufs, out=str(tmp_path / 'old.wav'), mp3_margin_db=0, tp_catch=False)
+    OPS['master_cue'](source=src, lufs=lufs, out=str(tmp_path / 'old.wav'), tp_catch=False)
     out = OPS['master_cue'](source=src, lufs=lufs, out=str(tmp_path / 'new.wav'))
     assert _lufs(str(tmp_path / 'old.wav')) - _lufs(str(tmp_path / 'new.wav')) < 0.3
     assert 'WARNING' not in out

@@ -681,20 +681,22 @@ def sound_autotune(path: str, key: str = 'C', scale: str = 'chromatic', notes: l
 @op(mutates=True)
 def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: float = -16.0, tp: float = -1.0,
                sr: int = 48000, out: str = None, fade_in_s: float = 0.0, fade_out_s: float = 0.4,
-               mp3_margin_db: float = 1.2, tp_catch: bool = True) -> str:
+               mp3_margin_db: float = 0.0, tp_catch: bool = True, mp3: bool = False,
+               mp3_catch_db: float = 1.2) -> str:
     """Master a finished cue (a teaser, a stinger, a song for posting) for delivery: cut source to start_s..end_s
     (seconds; end_s=None keeps the rest), fade the ends (cos^2; 0.4 s out by default), resample to sr, then ONE fixed
     gain to `lufs` integrated (BS.1770). Only if that gain puts the true peak (4x oversampled) over the ceiling does a
     lookahead peak limiter take the excess, and its gain reduction is reported; then a true-peak catch (4x
     oversampled, +-1.5 ms lookahead, 25 ms release, no re-gain after it) takes whatever the limiter left, so the wav
-    ends at or under the ceiling. The ceiling is tp - mp3_margin_db: a 320k mp3 of a limited master peaks up to about
-    1 dB over its wav, so the default 1.2 keeps the mp3 under `tp` too; mp3_margin_db=0 when the wav itself is the
-    delivery. With the catch the limiter gets up to 6 rounds, each aiming lower by what the last re-gain put over;
-    tp_catch=False with mp3_margin_db=0 is the master from before (3 plain rounds, no catch). Never a dynamic
-    loudness ride (ffmpeg loudnorm falls back to one on some files). Writes 24-bit wav to out= (default
-    <source>_master.wav beside it); a file already there is moved to old/ beside it first, never overwritten. -16
-    LUFS / -1 dBTP suits most platforms; -14 / -1 for a louder stream. Read the report before anyone listens: it is
-    the measurement line for the round."""
+    ends at or under `tp`. With the catch the limiter gets up to 6 rounds, each aiming lower by what the last re-gain
+    put over. mp3=True also writes a 320k mp3 beside the wav, made from a copy caught again at tp - mp3_catch_db (a
+    320k encode lands up to 1.25 dB over its wav, so 1.2 keeps it under `tp`); only the mp3 gets that catch, the wav
+    keeps its loudness, and the decoded mp3's true peak is reported. mp3_margin_db lowers the wav's own ceiling to
+    tp - mp3_margin_db (0 by default). tp_catch=False is the master from before (3 plain rounds, no catch). Never a
+    dynamic loudness ride (ffmpeg loudnorm falls back to one on some files). Writes 24-bit wav to out= (default
+    <source>_master.wav beside it, the mp3 as <out>.mp3); a file already there is moved to old/ beside it first,
+    never overwritten. -16 LUFS / -1 dBTP suits most platforms; -14 / -1 for a louder stream. Read the report
+    before anyone listens: it is the measurement line for the round."""
     import shutil
     import time
     from . import master as M
@@ -708,9 +710,13 @@ def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: flo
         raise OpError(f"lufs={lufs} is outside -40..-5: delivery targets are about -16 (posts) or -14 (streams)")
     if tp > 0:
         raise OpError(f"tp={tp} dBTP would allow clipping: keep the ceiling at or under 0, -1 is usual")
-    if not 0 <= mp3_margin_db <= 3:
-        raise OpError(f"mp3_margin_db={mp3_margin_db} is outside 0..3: a 320k mp3 peaks up to about 1 dB over its wav, "
-                      f"so {M.MP3_MARGIN_DB:g} keeps it under tp; 0 aims the wav itself at tp")
+    for name, v in (('mp3_margin_db', mp3_margin_db), ('mp3_catch_db', mp3_catch_db)):
+        if not 0 <= v <= 3:
+            raise OpError(f"{name}={v} is outside 0..3: a 320k mp3 peaks up to 1.25 dB over its wav, so "
+                          f"mp3_catch_db={M.MP3_CATCH_DB:g} keeps the mp3 under tp; mp3_margin_db=0 keeps the wav "
+                          f"at tp")
+    if mp3 and not M._ffmpeg():
+        raise OpError("mp3=True needs ffmpeg on PATH (or ISMAIL_FFMPEG set to it); or master the wav alone (mp3=False)")
     try:
         y, out_sr, r = M.master(y, in_sr, start_s, end_s, lufs, tp, int(sr), fade_in_s, fade_out_s,
                                 mp3_margin_db=float(mp3_margin_db), tp_catch=bool(tp_catch))
@@ -720,19 +726,33 @@ def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: flo
         out = os.path.splitext(source)[0] + '_master.wav'
     if os.path.abspath(out) == os.path.abspath(source):
         raise OpError("out= is the source itself: give a new name (the source is never overwritten)")
+    mp3_out = os.path.splitext(out)[0] + '.mp3' if mp3 else None
     moved = None
-    if os.path.exists(out):
-        old = os.path.join(os.path.dirname(os.path.abspath(out)), 'old')
-        os.makedirs(old, exist_ok=True)
-        stem = os.path.splitext(os.path.basename(out))[0]
-        moved = os.path.join(old, f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
-        shutil.move(out, moved)
+    for path in (out, mp3_out):
+        if path and os.path.exists(path):
+            old = os.path.join(os.path.dirname(os.path.abspath(path)), 'old')
+            os.makedirs(old, exist_ok=True)
+            stem, ext = os.path.splitext(os.path.basename(path))
+            dest = os.path.join(old, f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}{ext}")
+            shutil.move(path, dest)
+            moved = moved or dest
     sf.write(out, y, out_sr, subtype='PCM_24')
+    mp3_line = None
+    if mp3_out:
+        try:
+            mgr, mtp = M.write_mp3(y, out_sr, mp3_out, tp - mp3_catch_db)
+        except RuntimeError as e:
+            raise OpError(f"the wav is written ({out}) but its mp3 failed: {e}")
+        mp3_line = (f"mp3 -> {mp3_out} (320k, from a copy caught at {tp - mp3_catch_db:g} dBTP: "
+                    + (f"{-mgr:.2f} dB at most" if mgr < 0 else "nothing over it")
+                    + (f"; decoded true peak {mtp:.2f} dBTP" if mtp is not None else '') + ")")
+        if mtp is not None and mtp > tp:
+            mp3_line += f"\nWARNING: the mp3 peaks {mtp - tp:.2f} dB over {tp:g}: raise mp3_catch_db"
     lim = (f"limiter took {-r['limiter_gr_db']:.1f} dB at most (the gain alone would peak at "
            f"{r['peak_after_gain_dbtp']:.1f} dBTP)" if r['limiter_gr_db'] < 0 else
            f"no limiting (peak {r['peak_after_gain_dbtp']:.1f} dBTP after the gain)")
     ceil = r['ceiling_dbtp']
-    aim = f"{tp:g}" if ceil == tp else f"{tp:g}, the wav aimed at {ceil:g} so its mp3 stays under {tp:g}"
+    aim = f"{tp:g}" if ceil == tp else f"{tp:g}, the wav aimed at {ceil:g} (mp3_margin_db)"
     lines = [f"mastered -> {out}" + (f" (the old one is now {moved})" if moved else ''),
              f"{r['length_s']:.2f} s, {r['sr']} Hz, {r['channels']} ch, 24-bit; cut {r['trimmed'][0]:.2f}-"
              f"{r['trimmed'][1]:.2f} s of the source",
@@ -748,5 +768,7 @@ def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: flo
                      f"the target is too loud for this mix; try lufs={lufs - 2:g}, or tp_catch=True")
     elif r['limiter_gr_db'] < -3:
         lines.append(f"note: over 3 dB of limiting can be heard on transients; lufs={lufs - 2:g} keeps them")
+    if mp3_line:
+        lines.append(mp3_line)
     lines.append("next: these lines are the cue's measurement; then the person listens to the file")
     return '\n'.join(lines)

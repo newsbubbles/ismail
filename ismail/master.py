@@ -16,7 +16,8 @@ MARGIN_DB = 0.15          # the limiter aims this far under the ceiling, so the 
 ROUNDS = 3                # limiter rounds before ledger:M280 (tp_catch=False)
 TP_ROUNDS = 6             # with the catch: each round after the first aims lower by what the last re-gain put over,
 AIM_DEPTH_DB = 1.5        # at most this far under the ceiling (a target too loud for the mix is the catch's to take)
-MP3_MARGIN_DB = 1.2       # a 320k mp3 (ffmpeg lame) of a limited master peaked 0.1-1.25 dB over its wav (M280)
+MP3_CATCH_DB = 1.2        # the mp3 copy is caught this far under tp: a 320k mp3 (ffmpeg lame) of a limited master
+                          # peaked 0.1-1.25 dB over its wav (90-master sweep, ledger:M280)
 
 
 def true_peak_db(y):
@@ -71,9 +72,10 @@ def catch(y, sr, ceil_db, look_ms=1.5, release_ms=25.0):
 
 
 def master(y, sr, start_s=0.0, end_s=None, lufs=-16.0, tp=-1.0, out_sr=48000, fade_in_s=0.0, fade_out_s=0.4,
-           mp3_margin_db=MP3_MARGIN_DB, tp_catch=True):
+           mp3_margin_db=0.0, tp_catch=True):
     """The cue mastered: y is (n, ch) float. Returns (y, out_sr, report dict). Raises ValueError with what to change.
-    The limiter rounds and the catch aim at tp - mp3_margin_db (the wav's ceiling, so its mp3 lands under tp).
+    The limiter rounds and the catch aim at tp - mp3_margin_db (0: the wav at tp; an mp3 gets its own catch in
+    write_mp3).
     tp_catch=False keeps the limiter rounds from before ledger:M280 (3 plain rounds, no catch); with mp3_margin_db=0
     too it is that master exactly."""
     import pyloudnorm as pyln
@@ -125,3 +127,31 @@ def master(y, sr, start_s=0.0, end_s=None, lufs=-16.0, tp=-1.0, out_sr=48000, fa
            'trimmed': [a / sr, b / sr]}
     rep['over_ceiling'] = rep['true_peak_dbtp'] > ceil + 0.05
     return y, out_sr, rep
+
+
+def _ffmpeg():
+    import os
+    import shutil
+    return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+
+
+def write_mp3(y, sr, path, ceil_db, bitrate='320k'):
+    """The mp3 of a master (ledger:M280): a copy of y put through catch() at ceil_db, encoded with ffmpeg's lame from
+    a pipe (no temporary file), then decoded back and read at 4x. Only the mp3 gets this catch; y is not changed.
+    Returns (the copy's catch in dB, a negative number or 0, the decoded mp3's true peak in dBTP)."""
+    import subprocess
+    exe = _ffmpeg()
+    if not exe:
+        raise RuntimeError("ffmpeg not found; install it or set ISMAIL_FFMPEG to its path")
+    c, gr = catch(y, sr, ceil_db)
+    ch = c.shape[1]
+    r = subprocess.run([exe, '-y', '-loglevel', 'error', '-f', 'f32le', '-ar', str(int(sr)), '-ac', str(ch), '-i',
+                        'pipe:0', '-codec:a', 'libmp3lame', '-b:a', bitrate, path],
+                       input=np.ascontiguousarray(c, dtype='<f4').tobytes(), capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.decode(errors='replace').strip()[-300:] or f"ffmpeg exited {r.returncode}")
+    d = subprocess.run([exe, '-loglevel', 'error', '-i', path, '-f', 'f32le', '-ac', str(ch), 'pipe:1'],
+                       capture_output=True)
+    dec = np.frombuffer(d.stdout, dtype='<f4')
+    tp = true_peak_db(dec[:len(dec) // ch * ch].reshape(-1, ch).astype(np.float64)) if d.returncode == 0 else None
+    return gr, tp
