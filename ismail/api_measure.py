@@ -78,21 +78,48 @@ def ref_retune(project: str, cents: float = None) -> str:
             f"master afterwards instead.")
 
 
+DRIFT_PCT = 3.0          # analyze_swing says so when the 8-beat tempo spread is wider than this
+
+
 @op()
-def analyze_swing(project: str, source: str = None) -> str:
+def analyze_swing(project: str, source: str = None, follow: bool = False, band_hz: list = None,
+                  threshold: float = 0.35) -> str:
     """How late the swung hi-hats land, in beats and ms (16ths: the 'a' against the 'and'; 8ths: the 'and' against
     the beat). Default source: the reference drum stem if there is one, else the reference/render. Use it on a
-    reference before writing swung notes, and on 'track:<hats>' to check yours. Straight = 0."""
+    reference before writing swung notes, and on 'track:<hats>' to check yours. Straight = 0.
+    follow=True reads a record that drifts (played without a click): a beat line follows the thumb, bass or kick
+    (55-190 Hz) from the project tempo, every 16th step is read on it in band_hz ([lo, hi] Hz, default
+    [1500, 6000] for finger plucks; [6000, 16000] for hats), and it prints the hits, accents and median offset per
+    step against the plucks on the beats, and the most-played 16-step strings with the timing inside them. A step
+    counts as a pluck when its peak is over `threshold` x the 95th percentile peak (raise it, e.g. 0.5, when a
+    dense stem reads X on every step). Without follow, a line says when the beat drifts more than 3% and the
+    fixed grid smears the offsets."""
     P = _load(project)
     if source is None:
         ref = P.d.get('reference') or {}
         source = 'ref:drums' if ref.get('stems_dir') and os.path.exists(
             audiofile.find(os.path.join(ref['stems_dir'], 'drums.wav'))) else P.auto_source(None)
     path, g = P.source(source)
+    if band_hz is not None and (len(band_hz) != 2 or not 0 < float(band_hz[0]) < float(band_hz[1])):
+        raise OpError(f"band_hz is [lo, hi] in Hz with 0 < lo < hi, got {band_hz!r}")
+    if follow:
+        try:
+            return A.swing_follow(path, g.bpm, band_hz, threshold)[1]
+        except A.AnalysisError as e:
+            raise OpError(f"{e}. follow=True needs at least 12 beats near the project tempo ({g.bpm:g} BPM); "
+                          f"set it with project_set(bpm=...) from analyze_grid's thumb band")
     data, txt = A.swing(path, g.bpm, g.offset)
     if source in ('ref', 'render'):
         txt += ("\nNOTE this is a full mix: other highs bury the hats and can read straight. Measure a drum stem "
                 "(separate(source='ref') then source='ref:drums') or 'track:<hats>'.")
+    try:
+        d = A.tempo_drift(path, g.bpm)
+    except A.AnalysisError:
+        d = None                                  # too short to follow a beat line: nothing to say
+    if d and d['spread_pct'] > DRIFT_PCT:
+        txt += (f"\nthe beat drifts {d['spread_pct']:.0f}% ({d['min']:.1f} to {d['max']:.1f} BPM over 8 beats): a "
+                f"fixed grid smears these offsets. analyze_swing(follow=True) reads every step on a beat line that "
+                f"follows it.")
     return txt
 
 
@@ -207,12 +234,20 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
     as loud as its climax: the climax will not arrive, and this only showed up here) and sections so quiet they vanish at normal volume."""
     P = _load(project)
     y, sr = _segment(P, source)
-    _, g = P.source(source)
+    path, g = P.source(source)
     total = P.d.get('length_bars') or int((y.shape[1] / sr - g.offset) / (g.bpb * g.spb)) + 1
+    win = P.render_window(path)            # a bars=[a, b] render: its file starts at song bar a (windows.json)
+    w0, w1 = (int(win['bars'][0]), int(win['bars'][1])) if win else (1, total)
     if sections:
         secs = [(n, int(a), int(b)) for n, (a, b) in sections.items()]
+        out = [f"{n} [{a}, {b}]" for n, a, b in secs if a < w0 or b > w1]
+        if win and out:
+            raise OpError(f"{source!r} is a window render: its file starts at song bar {w0} and holds bars {w0}-{w1} "
+                          f"(renders/windows.json). Sections take song bars, so {', '.join(out[:3])} "
+                          f"{'falls' if len(out) == 1 else 'fall'} outside it: bars 1-4 of this file are "
+                          f"[{w0}, {w0 + 3}]. Shift the sections by {w0 - 1} bars, or render the full song")
     else:
-        secs = [(f"{a}-{min(a + block - 1, total)}", a, min(a + block - 1, total)) for a in range(1, total + 1, block)]
+        secs = [(f"{a}-{min(a + block - 1, w1)}", a, min(a + block - 1, w1)) for a in range(w0, w1 + 1, block)]
     w = int(0.4 * sr)
     rows = []
     for n, a, b in secs:
@@ -223,7 +258,8 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
         win = 10 * np.log10(np.add.reduceat(m, np.arange(0, len(m) - w + 1, w))[:len(m) // w] / w + 1e-20)
         rows.append((n, a, b, _db(s), 20 * np.log10(np.abs(s).max() + 1e-12), win.max(), win.min()))
     if not rows:
-        raise OpError("no section had 400 ms of audio; check sections against the render length")
+        raise OpError("no section had 400 ms of audio; check sections against the render length"
+                      + (f" ({source!r} holds song bars {w0}-{w1})" if win else ''))
     top = max(rows, key=lambda r: r[3])
     L = [f"sections of {source} (dB; loudest/quietest = 400 ms windows):",
          f"  {'section':<12} {'bars':>7} {'rms':>6} {'peak':>6} {'loudest':>8} {'quietest':>9}"]

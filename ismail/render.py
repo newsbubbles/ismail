@@ -163,6 +163,7 @@ class Renderer:
         self.cache_dir = os.path.join(root, 'cache')
         self.stats = {}
         self.early = {}          # track -> notes nudged before the song's first sample (moved to it)
+        self.notes_report = {}   # track -> summary lines about single notes (a mimic take far over its neighbours)
         instruments.set_resolvers(self.load_sound, self.load_table)
 
     # ------------------------------------------------------------------ sounds
@@ -295,8 +296,11 @@ class Renderer:
         if inst is not None:
             notes = self.track_notes_sec(tr, name)
             if notes:
+                rep = []
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
-                                                  self.b_t0, self.bpb)
+                                                  self.b_t0, self.bpb, rep)
+                if rep:
+                    self.notes_report[name] = rep
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
             s0 = int(round((self.beat_to_win_sec(clip['at_beat']) + tr.get('offset_ms', 0.0) / 1000.0) * self.sr))
@@ -340,15 +344,22 @@ class Renderer:
             keys[name] = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
             path = os.path.join(self.cache_dir, keys[name] + '.npy')
             t0 = time.time()
+            rpath = path[:-4] + '.notes.json'
             if self.use_cache and os.path.exists(path):
                 y = np.load(path).astype(np.float64)
                 cached = True
+                if os.path.exists(rpath):        # a cached track repeats its note lines
+                    with open(rpath, encoding='utf-8') as fh:
+                        self.notes_report[name] = json.load(fh)
             else:
                 y = self.render_track(name, tr)
                 cached = False
                 if self.use_cache:
                     os.makedirs(self.cache_dir, exist_ok=True)
                     np.save(path, y.astype(np.float32))
+                    if self.notes_report.get(name):
+                        with open(rpath, 'w', encoding='utf-8') as fh:
+                            json.dump(self.notes_report[name], fh)
             if name in sources:
                 self.post_fx[name] = y
             self.stats[name] = {'sec': round(time.time() - t0, 2), 'cached': cached}
@@ -425,7 +436,7 @@ def _code_hash():
     # any change to the synthesis/effect code invalidates cached track renders
     h = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py'):
+    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py', 'mimic.py'):
         with open(os.path.join(here, f), 'rb') as fh:
             h.update(fh.read())
     return h.hexdigest()[:12]

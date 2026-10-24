@@ -3,6 +3,8 @@ each rendered with the part before it as context and crossfaded at the bar line;
 on the song beat (beat0) then plays the same live as in a studio render of the whole part. Per-note events with one
 generator per render gave every slice different humanization (a kit's hi-hat changed timbre) and an 8 s tail each
 (kit70 rendered at 0.5x realtime)."""
+import os
+
 import numpy as np
 
 from ismail import instruments
@@ -133,3 +135,47 @@ def test_a_looping_performer_never_sees_a_negative_song_time(tmp_path):
     from ismail import voices
     seen = voices.load('keyed', str(tmp_path)).SEEN
     assert seen and min(seen) >= 0
+
+
+GESTURE = (
+    "import numpy as np\n"
+    "def voice(freq, t, vel, gate, sr):\n"
+    "    return 0.2 * vel * np.sin(2 * np.pi * freq * t) * (t < gate)\n"
+    "def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0):\n"
+    "    # a gesture score keyed on the song beat: a two-bar swell, so a part replayed from beat 0 sounds wrong\n"
+    "    t = np.arange(total_n) / sr\n"
+    "    swell = 0.05 + ((beat0 + t * bpm / 60.0) % 8.0) / 8.0\n"
+    "    y = np.zeros(total_n)\n"
+    "    for st, m, d, v in notes:\n"
+    "        s0, s1 = max(0, int(st * sr)), min(total_n, int((st + d) * sr))\n"
+    "        if s1 > s0:\n"
+    "            tt = t[s0:s1] - st\n"
+    "            y[s0:s1] += 0.2 * v / 127 * np.sin(2 * np.pi * 440 * 2 ** ((m - 69) / 12) * tt)\n"
+    "    return y * swell\n")
+
+
+def test_a_voice_named_with_fn_perform_plays_live_as_a_performer(tmp_path):
+    # M284: fn='perform' made the studio play the voice as a performer while live rendered it note by note, each
+    # note replaying the gesture score from beat 0 (corr -0.09 on a deck), with no warning
+    from ismail import api, voices
+    from ismail.live import parity
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=120, length_bars=6)
+    os.makedirs(os.path.join(root, 'voices'))
+    with open(os.path.join(root, 'voices', 'gesture.py'), 'w') as f:
+        f.write(GESTURE)
+    api.track_add(root, 'p', instrument={'type': 'code', 'voice': 'gesture', 'fn': 'perform', 'tail': 0.1})
+    api.notes_write(root, 'p', 2, '0 C4 1 100; 1 E4 1 90; 2 G4 2 100; 4 C5 1 80; 5 B4 1 90; 6 G4 2 100', repeat=2)
+    mod = voices.load('gesture', root)
+    for fn, want in ((None, False), ('', False), ('voice', False), ('perform', True), ('other', True)):
+        assert bool(_mark_performer({'type': 'code', 'voice': 'gesture', 'fn': fn}, root).get('performer')) is want
+        assert (instruments.performer_fn(mod, fn) is not None) is want             # the studio's rule, the same
+    res, _, _ = parity.run(root, [3, 5])                # a window that starts in bar 3, mid-part
+    m = res['track:p']
+    assert m['corr'] > 0.99 and abs(m['level_db']) < 0.5, m
+    # a kit pad that is a performer cannot play live as in the studio (live renders a kit hit by hit): said at load
+    from ismail.live.ops import _song_performer_gaps
+    api.track_add(root, 'k', instrument={'type': 'kit', 'map': {'C1': {'type': 'code', 'voice': 'gesture', 'fn': 'perform'},
+                                                                'D1': {'type': 'code', 'voice': 'gesture'}}})
+    gaps = _song_performer_gaps(root)
+    assert len(gaps) == 1 and "track 'k'" in gaps[0] and 'C1' in gaps[0] and 'D1' not in gaps[0], gaps
