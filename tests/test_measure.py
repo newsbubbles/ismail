@@ -138,3 +138,42 @@ def test_ref_retune_and_levels_from_ref(tmp):
     assert new['file'] != ref and os.path.exists(os.path.join(new['stems_dir'], 'bass.wav')), out
     assert abs(A.tuning(A.load(new['file']))[0]) < 5
     assert new['original']['file'] == ref
+
+
+def test_sections_on_a_window_render_say_where_the_file_starts(tmp):
+    """bossa_gilberto_studio 10-21: sections [1, 4] on a bars 69-92 window said only "no section had 400 ms"."""
+    import json
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=96, length_bars=16)
+    rd = os.path.join(p, 'renders')
+    os.makedirs(rd, exist_ok=True)
+    t = np.arange(int(4 * 2.5 * SR)) / SR
+    sf.write(os.path.join(rd, 'w_9_12.wav'), 0.3 * np.sin(2 * np.pi * 220 * t), SR)
+    with open(os.path.join(rd, api.WINDOWS_FILE), 'w', encoding='utf8') as f:
+        json.dump({'w_9_12.wav': {'bars': [9, 12], 'start_sec': 8 * 2.5}}, f)
+    src = os.path.join(rd, 'w_9_12.wav')
+    with pytest.raises(api.OpError, match=r'starts at song bar 9 and holds bars 9-12.*\[9, 12\]'):
+        OPS['analyze_sections'](p, source=src, sections={'a': [1, 4]})
+    out = OPS['analyze_sections'](p, source=src, sections={'a': [9, 10], 'b': [11, 12]})
+    assert '9-10' in out and '11-12' in out, out
+    out = OPS['analyze_sections'](p, source=src, block=2)       # default blocks follow the window
+    assert '9-10' in out and '11-12' in out and ' 1-2 ' not in out, out
+
+
+def test_voice_help_gives_the_level_per_velocity(tmp):
+    """bossa_gilberto_studio 10-21: velocity x1.3 / x0.78 moved a balance +2.2 dB, not +4.3; the curve makes a
+    balance change one step."""
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=120, length_bars=4)
+    os.makedirs(os.path.join(p, 'voices'), exist_ok=True)
+    with open(os.path.join(p, 'voices', 'square_law.py'), 'w', encoding='utf8') as f:
+        f.write('"""A test voice: level goes as velocity squared."""\nimport numpy as np\n\n\n'
+                'def voice(freq, t, vel, gate, sr):\n    return vel ** 2 * np.sin(2 * np.pi * freq * t)\n')
+    out = OPS['voice_help'](p, name='square_law')
+    line = next(l for l in out.splitlines() if l.startswith('level per velocity'))
+    # 40 log10(v): 0.2 -28.0, 0.4 -15.9, 0.6 -8.9, 0.8 -3.9
+    assert '0.2 -28.0 dB, 0.4 -15.9 dB, 0.6 -8.9 dB, 0.8 -3.9 dB, 1.0 +0.0 dB' in line, line
+    assert 'steps of 0.2: +12.0 +7.0 +5.0 +3.9 dB' in line, line
+    n = len(api._VEL_CACHE)
+    OPS['voice_help'](p, name='square_law')
+    assert len(api._VEL_CACHE) == n                             # probed once per voice file

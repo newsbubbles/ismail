@@ -46,6 +46,7 @@ import contextlib
 import ctypes
 import json
 import os
+import random
 import shutil
 import re
 import subprocess
@@ -67,7 +68,15 @@ CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
 NOVICE = ('someone new to computers is never asked to close things (they may not be able to, and it alarms '
           'them): wait quietly and say "the computer is busy, one moment"')
-WAIT_POLL_S = 5.0                  # a waiting job looks again this often
+WAIT_POLL_S = 5.0                  # a waiting job near the front of its line looks again this often
+WAIT_POLL_MAX_S = 60.0             # ... one further back looks less often, down to this (ledger:M307: it is woken
+                                   # when a job ends or a waiter leaves the line, so it misses nothing)
+WAKE_TICK_S = 0.25                 # a waiter asleep in line looks at the board's generation file (one stat) this often
+WAKE_SPREAD_S = 1.0                # woken, a waiter behind the front spreads its look over this long
+GEN_FILE = 'gen'                   # <board>/gen: touched when a job ends or a waiter leaves the line (ledger:M307)
+CPU_FRESH_S = 10.0                 # one CPU sample serves every process this long (<board>/cpu.json)
+GPU_FRESH_S = 5.0                  # one nvidia-smi reading serves every process this long (<board>/gpu.json)
+CLAIM_STALE_S = 15.0               # a reading's claim older than this was left by a sampler that died
 THREADS = 2                        # numeric threads per heavy job
 DISK_FLOOR_GB = 15.0               # no new heavy job while a drive jobs write to has less free than this
 DISK_WARN_GB = 30.0                # the board warns below this
@@ -140,9 +149,82 @@ def _gpu_query():
 _gpu_cache = [0.0, None]
 
 
+def _load_reading(path):
+    try:
+        with open(path, encoding='utf8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) and isinstance(d.get('t'), (int, float)) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _claim(path):
+    """-> 'mine' (made the claim file), 'theirs' (another caller holds it) or 'none' (the board cannot be written:
+    sample without one). A claim left by a sampler that died is removed after CLAIM_STALE_S. A claim only saves
+    work: two samplers at once cost one sample more, never a wrong reading."""
+    try:
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return 'mine'
+    except FileExistsError:
+        pass
+    except OSError:                                    # Windows: a claim being removed, or a board we cannot write
+        return 'theirs' if os.path.exists(path) else 'none'
+    try:
+        if time.time() - os.path.getmtime(path) > CLAIM_STALE_S:
+            _drop(path, patience=0)
+    except OSError:                                    # its sampler let go just now
+        pass
+    return 'theirs'
+
+
+def _shared_reading(name, fresh_s, take):
+    """-> {'t': when it was taken, ...}: a reading every process on this machine shares (ledger:M307: 23 waiters in
+    line each sampled the CPU for 2 s and ran nvidia-smi every 5 s, 8.4% of the CPU together while it was at 99%).
+    <board>/<name>.json holds the last one. A caller that finds it older than fresh_s claims the sampling with an
+    O_EXCL file <board>/<name>.json.claim and takes a new one; the callers that find the claim taken use the last
+    reading, a few seconds older (or, when there is none yet, wait for the first)."""
+    os.makedirs(board_dir(), exist_ok=True)
+    path = os.path.join(board_dir(), name + '.json')
+    claim = path + '.claim'
+    t_give = time.time() + CLAIM_STALE_S
+    while True:
+        d = _load_reading(path)
+        if d is not None and 0 <= time.time() - d['t'] < fresh_s:
+            return d
+        who = _claim(claim)
+        if who == 'theirs' and d is not None:
+            return d                                   # its sampler is at work: the last reading does for now
+        if who == 'theirs' and time.time() < t_give:
+            time.sleep(0.05)                           # the first reading is coming
+            continue
+        if who == 'theirs':
+            who = 'none'                               # no reading came: take one without the claim
+        try:
+            if who == 'mine':
+                d2 = _load_reading(path)               # a sampler finished between our look and our claim
+                if d2 is not None and 0 <= time.time() - d2['t'] < fresh_s:
+                    return d2
+            d = dict(take())
+            d['t'] = time.time()
+            try:
+                tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+                with open(tmp, 'w', encoding='utf8') as f:
+                    json.dump(d, f)
+                os.replace(tmp, path)
+            except OSError:                            # a reader holds it open (Windows), or a full disk
+                pass
+            return d
+        finally:
+            if who == 'mine':
+                _drop(claim, patience=0.5)
+
+
 def gpu():
-    if time.time() - _gpu_cache[0] > 5:
-        _gpu_cache[:] = [time.time(), _gpu_query()]
+    if time.time() - _gpu_cache[0] > GPU_FRESH_S and not (getattr(_locking, 'held', False) and _gpu_cache[0]):
+        # never nvidia-smi inside the board lock (ledger:M303): its holder uses the reading taken before it. One
+        # nvidia-smi serves every process for GPU_FRESH_S (ledger:M307)
+        d = _shared_reading('gpu', GPU_FRESH_S, lambda: {'gpu': _gpu_query()})
+        _gpu_cache[:] = [d['t'], d.get('gpu')]
     return _gpu_cache[1]
 
 
@@ -160,19 +242,18 @@ _cpu_cache = [0.0, None]
 
 
 def cpu_load():
-    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached 10 s
-    in this process and on the board for every process (each CLI call is a new process: each paid 2 s of sampling)."""
-    if time.time() - _cpu_cache[0] < 10 and _cpu_cache[1] is not None:
-        return _cpu_cache[1]
-    shared = os.path.join(board_dir(), 'cpu.json')
-    try:
-        with open(shared, encoding='utf8') as f:
-            d = json.load(f)
-        if time.time() - d['t'] < 10:
-            _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
-            return _cpu_cache[1]
-    except (OSError, ValueError, KeyError):
-        pass
+    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached
+    CPU_FRESH_S in this process and on the board for every process (each CLI call is a new process: each paid 2 s
+    of sampling). One caller samples at a time and the others read its sample (ledger:M307)."""
+    if _cpu_cache[1] is not None and (time.time() - _cpu_cache[0] < CPU_FRESH_S or getattr(_locking, 'held', False)):
+        return _cpu_cache[1]                           # inside the board lock: the sample taken before it
+    d = _shared_reading('cpu', CPU_FRESH_S, _cpu_sample)
+    _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
+    return _cpu_cache[1]
+
+
+def _cpu_sample():
+    """One CPU sample, CPU_SAMPLE_S long: the whole machine and the top 4 processes."""
     procs = []
     for p in psutil.process_iter(['name']):
         try:
@@ -191,16 +272,7 @@ def cpu_load():
         if c >= 1.0 and p.pid and p.info.get('name') not in ('System Idle Process', 'idle'):
             top.append((c, p.info.get('name') or '?', p.pid))
     top.sort(reverse=True)
-    _cpu_cache[:] = [time.time(), (total, top[:4])]
-    try:
-        os.makedirs(board_dir(), exist_ok=True)
-        tmp = shared + f".{os.getpid()}.tmp"
-        with open(tmp, 'w', encoding='utf8') as f:
-            json.dump({'t': _cpu_cache[0], 'busy': total, 'top': top[:4]}, f)
-        os.replace(tmp, shared)
-    except OSError:
-        pass
-    return _cpu_cache[1]
+    return {'busy': total, 'top': top[:4]}
 
 
 def _top_text(top):
@@ -408,6 +480,7 @@ def jobs():
         else:
             try:
                 os.remove(p)
+                _bump()                # a dead job's slot is free: wake the line
             except OSError:
                 pass
     return out
@@ -458,6 +531,7 @@ def set_priority(who, for_s, by, why=''):
     with _board_lock():
         with open(os.path.join(board_dir(), 'priority.json'), 'w', encoding='utf8') as f:
             json.dump(p, f)
+    _bump()                            # the line's order changed
     return p
 
 
@@ -495,6 +569,7 @@ def priority_match(who=None):
 def clear_priority():
     with _board_lock():
         _remove(os.path.join(board_dir(), 'priority.json'))
+    _bump()
 
 
 def waiters():
@@ -515,6 +590,7 @@ def waiters():
             else:
                 try:
                     os.remove(p)
+                    _bump()            # a dead waiter left the line: the ones behind it move up
                 except OSError:
                     pass
     pr = priority()
@@ -533,7 +609,59 @@ def _ahead(kind, who, since, me=None):
             and _rank(w['who'], w['since'], pr) < mine]
 
 
+def _gen():
+    """The board's generation: the time <board>/gen was last touched (0 when never). One stat."""
+    try:
+        return os.stat(os.path.join(board_dir(), GEN_FILE)).st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _bump():
+    """Wake the waiters (ledger:M307): a job ended, a waiter left the line or the priority changed, so the line may
+    have moved. A waiter asleep in line stats <board>/gen every WAKE_TICK_S and looks at the board when it changes."""
+    p = os.path.join(board_dir(), GEN_FILE)
+    t = time.time_ns()
+    try:
+        os.utime(p, ns=(t, t))
+    except FileNotFoundError:
+        try:
+            os.close(os.open(p, os.O_CREAT | os.O_WRONLY))
+            os.utime(p, ns=(t, t))
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def _wait_poll(kind, who, since, me):
+    """-> (seconds, behind): how long a waiter sleeps before it looks at the board again (ledger:M307). Near the
+    front of its line (it could be next) WAIT_POLL_S; `behind` places further back it cannot start before the jobs
+    ahead of it, and a job ending wakes it anyway, so it looks (1 + behind) times less often, down to
+    WAIT_POLL_MAX_S. 23 waiters looked at the board 4.6 times a second together; now about once."""
+    behind = max(0, len(_ahead(kind, who, since, me)) - SLOTS.get(kind, 1) + 1)
+    s = min(WAIT_POLL_S * (1 + behind), max(WAIT_POLL_S, WAIT_POLL_MAX_S))
+    return s * random.uniform(0.75, 1.25), behind      # jitter: the waiters do not all look at once
+
+
+def _nap(seconds, gen):
+    """Sleep up to `seconds`; wake early when the board's generation is no longer `gen`. -> True when woken."""
+    t_end = time.time() + seconds
+    while True:
+        left = t_end - time.time()
+        if left <= 0:
+            return False
+        time.sleep(min(WAKE_TICK_S, left))
+        if _gen() != gen:
+            return True
+
+
 STALE_LOCK_S = 30.0    # a board lock older than this was left by a holder that died mid-update
+DEAD_HOLDER_S = 2.0    # ... or older than this when the pid in it is gone (no critical section takes that long)
+LOCK_TIMEOUT_S = 30.0  # a caller gives up on the board lock after this long (exit 75 from `run`)
+TICKET_STALE_S = 1.0   # a ticket ahead in the lock's line is looked at (owner alive?) once it is this old
+LOCK_LINE = 'lockq'    # the board lock's line: one ticket file per caller, served oldest first (ledger:M303)
+_locking = threading.local()   # set while this thread holds the board lock: readings come from their caches
 
 
 def _read(path):
@@ -544,16 +672,16 @@ def _read(path):
         return None
 
 
-def _break_stale(lock):
+def _break_stale(lock, seen=None):
     """Take a dead holder's lock away. Renaming it is atomic, so of several waiters that all judged it stale only
-    one moves it; a waiter that moved a lock someone took meanwhile (fresh again) puts it back."""
+    one moves it; a waiter that moved a lock someone took meanwhile (not the lock it judged) puts it back."""
     moved = f"{lock}.stale.{os.getpid()}.{threading.get_ident()}"
     try:
         os.rename(lock, moved)
-    except OSError:                                    # gone already, or another waiter moved it
+    except OSError:                                    # gone already, another waiter moved it, or (Windows) still open
         return
     try:
-        if time.time() - os.path.getmtime(moved) < STALE_LOCK_S:
+        if (_read(moved) != seen) if seen is not None else (time.time() - os.path.getmtime(moved) < STALE_LOCK_S):
             os.link(moved, lock)                       # never over a lock that exists (FileExistsError)
     except OSError:
         pass
@@ -563,39 +691,130 @@ def _break_stale(lock):
         pass
 
 
-@contextlib.contextmanager
-def _board_lock(timeout=10.0):
-    """One writer at a time on the shared board, across every session's processes. A waiter retries while the lock
-    changes hands under it (a holder can let go between our failed create and our look at the lock: that race once
-    killed a job waiting in line), and a holder removes only its own lock."""
-    os.makedirs(os.path.join(board_dir(), 'jobs'), exist_ok=True)
-    lock = os.path.join(board_dir(), 'lock')
-    token = f"{os.getpid()} {threading.get_ident()} {time.time()!r}"
-    t0 = time.time()
+def _holder_gone(token):
+    """True when the lock's token ('pid thread time') names a process that no longer exists."""
+    try:
+        return not psutil.pid_exists(int(str(token).split()[0]))
+    except (ValueError, IndexError, psutil.Error):
+        return False
+
+
+def _lock_stale(lock):
+    """-> (stale, token): a lock past STALE_LOCK_S, or past DEAD_HOLDER_S with its holder's pid gone. A young lock
+    is never opened: on Windows a holder cannot remove a lock a waiter has open, and it stayed behind."""
+    try:
+        age = time.time() - os.path.getmtime(lock)
+    except OSError:                                    # its holder let go just now
+        return False, None
+    if age <= DEAD_HOLDER_S:
+        return False, None
+    token = _read(lock)
+    return (age > STALE_LOCK_S or (token is not None and _holder_gone(token))), token
+
+
+def _ticket_gone(name, now):
+    """A ticket ahead of us whose owner left without removing it: its process died, or its deadline passed (an
+    owner removes its ticket when it gives up). The name says it all (arrival, deadline, pid), so a ticket is never
+    opened: on Windows its owner cannot remove a file a waiter has open. Only tickets older than TICKET_STALE_S are
+    looked at, and a live owner is never skipped before its deadline. Tickets order the lock only: skipping one
+    costs fairness, never safety (the lock file is what keeps writers apart)."""
+    try:
+        made, until, pid = (int(x) for x in name.split('_')[:3])
+    except ValueError:
+        return True                                    # not a ticket
+    if now - made / 1e9 < TICKET_STALE_S:
+        return False
+    if now > until / 1e9 + 1.0:
+        return True
+    try:
+        return not psutil.pid_exists(pid)
+    except psutil.Error:
+        return False
+
+
+def _drop(path, patience):
+    """Remove a lock-line file, quietly, retrying while a reader holds it open (Windows). -> True when gone."""
+    t_end = time.time() + patience
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, token.encode())
-            break
-        except (FileExistsError, PermissionError):     # PermissionError: Windows, a lock being deleted
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            if time.time() >= t_end:
+                return False
+            time.sleep(0.005)
+
+
+@contextlib.contextmanager
+def _board_lock(timeout=None):
+    """One writer at a time on the shared board, across every session's processes, served in arrival order.
+
+    The lock itself is the O_EXCL file <board>/lock holding its owner's token; a holder removes only its own lock. In
+    front of it stands a line (ledger:M303: with about 23 jobs waiting, a new `run` lost the race for the lock again
+    and again and exited 75 after 10 s; one agent needed about 15 tries): each caller makes an O_EXCL ticket file in
+    <board>/lockq named by its arrival time, and only the caller whose ticket is first tries the lock. The others
+    look at the line with a backoff that grows with their place in it, with jitter, so 30 callers do not hammer one
+    file, and each is served after those ahead of it. A ticket whose owner died or passed its deadline is skipped; a
+    lock whose holder died is broken (pid gone: after DEAD_HOLDER_S; any lock: after STALE_LOCK_S). While a thread
+    holds the lock its GPU and CPU readings come from their caches, so nothing slow (nvidia-smi, a 2 s CPU sample)
+    runs inside it."""
+    timeout = LOCK_TIMEOUT_S if timeout is None else timeout
+    os.makedirs(os.path.join(board_dir(), 'jobs'), exist_ok=True)
+    lock = os.path.join(board_dir(), 'lock')
+    line = os.path.join(board_dir(), LOCK_LINE)
+    os.makedirs(line, exist_ok=True)
+    token = f"{os.getpid()} {threading.get_ident()} {time.time()!r}"
+    t0 = time.time()
+    # arrival_deadline_pid_thread_random: names sort in arrival order and say when their owner gives up
+    name = (f"{time.time_ns():020d}_{int((t0 + timeout) * 1e9):020d}_{os.getpid()}_{threading.get_ident()}_"
+            f"{os.urandom(3).hex()}")
+    ticket = os.path.join(line, name)
+    os.close(os.open(ticket, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    ahead, holder = [], None
+    try:
+        while True:
             try:
-                age = time.time() - os.path.getmtime(lock)
-            except OSError:                            # its holder let go just now: try again
-                age = 0.0
-            if age > STALE_LOCK_S:
-                _break_stale(lock)
+                ahead = sorted(n for n in os.listdir(line) if n < name)
+            except OSError:
+                ahead = []
+            if ahead and _ticket_gone(ahead[0], time.time()):
+                _drop(os.path.join(line, ahead[0]), patience=0)
+                continue
+            if not ahead:
+                try:
+                    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.write(fd, token.encode())
+                    break
+                except (FileExistsError, PermissionError):     # PermissionError: Windows, a lock being deleted
+                    stale, holder = _lock_stale(lock)
+                    if stale:
+                        _break_stale(lock, holder)
+                        continue
             if time.time() - t0 > timeout:
-                raise MachineBusy(f"the job board {lock} stayed locked for {timeout:.0f} s; try again")
-            time.sleep(0.02 + 0.03 * (threading.get_ident() % 7) / 7)
+                pid = f"; the lock's holder is pid {holder.split()[0]}" if holder and holder.split() else ''
+                raise MachineBusy(
+                    f"the job board lock {lock} stayed taken for {timeout:.0f} s ({len(ahead)} callers ahead of this "
+                    f"one{pid}); nothing was registered. Try again in a minute, or stand in line for the slot "
+                    f"with `python -m ismail.machine run --wait 30m ...`; `python -m ismail.machine` shows the "
+                    f"board. A lock whose holder died breaks itself within {STALE_LOCK_S:.0f} s")
+            # the first in line looks again soon (a holder keeps the lock for milliseconds); the k-th waits about k
+            # holds, with jitter, so the callers behind it do not all look at once
+            pause = 0.002 if not ahead else min(0.002 * (len(ahead) + 1), 0.05)
+            time.sleep(pause * random.uniform(0.5, 1.5))
+    finally:
+        gone = _drop(ticket, patience=0.5)             # served or given up: out of the line either way
+    _locking.held = True
     try:
         yield
     finally:
+        _locking.held = False
+        if not gone:                                   # a reader held it open all that time: once more, now
+            _drop(ticket, patience=0.5)
         os.close(fd)
         if _read(lock) == token:                       # never remove a lock another holder took
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
+            _drop(lock, patience=1.0)                  # a waiter judging an old lock may hold it open a moment
 
 
 def _ago(t):
@@ -1391,21 +1610,41 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
     me = psutil.Process()
     since, wid, wpath = time.time(), None, None
     deadline = since + float(wait) if wait else None
+
+    def ask():
+        return '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid, disk_gb=disk_gb,
+                                                        disk_path=disk_path, disk_hint=disk_hint, what=what, cmd=cmd,
+                                                        threads=threads)
+
+    def final(why):            # a job with a lighter way to run (disk_hint) is told it at once: a full drive rarely
+        return not deadline or time.time() >= deadline or (disk_hint and why.startswith('disk:'))   # clears in line
+
+    def busy(why):
+        return MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the machine op shows the "
+                           f"board), wait in line (`run --wait 30m`), do lighter work meanwhile, or pass force=True only "
+                           f"if the user says so.")
+    def rest(gen):             # until the next look, or until a job ends or a waiter leaves the line (ledger:M307)
+        seconds, behind = _wait_poll(kind, who, since, wid)
+        if _nap(seconds, gen) and behind:
+            time.sleep(random.uniform(0, WAKE_SPREAD_S))   # the front looks at once; those behind it spread out
     try:
         while True:
+            gen = _gen()               # before the look: a job that ends while this one looks still wakes it
             if kind == 'cpu' and not force:
                 cpu_load()             # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
+            # look first without the lock (ledger:M303): a job that cannot start yet, and a waiter whose turn has not
+            # come, never take it. The lock is for the decision itself: the check again, then the board write.
+            why = ask()
+            if why and final(why):
+                raise busy(why)
+            if why and wid is not None:        # in line already, and not this job's turn: look again later
+                rest(gen)
+                continue
             with _board_lock():
-                why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid,
-                                                               disk_gb=disk_gb, disk_path=disk_path,
-                                                               disk_hint=disk_hint, what=what, cmd=cmd,
-                                                               threads=threads)
-                # a job with a lighter way to run (disk_hint) is told it at once: a full drive rarely clears in line
-                if not why or not deadline or time.time() >= deadline or (disk_hint and why.startswith('disk:')):
+                why = why or ask()     # still free under the lock? (another job may have taken the slot meanwhile)
+                if not why or final(why):
                     if why:
-                        raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
-                                          f"machine op shows the board), wait in line (`run --wait 30m`), do lighter "
-                                          f"work meanwhile, or pass force=True only if the user says so.")
+                        raise busy(why)
                     # on the board inside the same lock as the check: registered later, the slot looked free to the
                     # next waiter in between (this waiter's line file already gone), and two jobs took one GPU slot
                     job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
@@ -1424,10 +1663,11 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
                     with open(wpath, 'w', encoding='utf8') as f:
                         json.dump({'id': wid, 'kind': kind, 'what': what, 'who': who, 'pid': me.pid,
                                    'pid_start': me.create_time(), 'since': since}, f)
-            time.sleep(WAIT_POLL_S)
+            rest(gen)
     finally:
         if wpath:
             _remove(wpath)
+            _bump()                    # out of the line (started or gave up): the ones behind move up
     g = gpu()
     state = {'gpu_temp': g['temp'], 'gpu_clock': g['clock'], 'gpu_reasons': hex(g['reasons']),
              'gpu_trouble': gpu_trouble(g) or None} if g else {}
@@ -1454,6 +1694,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         used = meter.stop()
         for f in (path, path[:-5] + '.tmp'):
             _remove(f)
+        _bump()                        # a slot is free: wake the line (ledger:M307)
         _record(job, job['started'] - since, state, used, outcome)
 
 

@@ -128,6 +128,22 @@ Find any tool by what you need or by role with `ops_find`.
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
   parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+- **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
+  woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
+  tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with
+  the exam that judged it, its range, its cost, and the gaps open in each family. The `kit` op gives the same rows
+  as text (`kit(family='woodwinds')`, `kit(voice='cello')`). Generated from the sources and the hand-kept rows in
+  `ismail/kit_tables.json` by `python -m ismail.kit` (data in [kit.json](kit.json)); `--check` fails when the page
+  is stale, and so does a test.
+- **MIDI out to synths and other apps.** `midi_ports` lists the inputs and outputs (a synth's USB MIDI, a loopMIDI
+  or IAC port into Ableton or FL Studio). `live_midi_out` sends a live track's notes (or a deck's part) to a port
+  and channel while the set plays, kits on channel 10, each note when its audio would reach the speakers, with or
+  without the track's own audio (`audio=False`) and a per-port `offset_ms` for the synth's delay; unrouting, a stop
+  and the set's end send every held note's note-off and All Notes Off. `live_midi_clock` sends MIDI clock (24 per
+  beat at the set's tempo, Start on the next bar line, Song Position with `position=True`, Stop at the end), so a
+  DAW or a drum machine follows the set. `midi_play` plays a song's notes (or some bars) to a port from the command
+  line, with clock if asked, no live set needed. Messages go out from their own thread (a sleep, then a short spin);
+  no new dependency on Windows (winmm), mido with python-rtmidi elsewhere.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
@@ -161,8 +177,15 @@ Find any tool by what you need or by role with `ops_find`.
   standing watch on its inbox with `phone_watch`.
 - **Exams**: blind exams on the phone (`phone_exam`, with floor pairs: the real clip against a 64 or 128 kb/s MP3
   copy of itself, or against itself, so a device limit can be told from a real difference); eye exams as picture
-  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown; and recording warnings for
+  rounds (`exam_picture_round`, `exam_eye_crops`); `exam_check` before any exam is shown (it also fails one overall
+  "A or B is real" choice on pairs whose real side moves: ask "real or fake?" per clip); and recording warnings for
   soft-limited peaks and band-limited (Bluetooth headset) microphones.
+- **The tell ledger** (`tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`,
+  `tell_check`, `tell_import`): the faults the person keeps naming in a sound ("boxy"), one append-only log per song
+  (`<song>/notes/tells.jsonl`) with their words, where they said them, and a measured gap each round. `tell_measure`
+  pulls its number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply or a saved report.
+  `tell_show` flags NOT MOVING on an open tell named twice whose gap did not shrink, closing needs a passed verdict
+  after the last measure, and `tell_check` validates the log.
 - **Feedback pages** (`feedback_page`, `feedback_read`, `feedback_wait`, `feedback_list`, `feedback_stop`):
   questions the person answers by typing or by voice at the desk, served on this computer, opened in their default
   browser (an app's browser pane has no microphone), with every typed answer and voice clip saved in the song and
@@ -248,7 +271,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | drums | `toms` | performer: the Big Rusty toms (Karoryfer, CC0) retuned to the note, so the note is the drum's pitch (F#1-A3 heard as real); lanes `pos` (0 center .. 1 rim) and `stroke` (stick, mallet, brush, rimshot, rim click, shell, dead) per hit; velocity picks the recorded layer. Not told apart from the real drum in a blind exam of 5 pairs (one listener, 2026-10-14). About 2 s of rendering per hit. Finds its samples in `$TOM_SAMPLES`, the project's `ref/`, or `samples_fetch('big_rusty')` |
 | guitar | `emily` | performer: Emilyguitar (Karoryfer, CC0), a clean electric guitar sampled DI; velocity picks one of 4 recorded layers and moves the level inside it, toward the layer below; fetch with `samples_fetch` |
 
-Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters.
+Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine patch in `presets_list`. Use a voice with `instrument={"type": "code", "voice": "grand_piano", "tail": 4.0}` or `"preset:grand_piano"`. `voices_list` shows what is available and `voice_help(name)` explains a voice's velocity mapping, functions and parameters, and gives its level per velocity (a short note probed at 0.2 to 1.0, in dB against 1.0), so a balance change is one step.
 
 Voices are looked up in this order:
 
@@ -294,7 +317,7 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Levels, bands and chords per bar | `analyze_bars`, `analyze_chords`, `analyze_key` |
 | Drum pattern | `analyze_drums` (step strings you can paste into `pattern_write`) |
 | What is in a drum kit | `analyze_kit` (splits a drum stem into its pieces, with each one's pattern and audio) |
-| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax) |
+| Loudness per section, dynamic range | `analyze_sections` (warns when a build is as loud as its climax; on a window render, sections are song bars and the error names the window) |
 | Notes | `analyze_pitches` (per beat), `analyze_roll` (piano roll), `analyze_melody`, `analyze_notes` |
 | Intonation, quarter tones (maqam steps), slides, vibrato | `analyze_melody(cents=True)` (each note's pitch as a float MIDI number, Hz and cents), `analyze_contour` (f0 per frame, in windows of up to 1000 rows) |
 | Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |
@@ -435,6 +458,8 @@ ismail/
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
+  kit.py         the kit page: voices and effects by family (docs/KIT.md, docs/kit.json), from kit_tables.json;
+                 api_kit.py the kit op
   audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup

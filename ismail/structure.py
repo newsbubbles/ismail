@@ -5,6 +5,9 @@ from . import features as FE
 from .notation import NAMES
 
 DIGITS = '0123456789'
+# absolute floor (dB on the features' level scale): digital silence reads about -117 dB per bar, real material far
+# above -100. A row that never rises above it is empty (a stem group with no tracks), not "loud at its own top".
+SILENT_ABS_DB = -100.0
 
 
 def bar_matrix(F, key):
@@ -25,7 +28,7 @@ def level_row(levels, top=None, step_db=4.0, silent_db=36.0):
     out = []
     for v in levels:
         d = v - top
-        out.append('.' if d < -silent_db else DIGITS[int(np.clip(round(9 + d / step_db), 0, 9))])
+        out.append('.' if d < -silent_db or v < SILENT_ABS_DB else DIGITS[int(np.clip(round(9 + d / step_db), 0, 9))])
     return ''.join(out)
 
 
@@ -206,7 +209,8 @@ def describe(F_mix, stems=None, max_bars=None):
     lines.append("\nSECTIONS by arrangement (letters = similar arrangement; ' = variant)")
     for s in segs:
         a, b = s['start'], s['end']
-        act = [n for n, Fs in stems.items() if np.max(bar_levels(Fs)[a - 1:b]) > np.max(bar_levels(Fs)) - 18]
+        act = [n for n, Fs in stems.items()
+               if np.max(bar_levels(Fs)[a - 1:b]) > max(np.max(bar_levels(Fs)) - 18, SILENT_ABS_DB)]
         line = f"{s['label']:<3} bars {a:>3}-{b:<3} ({b - a + 1:>2})  level {np.mean(bar_levels(F_mix)[a - 1:b]):6.1f} dB" \
                f"  pcs: {top_pitch_classes(stems.get('other', F_mix), a, b) or '-'}"
         if stems:
