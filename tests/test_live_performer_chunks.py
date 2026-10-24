@@ -106,7 +106,7 @@ def test_a_deck_performer_hears_what_came_before_its_window(tmp_path):
     assert [n[1] for n in c.notes] == [57, 59]                     # the held G3 is not struck again on beat 1
     assert sorted(n[1] for n in c.context) == [52, 55]             # the 8 beats before the window
     lo, ns, chunk = eng._chunk(c, 0, 0)
-    assert lo == -2 and chunk['pre'] == 1.0 and ns[0][1] == 55    # the held G3 from its start; E3 is past 1 s
+    assert lo == -2 and chunk['pre'] == 2.0 and ns[0][1] == 55    # the held G3 from its start (beats); E3 is past 1 s
 
 
 def test_a_looping_performer_never_sees_a_negative_song_time(tmp_path):
