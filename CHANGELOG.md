@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### master_cue ends at its true-peak ceiling, and its mp3 under it
+
+- `master_cue` gets a lookahead true-peak catch as its last stage (ledger:M280; M271 h and M277 a ask the same):
+  the 4x oversampled peak of each sample, the gain it needs min-filtered over +-1.5 ms, a 25 ms release and a
+  1.5 ms moving average, no re-gain after it. Ported from `songs/planet_rock_axel_f_remix/work/master.py`. The
+  limiter's rounds before it now get up to 6 rounds, each aiming lower by what the last re-gain put back over (at
+  most 1.5 dB under the ceiling), so the catch only takes what a target too loud for the mix leaves; the report
+  says what it took and where the loudness lands.
+- `mp3_margin_db=1.2`: the limiter and the catch aim at `tp - mp3_margin_db`, so the 320k mp3 of the wav stays under
+  `tp`. Measured with ismail's own encoder (ffmpeg libmp3lame 320k, `render.write_mp3`) on synthetic dense mixes
+  (saw chords, kick, snare, 16th hats; 5 mixes, 3 seeds, 44.1 and 48 kHz, 0 to 4 dB of limiting asked): the mp3
+  peaked 0.1 to 1.25 dB over its wav (median about 0.5). With 3 plain rounds and the catch, margins of 0.8, 1.0 and
+  1.2 left 4, 1 and 0 of 90 mp3s over -1 dBTP; with the rounds as shipped, 1.0 left none but its worst mp3 was at
+  -1.03, and 1.2's worst at -1.18. `mp3_margin_db=0` when the wav itself is the delivery.
+- On the test mix (4 s at -18.6 LUFS, 3 dB of limiting asked at -1 dBTP): before, wav -0.71 dBTP and mp3 0.00;
+  with the catch and margin 0, wav -1.08 and mp3 -0.30 at the same loudness; with the default, wav -2.24 and mp3
+  -1.42, 0.6 LU under the target (the extra 1.2 dB of limiting is more than the rounds can re-gain). A mix already under the ceiling keeps its
+  loudness (the rounds re-gain to the target).
+- This changes existing masters: a master whose peak after the gain lands between `tp - 1.2` and `tp` is now
+  limited by up to 1.2 dB (same loudness), and one the old rounds left over the ceiling now ends under it.
+  `tp_catch=False, mp3_margin_db=0` is the master from before, sample for sample. Tests:
+  `tests/test_master_cue.py` (the mp3 test skips without ffmpeg; CI has it on Linux).
+
 ### melody_consensus: a lead line over a backing in the same stem
 
 - New op `melody_consensus(source, reps, phrase_bars, steps_per_beat=4, low='C3', high='C7', track=None,
