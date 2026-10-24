@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Section reads find the path and name the loudest part
+
+- `analyze_sections` looks up a relative path in the working directory first, then in the project. On the
+  planet_rock remix, `songs/<slug>/proj/renders/mix_v7.wav` run from the repo root read "not found". A path in
+  neither place now gives an error that names both places it looked. (ledger:M281 a)
+- `analyze_sections` with stems adds a last block, one line per section, that names the loudest one or two parts
+  and their rms against the mix's. For a render with `stems=True` the parts are the tracks routed to the master
+  and each bus (a track on a bus counts inside the bus); for the reference they are its stems. On the remix a vox
+  routed to master carried a build that the mix bus had pulled down 9.5 dB, and the section read did not say so.
+  Stems from another render are not read, and one line says so. The existing lines are unchanged. (ledger:M281 b)
+
 ### instrument_fit takes wait; a band far off costs what it should
 
 - `instrument_fit` refused BUSY with a message to pass `wait='10m'`, then rejected the keyword. It now takes `wait`
