@@ -16,7 +16,8 @@ holds three things:
   once, then copied to every venue that streams. Each destination is its own small process, so one site dropping
   never stops the others, and it is reconnected on its own.
 - **Requests** (request_queue.py). Chat's requests in one queue the MC fills and the DJ plays from, an append-only log
-  (requests.jsonl) that needs no server, so both sessions see one line.
+  (requests.jsonl) that needs no server, so both sessions see one line. `!request` and `!vote` in chat are handled
+  by each venue's rules (venue_rules.py), and the viewers who asked are credited in a song's CREDITS.md.
 
 Going live on a public venue is the person's yes, every time: stream_go asks for their words and logs them.
 """

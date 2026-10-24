@@ -1,13 +1,15 @@
-"""request_* ops: one queue of chat's song requests that the MC fills and the DJ plays from (ledger:M290).
+"""request_* ops: one queue of chat's song requests that the MC fills and the DJ plays from (ledger:M290), with votes
+that move a request up and credit lines for the viewers who asked (ledger:M291).
 
-The queue is an append-only event log, requests.jsonl in the stream home: {ev: add | mark, id, at, ...}, replayed on
-every read. So it needs no server, survives a restart, and an MC and a DJ in separate processes see the same line.
-Writes hold a lock file while an id is chosen and its line appended."""
+The queue is an append-only event log, requests.jsonl in the stream home: {ev: add | mark | vote | love | cmd, id, at,
+...}, replayed on every read. So it needs no server, survives a restart, and an MC and a DJ in separate processes see
+the same line. Writes hold a lock file while an id is chosen and its line appended."""
 import json
 import os
 import statistics
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 from ..api import OpError, op
 from . import config as C, ops as S
@@ -77,15 +79,26 @@ def _append(ev):
     return ev
 
 
+def viewer_key(venue, who):
+    """One viewer on one venue, by the name chat shows (any case), so an op given a name and a chat line agree."""
+    return f"{venue or ''}:{str(who).strip().lower()}"
+
+
 def state():
-    """{id: request} replayed from the log: who, what, venue, note, status, added, started, ended, and the UTC time
-    each state was last entered (queued_at, playing_at, done_at, skipped_at), so request-to-air time reads off it."""
+    """{id: request} replayed from the log: who, what, venue, note, status, added, started, ended, the UTC time each
+    state was last entered (queued_at, playing_at, done_at, skipped_at, so request-to-air time reads off it), the
+    viewer's key, the keys of everyone who voted for it, and the !love taps while it played."""
     reqs = {}
     for e in _events():
         r = reqs.get(e.get('id'))
         if e.get('ev') == 'add':
             reqs[e['id']] = {k: e.get(k) for k in ('id', 'who', 'what', 'venue', 'note')} | {
-                'status': 'waiting', 'added': e['at'], 'started': None, 'ended': None, 'queued_at': e.get('ts')}
+                'status': 'waiting', 'added': e['at'], 'started': None, 'ended': None, 'queued_at': e.get('ts'),
+                'votes': [], 'loves': 0, 'key': viewer_key(e.get('venue'), e.get('who'))}
+        elif e.get('ev') == 'vote' and r and e.get('key') not in r['votes']:
+            r['votes'].append(e['key'])
+        elif e.get('ev') == 'love' and r:
+            r['loves'] += 1
         elif e.get('ev') == 'mark' and r:
             r['status'] = e['status']
             r['queued_at' if e['status'] == 'waiting' else e['status'] + '_at'] = e.get('ts')
@@ -101,7 +114,7 @@ def state():
 
 
 def _order(r):
-    return r['id']
+    return -len(r['votes']), r['id']        # more votes first, then first asked
 
 
 def line_up(reqs):
@@ -119,7 +132,26 @@ def _ago(s):
 
 
 def _desc(r):
-    return f"#{r['id']} {r['what']!r} for {r['who']}" + (f" ({r['venue']})" if r.get('venue') else '')
+    n = len(r['votes'])
+    return (f"#{r['id']} {r['what']!r} for {r['who']}" + (f" ({r['venue']})" if r.get('venue') else '')
+            + (f", {n} vote{'s' * (n != 1)}" if n else ''))
+
+
+def handled():
+    """The chat line numbers already acted on (chat_commands), so a line is never handled twice."""
+    return {e['src'] for e in _events() if e.get('src') is not None}
+
+
+def add(who, what, venue=None, note=None, user_id=None, src=None):
+    """Append a request (the caller holds _lock) and return its id."""
+    rid = max(state(), default=0) + 1
+    _append({'ev': 'add', 'id': rid, 'who': str(who)[:80], 'what': what, 'venue': venue, 'note': note,
+             'user_id': user_id, 'src': src})
+    return rid
+
+
+def position(rid, reqs):
+    return [r['id'] for r in line_up(reqs)].index(rid) + 1
 
 
 def _id(given, reqs):
@@ -159,7 +191,8 @@ def _times(r):
 
 def _now_line(reqs, now):
     p = _playing(reqs)
-    return 'playing: ' + ('; '.join(f"{_desc(r)}, for {_ago(now - r['started'])}" for r in p) if p else 'nothing')
+    return 'playing: ' + ('; '.join(f"{_desc(r)}, for {_ago(now - r['started'])}"
+                                    + (f", {r['loves']} !love" if r['loves'] else '') for r in p) if p else 'nothing')
 
 
 @op(mutates=True)
@@ -174,11 +207,9 @@ def request_add(who: str, what: str, venue: str = None, note: str = None) -> str
     if len(what) > MAX_WHAT:
         raise OpError(f"what is {len(what)} characters; keep it under {MAX_WHAT}: the request, not the chat line")
     with _lock():
-        reqs = state()
-        rid = max(reqs, default=0) + 1
-        _append({'ev': 'add', 'id': rid, 'who': who[:80], 'what': what, 'venue': venue, 'note': note})
+        rid = add(who, what, venue, note)
     reqs = state()
-    pos = [r['id'] for r in line_up(reqs)].index(rid) + 1
+    pos = position(rid, reqs)
     now = time.time()
     return (f"queued {_desc(reqs[rid])}: position {pos} in line ({pos - 1} ahead{_eta(pos, reqs, now)}). "
             f"{_now_line(reqs, now)}")
@@ -186,8 +217,9 @@ def request_add(who: str, what: str, venue: str = None, note: str = None) -> str
 
 @op()
 def request_list(status: str = 'waiting') -> str:
-    """The request queue: what plays now, then the waiting requests in the order they play, with their positions.
-    status: waiting (the default), playing, done, skipped, or all (every request, newest last)."""
+    """The request queue: what plays now, then the waiting requests in the order they play (most votes first, then
+    first asked), with their positions. status: waiting (the default), playing, done, skipped, or all (every
+    request, newest last)."""
     if status not in STATUSES + ('all',):
         raise OpError(f"status {status!r}: one of {', '.join(STATUSES + ('all',))}")
     reqs, now = state(), time.time()
@@ -280,3 +312,104 @@ def request_where(who: str, venue: str = None) -> str:
                      + (f" ({r['note']})" if r.get('note') else ''))
         out.append(f"{_desc(r)}: {where}{_times(r)}")
     return '\n'.join(out)
+
+
+def vote_refused(r, key):
+    """Why this viewer's vote for r does not count, or None."""
+    if r['status'] != 'waiting':
+        return f"#{r['id']} is not waiting (it is {r['status']})"
+    if key == r['key']:
+        return f"#{r['id']} is their own request"
+    if key in r['votes']:
+        return f"they voted for #{r['id']} already"
+    return None
+
+
+def vote(rid, key, src=None):
+    """Append a vote (the caller holds _lock and checked vote_refused)."""
+    _append({'ev': 'vote', 'id': rid, 'key': key, 'src': src})
+
+
+def love(key, src=None):
+    """Append a !love for what plays now (or for the set, when no request plays); returns that request's id."""
+    rid = next((r['id'] for r in _playing(state())), None)
+    _append({'ev': 'love', 'id': rid, 'key': key, 'src': src})
+    return rid
+
+
+def last_reward(key):
+    """When this viewer last voted or loved (chat_commands' window), or None."""
+    return max((e['at'] for e in _events() if e.get('ev') in ('vote', 'love') and e.get('key') == key), default=None)
+
+
+@op(mutates=True)
+def request_vote(id: int, who: str, venue: str = None) -> str:
+    """Count a viewer's vote for a waiting request: more votes play sooner (ties go to the first asked). One vote
+    per viewer per request, never for their own. chat_commands counts `!vote <id>` lines by itself; this is for a
+    vote that came another way. who / venue: the voter, as chat shows them."""
+    if not str(who or '').strip():
+        raise OpError("request_vote needs who= (the voter's name as chat shows it)")
+    with _lock():
+        reqs = state()
+        rid = _id(id, reqs)
+        why = vote_refused(reqs[rid], viewer_key(venue, who))
+        if why:
+            raise OpError(f"vote not counted: {why}. request_list shows the waiting ones")
+        vote(rid, viewer_key(venue, who))
+    reqs = state()
+    return f"counted: {_desc(reqs[rid])}, now position {position(rid, reqs)} in line"
+
+
+CREDITS_HEAD = '## Requests from chat'
+
+
+def credit_line(r, venues):
+    plat = (venues.get(r.get('venue')) or {}).get('platform')
+    where = (f"{r['venue']} on {plat}" if plat and plat != r['venue'] else r.get('venue')) or 'chat'
+    return f"- {r['who']} ({where}): asked for \"{r['what']}\""
+
+
+def _write_credits(p, lines):
+    """Add the lines missing from p under CREDITS_HEAD (made at the end when it is not there); returns the added."""
+    have = p.read_text(encoding='utf8').splitlines() if p.exists() else ['# Credits']
+    new = [l for l in lines if l not in have]
+    if not new:
+        return []
+    if CREDITS_HEAD not in have:
+        have += ([''] if have and have[-1].strip() else []) + [CREDITS_HEAD, ''] + new
+    else:
+        end = next((i for i in range(have.index(CREDITS_HEAD) + 1, len(have)) if have[i].startswith('#')), len(have))
+        while not have[end - 1].strip():
+            end -= 1
+        have[end:end] = new
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('\n'.join(have) + '\n', encoding='utf8')
+    return new
+
+
+@op(mutates=True)
+def request_credits(ids: list = None, path: str = None) -> str:
+    """Credit lines for the viewers whose requests shaped a song: their name, where they asked and what they asked
+    for, for the song's CREDITS.md. Reach for it when a song made from chat's requests is finished. ids: those
+    requests (default: every one that played). path: a CREDITS.md or a song folder (its CREDITS.md): the lines go
+    under "## Requests from chat", each one once; without path they come back to paste. credits(overwrite=True)
+    rewrites the file from SOURCES, so run this again after it. Name a viewer in a song only with their OK: ask them
+    in chat first."""
+    reqs = state()
+    if ids is None:
+        pick = [r for r in sorted(reqs.values(), key=lambda r: r['id']) if r['status'] in ('playing', 'done')]
+        if not pick:
+            return "no request has played yet: credit lines come from played requests, or name them with ids=[...]"
+    else:
+        pick = [reqs[_id(i, reqs)] for i in ([ids] if isinstance(ids, (int, str)) else ids)]
+    venues = C.load_venues()
+    lines = list(dict.fromkeys(credit_line(r, venues) for r in pick))
+    if not path:
+        return '\n'.join(lines)
+    p = Path(path)
+    if p.is_dir() or not p.suffix:
+        p = p / 'CREDITS.md'
+    new = _write_credits(p, lines)
+    if not new:
+        return f"{p}: every line is there already"
+    return f"{p}: added {len(new)} under {CREDITS_HEAD!r}\n" + '\n'.join(new)
