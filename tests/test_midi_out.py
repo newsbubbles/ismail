@@ -270,7 +270,7 @@ def test_midi_play_sends_a_song_to_a_port(tmp_path, monkeypatch):
 
 
 def test_clock_pulses_follow_a_tempo_change(tmp_path):
-    """live_tempo (ledger:M287) moves the clock with it: 120 to 150 BPM at bar 3 changes the pulse gap on that
+    """live_tempo (#243) moves the clock with it: 120 to 150 BPM at bar 3 changes the pulse gap on that
     bar's downbeat, with no drift after."""
     e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
     clk = Clock()

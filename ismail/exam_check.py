@@ -14,6 +14,9 @@ cannot be) or ok. The checks:
   it loads) next to a clip or in a label-to-class mapping, a key/answer file the page loads, formats (sample rate,
   channels, encoding) that differ by class, durations or leading silence that separate the classes, and a clip
   order that follows the key;
+- the overall choice: on an exam of pairs (1A, 1B, 2A ...) whose real side moves between pairs, one single-choice
+  question that asks which side is real ('A is the real band' / 'B is the real band') fails, and one that names
+  sides about anything else warns (Nate, metal round 3: ask "real or fake?" per clip instead);
 - submit: a marked test answer posted to submit_url lands in answers_path (where the asking agent reads it).
 """
 import json
@@ -209,7 +212,7 @@ def _page(page, tmp):
 
 
 def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit_url=None, submit_body=None,
-        lufs_tol=1.0, texts=None):
+        lufs_tol=1.0, texts=None, choices=None, question=None):
     fails, warns, oks = [], [], []
     tmp = tempfile.mkdtemp(prefix='exam_check_')
     try:
@@ -401,6 +404,11 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
                 fails.append("the clips are in key order (all of one class, then the next): shuffle them")
             if not any(f.startswith(('formats', 'durations', 'the order', 'the clips are')) for f in fails):
                 oks.append(f"no tell by format, length or order across {len(classes)} classes")
+        side = side_choice(choices, question, [(c['label'], c['cls']) for c in cl])
+        if side:
+            (fails if side[0] == 'FAIL' else warns).append(side[1])
+        elif choices and classes:
+            oks.append("the overall choice asks nothing a moving side would break")
         if terms and not any('says' in f or 'ties' in f or 'loads' in f for f in fails):
             oks.append(f"no leak of {', '.join(repr(t) for t in terms[:6])} in names, tags or the page")
 
@@ -443,6 +451,72 @@ def run(clips=None, page=None, key=None, secrets=None, answers_path=None, submit
         return not fails, _report(fails, warns, oks, len(cl))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ------------------------------------------------------------------ one overall "A or B" choice across pairs
+# Nate, metal round 3 (2026-10-22 voice note): "the last question of A being the real band or B being the real band,
+# or can't tell, I think that's redundant and it also doesn't match what you're doing here because you don't have
+# A or B be the real band every time." The real side moves between pairs, so one A-or-B answer has nothing to name.
+REALISH = ('real', 'fake', 'record', 'recording', 'original', 'reference', 'ref', 'genuine', 'human', 'synth',
+           'synthetic', 'ai', 'machine', 'ours', 'mine', 'made', 'render', 'rendered')
+REAL_CLASSES = ('real', 'record', 'recording', 'original', 'reference', 'ref', 'genuine', 'human')
+SIDE_WORD = r'(?i:clip|side|sound|option|take|version)'
+
+
+def _side_of(choice, sides):
+    """The side a choice names: 'A is the record', 'B', 'B)', 'clip A', 'the real one is B'; not 'A lot'."""
+    s = str(choice).strip()
+    for x in sides:
+        e = re.escape(x)
+        if (re.match(rf'^{e}(?:\s*$|\s*[).:,=]|\s+(?:is|was|sounds|seems|feels|has)\b)', s)
+                or re.search(rf'(?<![A-Za-z0-9]){SIDE_WORD}\s+{e}(?![A-Za-z0-9])', s)
+                or re.search(rf'\b(?:is|was)\s+{e}\s*[.!?]?$', s)):
+            return x
+    return None
+
+
+def side_choice(choices, question, clips):
+    """The overall single-choice question on a multi-pair exam. clips: [(label, class)], labelled by trial (1A, 1B,
+    2A ...). -> None, or (level, text): FAIL when the choices ask which side holds a class (the real one) and that
+    class changes side between the trials; WARN when they name sides that mean a different class in each trial. A
+    choice that names no side ('pair 1', "can't tell", 'yes'), a single trial, or classes that keep their side are
+    never flagged."""
+    trials = {}
+    for lab, k in clips:
+        m = PAIR.match(str(lab))
+        if m and k:
+            trials.setdefault(m.group(1), {})[m.group(2).upper()] = str(k)
+    trials = {t: v for t, v in trials.items() if len(v) >= 2}
+    if len(trials) < 2 or not choices:
+        return None
+    sides = sorted({s for v in trials.values() for s in v})
+    named = [(str(c), _side_of(c, sides)) for c in choices]
+    named = [(c, s) for c, s in named if s]
+    if len({s for _, s in named}) < 2:
+        return None
+    classes = sorted({k for v in trials.values() for k in v.values()})
+    where = {k: {} for k in classes}
+    for t in sorted(trials, key=int):
+        for s, k in sorted(trials[t].items()):
+            where[k].setdefault(s, []).append(t)
+    moving = [k for k in classes if len(where[k]) > 1]
+    if not moving:
+        return None
+    said = ' '.join(c for c, _ in named)
+    bare = all(not re.sub(rf'{SIDE_WORD}|\b[A-Z]\b|\W', '', c) for c, _ in named)
+    words = _words(classes) + list(REALISH)
+    about = [w for w in words if _hit(said, w)] or ([w for w in words if _hit(question or '', w)] if bare else [])
+    target = (next((k for k in moving if any(k.lower() == w.lower() for w in about)), None)
+              or next((k for k in moving if k.lower() in REAL_CLASSES), None) or moving[0])
+    at = '; '.join(f"{s} in pair{'s' * (len(ts) > 1)} {', '.join(ts)}" for s, ts in sorted(where[target].items()))
+    shown = ' / '.join(repr(c) for c, _ in named)
+    if about:
+        return 'FAIL', (f"one overall choice ({shown}) asks which side is {target!r}, but {target!r} moves between "
+                        f"pairs ({at}): that answer names nothing. Ask \"real or fake?\" for each clip of a pair (a "
+                        f"chip or a choice per clip) and drop the overall side choice (Nate, metal round 3)")
+    return 'WARN', (f"one overall choice names sides ({shown}), but a side is a different class in each pair "
+                    f"({target!r}: {at}): an answer about one side means a different clip per pair. Ask per pair "
+                    f"or per clip")
 
 
 def _report(fails, warns, oks, n):

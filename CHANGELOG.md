@@ -15,6 +15,135 @@
   planet_rock_studio prototype: on that song it lists the same 37 clashes in the deck and the 7 kept in the studio
   version, and no note out of G minor.
 
+### mimic plays phrases: perform=true for legato winds and strings
+
+- `{"type": "mimic", "profile": ..., "perform": true}` renders a track as phrases instead of note by note, for any
+  sustained (blown or bowed) profile. Overlapping notes slur (one continuous tone, the pitch glides, no second
+  attack), a gap under `breath_gap` (0.16 s) is tongued, a longer gap is a new breath. The vibrato waits and grows
+  (the profile's measured vibrato by default) with a breath pulse, and a long last note tapers. Lanes, as
+  automation `inst.lane.<name>` or clip `expr` live: `level`, `vib`, `scoop`, `tongue`, `breath` and `bend`, the
+  tenor sax's names where they overlap. `"perform": {...}` sets performer params (`instrument_help(type='mimic')`
+  lists them). A decaying profile (piano, harp) refuses it with a pointing error; left out, every render is as it
+  was. On a clarinet slur the second note's harmonics in the first 70 ms after the join sit 9.9 dB under their
+  held level note by note (a new attack) and 2.3 dB under performed. (ledger:M308, from the
+  bossa_gilberto_studio flute performer, after Nate's "the flute sounds a little bit midi" of 10-23.)
+
+### Velocity sets the level of rhodes and emily
+
+- `rhodes` was louder at low velocity than at full (C4, a 0.15 s note, dB against 1.0: 0.2 +1.4, 0.4 -1.0, 0.6 -1.8,
+  0.8 -1.1; C3 read up to +7 dB). The jRhodes3d samples are each normalised near full scale, so a soft layer reads 2
+  to 7 dB hotter than the hard one, and the voice had no velocity gain, only a 3 dB slope inside a layer. Each layer
+  is now matched in level to the key's hardest layer, so a layer change is timbre only, and the level follows the
+  played velocity over 30 dB (new param `vel_db`, 0 for one level): 0.1 -30.7, 0.2 -21.7, 0.4 -12.6, 0.6 -7.2,
+  0.8 -3.2, 1.0 0 dB at C4, within 1 dB of that at C3 and C5. Full velocity plays as before; softer notes in a song
+  that used rhodes come out quieter. (ledger:M310)
+- `emily` read one level from velocity 41 to 80 (one recorded layer of its 4, no level inside a layer). A layer now
+  plays as recorded at its top velocity and falls toward the layer below's recorded level at its bottom: at C4,
+  0.2 -13.6, 0.4 -8.2, 0.6 -3.2, 0.8 -0.2, 1.0 0 dB (was -10.8, -2.5, -2.5, +0.2). The samples are unchanged, and no
+  layer is added. Where a hard layer was recorded no louder in RMS than the one below (a hard pick's short spike,
+  on many keys from Eb3 up; its peak is still 5 to 6 dB higher), it stays as recorded.
+
+### Level per velocity in voice_help; analyze_sections on a window render
+
+- `voice_help(name)` adds a line with the voice's level per velocity: one short note at 0.2, 0.4, 0.6, 0.8 and 1.0,
+  RMS in dB against 1.0, and the step between each. Velocity is not linear in level: x1.3 / x0.78 moved a balance
+  +2.2 dB, not +4.3 (bossa_gilberto_studio), so read the dB off the curve and make a balance change in one step.
+  Probed at C4 (or the middle of the voice's `range`), cached per voice file; a kit says it is silent there.
+- `analyze_sections` on a window render (a `bars=[a, b]` render, in `renders/windows.json`): sections outside the
+  window are refused with where the file starts ("starts at song bar 69 and holds bars 69-92 ... bars 1-4 of this
+  file are [69, 72]"), and the default blocks follow the window instead of starting at bar 1.
+
+### Blind tests: real or fake per clip, climb back to one note, score the window
+
+- `exam_check(choices=, question=)` and `phone_exam` read the exam's one overall choice. On pairs labelled 1A, 1B,
+  2A ... whose real side moves between pairs, a choice that asks which side is real ('A is the real band' / 'B is
+  the real band', or bare 'A' / 'B' under a "which is real?" question) fails: it has no answer. A side choice about
+  anything else warns. Choices that name no side ('pair 1', "can't tell", 'A lot'), a single pair, or a real side
+  that never moves pass. `phone_exam(check=False)` still warns in its reply. From Nate's note on metal round 3.
+- `sound_compare` says when the two sounds differ in length or one holds a release tail and no window was given:
+  statistics over time count the whole file, so pass the window the person heard.
+- blind-tests.md: ask "real or fake?" for each clip of a pair; after two band-level rounds the person still wins,
+  climb back to an isolated note of the part they name; score the window, not the file.
+
+### A mimic chord's first notes start fast
+
+- mimic's attack map (every built-in profile and harp-like ones have one) ran on librosa.stft and istft, and
+  librosa's first stft in a process costs seconds (its lazy imports and numba). A deck's first bars paid that on their
+  first mimic note: 8 to 10 s of CPU for a first 8-note harp chord, 2.1 to 2.3 s now. The attack map now runs on a
+  numpy STFT of the same window, padding and overlap-add (within -300 dB of librosa's). Each note also builds its
+  time grid once rather than per partial, and the notes of a chord share their FFT frequency grid: the warm chord is
+  about 4% faster. The sound is unchanged: the 8-note chord is within -327 dB of before.
+  (ledger:M302)
+
+### Mimic takes stay within 3 dB of each other
+
+- A mimic note's random variation is seeded by its pitch, velocity and gate, and one velocity could draw a take 8 dB
+  louder than its neighbours, every repeat of it as loud (cs80_lead D5 vel 90). Two causes: on a note shorter than
+  the slow wanders, the "unit std" swell, shimmer and vibrato curves are short pieces scaled up, so their means became
+  level offsets; and a steady tone met the per-note room IR in or out of phase. The note's level while the key is
+  down is now held within 1.5 dB either way of the same note without the random parts, room included
+  (`mimic.LEVEL_CAP_DB = 3`). Brightness, partial timing, swells and the room's colour still vary per note.
+  Violin D5, vel 84 to 93, 0.3 s: 8.4 dB spread per unit velocity before, 3.2 after.
+- The render summary names a mimic take that still sits more than 6 dB over the takes within 2 semitones of it
+  (per unit velocity), with its velocity and first time, and says a velocity a step away draws another take.
+- A change to mimic.py now clears the render cache of mimic tracks, as one to the other synthesis files does.
+  (ledger:M301)
+
+### An empty stem group reads silent in analyze_structure
+
+- `analyze_structure(source='render')` printed a stem group with no tracks (no 'vocals' in the stem map, say) as all
+  '9' and listed it among every section's loud stems: its rows were scaled to their own top, and digital silence was
+  its own top. A row now reads '.' wherever it is under -100 dB on the features' level scale (silence reads about
+  -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
+  (ledger:M296)
+
+### The tell ledger
+
+- `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the
+  person keeps naming in a sound is logged per song in `<song>/notes/tells.jsonl` (append-only, the Sound
+  Engineer's prototype shape from the metal song), with their words, where they said them, and a measured gap each
+  round. `tell_measure(reply=)` pulls the number from a `sound_compare`, `region_measure` or `sound_zoom_diff` reply
+  or a saved report. `tell_show` flags NOT MOVING on an open tell named twice or more whose gap did not shrink
+  between its last two measures, or that was never measured. Closing is refused without a passed verdict after the
+  last measure, and `tell_check` names unknown ids, times out of order and malformed rows with what to do next.
+- `tell_import(project, path)` adopts an existing tells.jsonl into an empty ledger. A song whose log is already at
+  `<song>/notes/tells.jsonl` (the metal seed) is read in place.
+- recreate.md: run `tell_show` before every round, log a measured row per open tell each round, and give a NOT
+  MOVING tell a different method.
+
+### Jobs waiting in line cost almost nothing
+
+- 23 `python -m ismail.machine run --wait` waiters used 8.4% of the CPU together while the machine was at 99%: each
+  took its own 2 s CPU sample and ran nvidia-smi every 5 s. Now one CPU sample (10 s) and one GPU reading (5 s) serve
+  every process on the machine: the caller that finds the last reading old claims the sampling with a file next to
+  it, and the others read the last reading meanwhile. A claim left by a process that died is cleared after 15 s.
+- A waiter far back in line looks at the board less often (5 s near the front, up to 60 s further back), and the
+  line is woken when a job ends, a waiter leaves it or the priority changes: the board touches `<board>/gen` and a
+  waiter asleep in line looks at that file's time every 0.25 s. With 23 waiters over 30 s: 2 CPU samples instead of
+  23, 6 nvidia-smi runs instead of 91, 26 looks at the board instead of 134, and the next job started 0.2 s after a
+  job ended instead of 3.6 s.
+
+### The machine board's lock serves callers in order
+
+- With about 23 jobs waiting, a new `python -m ismail.machine run` could lose the race for the board's lock again
+  and again and exit 75 after 10 s (one agent needed about 15 tries). Now each caller takes a ticket in
+  `<board>/lockq` and the lock goes to the oldest ticket first; the callers behind it back off with jitter by
+  their place in line. Waiters in line read the board without the lock and take it only when their turn may have
+  come, and nothing slow runs inside it (the GPU and CPU readings come from their caches). With 30 callers taking
+  the lock nonstop, every new caller got it within about 1.5 s in tests.
+- A lock whose holder's process is gone is broken after 2 s instead of 30 s; a ticket whose owner died or passed
+  its deadline is skipped. The lock waits up to 30 s (was 10 s). Exit 75 still means "not started, nothing
+  registered", and the lock's message now says what to do: retry in a minute or `run --wait 30m`.
+
+### The kit page
+
+- `docs/KIT.md` (and `docs/kit.json`, the same data): every public voice and effect by family, with its type, what
+  it is modeled on (an instrument type), its ear state and the exam or ledger row that judged it, its range, its cost
+  and the gaps open in each family. Generated by `python -m ismail.kit` from showcase.json, presets, each voice's
+  INFO and mimic profile, fx.py and the live engine, plus the hand-kept rows in `ismail/kit_tables.json` (the ear
+  state is data there: `ear` and `exam`); `--check` and a test fail when the page is stale or a voice has no row.
+  The `kit` op gives the rows as text, by family or for one voice. From the Sound Engineer's inventory (ledger M295).
+
 ### MIDI out to synths and other apps, and MIDI clock
 
 - `live_midi_out`: a live track's notes (or a deck's part) to a MIDI output and channel while the set plays: a
