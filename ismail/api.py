@@ -2087,6 +2087,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
             L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")
+    for trk, lines in R.notes_report.items():
+        for ln in lines[:3]:
+            L.append(f"  {trk}: {ln}")
     for trk, k in R.early.items():
         L.append(f"  {trk}: {k} nudged notes would sound before 0 s and start at 0 s instead; "
                  f"project_set(offset_sec=...) a little later than now gives their lead-in room")

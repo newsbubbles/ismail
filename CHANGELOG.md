@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Mimic takes stay within 3 dB of each other
+
+- A mimic note's random variation is seeded by its pitch, velocity and gate, and one velocity could draw a take 8 dB
+  louder than its neighbours, every repeat of it as loud (cs80_lead D5 vel 90). Two causes: on a note shorter than
+  the slow wanders, the "unit std" swell, shimmer and vibrato curves are short pieces scaled up, so their means became
+  level offsets; and a steady tone met the per-note room IR in or out of phase. The note's level while the key is
+  down is now held within 1.5 dB either way of the same note without the random parts, room included
+  (`mimic.LEVEL_CAP_DB = 3`). Brightness, partial timing, swells and the room's colour still vary per note.
+  Violin D5, vel 84 to 93, 0.3 s: 8.4 dB spread per unit velocity before, 3.2 after.
+- The render summary names a mimic take that still sits more than 6 dB over the takes within 2 semitones of it
+  (per unit velocity), with its velocity and first time, and says a velocity a step away draws another take.
+- A change to mimic.py now clears the render cache of mimic tracks, as one to the other synthesis files does.
+  (ledger:M301)
+
 ### An empty stem group reads silent in analyze_structure
 
 - `analyze_structure(source='render')` printed a stem group with no tracks (no 'vocals' in the stem map, say) as all
