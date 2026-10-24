@@ -394,6 +394,7 @@
    "exam": null,
    "range": "velocity picks the effect, pitch ignored"
   },
+  "placed_audio": {"family": "fx", "type": "designed", "engine": "code engine", "modeled_on": "the song's own placed audio clips and frozen tracks, played on a live deck", "ear": "untested", "exam": null, "range": "pitch and velocity ignored; live_load gives it to audio tracks (audio_place, track_freeze)"},
   "transitions": {
    "family": "fx",
    "type": "designed",

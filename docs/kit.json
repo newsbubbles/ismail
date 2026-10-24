@@ -47,7 +47,7 @@
   "untested": "no ear test found"
  },
  "summary": {
-  "voices": 43,
+  "voices": 44,
   "voices_with_ear_state": 11,
   "by_family": {
    "analog synths": {
@@ -83,7 +83,7 @@
     "usable": 0,
     "failed": 0,
     "pending": 0,
-    "untested": 4
+    "untested": 5
    },
    "drum machines": {
     "passed": 0,
@@ -1259,6 +1259,31 @@
     }
    },
    "source": null,
+   "functions": null,
+   "lanes": null,
+   "info_error": null
+  },
+  {
+   "name": "placed_audio",
+   "family": "fx",
+   "type": "designed",
+   "engine": "code engine",
+   "modeled_on": "the song's own placed audio clips and frozen tracks, played on a live deck",
+   "ear": "untested",
+   "exam": null,
+   "heard": "",
+   "range": "pitch and velocity ignored; live_load gives it to audio tracks (audio_place, track_freeze)",
+   "range_from": "kit_tables.json",
+   "cost": "not measured",
+   "needs": null,
+   "showcase": false,
+   "standin": null,
+   "roles": [],
+   "use": {
+    "type": "code",
+    "voice": "placed_audio"
+   },
+   "source": "the song's own sound files",
    "functions": null,
    "lanes": null,
    "info_error": null
