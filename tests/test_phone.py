@@ -976,6 +976,8 @@ def test_a_long_path_in_the_log_wraps_instead_of_widening_the_page():
     html = (S.PAGE / 'index.html').read_text(encoding='utf8')
     assert '.log div{display:grid;grid-template-columns:42px minmax(0,1fr);' in html
     assert '.log div>*{min-width:0;overflow-wrap:anywhere}' in html
+    # a panel's text too (the Live DJ's handoff): a path in a panel scrolled the panel sideways, 1156 px in 375
+    assert '#panel h2,#panel p,#panel label,#panel li{overflow-wrap:anywhere}' in html
 
 @pytest.fixture
 def eye_round(tmp_path, monkeypatch):

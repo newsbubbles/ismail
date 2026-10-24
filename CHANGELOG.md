@@ -7,6 +7,8 @@
 - A DJ log note with a full file path made the phone page wider than the screen and pushed every other control
   sideways (Nate, 10-24). The log rows' text column is `minmax(0,1fr)` now and wraps anywhere, so a path breaks inside
   its row.
+- The same for a panel's heading and text: a path there scrolled the panel sideways (1156 px of content in a 375 px
+  panel); it wraps now.
 
 ### voices: flute, a measured air-jet performer
 
