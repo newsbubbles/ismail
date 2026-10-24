@@ -41,6 +41,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('is every part of my render in tune', 'analyze_tuning'),
     ('can the narrator be heard over the mix', 'analyze_voice_heard'),
     ('speech on the beat, each syllable on a 16th', 'sound_speak'),
+    ('what instruments exist', 'kit'),
     ('send the notes to my hardware synth', 'live_midi_out'),
     ('ableton follows the tempo of the set with midi clock', 'live_midi_clock'),
 ])

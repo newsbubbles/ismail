@@ -128,6 +128,13 @@ Find any tool by what you need or by role with `ops_find`.
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
   parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+- **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
+  woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
+  tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with
+  the exam that judged it, its range, its cost, and the gaps open in each family. The `kit` op gives the same rows
+  as text (`kit(family='woodwinds')`, `kit(voice='cello')`). Generated from the sources and the hand-kept rows in
+  `ismail/kit_tables.json` by `python -m ismail.kit` (data in [kit.json](kit.json)); `--check` fails when the page
+  is stale, and so does a test.
 - **MIDI out to synths and other apps.** `midi_ports` lists the inputs and outputs (a synth's USB MIDI, a loopMIDI
   or IAC port into Ableton or FL Studio). `live_midi_out` sends a live track's notes (or a deck's part) to a port
   and channel while the set plays, kits on channel 10, each note when its audio would reach the speakers, with or
@@ -444,6 +451,8 @@ ismail/
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
+  kit.py         the kit page: voices and effects by family (docs/KIT.md, docs/kit.json), from kit_tables.json;
+                 api_kit.py the kit op
   audiofile.py   where a song's audio is: <name>.wav, else <name>.flac; api_compress.py song_compress (FLAC, M221)
   presets.py     instrument presets; samples.py the sample sets some voices fetch; tune.py autotune (WORLD)
   separate.py    demucs stem separation; sources.py where a song's references came from; backup.py a project backup
