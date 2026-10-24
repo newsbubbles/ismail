@@ -90,48 +90,6 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 
 Any other MCP client works the same way: run `ismail mcp` (or `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
 
-### Fewer tools, for a harness with a tool cap
-
-The server offers every op as a tool, over 300 of them. Many harnesses cap tools near 128, or choose worse with that
-many. Start it with only some roles or shelves (the same ones `ops_find` shows) and it serves just their ops, plus
-`guide` and `ops_find`, so the agent can still find and read about what it lacks. `ops_find` then marks the ops this
-server does not serve.
-
-```bash
-ismail mcp --list-roles                      # each role's and shelf's tool count; starts nothing
-ismail mcp --roles mc                        # one role
-ismail mcp --roles mc --shelves listen       # a role and a shelf: the union
-ismail mcp --shelves live,stream,phone,listen,together,asks --max-tools 128
-```
-
-`--max-tools N` refuses to start when the set has more than N tools, and the error lists every role's and shelf's
-size. An unknown role or shelf is refused with the list of valid ones. At start the server writes how many tools it
-serves to stderr. A harness that cannot pass arguments can set `ISMAIL_MCP_ROLES`, `ISMAIL_MCP_SHELVES` and
-`ISMAIL_MCP_MAX_TOOLS` (comma-separated, like the options); an option wins over its variable.
-
-Run `--list-roles` for the current counts: the roles grow with the ops. Some roles are over 128 on their own (`dj`
-was 143 when this was written), so name shelves for those.
-
-A harness that reads `mcp_servers` with a stdio command and args (Codex's `~/.codex/config.toml`, for example):
-
-```toml
-[mcp_servers.ismail]
-command = "ismail"
-args = ["mcp", "--shelves", "live,stream,phone,listen,together,asks", "--max-tools", "128"]
-
-# or, with no arguments, through the environment
-# [mcp_servers.ismail]
-# command = "ismail"
-# args = ["mcp"]
-# env = { ISMAIL_MCP_ROLES = "mc", ISMAIL_MCP_MAX_TOOLS = "128" }
-```
-
-The same in JSON, for a harness that reads `mcpServers`:
-
-```json
-{"mcpServers": {"ismail": {"command": "ismail", "args": ["mcp", "--roles", "mc"]}}}
-```
-
 ## Quick start (CLI)
 
 Every tool is also a CLI op. Arguments are `key=value` pairs (values parsed as JSON when they can be) or one JSON object.
@@ -174,6 +132,14 @@ Find any tool by what you need or by role with `ops_find`.
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`).
+- **Live streaming** (`ismail/stream`, the `stream_*`, `venue_*` and `chat_*` tools): the set out to several sites
+  at once, with a picture drawn from the music, and every site's chat read and answered in one place. A request
+  queue (`request_*`) carries chat's requests from the MC to the DJ: `request_add` from chat, `request_next` at a
+  phrase end, `request_mark` as it plays, `request_where` for "when does mine play?". It is an append-only log in
+  the stream home, so it survives a restart and both sessions see one line. `chat_commands` handles `!request` and
+  `!vote` by each venue's rules (`venue_rules`: requests per viewer, a cooldown, duplicates counted as votes), and
+  `request_credits` writes the viewers who asked into a song's CREDITS.md. The guide:
+  [live-streaming.md](../skills/ismail/references/live-streaming.md).
 - **The VR stage** (`ismail/stage`, the `stage_*` tools): a three.js WebXR page for a desktop browser or a headset,
   and a small server that carries the live link between the page and the agent. Scenes live in the song's folder.
   The agent drives the page with ops and reads what the person did and said with `stage_events`. Objects carry
@@ -468,7 +434,8 @@ ismail/
   mcp_server.py, guide.py
   stage/         the VR stage: a WebXR page, its server and the live link, scenes, takes, presence; the stage_* ops
   phone/         the phone page: live stream with the screen off, taps and voice notes, panels, exams; the phone_* ops
-  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer
+  exampage/      the eye exam page: picture rounds, one sound per card, the key served only after an answer; one
+                 server serves every song's rounds through a round registry
   feedback/      feedback pages answered by typing or voice, kept and transcribed; the feedback_* ops (api_feedback.py)
   capture.py     faults in a recording found before it is measured (soft-limited peaks, band-limited capture)
   sketch.py      first sketches from a brief on the showcase voices, versions 1, 2, 3, feeling words

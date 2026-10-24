@@ -14,6 +14,47 @@
 - blind-tests.md: ask "real or fake?" for each clip of a pair; after two band-level rounds the person still wins,
   climb back to an isolated note of the part they name; score the window, not the file.
 
+### Picture rounds from every song on one server
+
+- The exam page server on 8871 (the only port the phone's `/eye/` reaches) served one folder, so a second song's
+  picture round 404ed while another song's exam was up. Now `exam_picture_round` registers its round in a registry
+  file (`~/.ismail/exampage/rounds.json`, or `$ISMAIL_EXAMPAGE_ROUNDS`) that the server reads on each request, after
+  its own folder. A name another song's round holds gets the song's name in front (`/eye/songb-round2`), and the op
+  returns that URL and phone link. It reads the round back through the server and, when it can't be served (no
+  server would start, or the running one is older than the registry), says why instead of returning a link that
+  404s. Old URLs and `python -m ismail.exampage serve <folder>` work as before; `python -m ismail.exampage register
+  <round folder>` registers a round by hand. `/health` now gives the server's folder and `"registry": true`.
+
+### Chat commands by rule, votes and credit for requests
+
+- `chat_commands(lines)` takes chat_watch's lines and handles `!request <text>` and `!vote <id>` the same way every
+  time, by each venue's rules: a request is queued, refused (too many waiting, too soon, too long, closed), or
+  counted as a vote when one like it is already waiting ("drum & bass" and "drum n bass" are one). It returns the
+  reply for each line for the MC to say, and acts on a chat line once however often it is handed in. `!vote a` (a
+  vote of the MC's own) is left to the MC. `!love` counts for the request that plays (request_next shows the
+  count), with no reply. One `!vote` or `!love` per viewer per `reward_s` seconds (60), so the reward channel cannot
+  be spammed.
+- `venue_rules(venue, ...)` sets the rules per venue or for every venue ('*'): requests, votes and loves open or
+  closed, waiting requests per viewer (1), seconds between one viewer's requests (600), duplicates as votes, the
+  longest request (120 characters), one vote or love per viewer per `reward_s` (60), the owner and mods exempt.
+- Votes move a request up the line (more votes first, then first asked); `request_vote` counts one that came
+  another way.
+- `request_credits(ids, path)` gives the credit lines for the viewers whose requests shaped a song (name, where they
+  asked, what they asked for) and adds the missing ones to its CREDITS.md under "Requests from chat".
+
+### A request queue for streams
+
+- `request_add(who, what, venue, note)` puts a chat request in one queue and says its place in line;
+  `request_next` gives the DJ the first waiting one at a phrase end; `request_mark(id, status)` moves it to playing
+  (the one before it is marked done), done, skipped or back to waiting; `request_list` shows the line with
+  positions; `request_where(who)` answers "when does mine play?" with the place and, once requests have played,
+  about how many minutes. The queue is an append-only log (requests.jsonl in the stream home), so it survives a
+  restart and an MC and a DJ in separate sessions see the same line. An unknown id names the ids there are; a bad
+  status lists the valid ones.
+- Each request keeps the UTC time of every state it entered (queued_at, playing_at, done_at, skipped_at), shown by
+  `request_list` and `request_where`, so request-to-air time reads straight off the queue. When one starts playing,
+  the stream's `now` line says whose it is ("request from @name: now playing ..."); `on_screen=False` leaves it.
+
 ### Fewer MCP tools for harnesses with a cap
 
 - `ismail mcp --roles dj,mc` or `--shelves live,stream` serves only those roles' or shelves' ops (the ones

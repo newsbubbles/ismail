@@ -95,6 +95,12 @@ box, each saved with its word. The key is served only after they submit, and `ex
 card and every pin on the REAL picture or OURS. In the Voice agent's work the pins named what 40 rounds of numbers
 missed ("fire plumes between the columns, ours are straight smears"). The page server is `python -m
 ismail.exampage serve <rounds folder>` (127.0.0.1:8871; the op starts it), with byte ranges so long audio seeks.
+One server serves rounds from every song: the op registers each round with the running server (a registry file,
+~/.ismail/exampage/rounds.json), so a round in another song's folder opens while one song's exam is up. If another
+song's round already has the folder's name, the URL carries the song's name in front (`/eye/songb-round2`): use the
+URL and phone link the op returns, never one you put together. When the round can't be served (the running server
+is older than the registry, or none would start) the op says why and gives no link. `python -m ismail.exampage
+register <round folder>` registers a round built with `host=False`.
 
 ## 2. The blind exam: can the user tell?
 
