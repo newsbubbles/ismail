@@ -99,7 +99,9 @@ def test_a_short_gap_tongues_and_a_long_gap_breathes():
     assert d_breath > 40, d_breath                  # a new breath: silence between the phrases
     slur = render(inst(perform=True), SLUR, 2.4)
     e = frames_db(slur.mean(0))
-    assert np.median(e[50:75]) - e[76:86].min() < 4   # a slur holds the tone through the join
+    # a slur holds the tone through the join: the fingered slur (M322, the default) dips about 4 dB in one 10 ms
+    # frame where the glide dipped 2.8 dB over 40 ms; a tongued note dips 13 dB or more
+    assert np.median(e[50:75]) - e[76:86].min() < 5
 
 
 def cents_wobble(y, midi, t0, t1):
