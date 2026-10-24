@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### An empty stem group reads silent in analyze_structure
+
+- `analyze_structure(source='render')` printed a stem group with no tracks (no 'vocals' in the stem map, say) as all
+  '9' and listed it among every section's loud stems: its rows were scaled to their own top, and digital silence was
+  its own top. A row now reads '.' wherever it is under -100 dB on the features' level scale (silence reads about
+  -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
+  (ledger:M296)
+
 ### The tell ledger
 
 - `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the
