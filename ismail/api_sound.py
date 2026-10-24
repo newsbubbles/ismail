@@ -83,12 +83,14 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
 def instrument_fit(project: str, target: str, instrument, params: dict, notes: str = '0 C4 1',
                    length_sec: float = None, fx: list = None, iters: int = 80, save_as: str = None,
                    apply_to_track: str = None, target_window: list = None, seed: int = 0, fmin: float = 25.0,
-                   fmax: float = 16000.0) -> str:
-    """Search instrument parameters so its sound matches a target (spectrum + envelope + width).
+                   fmax: float = 16000.0, wait: str = '10m') -> str:
+    """Search instrument parameters so its sound matches a target (spectrum + envelope + width; a band more than
+    20 dB off costs extra and the reply warns of it).
     target: a source like 'sound:refsnare' (cut one first with sound_import); instrument: dict, 'preset:x' or
     'track:<name>' (start from that track's instrument); params: {"path": [lo, hi]} e.g. {"tone_hz": [100, 250],
     "filter.cutoff": [300, 8000], "oscs.0.detune": [0, 40]}; notes: what to play (beats at project tempo; use the
     target's pitch); fmin/fmax restrict the spectral match to a range (e.g. ignore kick bleed below 70 Hz). Saves the result as sound save_as and/or sets it on apply_to_track.
+    wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once), as render does.
     Reach for it when a drum or a sound must have the genre's or the reference's character (a snare, kick or bass
     that sounds dated or generic): fit it to a hit from analyze_kit's components or sound_extract."""
     P = _load(project)
@@ -124,9 +126,14 @@ def instrument_fit(project: str, target: str, instrument, params: dict, notes: s
     best, d1, d0, vals = SD.fit(full, params, tdesc, notes_sec, L, fx, P.d['bpm'], iters, seed, fmin=fmin, fmax=fmax,
                                 root=P.root)
     y = SD.render_oneshot(best['inst'], notes_sec, L, best['fx'], P.d['bpm'], root=P.root)
-    _, cmp_txt = SD.compare_text(SD.descriptor(y), tdesc, 'fitted', target.split(':')[-1], fmin, fmax)
+    ydesc = SD.descriptor(y)
+    _, cmp_txt = SD.compare_text(ydesc, tdesc, 'fitted', target.split(':')[-1], fmin, fmax)
     out = [f"fit: distance {d0:.2f} -> {d1:.2f} after {iters} renders",
            "fitted params: " + json.dumps({k: round(v, 4) for k, v in vals.items()})]
+    far = SD.far_warning(ydesc, tdesc, fmin, fmax, 'fitted', 'target')
+    if far:
+        out.append(far + "; widen or change the params that make that band (an oscillator's octave or level, the "
+                         "filter) and fit again")
     # keep only the keys the caller gave plus type, so the stored instrument stays readable
     compact = json.loads(json.dumps(base))
     for k in params:
@@ -373,12 +380,13 @@ def _set_deep(d, path, v):
 @op(mutates=True)
 @heavy()
 def track_fit(project: str, track: str, params: dict, bars: list, iters: int = 30, apply: bool = False,
-              seed: int = 0) -> str:
+              seed: int = 0, wait: str = '10m') -> str:
     """Tune a track IN CONTEXT: render the track's whole stem group (stem_map) over bars [a, b] and score it against
     the same window of the reference stem with the perceptual (CLAP) metric plus band levels. params:
     {path: [lo, hi]} with 'inst.<param path>' (inst.filter.cutoff, inst.oscs.0.detune ...), 'fx.<i>.<param>',
     'volume_db' or 'pan'. 8-16 bars and 20-40 iterations is a good budget (each iteration renders the window).
-    apply=True writes the best values into the track."""
+    apply=True writes the best values into the track. wait: when the machine is busy, stand in line this long
+    ('10m' default, '0' refuses at once), as render does."""
     from . import trackfit as TF
     from .api_cmp import ref_stems
     P = _load(project)

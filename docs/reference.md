@@ -115,8 +115,9 @@ Find any tool by what you need or by role with `ops_find`.
 
 - **The DAW.** Songs as code (notes, instrument patches, effect chains, automation in a project file), rendered and
   read back as text. Named effect stacks (`fx_stack_*`, `stack:<name>`) and an `autotune` effect. A second part
-  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders wait in line on a shared machine
-  (`render(wait=)`, `machine_status`) and flag tracks running hot. Every mp3 is tagged with its provenance
+  measured out of a mix (`stem_parts`), melodies read with a confidence. Renders and fits wait in line on a shared
+  machine (`render(wait=)`, `instrument_fit(wait=)`, `track_fit(wait=)`, `machine_status`) and flag tracks running
+  hot. Every mp3 is tagged with its provenance
   (`python -m ismail.tags`), and `track_model` / `credits` say where each sound came from. A finished song's stems
   and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to the
   reclaim folder, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone. Everything moved
@@ -340,7 +341,7 @@ Bring your own reference audio (`project_new(..., reference=<file>)`); none is i
 1. `analyze_grid(source='ref')`, then `align` a rendered drum track against `ref:drums` and correct `offset_sec`. If it reports the record 15 cents or more off A440 (a sped-up sample), run `ref_retune()` first: otherwise every note reads as a pair of semitones.
 2. `separate(source='ref')` (demucs) and read `analyze_structure(source='ref')`. Measure the drums before writing them: `analyze_swing` and `analyze_kit(source='ref:drums')`.
 3. Transcribe with `notes_from_audio_loop`. Raw transcription copies echoes, leakage and distortion partials as hard notes, so it filters in three layers the agent can tune: partials are attributed to the note they belong to, quiet notes fall under level thresholds (`rel_db`, `min_rel_db`, `floor_db`), and a vote across loop repetitions drops what changes between them. A loud echo locked to the tempo repeats every loop and can survive all three; then the agent tightens the thresholds or asks. If the song alternates versions of its loop, transcribe each from its own repetitions and pass `base_bars` so the shared notes stay identical.
-4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity). `track_fit` tunes a part in context against the reference stem.
+4. Design sounds: `sound_extract` a repeated hit or stab, then `instrument_fit` (evolution strategy over instrument and effect parameters, scored on spectrum, envelope, width and pitch clarity; a band more than 20 dB off costs extra and the reply warns of it). `track_fit` tunes a part in context against the reference stem.
 5. `stem_map_set`, `render(stems=True)`, `levels_from_ref` (faders from the reference's stem balance), `cmp_run`, then drill down: `cmp_summary`, `cmp_arrangement`, `cmp_sections`, `cmp_worst`, `cmp_bars`, `cmp_zoom(bar)`. `cmp_list` tracks progress across runs.
 
 ### How comparisons score

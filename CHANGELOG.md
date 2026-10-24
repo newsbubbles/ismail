@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### instrument_fit takes wait; a band far off costs what it should
+
+- `instrument_fit` refused BUSY with a message to pass `wait='10m'`, then rejected the keyword. It now takes `wait`
+  as `render` does ('10m' default, '0' refuses at once), and so does `track_fit`. The parsing is one helper
+  (`api.wait_seconds`) shared by `render`, `track_freeze` and every heavy op. A heavy op without `wait`
+  (`mimic_measure`, `live_parity`) is no longer told to pass one: its BUSY reply names the shell work-around
+  `python -m ismail.machine run --cpu --wait 10m -- python -m ismail -p <project> <op> ...`. (ledger:M313)
+- The fit distance took the mean over 29 bands, so two sub bands 35 to 39 dB over the target cost about 2.5 and a
+  bass fit kept an octave-down square the target does not have. Each dB a band is past 20 dB off now adds 0.15,
+  summed, and the band the tables print as 25 Hz (24.8 Hz) counts for fmin=25 again (it fell out of the distance).
+  A synthetic A1 bass with nothing under 40 Hz: a darker clean bass read 5.37 before and 5.13 now; the same tone
+  plus an octave-down square (+36 and +25 dB at 25 and 31 Hz) read 4.45 before (the better score) and 9.46 now.
+  The `instrument_fit` reply warns of any band more than 20 dB off, and the distance line of it and
+  `sound_compare` says how far past 20 dB the far bands are. `track_fit` scores its own way
+  and is unchanged. (ledger:M315)
+
 ### Notes that clash, read from the arrangement
 
 - `notes_clash` (ledger:M282): notes from different pitched parts that sound together a semitone apart (a minor
