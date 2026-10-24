@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### mimic: short notes no longer drift tens of cents off
+
+- mimic's slow random curves (pitch drift, vibrato rate and depth wander, swell, shimmer) were scaled by the std of
+  the note's own slice. A short slice of a slow curve is nearly flat, so it was stretched to full depth: a 0.1 s
+  cs80_lead A4 note sat 27 cents off at the median and 81 at the 95th percentile, against 13 and 37 now. The curves
+  are now scaled by the smoothing window's expected std, so a short note gets a short stretch of the same curve a
+  long note has. Notes of 10 s and more keep their depth within a few percent. Every mimic note changes (the random
+  draws differ), so this wants an ear round. (ledger:M306)
+
 ### master_cue ends at its true-peak ceiling, and its mp3 under it
 
 - `master_cue` gets a lookahead true-peak catch as its last stage (ledger:M280; M271 h and M277 a ask the same):
