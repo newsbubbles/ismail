@@ -2239,11 +2239,20 @@ def _grid(P, bpm, offset_sec):
 @op()
 def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
     """Estimate tempo, the time of bar 1 (kick, harmony, section changes and snare on 2 and 4 vote), the tuning
-    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set."""
+    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set. It also
+    reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when they disagree
+    and which is likely the beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the
+    thumb (122 BPM for 92)."""
     P = _load(project)
-    g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
+    path = P.resolve_audio(source)
+    g, txt = A.beat_grid(path, bpm_hint, P.bpb)
+    txt += '\n' + A.band_periods(path, g['bpm'])[1]
     ref = P.d.get('reference') or {}
     drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
+    # bar 1 two beats off (a snare on 2 and 4 reads the same): the harmony changes vote, from the bass stem on a ref
+    bass = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'bass.wav'))
+    on_ref = P.auto_source(source).split(':')[0] == 'ref' and ref.get('stems_dir') and os.path.exists(bass)
+    g, txt = A.downbeat_by_harmony(P.resolve_audio(source), g, txt, bass if on_ref else None)
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
         txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
     else:
@@ -2541,9 +2550,18 @@ from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standin
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
 from . import api_clash  # noqa: E402,F401  (registers notes_clash: semitone rubs and out-of-key notes, ledger:M282)
 from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell ledger, ledger:M305)
+from . import api_melody  # noqa: E402,F401  (registers melody_consensus: a lead over a backing, ledger:M314)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
 from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)
 from .stream import request_queue as _stream_requests  # noqa: E402,F401  (registers the request_* ops, ledger:M290)
 from .stream import venue_rules as _stream_rules  # noqa: E402,F401  (registers venue_rules, chat_commands, ledger:M291)
+
+
+def __getattr__(name):
+    """Every op is an attribute of ismail.api, also those registered by the modules above (api.live_parity,
+    api.sound_speak, api.master_cue ...), as they are in api.OPS (ledger:M277(e), M285(e))."""
+    if name in OPS:
+        return OPS[name]
+    raise AttributeError(f"module 'ismail.api' has no attribute {name!r}; ops_find(need='...') finds an op by purpose")

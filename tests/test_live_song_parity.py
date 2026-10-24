@@ -101,3 +101,79 @@ def test_the_op_says_what_differs_and_where_it_goes(tmp_path):
     root = song(str(tmp_path / 's'), 'preset:pluck', MEL)
     out = api.OPS['live_parity'](root, bars=[2, 3])
     assert out.splitlines()[0].endswith('all 3 match') and '(edge)' in out
+
+
+def _take(n=2 * 44100, seed=0):
+    """A plucked-ish take: decaying noisy tones every quarter second, stereo."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / 44100
+    y = np.zeros(n)
+    for i, on in enumerate(np.arange(0, n / 44100, 0.25)):
+        k = t >= on
+        y[k] += np.sin(2 * np.pi * (220 + 55 * (i % 5)) * (t[k] - on)) * np.exp(-(t[k] - on) * 12)
+    y += 0.01 * rng.standard_normal(n)
+    return np.vstack([y, y])
+
+
+def _late(x, k):
+    y = np.zeros_like(x)
+    y[:, k:] = x[:, :-k]
+    return y
+
+
+def test_a_take_one_sample_late_is_the_same_take_offset():
+    """ledger:M285(a): a deck's notes round to its own mix samples, so a take one sample off read DIFFERS at corr
+    1.000 and level within 0.1 dB. It is judged at its best lag and reads the same, with the offset said."""
+    st = _take()
+    m = parity.compare(st, _late(st, 1))
+    assert m['lag'] == 1 and m['resid_db'] < -80, m
+    assert parity.verdict(m) == 'ok (same, offset 1 sample late)'
+    m = parity.compare(st, st[:, 3:])
+    assert m['lag'] == -3 and parity.verdict(m) == 'ok (same, offset 3 samples early)'
+
+
+def test_a_take_50_ms_late_still_differs():
+    st = _take()
+    m = parity.compare(st, _late(st, 2205))
+    assert m['lag'] == 2205, m
+    assert parity.verdict(m).startswith('DIFFERS: 2205 samples late (50.0 ms'), parity.verdict(m)
+
+
+def test_an_odd_tempo_with_nudged_notes_plays_live_sample_for_sample_and_says_its_speed(tmp_path):
+    """At 136 BPM a beat is not a whole number of samples and @ms nudges never are: the studio window and the deck
+    each round a note to a sample, and both must pick the song's (ledger:M285(a)). Each track says its live render
+    speed (M285(e))."""
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=136, length_bars=5)
+    api.track_add(root, 'p', instrument='preset:pluck')
+    api.notes_write(root, 'p', 1, '0 C4 0.25 100 @-4ms; 0.75 E4 0.25 90 @+1ms; 1.5 G4 0.25 100 @-9ms; 2.5 C5 0.5 80',
+                    repeat=5)
+    res, _, _ = parity.run(root, [3, 4])
+    m = res['track:p']
+    assert parity.verdict(m) == 'ok' and m['lag'] == 0 and m['resid_db'] < -80, m
+    assert m['speed_x'] > 0
+    assert 'x realtime' in parity.report(res)
+
+
+def test_a_window_at_an_odd_tempo_renders_its_bars_as_the_whole_song_does(tmp_path):
+    """A window's pre-roll is a fraction of a sample long at 136 BPM: the window's buffer starts on a whole song
+    sample, so its notes land where they do in the whole song's render (ledger:M285(a))."""
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=136, length_bars=5)
+    api.track_add(root, 'p', instrument='preset:saw_lead')
+    api.notes_write(root, 'p', 1, '0 C4 0.25 100 @-4ms; 0.75 E4 0.25 90 @+1ms; 2.5 C5 0.5 80', repeat=5)
+    d = json.load(open(os.path.join(root, 'project.json')))
+    full, _ = Renderer(d, root, None, None, None, False).run()
+    win, _ = Renderer(d, root, 4, 5, None, False).run()
+    bar = int(round(3 * 4 * 60 / 136 * 44100))
+    end = int(4 * 60 / 136 * 44100) - 2205
+    a, b = full[:, bar:bar + end], win[:, :end]
+    assert 10 * np.log10(np.mean((a - b) ** 2) + 1e-30) - 10 * np.log10(np.mean(a ** 2)) < -100
+
+
+def test_live_parity_is_an_attribute_of_the_api():
+    """ledger:M285(e), M277(e): ops registered outside api.py are attributes of ismail.api too."""
+    for name in ('live_parity', 'sound_speak', 'master_cue', 'analyze_sections', 'analyze_structure'):
+        assert getattr(api, name) is api.OPS[name]
+    with pytest.raises(AttributeError):
+        api.no_such_op

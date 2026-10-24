@@ -14,7 +14,7 @@ from scipy import signal as sg
 
 from ..dsp import SR
 from . import graph as G
-from .engine import Engine
+from .engine import Engine, TempoMap
 from .ops import _song_performers
 
 BANDS = (63, 125, 250, 500, 1000, 2000, 4000, 8000)
@@ -22,6 +22,10 @@ BANDS = (63, 125, 250, 500, 1000, 2000, 4000, 8000)
 LEVEL_DB = 0.5
 CORR = 0.99
 BAND_DB = 1.0
+# a take that lines up within this many ms is the same take, offset (a deck's notes round to its own mix samples);
+# the fit is looked for this far either way, so a take further off is still found and DIFFERS
+LAG_MS = 3.0
+LAG_SEARCH_MS = 100.0
 
 
 class _Unity:
@@ -45,14 +49,36 @@ def _studio(d, root, bars, tracks):
 
 def _live(song, d, bars, n):
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        eng = Engine(tmp, bpm=float(d['bpm']), bpb=d.get('beats_per_bar', 4), workers=0, device='none')
+        bpm, bpb = float(d['bpm']), d.get('beats_per_bar', 4)
+        eng = Engine(tmp, bpm=bpm, bpb=bpb, workers=0, device='none')
+        # each event lands on the nearest mix sample. When a beat is not a whole number of samples, the engine's bar
+        # line and the song's sit at different fractions of a sample, so some notes land one sample apart: a deck
+        # in a set does that (it cannot hear it). Here the engine's clock starts so its next bar line has the
+        # song window's fraction, and the take is sample for sample (ledger:M285(a))
+        spb = 60.0 / bpm
+        t_s = (float(d.get('offset_sec', 0.0)) + (bars[0] - 1) * bpb * spb) * SR
+        frac = t_s - np.floor(t_s)
+        eng.tmap = TempoMap([(0, bpb - (int(0.75 * bpb * spb * SR) + frac) / (spb * SR), bpm)])
         eng.safety = _Unity()
         got = {}
 
         def tap(key, p0, y, lag):
             got.setdefault(key, []).append((p0 - lag, y.copy()))
         eng.tap = tap
-        head = eng.cmd_load('P', song, bars=list(bars), at='next_bar', loop=False, performers=_song_performers(song))
+        # each track's render speed: seconds of audio its renders gave, and the seconds they took (the engine keeps
+        # only a running estimate, and that goes with it at shutdown, ledger:M285(e))
+        spent = {}
+        result = eng._result
+
+        def timed(jid, y, secs, err):
+            job = eng.jobs.get(jid)
+            if job is not None and not job['warm'] and not job.get('midi'):
+                a = spent.setdefault('track:' + job['track'].split('.', 1)[-1], [0.0, 0.0])
+                a[0] += job['audio_s']
+                a[1] += secs
+            return result(jid, y, secs, err)
+        eng._result = timed
+        head = eng.cmd_load('P', song, bars=list(bars), at='bar:2', loop=False, performers=_song_performers(song))
         start = eng.sample(min(c.start for c in eng.tl.clips.values()))
         while eng.pos < start + n + G.LAT_BUDGET:
             eng.tick()
@@ -67,7 +93,7 @@ def _live(song, d, bars, n):
             if z > a:
                 y[:, a - start:z - start] += b[:, a - p:z - p]
         out[key.replace('track:P.', 'track:').replace('bus:P.', 'bus:')] = y
-    return out, head
+    return out, head, {k: {'audio_s': a, 'render_s': r} for k, (a, r) in spent.items()}
 
 
 def _db(x):
@@ -88,23 +114,41 @@ def _bands(x):
     return np.array([10 * np.log10(S[(fr >= c / 2 ** .5) & (fr < c * 2 ** .5)].sum() + 1e-20) for c in BANDS])
 
 
+def _lag(st, lv, reach):
+    """The lag (samples, + = live late) where live lines up best with the studio within +-reach, from the first 4 s;
+    0 when the two never line up at all (noise or a free phase)."""
+    m = min(st.shape[1], 4 * SR)
+    a, b = lv.mean(0)[:m], st.mean(0)[:m]
+    xc = sg.correlate(a, b, mode='full', method='fft') / (np.sqrt(np.sum(a * a) * np.sum(b * b)) + 1e-30)
+    r = min(reach, m - 1)
+    w = np.abs(xc[m - 1 - r:m + r])
+    return int(np.argmax(w)) - r if w.max() > 0.5 else 0
+
+
+def _shift(st, lv, lag):
+    """The two takes lined up at `lag` (live `lag` samples late): the overlap only."""
+    if lag > 0:
+        return st[:, :-lag], lv[:, lag:]
+    if lag < 0:
+        return st[:, -lag:], lv[:, :lag]
+    return st, lv
+
+
 def compare(studio, live):
-    """Numbers for one pair of (2, n) takes: the studio level (dBFS rms), live minus studio level, 50 ms envelope correlation (dB, 50 dB floor),
-    the residual (live - studio) under the studio level, the best lag in samples (should be 0), octave bands
-    63..8k live minus studio (bands under 60 dB below the loudest are left out, as None)."""
+    """Numbers for one pair of (2, n) takes: the studio level (dBFS rms), live minus studio level, 50 ms envelope
+    correlation (dB, 50 dB floor), the residual (live - studio) under the studio level, octave bands 63..8k live
+    minus studio (bands under 60 dB below the loudest are left out, as None), and 'lag': the samples live is late
+    (+) or early (-) at its best fit within +-LAG_SEARCH_MS. A lag within +-LAG_MS is an offset, not a difference:
+    the other numbers are then judged with live moved back by it. A lag beyond it is judged where the take sits."""
     n = min(studio.shape[1], live.shape[1])
     st, lv = studio[:, :n], live[:, :n]
     if _db(st) < -100 and _db(lv) < -100:
         return {'silent': True}
+    lag = _lag(st, lv, int(LAG_SEARCH_MS * SR / 1000))
+    if abs(lag) <= LAG_MS * SR / 1000:
+        st, lv = _shift(st, lv, lag)
     es, el = _env_db(st), _env_db(lv)
     corr = float(np.corrcoef(es, el)[0, 1]) if es.std() > 1e-6 and el.std() > 1e-6 else float(np.allclose(es, el, atol=0.5))
-    m = min(n, 4 * SR)
-    a, b = lv.mean(0)[:m], st.mean(0)[:m]
-    xc = sg.correlate(a, b, mode='full', method='fft') / (np.sqrt(np.sum(a * a) * np.sum(b * b)) + 1e-30)
-    mid = m - 1
-    w = xc[mid - 256:mid + 257]
-    # a lag only means something when the two line up at all (noise or a free phase never does)
-    lag = int(np.argmax(np.abs(w))) - 256 if np.abs(w).max() > 0.5 else 0
     bs, bl = _bands(st), _bands(lv)
     keep = bs > bs.max() - 60
     return {'silent': False, 'studio_db': _db(st), 'level_db': _db(lv) - _db(st), 'corr': corr, 'resid_db': _db(lv - st) - _db(st),
@@ -112,11 +156,19 @@ def compare(studio, live):
             'bands': [float(b) if k else None for b, k in zip(bl - bs, keep)]}
 
 
+def _samples(lag):
+    return f"{abs(lag)} sample{'s' if abs(lag) != 1 else ''} {'late' if lag > 0 else 'early'}"
+
+
 def verdict(m):
-    """'ok' or the reasons it is not."""
+    """'ok', 'ok (same, offset N samples ...)' or the reasons it is not."""
     if m.get('silent'):
         return 'ok (silent in both)'
     why = []
+    # a take further off than an offset is said first: the envelope and the bands then differ by that alone
+    small = abs(m['lag']) <= LAG_MS * SR / 1000
+    if m['lag'] and not small:
+        why.append(f"{_samples(m['lag'])} ({abs(m['lag']) * 1000 / SR:.1f} ms, past +-{LAG_MS:g} ms)")
     if abs(m['level_db']) > LEVEL_DB:
         why.append(f"level {m['level_db']:+.1f} dB")
     if m['corr'] < CORR:
@@ -124,14 +176,15 @@ def verdict(m):
     worst = max((abs(b) for b in m['bands'] if b is not None), default=0.0)
     if worst > BAND_DB:
         why.append(f"a band off by {worst:.1f} dB")
-    if m['lag']:
-        why.append(f"{m['lag']:+d} samples late" if m['lag'] > 0 else f"{-m['lag']} samples early")
-    return 'ok' if not why else 'DIFFERS: ' + ', '.join(why)
+    if why:
+        return 'DIFFERS: ' + ', '.join(why)
+    return f"ok (same, offset {_samples(m['lag'])})" if m['lag'] else 'ok'
 
 
 def run(song, bars, tracks=None):
     """-> ({key: metrics}, takes {key: (studio, live)}, the deck's load message). Keys: 'mix', 'track:<name>',
-    'bus:<name>', judged from the window's second bar, and 'mix, bar <a> (edge)' for the first. tracks limits both sides to those tracks (the mix is then theirs alone)."""
+    'bus:<name>', judged from the window's second bar, and 'mix, bar <a> (edge)' for the first. A track's metrics
+    carry 'speed_x', its live render speed (x realtime) when it rendered anything. tracks limits both sides to those tracks (the mix is then theirs alone)."""
     song = os.path.abspath(song)
     with open(os.path.join(song, 'project.json'), encoding='utf8') as f:
         d = json.load(f)
@@ -161,7 +214,7 @@ def run(song, bars, tracks=None):
 def _run(deck_song, root, d, bars):
     st = _studio(d, root, bars, None)
     n = st['mix'].shape[1]
-    lv, head = _live(deck_song, d, bars, n)
+    lv, head, spent = _live(deck_song, d, bars, n)
     # a window's first bar is its edge: the studio rings in what was played before it, a deck starts clean (only
     # notes still held come in). Judged from the second bar on; the edge is reported as a line of its own.
     edge = int(round(d.get('beats_per_bar', 4) * 60.0 / float(d['bpm']) * SR)) if bars[0] > 1 and bars[1] > bars[0] else 0
@@ -171,6 +224,9 @@ def _run(deck_song, root, d, bars):
         s = st[k]
         v = lv.get(k, np.zeros_like(s))
         res[k] = compare(s[:, edge:], v[:, edge:])
+        if k in spent and spent[k]['render_s'] > 0:
+            # x realtime: seconds of audio its renders gave per second they took, in this process (one worker's pace)
+            res[k]['speed_x'] = spent[k]['audio_s'] / spent[k]['render_s']
         takes[k] = (s, v)
     if edge:
         res[f'mix, bar {bars[0]} (edge)'] = compare(takes['mix'][0][:, :edge], takes['mix'][1][:, :edge])
@@ -184,8 +240,9 @@ def report(res, head=''):
             L.append(f"  {k:<22} silent in both")
             continue
         bands = ' '.join('  . ' if b is None else f"{b:+4.1f}" for b in m['bands'])
+        speed = f"  renders {m['speed_x']:.1f}x realtime" if 'speed_x' in m else ''
         L.append(f"  {k:<22} {m['studio_db']:6.1f} dB rms  live {m['level_db']:+5.2f} dB  corr {m['corr']:.3f}  residual {m['resid_db']:+6.1f} dB  "
-                 f"bands {bands}  {verdict(m)}")
+                 f"bands {bands}  {verdict(m)}{speed}")
     notes = [ln.strip() for ln in head.splitlines() if 'not live' in ln]
     return '\n'.join(L + [f"  deck: {x}" for x in notes])
 
