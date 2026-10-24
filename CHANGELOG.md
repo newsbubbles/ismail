@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Notes that clash, read from the arrangement
+
+- `notes_clash` (ledger:M282): notes from different pitched parts that sound together a semitone apart (a minor
+  2nd, a minor 9th, or those plus octaves; a close major 7th is a chord colour and not listed) for at least
+  `min_overlap` beats (0.1 by default, so passing tones drop out), and notes out of the key. The key is the one
+  given, the project's or the sketch's, else found from the notes; a minor key allows its raised 7th. Each finding
+  gives the bar and beat, the two parts and their notes, the overlap and the velocities; a place in the bar that
+  repeats is one finding with its bars. Sorted by how audible (the quieter note's level times the square root of
+  the overlap), top `n` per list, counts for all. Drums, fixed-pitch samples and synths, drum and effect voices,
+  unmapped pads and muted tracks are skipped and named; a kit's pitched pads are read. Ported from the
+  planet_rock_studio prototype: on that song it lists the same 37 clashes in the deck and the 7 kept in the studio
+  version, and no note out of G minor.
+
 ### mimic plays phrases: perform=true for legato winds and strings
 
 - `{"type": "mimic", "profile": ..., "perform": true}` renders a track as phrases instead of note by note, for any
