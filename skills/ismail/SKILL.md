@@ -189,6 +189,7 @@ nudges you, follow it.
 | you are not sure which tool fits, or you work in one role (voice, sound, DJ, stage, film) | `ops_find(need='<what you want, in plain words>')`; `ops_find(role=...)` lists the tools your role reaches for first. It reads each tool's own description, so it is never out of date |
 | a new person, or a new song with no reference | `sketch` (two or three contrasting sketches in minutes), then `sketch_keep` the one they pick |
 | a number, a cause, a fact about the reference, a reading of their words | the check that backs it before you act (Non-negotiables, "A guess until one check backs it") |
+| what instruments exist, whether there is one for a family (an organ, a sax, a drum machine), which passed a blind test | `kit` (`kit(family=...)` for one family and its open gaps, `kit(voice=...)` for one voice in full); the same data as a page: `docs/KIT.md` |
 | an instrument must sound real | an example first (`references/instruments.md`), then `mimic_measure` or a fit; `track_model` names its source |
 | the numbers plateau, or they say bland, generic, dated | an eye exam: lenses that each change one named thing, at the two ends of the range, never steps around the current value (`references/blind-tests.md`) |
 | you think a sound is done | a blind exam, real vs yours, hidden: one note first, then phrases, then the mix; `exam_check` before it reaches the person |
@@ -209,6 +210,7 @@ nudges you, follow it.
 | a live set | a runway queued ahead; a guard on `live_status` (`SILENT ON AIR`, `RUNWAY ENDED`, `THIN`) |
 | a song sounds different live | `live_parity`, then the song's `HANDOFF.md` |
 | the person wants to play a part themselves (a jam, a lead over the set) | `midi_sources`, then `live_midi` to patch their keys to a track's sound; `live_played` reads what they played as notes, and `fit=True` snaps a take to loop back; no instrument: `live_keys_page` (on-screen keys) (`references/live.md`, "Played keys") |
+| the person wants a part played by their own synth or a plugin in their DAW, or another app or a drum machine in time with the set | `midi_ports`, then `live_midi_out(track=..., port=...)` (`audio=False` when the synth is the sound) and `live_midi_clock(port=...)`; no set: `midi_play` (`references/live.md`, "MIDI out") |
 | the person wants the song in their DAW (Ableton, FL Studio, Logic), as sheet music, or brings a .mid | `midi_write` (notes, tempo, markers; `render(stems=True)` for the sound beside it); a .mid in: `midi_read` without `into` lists it, then `into={...}` writes the parts they pick |
 | something you built would help others | the inclusion review (`references/development.md`), then a fork and a pull request |
 

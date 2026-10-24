@@ -465,9 +465,12 @@ def test_listen_peek_points_at_listen_heard_while_the_mic_is_on(home):
 
 
 def test_the_bars_come_from_the_live_engines_clock(tmp_path):
-    from ismail.live.engine import Engine
+    from ismail.live.engine import Engine, TempoMap
+    # the mix is already past a live_tempo change at beat 36 that the listener has not heard: the clock gives the
+    # tempo at the heard beat
+    tmap = TempoMap([(0, 0.0, 124.0)]).changed(36.0, 140.0)
     fake = types.SimpleNamespace(midi=types.SimpleNamespace(heard_beat=lambda: 33.25), stream=object(),
-                                 _null_on=False, beat=lambda pos: 0.0, pos=0, bpm=124.0, bpb=4)
+                                 _null_on=False, beat=lambda pos: 0.0, pos=0, bpm=140.0, bpb=4, tmap=tmap)
     c = Engine.cmd_clock(fake)
     assert c['beat'] == 33.25 and c['bpm'] == 124.0 and c['bpb'] == 4 and abs(c['wall'] - time.time()) < 1
     _mk(tmp_path / 'live')

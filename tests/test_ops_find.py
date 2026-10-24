@@ -31,10 +31,19 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('reply to a viewer in the twitch chat', 'chat_say'),
     ('read the stream chat', 'chat_watch'),
     ('go live on youtube and twitch at once', 'stream_go'),
+    ('queue a song request from chat', 'request_add'),
+    ('the next request for the DJ to play', 'request_next'),
+    ('how long until my request plays', 'request_where'),
+    ('handle the !request and !vote commands in chat', 'chat_commands'),
+    ('limit requests per viewer with a cooldown', 'venue_rules'),
+    ('credit the viewers who asked for a song', 'request_credits'),
     ('level of one band in one moment of a sound', 'region_measure'),
     ('is every part of my render in tune', 'analyze_tuning'),
     ('can the narrator be heard over the mix', 'analyze_voice_heard'),
     ('speech on the beat, each syllable on a 16th', 'sound_speak'),
+    ('what instruments exist', 'kit'),
+    ('send the notes to my hardware synth', 'live_midi_out'),
+    ('ableton follows the tempo of the set with midi clock', 'live_midi_clock'),
 ])
 def test_a_need_in_plain_words_finds_its_op_first(need, first):
     out = api.OPS['ops_find'](need=need, n=3)

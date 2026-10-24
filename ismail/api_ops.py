@@ -20,15 +20,16 @@ CATEGORIES = [
     ('write', 'tracks, notes, patterns, buses, automation, stem maps',
      ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
       'notes_transform', 'pattern_write', 'automation_', 'stem_map_set', 'audio_place')),
-    ('sounds', 'choosing and making sounds: voices, instruments, presets, effects, samples, speech',
-     ('voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
+    ('sounds', 'choosing and making sounds: the kit by family, voices, instruments, presets, effects, samples, speech',
+     ('kit', 'voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
       'samples_', 'sound_list', 'sound_make', 'sound_import', 'sound_speak', 'sound_autotune')),
     ('fit', 'matching a sound or a level to a recording, measured',
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
       'levels_from_ref', 'ref_retune')),
     ('render', 'rendering, mastering a finished cue for delivery, and playing', ('render', 'play_file', 'master_cue')),
-    ('midi', 'MIDI files in and out: the song or some tracks to a .mid any DAW opens, a .mid read into tracks',
-     ('midi_write', 'midi_read')),
+    ('midi', 'MIDI files and ports: the song or some tracks to a .mid any DAW opens, a .mid read into tracks, the '
+             'MIDI inputs and outputs, a song played to a synth or a DAW',
+     ('midi_write', 'midi_read', 'midi_ports', 'midi_play')),
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
                'and where two takes differ',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
@@ -40,10 +41,13 @@ CATEGORIES = [
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
     ('together', 'listening together: record what plays (a mic only with their yes), their words as they say them, '
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
-    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
+    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it, its notes and '
+             'clock out to synths and other apps, tracks frozen into one a deck plays, what a deck costs',
+     ('live_', 'midi_', 'track_freeze', 'deck_cost')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stream', "live streaming: the set to several sites at once, the picture and its text, every site's chat read "
-               "and answered", ('stream_', 'venue_', 'chat_')),
+               "and answered, and the request queue the MC fills and the DJ plays from",
+     ('stream_', 'venue_', 'chat_', 'request_')),
     ('asks', "before you ask the person: their standing grants, and which agent owns which questions", ('grant_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]
@@ -60,6 +64,45 @@ ROLES = {
     'film': ['stage', 'render', 'listen', 'exam', 'asks'],
     'dev': [c[0] for c in CATEGORIES],
 }
+
+# the ops a filtered MCP server always serves, so an agent with a few shelves can still find and read what it lacks
+DISCOVERY = ('guide', 'ops_find')
+
+# what the running MCP server serves: None (every op) or (set of op names, how it was chosen); set by mcp_server
+_SERVED = None
+
+
+def ops_for(roles=(), shelves=()):
+    """The ops an MCP server filtered to these roles and shelves serves: every op on their shelves, plus DISCOVERY,
+    in OPS order. An unknown role or shelf raises OpError naming the valid ones."""
+    known = [c[0] for c in CATEGORIES]
+    bad = [r for r in roles if r not in ROLES]
+    if bad:
+        raise OpError(f"unknown role {', '.join(bad)}; roles: {', '.join(ROLES)}")
+    bad = [s for s in shelves if s not in known]
+    if bad:
+        raise OpError(f"unknown shelf {', '.join(bad)}; shelves: {', '.join(known)}")
+    want = set(shelves).union(*(ROLES[r] for r in roles))
+    return [n for n in OPS if n in DISCOVERY or category_of(n) in want]
+
+
+def serve_only(names, how=''):
+    """Tell ops_find what the running MCP server serves: these op names, chosen by `how` (names None: every op)."""
+    global _SERVED
+    _SERVED = None if names is None else (set(names), how)
+
+
+def _here(name):
+    return '' if _SERVED is None or name in _SERVED[0] else '  (not on this server)'
+
+
+def _served_note():
+    if _SERVED is None:
+        return []
+    return [f"note: this MCP server is filtered to {_SERVED[1]} and serves {len(_SERVED[0])} of {len(OPS)} ops. An op "
+            "marked (not on this server) needs the server started with its role or shelf (--roles or --shelves, or "
+            "ISMAIL_MCP_ROLES or ISMAIL_MCP_SHELVES), or the CLI: python -m ismail -p <project> <op>"]
+
 
 _STOP = set('a an the and or of to in on for with by at from as is are be it its this that my our your their i we '
             'you he she they me them do does how what which when where who can could should would want need make '
@@ -158,21 +201,25 @@ def ops_find(need: str = None, role: str = None, category: str = None, n: int = 
         if not hits:
             return (f"nothing matches {need!r}. Try other words, or browse: ops_find(role=...) or "
                     f"ops_find(category=...); categories: {', '.join(shelves)}")
-        return '\n'.join([f"ops for: {need}"] + [f"  {x}  [{category_of(x)}]  {_first_line(x)}" for _, x in hits])
+        return '\n'.join([f"ops for: {need}"] + [f"  {x}  [{category_of(x)}]  {_first_line(x)}{_here(x)}"
+                                                 for _, x in hits] + _served_note())
     if category:
         c = shelves[category]
-        return '\n'.join([f"{category}: {c[1]}"] + [f"  {x}  {_first_line(x)}" for x in by_cat.get(category, [])])
+        return '\n'.join([f"{category}: {c[1]}"] + [f"  {x}  {_first_line(x)}{_here(x)}"
+                                                     for x in by_cat.get(category, [])] + _served_note())
     if role:
         L = [f"role {role}: the shelves to reach for first come first (ops_find(need=...) searches them all)"]
         for cat in ROLES[role]:
             names = by_cat.get(cat, [])
             L.append(f"{cat} ({len(names)}): {shelves[cat][1]}")
             if len(names) > 24:          # the stage and live shelves: names only, search for the rest
-                L.append('  ' + ' '.join(names))
+                L.append('  ' + ' '.join(x + ('*' if _here(x) else '') for x in names))
             else:
-                L += [f"  {x}  {_first_line(x)}" for x in names]
-        return '\n'.join(L)
+                L += [f"  {x}  {_first_line(x)}{_here(x)}" for x in names]
+        if any(_here(x) for c in ROLES[role] for x in by_cat.get(c, [])):
+            L.append('(* = not on this server)')
+        return '\n'.join(L + _served_note())
     L = ['shelves (ops_find(category=...) lists one; ops_find(need="...") searches every description):']
     L += [f"  {c} ({len(by_cat.get(c, []))}): {d}" for c, d, _ in CATEGORIES]
     L.append('roles (ops_find(role=...) shows the shelves a role reaches for first): ' + ', '.join(ROLES))
-    return '\n'.join(L)
+    return '\n'.join(L + _served_note())
