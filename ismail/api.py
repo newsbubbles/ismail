@@ -2229,9 +2229,14 @@ def _grid(P, bpm, offset_sec):
 @op()
 def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> str:
     """Estimate tempo, the time of bar 1 (kick, harmony, section changes and snare on 2 and 4 vote), the tuning
-    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set."""
+    offset from A440 and, with a reference drum stem, the swing. Use the result in project_new/project_set. It also
+    reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when they disagree
+    and which is likely the beat: a bossa guitar's 3-3-2 finger figure pulls the whole-mix tempo to 4/3 of the
+    thumb (122 BPM for 92)."""
     P = _load(project)
-    g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
+    path = P.resolve_audio(source)
+    g, txt = A.beat_grid(path, bpm_hint, P.bpb)
+    txt += '\n' + A.band_periods(path, g['bpm'])[1]
     ref = P.d.get('reference') or {}
     drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):

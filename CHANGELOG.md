@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Reading a drifting, thumb-led record
+
+- `analyze_grid` reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when
+  they disagree. On a bossa guitar the whole-mix tempo locked onto the 3-3-2 finger figure (122 BPM for a thumb at
+  92); now the extra lines name the thumb/bass band as the likely beat and give the `bpm_hint` to rerun with. The
+  existing lines are unchanged; the new ones come before the swing line. On the Bim Bom guitar stem: thumb band
+  92.5 BPM, tempo read 121.92, "rerun with bpm_hint=92.5". (ledger:M287 a)
+- `analyze_swing(follow=True)` follows a beat line on a record that drifts instead of one fixed grid, reads every
+  16th step on it in `band_hz` (default 1.5-6 kHz) and prints the hits, accents and median offset per step and the
+  most-played 16-step strings with the timing inside them; `threshold` sets what counts as a pluck. Ported from
+  the bossa reference's prototype. On a click track drifting from 90 to 94 BPM, planted +20 and -15 ms offsets read
+  +21 and -13 ms. Without `follow`, one line says when the beat drifts more than 3%. (ledger:M287 b)
+
 ### Notes that clash, read from the arrangement
 
 - `notes_clash` (ledger:M282): notes from different pitched parts that sound together a semitone apart (a minor
