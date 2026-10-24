@@ -19,6 +19,19 @@
   ear round's D5, a short last note, tongued notes into a long one) the end falls 5.9 to 8.6 dB, against 2.8 to
   6.8 dB before. Found by the Sound Engineer's #346 ear round build.
 
+### Reading a drifting, thumb-led record
+
+- `analyze_grid` reads the thumb/bass band (55-190 Hz) and the finger band (1.5-6 kHz) periods apart and says when
+  they disagree. On a bossa guitar the whole-mix tempo locked onto the 3-3-2 finger figure (122 BPM for a thumb at
+  92); now the extra lines name the thumb/bass band as the likely beat and give the `bpm_hint` to rerun with. The
+  existing lines are unchanged; the new ones come before the swing line. On the Bim Bom guitar stem: thumb band
+  92.5 BPM, tempo read 121.92, "rerun with bpm_hint=92.5". (ledger:M287 a)
+- `analyze_swing(follow=True)` follows a beat line on a record that drifts instead of one fixed grid, reads every
+  16th step on it in `band_hz` (default 1.5-6 kHz) and prints the hits, accents and median offset per step and the
+  most-played 16-step strings with the timing inside them; `threshold` sets what counts as a pluck. Ported from
+  the bossa reference's prototype. On a click track drifting from 90 to 94 BPM, planted +20 and -15 ms offsets read
+  +21 and -13 ms. Without `follow`, one line says when the beat drifts more than 3%. (ledger:M287 b)
+
 ### Notes that clash, read from the arrangement
 
 - `notes_clash` (ledger:M282): notes from different pitched parts that sound together a semitone apart (a minor
@@ -160,6 +173,16 @@
   INFO and mimic profile, fx.py and the live engine, plus the hand-kept rows in `ismail/kit_tables.json` (the ear
   state is data there: `ear` and `exam`); `--check` and a test fail when the page is stale or a voice has no row.
   The `kit` op gives the rows as text, by family or for one voice. From the Sound Engineer's inventory (ledger M295).
+
+### A voice named with fn='perform' plays live as a performer (ledger:M284)
+
+- A code voice with `fn: 'perform'` played as a performer in the studio (the whole part at once) but note by note
+  live: each note replayed the gesture score from beat 0, so a deck sounded wrong (corr -0.09 against the studio
+  render on a samba deck) with no warning. The live path now marks a performer by the studio's own rule
+  (`instruments.performer_fn`: fn 'perform', or a module with perform() and no function named fn). A tiny gesture
+  voice on bars 3 to 5 went from corr 0.971 and -12 dB to corr 1.000 and 0.00 dB against the studio.
+- A kit pad whose voice is a performer cannot play live as in the studio (live renders a kit hit by hit):
+  `live_track` and `live_load` now say so and name the pads, with the fix (a track of its own).
 
 ### MIDI out to synths and other apps, and MIDI clock
 

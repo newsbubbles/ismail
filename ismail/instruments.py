@@ -656,6 +656,17 @@ def performer_kw(perform, params, beat0, root):
     return kw
 
 
+def performer_fn(mod, fn=None):
+    """A voice module's perform() when a code instrument naming fn plays it as a performer (the whole part at once),
+    else None: fn 'perform', or fn (default 'voice') not a function of the module while perform() is. The one rule
+    for the studio render and the live engine (live.ops._mark_performer), so both treat a voice the same."""
+    perform = getattr(mod, 'perform', None)
+    if not callable(perform):
+        return None
+    want = fn or 'voice'
+    return perform if want == 'perform' or not callable(getattr(mod, want, None)) else None
+
+
 def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.0):
     from . import voices
     if p.get('voice'):
@@ -663,10 +674,8 @@ def render_code(p, notes, total_n, sr, bpm=120.0, root=None, auto=None, beat0=0.
             mod = voices.load(p['voice'], root)
         except voices.VoiceError as e:
             raise InstrumentError(str(e))
-        # fn defaults to 'voice'; a module without voice() but with perform() is a performer
-        want = p.get('fn') or 'voice'
-        perform = getattr(mod, 'perform', None) if (want == 'perform' or not callable(getattr(mod, want, None))) else None
-        if callable(perform):
+        perform = performer_fn(mod, p.get('fn'))
+        if perform is not None:
             # a performer voice renders the whole part at once (strings that ring on, legato, whammy):
             # it gets every note and its expression lanes (automation 'inst.lane.<name>', per-sample curves)
             lanes = {k[5:]: v for k, v in (auto or {}).items() if k.startswith('lane.')}
