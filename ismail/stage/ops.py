@@ -1294,7 +1294,7 @@ def stage_face(scene: str, person: str, at: float = None, audio: str = None, tak
             faces.pop(person)
         w['faces'] = faces
         worldmod.save_world(d, scene, w)
-        return f'removed {len(mine) - len(keep)} mouth track(s) of {person} in {scene}' + _face_reload(scene, faces)
+        return f'removed {len(mine) - len(keep)} mouth track(s) of {person} in {scene}' + _face_reload(scene, faces, d)
     if person not in (w.get('actors') or {}):
         raise OpError(f'{person!r} is not a person of {scene} (world.json actors: {", ".join(sorted(w.get("actors") or {}))})')
     if at is None:
@@ -1360,7 +1360,7 @@ def stage_face(scene: str, person: str, at: float = None, audio: str = None, tak
     return (f"{person}'s mouth: {tr['seconds']} s of {src.name} from {tr['start']} s, at song {at} s, "
             f"{_face_from(tr['source'])}"
             f"{'; said: ' + said[:200] if said else ''}{'; replaced ' + ', '.join(replaced) if replaced else ''}; "
-            f"saved faces/{name}" + _face_reload(scene, faces) + '\n' + face.readout(tr))
+            f"saved faces/{name}" + _face_reload(scene, faces, d) + '\n' + face.readout(tr))
 
 
 def _face_from(src):
@@ -1370,8 +1370,12 @@ def _face_from(src):
     return out + (f" (Rhubarb did not run: {src['rhubarb_error']})" if src.get('rhubarb_error') else '')
 
 
-def _face_reload(scene, faces):
+def _face_reload(scene, faces, d):
+    """Tell the open page of the scenes folder d; a server with a same-named scene in another folder (a private copy's
+    twin on the live stage, 2026-10-23) is not told: its page would load tracks it does not have."""
     try:
+        if Path(link.server_for(scene)['scenes']).resolve() != Path(d).resolve():
+            return '; the page takes it at its next load'
         link.page_cmd(scene, 'face_reload', {'faces': faces}, timeout=8)
         return '; the page has it'
     except Exception:                                      # noqa: BLE001  (no page open)

@@ -160,6 +160,26 @@ def test_a_voice_goes_on_a_persons_mouth_at_a_song_time(stage, tmp_path):
         page.t.join(5)
 
 
+def test_a_track_saved_in_a_private_copy_is_not_pushed_to_the_live_twin(stage, tmp_path):
+    import shutil
+    import soundfile as sf
+    OPS['stage_world'](scene='room', world={'actors': {'singer': 'body_c'}})
+    private = tmp_path / 'private'
+    shutil.copytree(stage['scenes'], private)              # the same scene names, another folder
+    wav = tmp_path / 'vocal.wav'
+    sf.write(wav, voice([(1.0, 1.6)], seconds=3.0), SR)
+    page = FakePage(stage['port'], 'room')                 # the live server's page of its own 'room'
+    try:
+        out = OPS['stage_face'](scene='room', person='singer', at=12.0, audio=str(wav), scenes=str(private))
+        assert 'takes it at its next load' in out
+        assert not any(c['type'] == 'face_reload' for c in page.seen)
+        assert (private / 'room' / 'faces' / 'singer_12000.json').is_file()
+        assert not (stage['scenes'] / 'room' / 'faces').exists()
+    finally:
+        page.stop = True
+        page.t.join(5)
+
+
 def test_a_take_gives_its_own_voice_and_words(stage):
     import soundfile as sf
     sc = stage['scenes']
