@@ -125,6 +125,13 @@ Find any tool by what you need or by role with `ops_find`.
   Windows, `songs/_reclaim` elsewhere, `$ISMAIL_RECLAIM` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
   file's path from the drive root, with a `manifest.json` and a `README.txt` line per folder, and `machine_disk`
   lists its folders with their sizes. The person deletes a folder there; nothing in ismail deletes.
+- **Mastering for delivery.** `master_cue(source, lufs=-16, tp=-1, mp3=False, mp3_catch_db=1.2)` cuts, fades and
+  resamples a finished cue, applies one fixed gain to the loudness target, and limits only the true-peak excess,
+  with a lookahead true-peak catch (4x oversampled) as its last stage, so the wav ends at the ceiling `tp`.
+  `mp3=True` also writes a 320k mp3 from a copy caught again at `tp - mp3_catch_db`: a 320k encode lands up to
+  1.25 dB over its wav, and 1.2 kept every measured mp3 under `tp`. Only the mp3 gets that catch; the wav keeps
+  its loudness. `mp3_margin_db` lowers the wav's own ceiling (0 by default); `tp_catch=False` is the master from
+  before the catch.
 - **MIDI files in and out.** `midi_write` puts the song (or some tracks, or a window of bars) into a type 1 .mid
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
