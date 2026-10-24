@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### voices: flute, a measured air-jet performer
+
+- New built-in voice `flute` (`ismail/voices/winds/flute.py`), a performer: `{"type": "code", "voice": "flute",
+  "tail": 1.5}`. An additive air jet whose tone tables (H1-H12 and the air per band, per note and dynamic, B3-Db7)
+  are fitted to the University of Iowa MIS flute; slurs, legato tonguing and flutter from the Philharmonia flute
+  phrases; vibrato growth and breath attacks from public-domain and CC solo recordings (credits in its INFO and in
+  docs/reference.md, Sample sources). An overlap slurs as a cross-fade of harmonics (no glide), a gap under 0.1 s
+  tongues under the same breath, a gap of `breath_gap` or more breathes. Velocity is blowing. Lanes `bend`, `vib`,
+  `level`, `breath`, `tongue`, `scoop`, `fall`, `flutter`. Built and judged in a song study (blind picture rounds,
+  a blind ear A/B in a mix, a sighted pass in a mix; no blind round against a player yet). (ledger:M321)
+- Its defaults are the study's measured ones plus the fingered settings passed by ear: `slur_cross` 1,
+  `slur_detail` 0, `keys` 0.45, `breath` 0.7, and `entry_vel` 8 (a phrase's first note shorter than a beat is blown
+  a little firmer). INFO's `tips` gives the settings for a line slurred almost every note with a late vibrato.
+- A phrase's first note's attack is capped at a share of its length at every length (the study capped only notes
+  under 0.2 s), so a 0.26 s pickup is no longer swallowed: on 8 pickups slurred into held notes, the pickup 40-120 ms
+  in sat at most 4.8 dB under the held note (was 10.3), median 3.0 (was 5.3).
+- Four study params nobody set were left out: `floor_hi`, `chiff`, `part_spread`, `lane_tilt`.
+
 ### mimic perform: fingered slurs by default, and when the vibrato comes in is a lane
 
 - A slur in `"perform": true` is now a fingered slur (ledger:M322). Nate on the clarinet performer's blind round,

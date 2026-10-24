@@ -207,7 +207,9 @@ Find any tool by what you need or by role with `ops_find`.
   (see [Voices](#voices-instruments-as-code) and [Sample sources](#sample-sources)). Clarinet, bassoon and horn
   were measured from VSCO 2 CE (CC0) and checked blind against the real recordings on 2026-10-07 (clarinet not told
   apart; bassoon and horn told apart but rated good enough; one listener, one pair each). Flute, oboe, trumpet,
-  trombone and tuba were measured too and heard as synthetic, so they stay out until they pass.
+  trombone and tuba were measured too and heard as synthetic, so they stay out until they pass; the flute has
+  since come back as a measured performer (`flute`, 2026-10-24), passed by ear in a mix but not yet blind against
+  a player.
 - **Developing it with agents**: roles for studio agents, contributor devs, area devs and helpers
   ([development.md](../skills/ismail/references/development.md),
   [contributor-dev.md](../skills/ismail/references/contributor-dev.md)), one worktree per change
@@ -242,6 +244,11 @@ Measured or sampled voices come from these sets. The audio itself stays out of t
 | [jRhodes3d](https://github.com/sfzinstruments/jlearman.jRhodes3d) by Jeff Learman | the `rhodes` voice | samples CC BY-NC 4.0; the author grants CC0 for music made with them |
 | [Big Rusty Drums](https://github.com/sfzinstruments/karoryfer.big-rusty-drums) by Karoryfer Samples | the `rusty` and `toms` voices | CC0 1.0 |
 | [Emilyguitar](https://github.com/sfzinstruments/karoryfer.emilyguitar) by D. Smolken, Karoryfer Samples | the `emily` voice | CC0 1.0 |
+| [University of Iowa MIS, flute](https://theremin.music.uiowa.edu/MISflute.html) (Electronic Music Studios) | the `flute` voice's tone tables, attacks, intonation and vibrato (numbers only) | free to use |
+| [Philharmonia Orchestra sound samples, flute](https://github.com/skratchdot/philharmonia-samples) | the `flute` voice's slurs, legato tonguing, flutter and staccato (numbers only) | free to use, not for resale as samples |
+| Debussy, Syrinx, played by Sarah Bassingthwaite ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Debussy_-_Syrinx.ogg)) | the `flute` voice's vibrato growth, slurs and breath attacks (numbers only) | public domain |
+| Bach, Partita BWV 1013, Sarabande, played by **Scott Goff** ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Bach_-_Partita_For_Solo_Flute_-_Modern_Flute_-_3._Sarabande.ogg)) | the `flute` voice's vibrato growth and slur and tongue dips (numbers only) | CC BY-SA 2.0, credit Scott Goff |
+| "Flute Play C - 14" by cms4f ([Freesound 159136](https://freesound.org/people/cms4f/sounds/159136/)) | the `flute` voice's slurs and tongued notes (numbers only) | CC0 |
 
 ## Concepts
 
@@ -268,6 +275,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | strings | `violin`, `cello`, `contrabass` | mimic profiles measured from real recordings (use `{"type": "mimic", "profile": "violin"}`); open strings, measured room and vibrato included; `params.players` makes a section |
 | winds | `clarinet` | mimic profile measured from VSCO 2 CE (CC0); not told apart from the real note in a blind pair (one listener, 2026-10-07) |
 | winds | `bassoon` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
+| winds | `flute` | performer: a concert flute as a measured additive air jet (tone tables per note and dynamic from the Iowa MIS flute), playing a whole line: an overlap slurs (a cross-fade of harmonics, no glide), a gap under 0.1 s tongues under the same breath, a longer gap breathes; velocity is blowing (brighter loud, breathier soft); lanes `bend`, `vib`, `level`, `breath`, `tongue`, `scoop`, `fall`, `flutter`. Use `{"type": "code", "voice": "flute", "tail": 1.5}`; `voice_help('flute')` lists its params, sources and exams |
 | brass | `horn` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
@@ -470,8 +478,8 @@ ismail/
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
   mimic_perform.py  the phrase performer for sustained mimic profiles ("perform": true)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
-                 (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon), brass (horn), bass (growl),
-                 fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
+                 (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon, flute), brass (horn),
+                 bass (growl), fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)
   api_ops.py     ops_find: the op for a need, by purpose or role
