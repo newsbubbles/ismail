@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### phone: a long path in the DJ log wraps
+
+- A DJ log note with a full file path made the phone page wider than the screen and pushed every other control
+  sideways (Nate, 10-24). The log rows' text column is `minmax(0,1fr)` now and wraps anywhere, so a path breaks inside
+  its row.
+
 ### voices: flute, a measured air-jet performer
 
 - New built-in voice `flute` (`ismail/voices/winds/flute.py`), a performer: `{"type": "code", "voice": "flute",

@@ -968,6 +968,15 @@ def test_every_panel_picture_opens_full_screen_and_back_closes_it():
     assert '#viewer{position:fixed;inset:0;z-index:10' in html and 'touch-action:none' in html
 
 
+
+def test_a_long_path_in_the_log_wraps_instead_of_widening_the_page():
+    """Nate 10-24: a DJ log note with a full file path made the whole page wider than the phone. A grid track of 1fr
+    grows to its longest word; minmax(0,1fr) and overflow-wrap:anywhere let the path wrap inside its row (checked in
+    a browser at 375 px: 891 px wide before, 375 after)."""
+    html = (S.PAGE / 'index.html').read_text(encoding='utf8')
+    assert '.log div{display:grid;grid-template-columns:42px minmax(0,1fr);' in html
+    assert '.log div>*{min-width:0;overflow-wrap:anywhere}' in html
+
 @pytest.fixture
 def eye_round(tmp_path, monkeypatch):
     """A throwaway picture-round page server (ismail.exampage) on a free port, one round 'r1'; the phone server's
