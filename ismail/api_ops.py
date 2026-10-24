@@ -20,27 +20,31 @@ CATEGORIES = [
     ('write', 'tracks, notes, patterns, buses, automation, stem maps',
      ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
       'notes_transform', 'pattern_write', 'automation_', 'stem_map_set', 'audio_place')),
-    ('sounds', 'choosing and making sounds: voices, instruments, presets, effects, samples, speech',
-     ('voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
+    ('sounds', 'choosing and making sounds: the kit by family, voices, instruments, presets, effects, samples, speech',
+     ('kit', 'voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
       'samples_', 'sound_list', 'sound_make', 'sound_import', 'sound_speak', 'sound_autotune')),
     ('fit', 'matching a sound or a level to a recording, measured',
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
       'levels_from_ref', 'ref_retune')),
     ('render', 'rendering, mastering a finished cue for delivery, and playing', ('render', 'play_file', 'master_cue')),
-    ('midi', 'MIDI files in and out: the song or some tracks to a .mid any DAW opens, a .mid read into tracks',
-     ('midi_write', 'midi_read')),
+    ('midi', 'MIDI files and ports: the song or some tracks to a .mid any DAW opens, a .mid read into tracks, the '
+             'MIDI inputs and outputs, a song played to a synth or a DAW',
+     ('midi_write', 'midi_read', 'midi_ports', 'midi_play')),
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
                'and where two takes differ',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
       'region_measure')),
     ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop')),
-    ('compare', 'your render against the reference, stored and drilled into bar by bar', ('cmp_', 'ear_pass')),
+    ('compare', 'your render against the reference, stored and drilled into bar by bar, and the tells the person '
+               'keeps hearing, measured every round', ('cmp_', 'ear_pass', 'tell_')),
     ('exam', 'pages the person answers: blind exams, eye exams, picture rounds they mark with pins and boxes, '
              'feedback pages they answer by voice or typing', ('exam_', 'feedback_')),
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
     ('together', 'listening together: record what plays (a mic only with their yes), their words as they say them, '
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
-    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it', ('live_', 'midi_')),
+    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it, its notes and '
+             'clock out to synths and other apps, tracks frozen into one a deck plays, what a deck costs',
+     ('live_', 'midi_', 'track_freeze', 'deck_cost')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stream', "live streaming: the set to several sites at once, the picture and its text, every site's chat read "
                "and answered, and the request queue the MC fills and the DJ plays from",

@@ -2144,6 +2144,9 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
             L.append(f"  {trk} fx {i}: max gain reduction {gr:.1f} dB")
+    for trk, lines in R.notes_report.items():
+        for ln in lines[:3]:
+            L.append(f"  {trk}: {ln}")
     for trk, k in R.early.items():
         L.append(f"  {trk}: {k} nudged notes would sound before 0 s and start at 0 s instead; "
                  f"project_set(offset_sec=...) a little later than now gives their lead-in room")
@@ -2516,9 +2519,12 @@ from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list
 from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
 from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
 from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
-from . import api_midi  # noqa: E402,F401  (registers midi_write / midi_read: MIDI files in and out, ledger:M113)
+from . import api_midi  # noqa: E402,F401  (registers midi_write, midi_read, midi_ports, midi_play: ledger:M113)
+from . import api_freeze  # noqa: E402,F401  (registers track_freeze: tracks into one audio track a deck plays, ledger:M292)
+from . import api_kit  # noqa: E402,F401  (registers kit: every public voice and effect by family, ledger:M295)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
+from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell ledger, ledger:M305)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
