@@ -10,13 +10,16 @@
   (`mimic_measure`, `live_parity`) is no longer told to pass one: its BUSY reply names the shell work-around
   `python -m ismail.machine run --cpu --wait 10m -- python -m ismail -p <project> <op> ...`. (ledger:M313)
 - The fit distance took the mean over 29 bands, so two sub bands 35 to 39 dB over the target cost about 2.5 and a
-  bass fit kept an octave-down square the target does not have. Each dB a band is past 20 dB off now adds 0.15,
-  summed, and the band the tables print as 25 Hz (24.8 Hz) counts for fmin=25 again (it fell out of the distance).
-  A synthetic A1 bass with nothing under 40 Hz: a darker clean bass read 5.37 before and 5.13 now; the same tone
-  plus an octave-down square (+36 and +25 dB at 25 and 31 Hz) read 4.45 before (the better score) and 9.46 now.
-  The `instrument_fit` reply warns of any band more than 20 dB off, and the distance line of it and
-  `sound_compare` says how far past 20 dB the far bands are. `track_fit` scores its own way
-  and is unchanged. (ledger:M315)
+  bass fit kept an octave-down square the target does not have. In `instrument_fit` each dB a band is past 20 dB
+  off now adds 0.15, summed, and the band the tables print as 25 Hz (24.8 Hz) counts for fmin=25 (it fell out of
+  the distance). A synthetic A1 bass with nothing under 40 Hz: a darker clean bass read 5.37 before and 5.13 now;
+  the same tone plus an octave-down square (+36 and +25 dB at 25 and 31 Hz) read 4.45 before (the better score)
+  and 9.46 now. The `instrument_fit` reply warns of any band more than 20 dB off. (ledger:M315)
+- `sound_compare` scores are unchanged on purpose: song sessions track its number across rounds, and a before and
+  after must stay comparable. Its reply now prints the same far-band warning, as text only. To score the way
+  `instrument_fit` does, pass `sound_compare(..., fit_score=True)` (in Python, `sounddesign.distance(...,
+  **sounddesign.FIT_SCORE)`, that is `far_cost=0.15, nominal_bands=True`). `distance` defaults to the old score,
+  so `track_fit` and `mimic_measure`'s leave-one-out check score as before too.
 
 ### Notes that clash, read from the arrangement
 

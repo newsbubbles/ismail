@@ -62,7 +62,7 @@ def _window_hint(ya, yb, a_cut, b_cut):
 
 @op()
 def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window: list = None, a_span: list = None,
-                  b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0) -> str:
+                  b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0, fit_score: bool = False) -> str:
     """A/B two sounds: 1/3-octave bands side by side (with << >> where A is >6 dB off), envelope from onset,
     centroid, stereo width, and one distance number. a/b are sources ('sound:<name>', 'ref:drums', 'track:x',
     ...); window=[t0, t1] seconds or span=[start_bar, end_bar] (fractional) selects a slice. Reach for it when one
@@ -70,11 +70,14 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
     sit like the record's): yours against theirs, on the window where it plays. Score the window, not the file:
     the envelope and every statistic over time count all of each sound, so a render or stem that runs past what
     the person hears (its release tail) reads apart from the clip they heard; the reply says when the lengths or
-    tails differ and no window was given."""
+    tails differ and no window was given, and warns of any band more than 20 dB apart (text only). The distance is
+    the number it has always been, so scores across rounds compare; fit_score=True scores the way instrument_fit
+    does instead (each dB a band is past 20 dB off adds 0.15, the 25 Hz band counts for fmin=25)."""
     P = _load(project)
     ya, yb = _audio(P, a, a_window, a_span), _audio(P, b, b_window, b_span)
     da, db = SD.descriptor(ya), SD.descriptor(yb)
-    return (SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1]
+    return (SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax,
+                            **(SD.FIT_SCORE if fit_score else {}))[1]
             + _window_hint(ya, yb, bool(a_window or a_span), bool(b_window or b_span)) + ZOOM_HINT)
 
 
@@ -127,7 +130,8 @@ def instrument_fit(project: str, target: str, instrument, params: dict, notes: s
                                 root=P.root)
     y = SD.render_oneshot(best['inst'], notes_sec, L, best['fx'], P.d['bpm'], root=P.root)
     ydesc = SD.descriptor(y)
-    _, cmp_txt = SD.compare_text(ydesc, tdesc, 'fitted', target.split(':')[-1], fmin, fmax)
+    _, cmp_txt = SD.compare_text(ydesc, tdesc, 'fitted', target.split(':')[-1], fmin, fmax, warn=False,
+                                 **SD.FIT_SCORE)
     out = [f"fit: distance {d0:.2f} -> {d1:.2f} after {iters} renders",
            "fitted params: " + json.dumps({k: round(v, 4) for k, v in vals.items()})]
     far = SD.far_warning(ydesc, tdesc, fmin, fmax, 'fitted', 'target')

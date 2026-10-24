@@ -25,14 +25,30 @@ def _desc(inst):
     return SD.descriptor(SD.render_oneshot(inst, NOTE, 1.3))
 
 
-def test_a_strong_sub_octave_the_target_lacks_now_scores_worse_than_a_clean_bass():
+def _main_distance(da, db, fmin=25.0, fmax=16000.0):
+    """sound_compare's distance as main computed it before M315 (origin/main 80edfc7), written out so a later change
+    to sounddesign cannot move it unnoticed."""
+    import numpy as np
+    msk = (SD.THIRD_OCT >= fmin) & (SD.THIRD_OCT <= fmax)
+    live = msk & ((da['bands'] > -50) | (db['bands'] > -50))
+    band = float(np.mean(np.abs(da['bands'][live] - db['bands'][live]))) if live.any() else 0.0
+    n = min(len(da['env']), len(db['env']))
+    live_e = (da['env'][:n] > -50) | (db['env'][:n] > -50)
+    env = float(np.mean(np.abs(da['env'][:n][live_e] - db['env'][:n][live_e]))) if live_e.any() else 0.0
+    pm = msk & (SD.THIRD_OCT >= 100) & (SD.THIRD_OCT <= 5000) & (da['bands'] > -40) & (db['bands'] > -40)
+    peak = float(np.mean(np.abs(da['peak'][pm] - db['peak'][pm]))) if pm.any() else 0.0
+    return 1.0 * band + 0.5 * env + 5.0 * abs(da['width'] - db['width']) + 0.4 * peak
+
+
+def test_a_strong_sub_octave_the_target_lacks_now_scores_worse_than_a_clean_bass_in_a_fit():
     tgt = _desc(_bass(900))
     clean = _desc(_bass(500))                 # the right parts, a darker filter
     sub = _desc(_bass(900, sub=0.15))         # the target's tone plus an octave-down square
-    d_clean, _ = SD.distance(clean, tgt)
-    d_sub, parts = SD.distance(sub, tgt)
+    assert _main_distance(sub, tgt) < _main_distance(clean, tgt)          # the M315 bug: the sub scored better
+    d_clean, _ = SD.distance(clean, tgt, **SD.FIT_SCORE)
+    d_sub, parts = SD.distance(sub, tgt, **SD.FIT_SCORE)
     assert d_sub > d_clean
-    assert parts['far_db'] > 10
+    assert parts['far_excess_db'] > 10
     far = dict(SD.far_bands(sub, tgt))
     assert any(c < 40 and x > 20 for c, x in far.items())
     w = SD.far_warning(sub, tgt)
@@ -40,10 +56,22 @@ def test_a_strong_sub_octave_the_target_lacks_now_scores_worse_than_a_clean_bass
     assert SD.far_warning(clean, tgt) == ''
 
 
-def test_the_band_the_table_calls_25_hz_counts_for_fmin_25():
+def test_the_band_the_table_calls_25_hz_counts_for_fmin_25_in_a_fit():
     m = SD.band_mask(25.0, 16000.0)
     assert m[1] and not m[0]                                     # 24.8 Hz in, 19.7 Hz out
     assert not SD.band_mask(70.0)[5] and SD.band_mask(70.0)[6]   # fmin=70 still leaves 63 Hz out, keeps 79 Hz
+    old = SD.band_mask(25.0, 16000.0, nominal=False)
+    assert not old[1] and old[2]                                 # the old pick, which sound_compare keeps
+
+
+def test_sound_compare_scores_exactly_as_main_did():
+    """Song sessions track sound_compare numbers across rounds (kit_families' 25.89 / 17.54): its distance stays
+    main's, both the far-band cost and the 25 Hz band left out by default."""
+    tgt = _desc(_bass(900))
+    for other in (_desc(_bass(500)), _desc(_bass(900, sub=0.15)), _desc(_bass(4000))):
+        assert SD.distance(other, tgt)[0] == _main_distance(other, tgt)
+        assert SD.compare_text(other, tgt)[0] == _main_distance(other, tgt)
+        assert SD.distance(other, tgt, fmin=70.0, fmax=8000.0)[0] == _main_distance(other, tgt, 70.0, 8000.0)
 
 
 @pytest.fixture
@@ -58,6 +86,20 @@ def test_the_fit_reply_warns_when_a_band_is_more_than_20_db_off(proj):
     out = api.OPS['instrument_fit'](proj, target='sound:ref_bass', instrument=_bass(900, sub=0.5),
                                     params={"oscs.1.level": [0.4, 0.5]}, notes='0 A1 2', iters=8)
     assert 'WARNING' in out and 'more than 20 dB' in out and 'fitted - target' in out
+    assert out.count('WARNING') == 1
+
+
+def test_the_sound_compare_op_keeps_its_number_and_prints_the_warning(proj):
+    api.sound_make(proj, 'sub_bass', _bass(900, sub=0.5), notes='0 A1 2', describe=False)
+    out = api.OPS['sound_compare'](proj, a='sound:sub_bass', b='sound:ref_bass')
+    from ismail.api_sound import _audio
+    P = api._load(proj)
+    da, db = SD.descriptor(_audio(P, 'sound:sub_bass')), SD.descriptor(_audio(P, 'sound:ref_bass'))
+    assert out.startswith(f"distance {_main_distance(da, db):.2f} (")
+    assert 'WARNING' in out and '25 Hz' in out
+    opt = api.OPS['sound_compare'](proj, a='sound:sub_bass', b='sound:ref_bass', fit_score=True)
+    assert opt.startswith(f"distance {SD.distance(da, db, **SD.FIT_SCORE)[0]:.2f} (")
+    assert SD.distance(da, db, **SD.FIT_SCORE)[0] > _main_distance(da, db) + 1
 
 
 class _Busy:
