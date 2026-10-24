@@ -56,6 +56,18 @@
   -117), and such a stem never counts as loud. The same floor applies to the stem rows of the cmp level maps.
   (ledger:M296)
 
+### analyze_grid: the harmony votes on bar 1 two beats apart
+
+- A snare on 2 and 4 reads the same under a two-beat shift, so on a four-on-the-floor house track the drum stem put
+  bar 1 two beats late (celestial_resort_1024: drum stem 0.916 s, the bass and chords change on beat 1 at
+  0.0687 s). `analyze_grid` now reads the bass root per beat (from the reference's bass stem when the source is the
+  reference and it has one, else the low band of the source, plus its chroma turns) and counts the changes on each
+  beat of the bar. The candidate two beats away wins with 1.5x the changes on its bar lines and at least max(3, 10%
+  of the bars) more; under 3 changes in all, harmony does not vote and the pick stays. One line says it:
+  "downbeat: drums say 0.9157 s, harmony says 0.0585 s (changes on beat 1 in 61 of 131 bars, on beat 3 in 15);
+  using 0.0585 s" on that track's drum stem, and on a move the "bar 1 starts at" line and the chosen candidate are
+  marked. (ledger:M312)
+
 ### The tell ledger
 
 - `tell_add`, `tell_heard`, `tell_measure`, `tell_judged`, `tell_status`, `tell_show`, `tell_check`: a fault the

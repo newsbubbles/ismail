@@ -274,6 +274,90 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
     return data, txt
 
 
+def harmony_changes(path, bpm, offset, bass=False):
+    """Per beat on the grid (bpm, offset): the bass root and whether the harmony changed on that beat. The root is
+    the strongest pitch class of a constant-Q chroma from C1 (4 octaves on a bass stem, 3 on a mix: its low band),
+    read over the beat's 35-95% (the kick's attack is past). A beat changes when its root differs from the last
+    beat's and both are voiced; on a mix, also when the chroma above C2 turns (cosine under 0.7). Returns
+    (beat times, roots or -1, changed booleans)."""
+    y = load(path)
+    spb = 60 / bpm
+    fps = ASR / HOP
+    b0 = offset % spb
+    bt = b0 + np.arange(int((len(y) / ASR - b0) / spb)) * spb
+    if len(bt) < 8:
+        return bt, np.full(len(bt), -1), np.zeros(len(bt), bool)
+    low = librosa.feature.chroma_cqt(y=y, sr=ASR, hop_length=HOP, fmin=librosa.note_to_hz('C1'),
+                                     n_octaves=4 if bass else 3, bins_per_octave=36, norm=None)
+
+    def per_beat(C):
+        out = []
+        for t in bt:
+            a, b = int((t + 0.35 * spb) * fps), int((t + 0.95 * spb) * fps)
+            out.append(C[:, a:max(b, a + 1)].mean(1) if a < C.shape[1] else np.zeros(12))
+        return np.array(out)
+    v = per_beat(low)
+    e = v.sum(1)
+    root = v.argmax(1)
+    # voiced: some low energy, and one pitch class well over an even spread (1/12 of the sum)
+    voiced = (e > 0.1 * np.percentile(e, 90)) & (v.max(1) > 2.0 * e / 12) if e.max() > 0 else np.zeros(len(e), bool)
+    root = np.where(voiced, root, -1)
+    # a change counts when the new root holds for the next beat too: a glide or a passing note is not one
+    chg = np.r_[False, (root[1:] != root[:-1]) & voiced[1:] & voiced[:-1]] & np.r_[root[1:] == root[:-1], False]
+    if not bass:
+        hi = per_beat(librosa.feature.chroma_cqt(y=y, sr=ASR, hop_length=HOP, fmin=librosa.note_to_hz('C2'),
+                                                 n_octaves=5))
+        n = np.linalg.norm(hi, axis=1) + 1e-9
+        cos = (hi[1:] * hi[:-1]).sum(1) / (n[1:] * n[:-1])
+        chg |= np.r_[False, cos < 0.7]
+    return bt, root, chg
+
+
+def downbeat_by_harmony(path, g, txt, bass_path=None):
+    """Vote between bar 1 as beat_grid chose it and the candidate two beats away, by where the harmony changes. A
+    snare on 2 and 4 reads the same under a two-beat shift; bass and chord changes land on beat 1 far more often
+    than on beat 3 (a four-on-the-floor house track read two beats late: its bass changes fell on beat 3 of the
+    pick). The bass root per beat comes from bass_path (a bass stem) when given, else the low band of path. The
+    other candidate wins with 1.5x the changes on its bar lines and at least max(3, 10% of the bars) more. Returns
+    (g, txt) with offset_sec moved and the text marked when harmony overrides, and one 'downbeat:' line added."""
+    bpb = g.get('beats_per_bar', 4)
+    if bpb != 4 or 'candidate_offsets' not in g:
+        return g, txt
+    bpm, pick = g['bpm'], g['offset_sec']
+    spb, bar = 60 / bpm, 4 * 60 / bpm
+    cands = g['candidate_offsets']
+    q = int(np.argmin([min(abs(c - pick), bar - abs(c - pick)) for c in cands]))
+    alt = cands[(q + 2) % 4]
+    bt, root, chg = harmony_changes(bass_path or path, bpm, pick, bass=bool(bass_path))
+    # beat index within the picked bar (0 = beat 1)
+    pos = np.round((bt - pick) / spb).astype(int) % 4
+    counts = [int(chg[pos == k].sum()) for k in range(4)]
+    m = int((pos[1:] == 0).sum())
+    n1, n3 = counts[0], counts[2]
+    src = 'the bass stem' if bass_path else 'the low band and chroma of the mix'
+    flip = n3 >= 1.5 * n1 and n3 - n1 >= max(3, 0.1 * m)
+    g = dict(g, harmony_changes_per_beat=counts, harmony_offset=alt if flip else pick)
+    per = f"changes per beat of the drums' bar, 1/2/3/4: {'/'.join(map(str, counts))}, from {src}"
+    if sum(counts) < 3:
+        line = (f"downbeat: drums say {pick:.4f} s, harmony did not vote (under 3 bass or chord changes; {per}); "
+                f"using {pick:.4f} s")
+    elif flip:
+        line = (f"downbeat: drums say {pick:.4f} s, harmony says {alt:.4f} s (changes on beat 1 in {n3} of {m} "
+                f"bars, on beat 3 in {n1}); using {alt:.4f} s. {per}")
+        g['offset_sec'] = alt
+        g['bars'] = int((librosa.get_duration(path=path) - alt) / bar)
+        txt = txt.replace(f"bar 1 starts at {pick:.3f}s", f"bar 1 starts at {alt:.3f}s (by harmony, see the downbeat "
+                          f"line; the drums said {pick:.3f}s)", 1)
+        txt = txt.replace('  <- chosen', '  <- the drums')
+        txt = '\n'.join(ln + '  <- chosen (harmony)' if ln.startswith(f"  {alt:.4f}s  ") else ln
+                        for ln in txt.split('\n'))
+    else:
+        says = f"harmony says {pick:.4f} s too" if n1 > n3 else "harmony is not clear"
+        line = (f"downbeat: drums say {pick:.4f} s, {says} (changes on beat 1 in {n1} of {m} bars, {n3} on beat 3, "
+                f"where bar 1 at {alt:.4f} s would put beat 1); using {pick:.4f} s. {per}")
+    return g, txt + '\n' + line
+
+
 # ------------------------------------------------------------------ per-bar features
 
 def _band_db(S, freqs):

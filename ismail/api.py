@@ -2229,6 +2229,10 @@ def analyze_grid(project: str, source: str = None, bpm_hint: float = None) -> st
     g, txt = A.beat_grid(P.resolve_audio(source), bpm_hint, P.bpb)
     ref = P.d.get('reference') or {}
     drums = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'drums.wav'))
+    # bar 1 two beats off (a snare on 2 and 4 reads the same): the harmony changes vote, from the bass stem on a ref
+    bass = audiofile.find(os.path.join(ref.get('stems_dir') or '', 'bass.wav'))
+    on_ref = P.auto_source(source).split(':')[0] == 'ref' and ref.get('stems_dir') and os.path.exists(bass)
+    g, txt = A.downbeat_by_harmony(P.resolve_audio(source), g, txt, bass if on_ref else None)
     if P.auto_source(source) in ('ref', 'ref:drums') and ref.get('stems_dir') and os.path.exists(drums):
         txt += '\n' + A.swing(drums, g['bpm'], g['offset_sec'])[1]
     else:
