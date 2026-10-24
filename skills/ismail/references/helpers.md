@@ -61,6 +61,12 @@ busy (the message says why), or, rarely, the board's lock stayed taken for 30 s.
 retry in a minute or stand in line with `run --wait 30m`. A lock or ticket left by a process that died is cleared
 by the next caller.
 
+Standing in line is cheap, so `run --wait` is the right way to queue, however long the line. One CPU sample (every
+10 s) and one GPU reading (every 5 s) serve every waiter: the first to find the last one old takes a new one and the
+others read it (`_machine/cpu.json`, `_machine/gpu.json`). A waiter near the front looks at the board every 5 s, one
+further back less often (up to a minute), and every waiter is woken within a quarter of a second when a job ends or
+a waiter leaves the line (`_machine/gen`), so the next job still starts at once.
+
 ## Which model does which task
 
 A default, not a rule, and the person's choice wins:

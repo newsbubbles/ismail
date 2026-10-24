@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Jobs waiting in line cost almost nothing
+
+- 23 `python -m ismail.machine run --wait` waiters used 8.4% of the CPU together while the machine was at 99%: each
+  took its own 2 s CPU sample and ran nvidia-smi every 5 s. Now one CPU sample (10 s) and one GPU reading (5 s) serve
+  every process on the machine: the caller that finds the last reading old claims the sampling with a file next to
+  it, and the others read the last reading meanwhile. A claim left by a process that died is cleared after 15 s.
+- A waiter far back in line looks at the board less often (5 s near the front, up to 60 s further back), and the
+  line is woken when a job ends, a waiter leaves it or the priority changes: the board touches `<board>/gen` and a
+  waiter asleep in line looks at that file's time every 0.25 s. With 23 waiters over 30 s: 2 CPU samples instead of
+  23, 6 nvidia-smi runs instead of 91, 26 looks at the board instead of 134, and the next job started 0.2 s after a
+  job ended instead of 3.6 s.
+
 ### The machine board's lock serves callers in order
 
 - With about 23 jobs waiting, a new `python -m ismail.machine run` could lose the race for the board's lock again
