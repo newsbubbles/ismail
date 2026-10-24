@@ -35,6 +35,7 @@ from . import graph as G
 from . import worker
 from .safety import BAD_ABS, Safety
 from . import outputs as O
+from .midi_out import MidiOut
 from .midi_play import MidiPlay
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 
@@ -223,6 +224,7 @@ class Engine:
         self._fifo_lock = threading.Lock()
         self._head = 0
         self.midi = MidiPlay(self)      # played keys: MIDI inputs patched to instruments (live_midi)
+        self.mout = MidiOut(self)       # tracks' notes and clock to MIDI outputs (live_midi_out, live_midi_clock)
         if self.n_workers > 0:
             import multiprocessing as mp
             ctx = mp.get_context('spawn')
@@ -481,6 +483,8 @@ class Engine:
                     m['placed'] = min(m['placed'], on)
                 todo = todo[:n]
             for on, c, ei, k in todo:     # render in the order they will sound
+                if self.tracks.get(c.track, {}).get('midi_only'):
+                    continue                  # its notes go out as MIDI only (live_midi_out(audio=False))
                 tp = self._transpose(c.track, on)
                 key = (c.id, ei, tp) + self._variant(c, ei, k)
                 have = self.cache.get(key)
@@ -538,6 +542,12 @@ class Engine:
             for dn, dk in self.decks.items():
                 if dk.held:
                     self._release(dn, dk, now)
+            try:
+                self.mout.plan()
+            except Exception as ex:           # MIDI out must never stop the set's own scheduling
+                if self.stats['midi_out_errors'] < 3:
+                    self.news.append(f"MIDI out: planning failed ({type(ex).__name__}: {ex}); tell Main Dev")
+                self.stats['midi_out_errors'] += 1
 
     def _unrendered(self, deck, b0, b1):
         """Tracks of `deck` with events in [b0, b1) still waiting for their render."""
@@ -848,6 +858,7 @@ class Engine:
 
     def _pull(self, frames):
         self.last_pull = time.time()
+        self.mout.pulled(self.played)    # the speaker-time anchor MIDI out sends by: sample `played` leaves now
         out = np.zeros((frames, 2), dtype=np.float32)
         got = 0
         with self._fifo_lock:
@@ -1032,6 +1043,7 @@ class Engine:
     def shutdown(self):
         self.running = False
         self.midi.close()
+        self.mout.close()
         if getattr(self, '_on_board', None) is not None:
             self._on_board.close()
         if getattr(self, 'stream', None) is not None:
@@ -2394,6 +2406,18 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
+    def cmd_midi_out(self, track=None, port=None, channel=None, audio=None, offset_ms=None, at='now', remove=False):
+        try:
+            return self.mout.route(track, port, channel, audio, offset_ms, at, remove)
+        except (ValueError, OSError, RuntimeError) as e:
+            raise LiveError(str(e))
+
+    def cmd_midi_clock(self, port=None, on=True, position=False, offset_ms=None):
+        try:
+            return self.mout.clock_cmd(port, on, position, offset_ms)
+        except (ValueError, OSError, RuntimeError) as e:
+            raise LiveError(str(e))
+
     def cmd_keys(self, events=None, sid=None):
         """The on-screen keys page (live_keys_page): its key messages in, what the page shows out."""
         try:
@@ -2424,6 +2448,7 @@ class Engine:
                 lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
             if self.midi.patches:
                 lines += [self.midi.line(p) for p in self.midi.patches.values()]
+            lines += self.mout.status_lines()
             if self.controls.maps:
                 lines.append("controls: " + '; '.join(f"{c} -> {O.describe(m)}" for c, m in self.controls.maps.items()))
             stall = self._stalled()
@@ -2632,6 +2657,7 @@ class Engine:
         with self.lock:
             n = max(1, int(float(fade_s) * SR))
             self.fade = (n, n)
+        self.mout.end(fade_s)           # MIDI out: notes stop with the fade, then note-offs and clock Stop
         threading.Thread(target=self._finish, daemon=True).start()
         return f"fading out over {fade_s:g} s and stopping"
 
@@ -2723,6 +2749,7 @@ def serve(engine, port=0, idle_min=None):
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
            'midi': engine.cmd_midi, 'played': engine.cmd_played, 'keys': engine.cmd_keys,
+           'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
            'clock': engine.cmd_clock}
     keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')
 
