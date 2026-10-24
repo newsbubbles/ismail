@@ -234,12 +234,20 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
     as loud as its climax: the climax will not arrive, and this only showed up here) and sections so quiet they vanish at normal volume."""
     P = _load(project)
     y, sr = _segment(P, source)
-    _, g = P.source(source)
+    path, g = P.source(source)
     total = P.d.get('length_bars') or int((y.shape[1] / sr - g.offset) / (g.bpb * g.spb)) + 1
+    win = P.render_window(path)            # a bars=[a, b] render: its file starts at song bar a (windows.json)
+    w0, w1 = (int(win['bars'][0]), int(win['bars'][1])) if win else (1, total)
     if sections:
         secs = [(n, int(a), int(b)) for n, (a, b) in sections.items()]
+        out = [f"{n} [{a}, {b}]" for n, a, b in secs if a < w0 or b > w1]
+        if win and out:
+            raise OpError(f"{source!r} is a window render: its file starts at song bar {w0} and holds bars {w0}-{w1} "
+                          f"(renders/windows.json). Sections take song bars, so {', '.join(out[:3])} "
+                          f"{'falls' if len(out) == 1 else 'fall'} outside it: bars 1-4 of this file are "
+                          f"[{w0}, {w0 + 3}]. Shift the sections by {w0 - 1} bars, or render the full song")
     else:
-        secs = [(f"{a}-{min(a + block - 1, total)}", a, min(a + block - 1, total)) for a in range(1, total + 1, block)]
+        secs = [(f"{a}-{min(a + block - 1, w1)}", a, min(a + block - 1, w1)) for a in range(w0, w1 + 1, block)]
     w = int(0.4 * sr)
     rows = []
     for n, a, b in secs:
@@ -250,7 +258,8 @@ def analyze_sections(project: str, source: str = 'render', sections: dict = None
         win = 10 * np.log10(np.add.reduceat(m, np.arange(0, len(m) - w + 1, w))[:len(m) // w] / w + 1e-20)
         rows.append((n, a, b, _db(s), 20 * np.log10(np.abs(s).max() + 1e-12), win.max(), win.min()))
     if not rows:
-        raise OpError("no section had 400 ms of audio; check sections against the render length")
+        raise OpError("no section had 400 ms of audio; check sections against the render length"
+                      + (f" ({source!r} holds song bars {w0}-{w1})" if win else ''))
     top = max(rows, key=lambda r: r[3])
     L = [f"sections of {source} (dB; loudest/quietest = 400 ms windows):",
          f"  {'section':<12} {'bars':>7} {'rms':>6} {'peak':>6} {'loudest':>8} {'quietest':>9}"]
