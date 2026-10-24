@@ -2,8 +2,10 @@
 pickups, flatwounds), sampled every minor third with 4 velocity layers and 3 round robins. The output is the DI:
 put the rig after it (amp, cab ...), as with the electric voice.
 Per note: the nearest sample (<= 1.5 semitones, played faster or slower), the velocity layer from the note's
-velocity, the round robin walked by the note's song position (neighbours never repeat), a short damping at the note's
-end with the recorded release noise. twelve > 0 adds a 12-string's courses: the octave string under each of the
+velocity and a level inside it (the layer plays as recorded at its top velocity and falls toward the recorded level
+of the layer below at its bottom, so velocity moves the level between the 4 recorded steps), the round robin
+walked by the note's song position (neighbours never repeat), a short damping at the note's end with the recorded
+release noise. twelve > 0 adds a 12-string's courses: the octave string under each of the
 four lower courses (E2..G3 + an octave) and a unison string above, a few ms apart and a few cents off, picked in
 the order an upstroke or downstroke meets them.
 Articulation (the electric voice's conventions): mono=True chains notes that overlap the one before onto one string
@@ -21,7 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 INFO = {
     "summary": "Emilyguitar (Karoryfer, CC0) DI samples: velocity layers, round robins, release noise; optional 12-string courses",
     "range": "Db2-D6 (shifted up to 1.5 semitones from the nearest sample)",
-    "velocity": "picks the layer: p <= 40, mp <= 80, mf <= 120, f above",
+    "velocity": "picks the layer: p <= 40, mp <= 80, mf <= 120, f above; inside a layer the level falls from the "
+                "layer's recorded level (its top) toward the layer below's (its bottom)",
     "params": {"twelve": "level of the 12-string course strings, 0 = a 6-string", "release_db": "release-noise level, dB",
                "humanize_ms": "timing jitter, ms", "detune_cents": "12-string course detune, cents", "level": "output gain",
                "pan": "-1..1 (mono DI)", "mono": "legato chains (overlapping notes = hammer-on / slide)",
@@ -75,6 +78,38 @@ def _load(f, sr, semis):
     return y
 
 
+def _level(f):
+    """RMS of a sample's first 0.4 s."""
+    key = ('lv', f)
+    if key not in _cache:
+        import soundfile as sf
+        info = sf.info(f)
+        y, _ = sf.read(f, frames=int(0.4 * info.samplerate), dtype='float64', always_2d=True)
+        _cache[key] = float(np.sqrt(np.mean(y.mean(1) ** 2))) + 1e-12
+    return _cache[key]
+
+
+def _layer_gain(base, layer, v):
+    """The level inside a velocity layer: 1 at the layer's top velocity (the sample as recorded), down at its
+    bottom to the recorded level of the layer below (p: the p to mp step again, at most 8 dB). Where the layer below
+    was recorded as loud or louder (a hard pick's short spike), the layer stays flat. Samples are never changed."""
+    idx, _ = _index()
+    names = [n for n, _ in LAYERS]
+    if layer not in idx[base]:
+        return 1.0
+    db = {n: 20 * np.log10(np.mean([_level(f) for f in t.values()])) for n, t in idx[base].items()}
+    i = names.index(layer)
+    if i > 0 and names[i - 1] in db:
+        below = db[names[i - 1]]
+    elif i == 0 and names[1] in db:
+        below = db[layer] - float(np.clip(db[names[1]] - db[layer], 0, 8))
+    else:
+        return 1.0
+    lo, hi = (0 if i == 0 else LAYERS[i - 1][1]), min(127, LAYERS[i][1])
+    drop = float(np.clip(db[layer] - below, 0, 12))
+    return 10 ** (-drop * float(np.clip((hi - v) / max(1, hi - lo), 0, 1)) / 20)
+
+
 def _rng(beat, m, salt):
     return np.random.default_rng([int(round(beat * 960)) % (2 ** 31), int(m), int(salt)])
 
@@ -106,7 +141,7 @@ def _one(out, m, st, dur, v, beat, sr, gain, release_db, humanize_ms, cents=0.0,
             k = min(len(ry), len(y) - j)
             y[j:j + k] += ry[:k]
     k = min(len(y), len(out) - i0)
-    out[i0:i0 + k] += gain * y[:k]
+    out[i0:i0 + k] += gain * _layer_gain(base, layer, v) * y[:k]
 
 
 def _lane(lanes, name, a, b):
@@ -178,7 +213,7 @@ def _chain(out, ch, beat, sr, release_db, humanize_ms, lanes, attack_cents, vib_
             ry = _load(rf, sr, 0.0) * 10 ** (release_db / 20)
             k = min(len(ry), n - n_note)
             w[n_note:n_note + k] += ry[:k]
-    out[i0:i0 + n] += w
+    out[i0:i0 + n] += _layer_gain(base, layer, v0) * w
 
 
 def perform(notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, twelve=0.0, release_db=-18.0, humanize_ms=3.0,

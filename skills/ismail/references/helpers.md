@@ -54,6 +54,19 @@ fits) takes a slot and refuses with the reason, and anything outside ismail goes
 - **One heavy job per crew**, like any session. Helpers queue (`run --wait`, `slot(..., wait=)`) rather than
   pile up; the light work (writing code, reading numbers) runs side by side.
 
+A long line does not lock anyone out. Waiters look at the board without taking its lock, and the lock serves
+callers in arrival order (a ticket each in `_machine/lockq`), so a new `machine run` gets onto the board within
+about a second even with 30 jobs waiting. Exit 75 from `machine run` means the job did not start: the machine is
+busy (the message says why), or, rarely, the board's lock stayed taken for 30 s. Either way nothing was registered:
+retry in a minute or stand in line with `run --wait 30m`. A lock or ticket left by a process that died is cleared
+by the next caller.
+
+Standing in line is cheap, so `run --wait` is the right way to queue, however long the line. One CPU sample (every
+10 s) and one GPU reading (every 5 s) serve every waiter: the first to find the last one old takes a new one and the
+others read it (`_machine/cpu.json`, `_machine/gpu.json`). A waiter near the front looks at the board every 5 s, one
+further back less often (up to a minute), and every waiter is woken within a quarter of a second when a job ends or
+a waiter leaves the line (`_machine/gen`), so the next job still starts at once.
+
 ## Which model does which task
 
 A default, not a rule, and the person's choice wins:
