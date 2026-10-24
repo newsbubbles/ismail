@@ -434,6 +434,10 @@ air; only you hear it, through `live_listen(deck=...)`.
    A deck loaded straight on air waits off air until a whole bar of it is rendered, then goes on air on that bar
    line: load too close and the audience hears it start bars late, and the next reply says so. A big song (20+
    tracks) wants 10 to 20 bars of lead; load it while the other deck plays, and keep it cued.
+   Before the set (or before a reset), `deck_cost(song, bars=[a, b])` for each deck says how long its first bar
+   takes to render here and which track makes the wait: load a deck that many bars ahead, pick a lighter section,
+   or lighten the heavy track. It starts no engine and plays nothing, so it is safe while a set runs (it does use
+   CPU for a few seconds).
    Before a set, check each song's sections with `live_parity(song, bars=[a, b])`: a drum bus that had lost its
    dry signal left only the bass audible, and only the user heard it.
 2. Listen to deck B while deck A plays; fix it there (`live_deck` eq/transpose, `live_fx` on `B.<track>`).

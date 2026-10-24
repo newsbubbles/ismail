@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### What a deck costs, before it plays
+
+- `deck_cost(project, bars=, bpm=, workers=)`: the deck's first bar loaded on a silent engine in the op's own
+  process (no `live_start`, no workers, no device, nothing played), warmed as a started engine is, and timed: each
+  track's render seconds for the bar and its real-time factor, its slowest event, its first note, its effects' ms
+  per mixer block; the total, the wait for the first bar with the engine's render workers, and the mixer's load.
+  The reset gap after a `live_load` was mostly that first bar, and the agent could not see it coming. (ledger:M293,
+  the Live DJ's stream set of 10-22.)
+
 ### Frozen tracks, and placed audio on decks
 
 - `track_freeze(project, tracks, into=)` renders tracks into one audio track a live deck can play: their mix as
