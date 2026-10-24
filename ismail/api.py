@@ -2463,6 +2463,7 @@ from . import api_midi  # noqa: E402,F401  (registers midi_write, midi_read, mid
 from . import api_freeze  # noqa: E402,F401  (registers track_freeze: tracks into one audio track a deck plays, ledger:M292)
 from . import api_guards  # noqa: E402,F401  (registers the grant_* ops: standing grants and routes, ledger:M209)
 from . import api_compress  # noqa: E402,F401  (registers song_compress: finished songs as FLAC, ledger:M221)
+from . import api_clash  # noqa: E402,F401  (registers notes_clash: semitone rubs and out-of-key notes, ledger:M282)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)
