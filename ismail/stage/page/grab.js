@@ -215,7 +215,9 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
         }
       }
     }
-    h.held = { it, fixed, pinned, joint, t0: now, grip: Math.max(curlOf(side) || 0, GRIP_MIN), gripAt: now,
+    // a release counts only once the hand has closed on it (the user, 2026-10-25: a thing taken by an open hand resting on
+    // it dropped at once, the open hand read as "let go"; now any hand shape takes, and opening from a closed hand lets go)
+    h.held = { it, fixed, pinned, joint, t0: now, grip: Math.max(curlOf(side) || 0, GRIP_MIN), gripAt: now, closed: (curlOf(side) || 0) >= GRIP_MIN,
       offset: wristM(s).invert().multiply(o.matrixWorld), holdW: h.prev.wrist ? h.prev.wrist.clone() : null, nearAt: now };
     h.count = null;
     live.emit('grabbed', { object: it.name, hand: side, joint, contacts, fixed, pinned: pinned ? `${pinned.person} ${pinned.bone}` : null,
@@ -412,9 +414,10 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
         glue(side, s);
         const g = h.held, curl = curlOf(side);
         if (curl != null && curl >= g.grip * GRIP_FRAC) g.gripAt = now;
+        if (curl != null && curl >= GRIP_MIN) g.closed = true;
         const pulled = g.fixed && g.holdW && wrist.p.distanceTo(g.holdW) > PULL_M;
         if (g.fixed && g.holdW && wrist.p.distanceTo(g.holdW) < 0.02) g.nearAt = now;
-        const open = curl != null && curl < g.grip * OPEN_FRAC;
+        const open = g.closed && curl != null && curl < g.grip * OPEN_FRAC;
         if (open || pulled) {
           if (!h.rel) {
             h.rel = { t0: now, why: open ? 'opened' : 'pulled', began: open ? g.gripAt : g.nearAt };
