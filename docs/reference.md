@@ -209,7 +209,8 @@ Find any tool by what you need or by role with `ops_find`.
   apart; bassoon and horn told apart but rated good enough; one listener, one pair each). Flute, oboe, trumpet,
   trombone and tuba were measured too and heard as synthetic, so they stay out until they pass; the flute has
   since come back as a measured performer (`flute`, 2026-10-24), passed by ear in a mix but not yet blind against
-  a player.
+  a player, and the trumpet as one too (`trumpet`, 2026-10-25), not told apart from a player's phrases in a blind
+  round on a phone speaker.
 - **Developing it with agents**: roles for studio agents, contributor devs, area devs and helpers
   ([development.md](../skills/ismail/references/development.md),
   [contributor-dev.md](../skills/ismail/references/contributor-dev.md)), one worktree per change
@@ -249,6 +250,9 @@ Measured or sampled voices come from these sets. The audio itself stays out of t
 | Debussy, Syrinx, played by Sarah Bassingthwaite ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Debussy_-_Syrinx.ogg)) | the `flute` voice's vibrato growth, slurs and breath attacks (numbers only) | public domain |
 | Bach, Partita BWV 1013, Sarabande, played by **Scott Goff** ([Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Bach_-_Partita_For_Solo_Flute_-_Modern_Flute_-_3._Sarabande.ogg)) | the `flute` voice's vibrato growth and slur and tongue dips (numbers only) | CC BY-SA 2.0, credit Scott Goff |
 | "Flute Play C - 14" by cms4f ([Freesound 159136](https://freesound.org/people/cms4f/sounds/159136/)) | the `flute` voice's slurs and tongued notes (numbers only) | CC0 |
+| [University of Iowa MIS, Bb trumpet 2012](https://theremin.music.uiowa.edu/MIS-Pitches-2012/MISBbTrumpet2012.html) (Electronic Music Studios) | the `trumpet` voice's tone per pitch, attacks, onset pitch, releases and vibrato (numbers only) | free to use |
+| Trumpet sound effects (1) half-valve, (4) the fall, (5) the doit, (9) the scoop by **Jon Harnum** (YouTube: [1](https://www.youtube.com/watch?v=u9fnlRF56lM), [4](https://www.youtube.com/watch?v=qRKI-euzdfU), [5](https://www.youtube.com/watch?v=IhTTzb7R0zM), [9](https://www.youtube.com/watch?v=t8FbAtl-3sg)) | the `trumpet` voice's half-valve, doit, scoop and fall curves, the onset buzz time and the room floor (numbers only) | CC BY, credit Harnum |
+| Trumpet solo lines by emirdemirel ([Freesound 417964](https://freesound.org/people/emirdemirel/sounds/417964/) and three more) and trumpetplayer ([Freesound 651201](https://freesound.org/people/trumpetplayer/sounds/651201/), 651202, 651203) | the `trumpet` voice's tonguing and slurs, and the brightness of short notes (numbers only) | CC0 |
 
 ## Concepts
 
@@ -277,6 +281,7 @@ The library is grouped in family folders under `ismail/voices/`; names stay flat
 | winds | `bassoon` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
 | winds | `flute` | performer: a concert flute as a measured additive air jet (tone tables per note and dynamic from the Iowa MIS flute), playing a whole line: an overlap slurs (a cross-fade of harmonics, no glide), a gap under 0.1 s tongues under the same breath, a longer gap breathes; velocity is blowing (brighter loud, breathier soft); lanes `bend`, `vib`, `level`, `breath`, `tongue`, `scoop`, `fall`, `flutter`. Use `{"type": "code", "voice": "flute", "tail": 1.5}`; `voice_help('flute')` lists its params, sources and exams |
 | brass | `horn` | mimic profile measured from VSCO 2 CE (CC0); told apart in a blind pair but rated good enough (one listener, 2026-10-07) |
+| brass | `trumpet` | performer: a Bb trumpet as a measured additive lip reed (the tone per pitch from the Iowa MIS trumpet) under one brass law (softer blowing is darker by harmonic number, so a swell brightens and the top dies first at a release), playing a whole line: an overlap slurs, a gap tongues; velocity is blowing; mutes `open`, `harmon`, `harmon_stem` (param `mute`) and a plunger lane; lanes `bend`, `vib`, `level`, `breath`, `tongue`, `scoop`, `fall`, `doit`, `shake`, `flutter`, `growl`, `halfvalve`, `plunger`, `jitter`, `top`. Use `{"type": "code", "voice": "trumpet", "tail": 1.5}`; `voice_help('trumpet')` lists its params, sources and exams |
 | bass | `growl` | dubstep bass engine: velocity 1x yoi, 2x wub, 3x screech, 4x metal, 5x dive, 6x zap, 7x grind, 8x chop, 9x talk, 11x robot, 12x howl; the LFO rates follow the song tempo |
 | fx | `sfx` | one-shots by velocity: gunshot, reload, shell casing, bone crunch, punch, rip, gong |
 | fx | `crackle` | designed vinyl surface noise: clicks and hiss |
@@ -478,7 +483,7 @@ ismail/
   mimic.py       instruments measured from recordings (partials, body, noise, vibrato, room)
   mimic_perform.py  the phrase performer for sustained mimic profiles ("perform": true)
   voices/        the voice library in family folders: keys (grand_piano, additive_piano, rhodes), strings
-                 (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon, flute), brass (horn),
+                 (violin, cello, contrabass mimic profiles), winds (clarinet, bassoon, flute), brass (horn, trumpet),
                  bass (growl), fx (sfx, crackle, transitions), guitar (electric, emily), drums (kit70, rusty, toms); showcase.json lists the voices
                  a first sketch uses, fx_stacks.json the built-in effect stacks
   api.py, api_cmp.py, api_sound.py, api_measure.py, api_exam.py, api_fxstack.py   the operations (CLI and MCP tools)

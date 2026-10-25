@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### voices: trumpet, a measured lip-reed performer
+
+- New built-in voice `trumpet` (`ismail/voices/brass/trumpet.py`), a performer: `{"type": "code", "voice":
+  "trumpet", "tail": 1.5}`. A Bb trumpet in concert pitch, E3-D6 as measured (to F6 thinner): an additive lip reed
+  whose tone per pitch is fitted to the University of Iowa MIS Bb trumpet, under one brass law for dynamics,
+  attacks, releases and swells (softer blowing is darker by harmonic number). An overlap slurs, a gap tongues.
+  Velocity is blowing (127 ff, 90 f, 55 mf, 35 mp, 22 p). Mutes `open`, `harmon`, `harmon_stem` (param `mute`);
+  lanes `bend`, `vib`, `level`, `breath`, `tongue`, `scoop`, `fall`, `doit`, `shake`, `flutter`, `growl`,
+  `halfvalve`, `plunger`, `jitter`, `top`. (ledger:M331)
+- Built and judged in a winds song study: blind picture rounds at or under chance (the lip shake still caught),
+  five single notes in a blind ear round (four not told apart, the plunger reversed), and a blind phrase round on a
+  phone speaker passed ("I cannot tell the difference at all"). Its numbers are the study's: the defaults render
+  sample for sample as the study's voice did. The phrases that passed copied a player's take each; INFO's `tips`
+  gives those settings.
+- Scoop, fall, doit and half-valve curves and the room floor are measured from Jon Harnum's trumpet effects videos
+  (CC BY, credit Harnum): credited in its INFO and in docs/reference.md, Sample sources. Its INFO lists which
+  constant came from which source.
+
 ### mimic perform: each slur's move inside the margin Nate named
 
 - Each slur in `"perform": true` now draws its own cross (ledger:M327). Nate on the #358 confirm round (clarinet,

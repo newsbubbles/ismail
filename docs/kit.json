@@ -47,8 +47,8 @@
   "untested": "no ear test found"
  },
  "summary": {
-  "voices": 45,
-  "voices_with_ear_state": 12,
+  "voices": 46,
+  "voices_with_ear_state": 13,
   "by_family": {
    "analog synths": {
     "passed": 0,
@@ -128,7 +128,7 @@
     "untested": 0
    },
    "brass": {
-    "passed": 0,
+    "passed": 1,
     "usable": 1,
     "failed": 0,
     "pending": 0,
@@ -1264,6 +1264,49 @@
    "info_error": null
   },
   {
+   "name": "trumpet",
+   "family": "brass",
+   "type": "measured",
+   "engine": "additive lip-reed performer (phrases, slurs, tonguing, techniques as lanes)",
+   "modeled_on": "Bb trumpet, open and muted",
+   "ear": "passed",
+   "exam": "blind ear round 1 (five single notes: four not told apart, the plunger reversed); blind phrase round 2 passed; picture rounds 7-10 (real picked 12, 13, 8, 10 of 28); ledger:M331",
+   "heard": "phrase round 2, blind, on a phone speaker: every clip ticked played, \"I cannot tell the difference at all\"; the phrases copied a player's take each, an original solo is not judged yet; the lip shake is still caught in picture rounds",
+   "range": "concert E3-D6 (MIDI 52-86) as measured; to F6 (89) thinner; write concert pitch (the Bb trumpet reads a major second above)",
+   "range_from": "voice INFO",
+   "cost": "not measured; INFO says: about 6x realtime on one CPU core (a tongued and slurred 32-note line at 120 BPM, 44.1 kHz, 2026-10-25 on a shared laptop); the cost is per phrase (harmonics up to 15 kHz, each with its own level curve)",
+   "needs": null,
+   "showcase": false,
+   "standin": null,
+   "roles": [],
+   "use": {
+    "type": "code",
+    "voice": "trumpet"
+   },
+   "source": "measured: University of Iowa MIS Bb trumpet; Jon Harnum's trumpet effects (CC BY, credit Harnum); Freesound CC0 solo lines (emirdemirel, trumpetplayer); lesson videos measured for numbers only",
+   "functions": [
+    "perform"
+   ],
+   "lanes": [
+    "bend",
+    "breath",
+    "doit",
+    "fall",
+    "flutter",
+    "growl",
+    "halfvalve",
+    "jitter",
+    "level",
+    "plunger",
+    "scoop",
+    "shake",
+    "tongue",
+    "top",
+    "vib"
+   ],
+   "info_error": null
+  },
+  {
    "name": "placed_audio",
    "family": "fx",
    "type": "designed",
@@ -2003,9 +2046,9 @@
   },
   {
    "family": "brass",
-   "gap": "trumpet, trombone, tuba, brass section",
-   "cite": "M169 (all three FAILED, \"synthetic\"); M180",
-   "under_way": "trumpet next in songs/kit_winds, from performances"
+   "gap": "trombone, tuba, brass section",
+   "cite": "M169 (all three FAILED, \"synthetic\"); M180; the trumpet performer M331",
+   "under_way": "none"
   },
   {
    "family": "mallets",
