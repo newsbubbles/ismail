@@ -146,6 +146,12 @@ INFO = {
         "the shake: caught in every picture round",
         "the phrase pass was on a phone speaker",
         "the phrase settings copy one take each; an original solo is not yet judged",
+        "a fall's air tail (0.3-6 kHz at 0.55 of the note's rms, about 0.8 s, no lane reaches it) is brighter "
+        "above 4 kHz than the note it follows (about 5 dB on an f Bb5); a first original solo drew its falls on "
+        "the bend lane instead",
+        "lanes keep acting on a phrase's release: a lane that moves right after the last note (a level taper "
+        "back to 0 dB, a bend back to 0) clicks or bends the tail; hold every lane at its last value for about "
+        "1.2 s after each phrase",
     ],
 }
 
