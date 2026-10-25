@@ -168,8 +168,7 @@ def check_skills(errors, warnings, files):
         if not desc:
             errors.append(f'{n}: frontmatter description is required')
         elif len(desc) > 1024:
-            warnings.append(f'{n}: description is {len(desc)} characters; the Agent Skills spec caps it at 1024 '
-                            '(OpenAI\'s docs state no limit)')
+            errors.append(f'{n}: description is {len(desc)} characters; the Agent Skills spec caps it at 1024')
 
 
 def server_entry(meta, **extra):
@@ -266,7 +265,7 @@ def build_openai(meta, root=ROOT):
     codex_manifest = {
         'name': meta['name'],
         'version': meta['version'],
-        'description': meta['description'],
+        'description': meta['marketplace_description'],
         'author': meta['author'],
         'homepage': meta['homepage'],
         'repository': meta['repository'],
@@ -274,7 +273,7 @@ def build_openai(meta, root=ROOT):
         'keywords': meta['keywords'],
         'skills': './skills/',
         'mcpServers': './.codex-plugin/mcp.json',
-        'interface': {**openai_interface(meta, long_description=meta['description']),
+        'interface': {**openai_interface(meta, long_description=meta['marketplace_description']),
                       'logo': icon, 'composerIcon': icon},
     }
     mcp = {'mcpServers': {meta['server']['name']: server_entry(
@@ -373,10 +372,6 @@ def validate_openai(out, meta, root=ROOT):
             for hit in find_keys(json.loads(data), OPENAI_FORBIDDEN_KEYS):
                 errors.append(f'{n}: {hit} is not allowed in a submitted package')
     check_skills(errors, out.warnings, files)
-    named = sorted(n for n, d in files.items() if n.endswith('.md') and b'Claude' in d)
-    if named:
-        out.warnings.append(f'{len(named)} skill files name Claude (the skill scan may prefer neutral wording): '
-                            + ', '.join(named))
 
     # B: the Codex marketplace files
     repo = {**out.repo}
@@ -449,7 +444,7 @@ def build_claude_code(meta, root=ROOT):
         'name': meta['name'],
         'displayName': c['displayName'],
         'version': meta['version'],
-        'description': meta['description'],
+        'description': meta['marketplace_description'],
         'author': meta['author'],
         'homepage': meta['homepage'],
         'repository': meta['repository'],

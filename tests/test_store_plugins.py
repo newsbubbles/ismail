@@ -95,6 +95,9 @@ def test_validators_catch_broken_listings(meta):
     assert 'shortDescription is 31' in text and 'defaultPrompt' in text and 'name' in text
     _, errors = release.build('claude-code', meta={**meta, 'name': 'claude-ismail'})
     assert any('reserved' in e for e in errors)
+    errors = []
+    release.check_skills(errors, [], {'skills/x/SKILL.md': b'---\nname: y\ndescription: ' + b'a' * 1025 + b'\n---\n'})
+    assert len(errors) == 2 and 'match its folder' in errors[0] and 'caps it at 1024' in errors[1]
 
 
 # ---------------------------------------------------------------- openai (ChatGPT and Codex)
@@ -128,6 +131,7 @@ def test_codex_marketplace_server_answers(meta, tmp_path):
 def test_claude_code_plugin_server_answers(meta, tmp_path):
     out, _ = release.build('claude-code', meta=meta)
     plugin = json.loads(out.repo['.claude-plugin/plugin.json'])
+    assert plugin['description'] == meta['marketplace_description']      # the plugin starts the server itself
     (server,) = plugin['mcpServers'].values()
     files = release.read_zip(out.dist[release.claude_zip_name(meta)])
     assert json.loads(files['.claude-plugin/plugin.json']) == plugin

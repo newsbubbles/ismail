@@ -2,7 +2,7 @@
   "name": "ismail",
   "displayName": "ismail",
   "version": "0.3.0",
-  "description": "A DAW for AI agents: write music as notes, sounds and code, read the audio back as text, and play it live, in a VR stage too. Its MCP tools (find one by need with ops_find) and the composing skill.",
+  "description": "ismail is an open-source (MIT) music studio that an AI model runs through text. The model writes the song as notes, instrument patches and mix settings, renders it on your machine (the plugin starts the ismail server for you, with uv), and reads every render back as numbers: levels, drum lanes, piano rolls, and comparisons against a reference. It does this because it can't hear. Instruments are built from recorded notes of the real thing, and your own ears decide when a piece is done, through short listening checks. No generative audio model makes the sound.",
   "author": {
     "name": "Nate Codes",
     "url": "https://github.com/newsbubbles"
