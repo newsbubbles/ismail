@@ -114,7 +114,7 @@ INFO = {
         "Freesound CC0 solo lines by emirdemirel (417963, 417964, 416025, 416026) and trumpetplayer (651201, 651202, "
         "651203; https://freesound.org/people/trumpetplayer/sounds/651201/): tonguing and slurs, the phrase rounds' "
         "takes; TOP_HZ0 and the top lane (the blues lick's short notes), air_lowcut and chiff_db (off by default).",
-        "Measured only, YouTube standard licence (held for the user's rule-3 decision, development.md): Bryan Davis, "
+        "Measured only, YouTube standard licence (cleared by the user for the defaults, 2026-10-25, credited): Bryan Davis, "
         "How to Growl and Flutter Tongue on Trumpet (the soft-note brass law: BRASS_HZ, TONE_AIR_LAW, BAND_TOP_HZ, "
         "BAND_TOP_ORDER, BAND_GAIN; BRASS_B's slope was calibrated on Davis mf F4 against Iowa ff F4; FINGER_SD, "
         "TONE_AIR, TONE_AIR_HZ, TONE_AIR_REF and TONE_AIR_TILT were fitted in the same round against Iowa ff and "

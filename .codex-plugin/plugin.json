@@ -1,0 +1,38 @@
+{
+  "name": "ismail",
+  "version": "0.3.0",
+  "description": "ismail is an open-source (MIT) music studio that an AI model runs through text. The model writes the song as notes, instrument patches and mix settings, renders it on your machine (the plugin starts the ismail server for you, with uv), and reads every render back as numbers: levels, drum lanes, piano rolls, and comparisons against a reference. It does this because it can't hear. Instruments are built from recorded notes of the real thing, and your own ears decide when a piece is done, through short listening checks. No generative audio model makes the sound.",
+  "author": {
+    "name": "Nate Codes",
+    "url": "https://github.com/newsbubbles"
+  },
+  "homepage": "https://newsbubbles.github.io/ismail/",
+  "repository": "https://github.com/newsbubbles/ismail",
+  "license": "MIT",
+  "keywords": [
+    "music",
+    "daw",
+    "audio",
+    "synthesizer",
+    "live",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "ismail DAW",
+    "shortDescription": "Make songs, beats and mixes",
+    "longDescription": "ismail is an open-source (MIT) music studio that an AI model runs through text. The model writes the song as notes, instrument patches and mix settings, renders it on your machine (the plugin starts the ismail server for you, with uv), and reads every render back as numbers: levels, drum lanes, piano rolls, and comparisons against a reference. It does this because it can't hear. Instruments are built from recorded notes of the real thing, and your own ears decide when a piece is done, through short listening checks. No generative audio model makes the sound.",
+    "developerName": "Measured Instruments LLC",
+    "category": "Creativity",
+    "capabilities": [],
+    "websiteURL": "https://newsbubbles.github.io/ismail/",
+    "defaultPrompt": [
+      "Make a 16 bar deep house loop in F minor and render an mp3.",
+      "Recreate the drums of this reference clip, then show me how close the match is.",
+      "Play me my guitar recording and your rebuilt one without saying which is which."
+    ],
+    "logo": "./assets/logo/apple-touch-icon.png",
+    "composerIcon": "./assets/logo/apple-touch-icon.png"
+  }
+}
