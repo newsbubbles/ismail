@@ -14,7 +14,9 @@ split into lines, and the room, ring and sympathetic strings of mimic's own post
 How notes are read (per line; a chord splits into lines, each phrased on its own):
   overlap         SLUR: no new attack, the pitch moves under continuous air: by default as fingers do, in about
                   5 ms, while each partial's level cross-fades from the old note's to the new note's over about
-                  20 ms (slur_cross 1); slur_cross 0 is the glide of slur_ms (45 ms) it had before
+                  20 ms (slur_cross 1); slur_cross 0 is the glide of slur_ms (45 ms) it had before. Each slur
+                  draws its own cross inside a margin (slur_vary): a step anywhere from the glide to the fingers,
+                  a leap near the fingers
   gap < breath_gap TONGUE: the air keeps going, the tone dips and speaks again with the measured chiff
   longer gap      a new BREATH: a new phrase, with its onset
 
@@ -55,6 +57,12 @@ INFO = {
                              "partial's level cross-fades from the old note's to the new note's over about 20 ms, "
                              "each at its own time; 0 = the glide over slur_ms of before (Nate on the clarinet "
                              "performer, 10-24: \"it sounds like a MIDI instrument sliding up\")",
+               "slur_vary": "0..1 how far each slur's own cross is drawn below slur_cross, toward 0 (the glide): a "
+                            "step (2 semitones or less) draws anywhere in [slur_cross x (1 - slur_vary), slur_cross], "
+                            "a leap in the top quarter of it; 1 (default) = steps from the 45 ms glide to the "
+                            "fingered move, 0 = every slur at slur_cross. Nate on the confirm round, 10-25: the glide "
+                            "and the fingers \"represent like the margins of where we should be inside of\" (leaps: "
+                            "the glide \"too slow\")",
                "slur_color_ms": "ms each partial's level takes to hand over from the old note's to the new note's "
                                 "at slur_cross 1 (each from its own start, up to about 15 ms in); the old note's levels "
                                 "at the new pitch make a short dip at the join (about -3.6 dB in one 10 ms frame at "
@@ -73,8 +81,8 @@ INFO = {
 }
 
 DEFAULTS = dict(bright=0.0, vel_bright=6.0, vib=None, vib_rate=None, vib_delay=0.45, vib_grow=0.6, vib_am_db=1.6,
-                slur_ms=45.0, slur_cross=1.0, slur_color_ms=20.0, scoop_ms=110.0, attack_ms=75.0, tongue=0.35,
-                release=0.16, breath_gap=0.16,
+                slur_ms=45.0, slur_cross=1.0, slur_vary=1.0, slur_color_ms=20.0, scoop_ms=110.0, attack_ms=75.0,
+                tongue=0.35, release=0.16, breath_gap=0.16,
                 noise=0.0, lead_ms=28.0, drift_cents=3.0, breathe_db=0.7, taper_db=5.0, end_sag_cents=14.0,
                 chord_ms=30.0, room=None, room_mix=-10.0, width=0.35, seed=5)
 
@@ -95,6 +103,13 @@ SLUR_X_COL_SD_MS = 6.0    # each partial's level cross-fade (slur_color_ms) star
 SLUR_DIP_DB = -0.8        # the level dip at a slur, centred on the pitch move ...
 SLUR_X_DIP_W = 0.012      # ... its half-width x the move (0.7), never under this at full slur_cross (s), so a fast
                           # move still dips audibly while the fingers cross
+# each slur's own cross (slur_vary, ledger M327). Nate on the #358 confirm round (clarinet, 2026-10-25): on a
+# stepping tune both the glide (pitch move 35 ms) and the fingers (16 ms) pass, "maybe somewhere between those two
+# would be like the perfect fit but I think those two represent like the margins of where we should be inside of";
+# on leaps he picked the fingers and called the glide "slide, too slow". Real flute slurs vary too (move sd about
+# 6 ms around 13 ms). So a step draws its cross anywhere in the margin, a leap in its top quarter (the fast end).
+SLUR_STEP_ST = 2.0        # semitones: a slur this wide or less is a step, wider is a leap
+SLUR_LEAP_SHARE = 0.25    # a leap draws in this top share of the margin
 MAX_PARTIALS = 200
 
 
@@ -131,6 +146,15 @@ def _smooth(x):
 
 def _rng(seed, ms, salt):
     return np.random.default_rng([int(seed) & 0xFFFFFFFF, int(ms) + (1 << 40), int(salt) & 0xFFFF])
+
+
+def slur_cross_at(seed, ms, interval, cross, vary):
+    """one slur's own cross, 0..cross: drawn from the margin [cross x (1 - vary), cross] (a leap, more than
+    SLUR_STEP_ST semitones, from its top SLUR_LEAP_SHARE), keyed on the slur's song ms; vary 0 = cross"""
+    if vary <= 0 or cross <= 0:
+        return cross
+    share = 1.0 if abs(interval) <= SLUR_STEP_ST + 1e-9 else SLUR_LEAP_SHARE
+    return cross - cross * vary * share * float(_rng(seed, ms, 4).uniform())
 
 
 def _wander(rng, n, rate_hz, sr_c):
@@ -289,6 +313,7 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
 
     rel = float(P['release'])
     scr = float(np.clip(P['slur_cross'], 0.0, 1.0))
+    svary = float(np.clip(P['slur_vary'], 0.0, 1.0))
     lead = float(P['lead_ms']) / 1000.0
     nyq = min(sr / 2 * 0.95, 20000)
     sr_c = sr / CR
@@ -333,6 +358,7 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
         vib_amt = np.zeros(nc)                             # cents peak, per note, growing in
         note_of = np.zeros(nc, int)
         onsets = []                                        # (control index, hardness)
+        scr_of = {}                                        # each slur's own cross (pitch move and colour)
         for j, (st, m, d, v, how) in enumerate(ph):
             i0 = min(nc - 1, max(0, int(round((st - p0) * sr_c))))
             nrng = _rng(seed, int(round((st + t_song0) * 1000)), 2)
@@ -344,11 +370,12 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
                 pm = ph[j - 1][1]
                 jit = 1 + 0.2 * nrng.normal()
                 sl = max(0.015, float(P['slur_ms']) / 1000 * jit)
-                if scr > 0:
+                sx = scr_of[j] = slur_cross_at(seed, int(round((st + t_song0) * 1000)), m - pm, scr, svary)
+                if sx > 0:
                     # the fingers' move: a few ms (slur_cross 1) in place of the glide (0)
-                    sl = (1 - scr) * sl + scr * max(0.002, SLUR_X_MS / 1000 * jit)
+                    sl = (1 - sx) * sl + sx * max(0.002, SLUR_X_MS / 1000 * jit)
                 bend[i0:] += (pm - m) * (1 - _smooth(age / sl))
-                art_db[i0:] += SLUR_DIP_DB * np.exp(-((age - sl * 0.5) / max(sl * 0.7, scr * SLUR_X_DIP_W)) ** 2)
+                art_db[i0:] += SLUR_DIP_DB * np.exp(-((age - sl * 0.5) / max(sl * 0.7, sx * SLUR_X_DIP_W)) ** 2)
             elif how == 'tongue':
                 tg = float(np.clip(lane_at('tongue', a0 + i0 * CR, P['tongue']), 0, 1))
                 gap = st - (ph[j - 1][0] + ph[j - 1][2])
@@ -448,13 +475,14 @@ def perform(prof, notes, total_n, sr, bpm=120.0, lanes=None, beat0=0.0, mimic_pa
                 continue
             i0 = max(0, int(round((ph[j][0] - p0) * sr_c)))
             sl = max(0.015, float(P['slur_ms']) / 1000)
-            if scr == 0:
+            sx = scr_of[j]
+            if sx == 0:
                 i1 = min(nc, i0 + int(np.ceil(2 * sl * sr_c)) + 1)
                 x = _smooth((tc[i0:i1] - tc[i0]) / (2 * sl))[:, None]
             else:
                 xr = _rng(seed, int(round((ph[j][0] + t_song0) * 1000)), 3)
-                off = scr * np.abs(xr.normal(0, SLUR_X_COL_SD_MS / 1000, K))       # each partial's own start
-                span = (1 - scr) * 2 * sl + scr * max(float(P['slur_color_ms']), 1.0) / 1000
+                off = sx * np.abs(xr.normal(0, SLUR_X_COL_SD_MS / 1000, K))        # each partial's own start
+                span = (1 - sx) * 2 * sl + sx * max(float(P['slur_color_ms']), 1.0) / 1000
                 i1 = min(nc, i0 + int(np.ceil((span + off.max()) * sr_c)) + 1)
                 x = _smooth(((tc[i0:i1] - tc[i0])[:, None] - off[None, :]) / span)
             src_c[i0:i1] = srcs[j - 1][None, :] * (1 - x) + srcs[j][None, :] * x
