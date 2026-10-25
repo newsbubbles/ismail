@@ -15,3 +15,6 @@ ref/
 
 # songs and projects (local work, not part of the tool)
 songs/
+
+# store packages (python -m ismail.release)
+dist/
