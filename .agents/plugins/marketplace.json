@@ -1,0 +1,20 @@
+{
+  "name": "ismail",
+  "interface": {
+    "displayName": "ismail DAW"
+  },
+  "plugins": [
+    {
+      "name": "ismail",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Creativity"
+    }
+  ]
+}

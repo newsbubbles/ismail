@@ -181,6 +181,29 @@ pip install "ismail @ git+https://github.com/newsbubbles/ismail"
 Then `ismail mcp` for any MCP client, `ismail -p <project> <op>` on the command line, or `from ismail import api`.
 Extras and per-client setup are in [docs/reference.md](docs/reference.md).
 
+In Codex it could install as a plugin: `codex plugin marketplace add newsbubbles/ismail`, then `ismail` from the
+plugin list (checked against Codex's docs and a server handshake, not yet in a live Codex session). It runs the server
+with uvx, so it needs [uv](https://docs.astral.sh/uv/).
+
+### Store packages
+
+One command builds the package for every harness store from one metadata file (`packaging/listing.json`, version
+from `pyproject.toml`), all pointing at the same server (`ismail mcp`):
+
+```bash
+python -m ismail.release --all            # writes dist/<target>/, validates each against its store's rules
+python -m ismail.release --all --sync     # also rewrites the committed manifests below
+python -m ismail.release --list           # the targets and how each client starts the server
+```
+
+| target | what it makes | how the server runs |
+|---|---|---|
+| `openai` | `dist/openai/ismail-openai-skills-<version>.zip`: the skill only, for the OpenAI plugin directory that ChatGPT and Codex share (upload under Skills only). Also `.codex-plugin/` and `.agents/plugins/marketplace.json` in this repo, the Codex marketplace above | The zip carries no server: the directory takes only remote HTTPS servers, so the skill sets ismail up on the computer. The Codex marketplace starts `uvx ... ismail mcp` over stdio |
+| `claude-code` | `.claude-plugin/plugin.json` and `marketplace.json` in this repo, and `dist/claude-code/ismail-claude-code-<version>.zip` of the plugin to share | Claude Code starts `uvx ... ismail mcp` over stdio |
+
+Two builds of the same checkout give the same bytes. `tests/test_store_plugins.py` checks each target and starts
+its declared server for an MCP handshake.
+
 ## Where to look
 
 | you want | read |

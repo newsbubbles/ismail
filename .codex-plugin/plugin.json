@@ -1,0 +1,38 @@
+{
+  "name": "ismail",
+  "version": "0.3.0",
+  "description": "A DAW for AI agents: write music as notes, sounds and code, read the audio back as text, and play it live, in a VR stage too. Its MCP tools (find one by need with ops_find) and the composing skill.",
+  "author": {
+    "name": "Nate Codes",
+    "url": "https://github.com/newsbubbles"
+  },
+  "homepage": "https://newsbubbles.github.io/ismail/",
+  "repository": "https://github.com/newsbubbles/ismail",
+  "license": "MIT",
+  "keywords": [
+    "music",
+    "daw",
+    "audio",
+    "synthesizer",
+    "live",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "ismail DAW",
+    "shortDescription": "Agentic music, measured",
+    "longDescription": "A DAW for AI agents: write music as notes, sounds and code, read the audio back as text, and play it live, in a VR stage too. Its MCP tools (find one by need with ops_find) and the composing skill.",
+    "developerName": "Measured Instruments LLC",
+    "category": "Creativity",
+    "capabilities": [],
+    "websiteURL": "https://newsbubbles.github.io/ismail/",
+    "defaultPrompt": [
+      "Make a 16 bar deep house loop in F minor and render an mp3.",
+      "Recreate the drums of this reference clip, then show me how close the match is.",
+      "Play me my guitar recording and your rebuilt one without saying which is which."
+    ],
+    "logo": "./assets/logo/apple-touch-icon.png",
+    "composerIcon": "./assets/logo/apple-touch-icon.png"
+  }
+}
