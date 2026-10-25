@@ -35,7 +35,7 @@ const PULL_M = 0.06;                      // a fixed thing: the hand this far of
 const SWEEP_M = 0.01;                     // the path from the last frame is tested every centimetre
 const NEAR_M = 0.3;                       // only things whose box is this near the wrist are tested
 const BOX_MS = 1000;                      // the list of things a hand may take is refreshed this often
-const FLY_MAX_S = 4, V_MAX = 8, G = 9.81;
+const FLY_MAX_S = 4, V_MAX = 8, G = 9.81, THROW_S = 0.4;
 // the joints that start a grab: the wrist, the metacarpals and the finger bases (not the tips: those pinch)
 const BASE = new Set(JOINTS.filter((n) => n === 'wrist' || n.endsWith('metacarpal') || n.endsWith('phalanx-proximal')));
 const ORDER = Object.fromEntries(JOINTS.map((n) => [n, n === 'wrist' ? 0 : n.endsWith('metacarpal') ? 1 : n.endsWith('proximal') ? 2
@@ -246,6 +246,20 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
     const v = a[a.length - 1].p.clone().sub(a[0].p).divideScalar(Math.max(1e-3, a[a.length - 1].t - a[0].t));
     return v.length() > V_MAX ? v.setLength(V_MAX) : v;
   }
+  // the fastest the wrist moved in the last moments before a let-go (0.1 s steps over THROW_S): a throw is the swing
+  // before the fingers open. Measured at "began to open" alone, a thing held by a resting open palm (never closed, so
+  // "began" is the grab itself) let go of a swung throw with 0.01 m/s (Nate, 10-25: "it just drops").
+  function swingBefore(side, t) {
+    const hist = H[side].hist.filter((x) => x.t >= t - THROW_S && x.t <= t);
+    let best = new THREE.Vector3();
+    for (let i = 0, j = 0; i < hist.length; i++) {
+      while (hist[i].t - hist[j].t > 0.1) j++;
+      if (i === j || hist[i].t - hist[j].t < 0.04) continue;
+      const v = hist[i].p.clone().sub(hist[j].p).divideScalar(hist[i].t - hist[j].t);
+      if (v.lengthSq() > best.lengthSq()) best = v;
+    }
+    return best.length() > V_MAX ? best.setLength(V_MAX) : best;
+  }
   const letGoAt = new Map();                                 // thing name -> when a hand last let go of it (regrab_s)
   function release(side, why, began, now) {
     const h = H[side], g = h.held;
@@ -254,7 +268,8 @@ export function initGrab(ed, live, xr, hands, getActors, props) {
     letGoAt.set(g.it.name, now);
     const s = ctlOf(side);
     if (s) { const model = handModel(s); if (model) model.position.set(0, 0, 0); }
-    const it = g.it, v = speedAt(side, began / 1000);
+    const it = g.it, v0 = speedAt(side, began / 1000), v1 = swingBefore(side, now / 1000);
+    const v = v1.lengthSq() > v0.lengthSq() ? v1 : v0;
     let rel = null;
     if (g.pinned) { const p = props.letGo(it.name); rel = p ? p.rel : null; }
     if (g.pinned && rel) hands.mark({ drop: it.name, person: g.pinned.person, bone: g.pinned.bone, hand: side,
