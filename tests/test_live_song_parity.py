@@ -30,10 +30,12 @@ EXACT = [('saw_lead', MEL), ('pad', MEL), ('pluck', MEL), GLIDE, ('fm_bell', MEL
 FLUTE = {'type': 'code', 'voice': 'flute', 'tail': 1.5}
 # a phrase per bar (the last note leaves a gap): a performer's window ends on a phrase's end, as the song does there
 FLUTE_MEL = '0 C5 0.5 100; 0.5 E5 0.5 90; 1 G5 1 100; 2 C6 0.5 80; 2.5 B5 0.25 70; 3 G5 0.5 90'
+TRUMPET = {'type': 'code', 'voice': 'trumpet', 'tail': 1.5}
+TRUMPET_MEL = '0 C4 0.5 100; 0.5 E4 0.5 90; 1 G4 1 100; 2 C5 0.5 80; 2.5 B4 0.25 70; 3 G4 0.5 90'
 # (preset or instrument, voice, rig whose fx it plays through or None, notes)
 PERFORMERS = [('strat70_lead', 'electric', 'lead', MEL.replace('4', '3').replace('5', '4')),
               ('pbass70', 'electric', 'bass', BASS), ('kit70', 'kit70', 'kit', KIT70),
-              (FLUTE, 'flute', None, MEL.replace('4', '5'))]
+              (FLUTE, 'flute', None, MEL.replace('4', '5')), (TRUMPET, 'trumpet', None, MEL)]
 
 
 def song(root, instrument, notes, fx=(), sound=None):
@@ -89,12 +91,14 @@ def test_a_section_with_a_bus_sends_and_track_effects_plays_live_as_in_the_studi
     assert res['track:d']['resid_db'] < -80
 
 
-@pytest.mark.parametrize('inst, notes', [('snare', MEL), ('saw_lead', MEL), ('sfx', FX), (FLUTE, FLUTE_MEL)],
-                         ids=['snare', 'saw_lead', 'sfx', 'flute'])
+@pytest.mark.parametrize('inst, notes', [('snare', MEL), ('saw_lead', MEL), ('sfx', FX), (FLUTE, FLUTE_MEL),
+                                         (TRUMPET, TRUMPET_MEL)],
+                         ids=['snare', 'saw_lead', 'sfx', 'flute', 'trumpet'])
 def test_a_window_renders_its_bars_as_the_whole_song_does(tmp_path, inst, notes):
     """Random phase and noise are seeded on where a note sits in its bar, and a voice gets each note whole: a
     window render (and so a live deck) sounds as those bars do in the song, not like a new take. A performer (the
-    flute) keys its draws on song time and is given the notes before the window, so its window matches too."""
+    flute, the trumpet) keys its draws on song time and is given the notes before the window, so its window matches
+    too."""
     root = song(str(tmp_path / 's'), f'preset:{inst}' if isinstance(inst, str) else inst, notes)
     d = json.load(open(os.path.join(root, 'project.json')))
     full, _ = Renderer(d, root, None, None, None, False).run()

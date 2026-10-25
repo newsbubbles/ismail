@@ -239,6 +239,15 @@
    "exam": "M169 (songs/_migration/m169_exam/results_b.md)",
    "heard": "picked out, \"good enough, synthy\""
   },
+  "trumpet": {
+   "family": "brass",
+   "type": "measured",
+   "engine": "additive lip-reed performer (phrases, slurs, tonguing, techniques as lanes)",
+   "modeled_on": "Bb trumpet, open and muted",
+   "ear": "passed",
+   "exam": "blind ear round 1 (five single notes: four not told apart, the plunger reversed); blind phrase round 2 passed; picture rounds 7-10 (real picked 12, 13, 8, 10 of 28); ledger:M331",
+   "heard": "phrase round 2, blind, on a phone speaker: every clip ticked played, \"I cannot tell the difference at all\"; the phrases copied a player's take each, an original solo is not judged yet; the lip shake is still caught in picture rounds"
+  },
   "kit70": {
    "family": "drum kits",
    "type": "measured",
@@ -624,9 +633,9 @@
   },
   {
    "family": "brass",
-   "gap": "trumpet, trombone, tuba, brass section",
-   "cite": "M169 (all three FAILED, \"synthetic\"); M180",
-   "under_way": "trumpet next in songs/kit_winds, from performances"
+   "gap": "trombone, tuba, brass section",
+   "cite": "M169 (all three FAILED, \"synthetic\"); M180; the trumpet performer M331",
+   "under_way": "none"
   },
   {
    "family": "mallets",
