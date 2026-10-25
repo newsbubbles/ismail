@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### mimic perform: each slur's move inside the margin Nate named
+
+- Each slur in `"perform": true` now draws its own cross (ledger:M327). Nate on the #358 confirm round (clarinet,
+  phone, 2026-10-25): on a stepping tune both the old glide ("slide") and the fingered slur ("fingers") pass, "maybe
+  somewhere between those two would be like the perfect fit but I think those two represent like the margins of where
+  we should be inside of"; on leaps he picked the fingers and called the glide "slide, too slow". New param
+  `slur_vary` (0..1, default 1): a step (2 semitones or less) draws its cross uniformly in
+  [`slur_cross` x (1 - `slur_vary`), `slur_cross`], so with the defaults anywhere from the glide to the fingers; a
+  leap (more than 2 semitones) draws in the top quarter of that margin, near the fingers. The pitch move and the
+  colour cross-fade read the same draw, keyed on the slur's song time, so a window renders as the whole does.
+- The 10-90 % pitch move per slur, read with yin as the round measured it (clarinet, 80 slurs each, p10 / p50 / p90):
+  steps 14.5 / 20.3 / 29.0 ms (sd 5.2; real flute slurs: sd about 6 around 13), leaps 5.8 / 8.7 / 10.2 ms, against
+  13.1 / 14.5 / 16.0 for #358 alone and 26.0 / 31.9 / 37.7 for the glide. Every performed slur is a new take;
+  `"slur_vary": 0` renders exactly what #358 did and `"slur_cross": 0` exactly the glide of before (tests compare
+  against saved copies of both).
+
 ### phone: a long path in the DJ log wraps
 
 - A DJ log note with a full file path made the phone page wider than the screen and pushed every other control
