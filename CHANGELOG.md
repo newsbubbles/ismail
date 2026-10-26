@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### seven small fixes from the songs (ledger:M350, M334, M271h, M277a, M337, M336, M342, M338)
+
+- A fader, pan, send, mute or solo move reuses the track's cached render; only the mix is applied again.
+- `project_new(master_limiter=False)` leaves the default safety limiter out; `fx_add` names a second master limiter.
+- The limiter's `true_peak: true` holds its ceiling between samples too (off by default, so no master moves).
+- render's HOT advice reads each track before the master chain, so a master gain ahead of a clipper no longer
+  marks every part hot.
+- The memory a render declares to the machine governor follows a measurement (it was about half of use).
+- `analyze_melody(vibrato_ms=190)` reads a held note with a wide vibrato as one note at its centre.
+- mastering.md: a psytrance loudness row, and when to use the true-peak limiter.
+
 ### repository: actions pinned, Dependabot, SECURITY.md (ledger:M359)
 
 - Every GitHub Action in the workflows is pinned to a commit SHA (the tag in a comment), so a moved tag cannot
