@@ -157,6 +157,7 @@ class Renderer:
         self.offset_samples_in_window = int(round((self.offset - t0) * self.sr))
         self.only = only
         self.post_fx = {}
+        self.pre_master_peak = {}   # each audible track's peak (dB) after its fader, before the master chain
         self.gain_reduction = {}
         self.sounds = {}
         self.use_cache = cache
@@ -379,6 +380,7 @@ class Renderer:
             if not audible:
                 continue
             stems[name] = _Stem(y)
+            self.pre_master_peak[name] = float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
             out = tr.get('output', 'master')
             if out != 'master' and out not in buses:
                 raise RenderError(f"track {name!r} outputs to unknown bus {out!r}; buses: {list(buses)}")

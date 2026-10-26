@@ -2187,10 +2187,14 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         s = R.stats.get(k, {})
         src = P.d.get('buses', {}).get(k[4:], {}) if k.startswith('bus:') else P.d['tracks'].get(k, {})
         fader = f"  fader {src.get('volume_db', 0.0):+.1f}" + (' (automated)' if (src.get('automation') or {}).get('volume_db') else '')
+        # stems carry the master chain's gain; HOT reads the track before it, so a master gain ahead of a clipper
+        # does not make every part look hot (ledger:M337)
+        pre = R.pre_master_peak.get(k, pk)
         L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB{fader}" + (f"  ({'cached' if s.get('cached') else 'rendered in ' + str(s['sec']) + 's'})" if s else '')
+                 + (f"  (peak {pre:.1f} before the master chain)" if abs(pre - pk) >= 1.0 else '')
                  + ('  SILENT - check notes/instrument/mute' if pk < -90 else '')
-                 + (f"  HOT: this part alone reaches full scale; lower it {pk + 3:.1f} dB (track_set volume_db) so "
-                    f"it peaks near -3 and the limiter is not flattening it" if pk > HOT_DB and k != 'master'
+                 + (f"  HOT: this part alone reaches full scale; lower it {pre + 3:.1f} dB (track_set volume_db) so "
+                    f"it peaks near -3 and the limiter is not flattening it" if pre > HOT_DB and k != 'master'
                     and not k.startswith('bus:') else ''))
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
@@ -2238,7 +2242,9 @@ def _render_gb(d, n, only=None):
     from .render import Renderer
     tracks = [t for k, t in d['tracks'].items() if only is None or k in only]
     deps = set().union(*(Renderer.deps(None, t) for t in d['tracks'].values()))
-    return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps))
+    chains = [t.get('fx', []) for t in d['tracks'].values()] + [b.get('fx', []) for b in d.get('buses', {}).values()]
+    tp = any(f.get('type') == 'limiter' and f.get('true_peak') for c in chains + [d['master'].get('fx', [])] for f in c)
+    return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps), tp)
 
 
 def _render_disk_gb(d, n, only, cache, stems, named):
