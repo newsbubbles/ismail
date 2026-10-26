@@ -90,6 +90,12 @@ person and an agent change the same scene.
     "screen" (or `"material":`, or `"object":` for that object's one material) flat and unlit in the key colour, so
     every keyed pixel in a frame is the visible screen and whatever covers it is found exactly. `"color": "off"`
     puts it back. Captures only; the scene is not changed.
+- **Before a stage or avatar scene ships, check it for clipping:** `stage_clip_check(scene, people=, setup=, t0=,
+  t1=)` runs a short capture with no picture kept and replies with a table, one line per person: frames with an arm
+  2 cm or more inside their own body or another's, frames with a foot 2 cm or more inside what it stands on, the
+  deepest of each, PASS or FAIL. The feet are measured from the drawn soles against the scene's meshes, so a person
+  placed on the wrong ground fails too. Default: everyone in their start pose for half a second; play takes in
+  `setup` to check a performance. A FAIL is fixed before the panel goes out.
 
 ## Listening while the person is in
 

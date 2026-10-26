@@ -1543,7 +1543,6 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     and the frame's cost (ms). probe='a,b': the first as before, the others (playing or resting in a start pose) under
     'others' in the same line, to measure two bodies' contact."""
     import re
-    import uuid
     d = (Path(scenes).resolve() / scene) if scenes else _scene_dir(scene)
     if not (d / 'scene.glb').is_file():
         raise OpError(f'no scene {scene!r} in {d.parent}')
@@ -1601,6 +1600,21 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
             col = c.get('color', '#00ff00')
             if not (col == 'off' or (isinstance(col, str) and re.match(r'^#[0-9A-Fa-f]{6}$', col))):
                 raise OpError(f'screen_key color is "#rrggbb" or "off" (got {col!r})')
+    job_id, jd = _launch_capture(d, scene, name, video, {
+        't0': float(t0), 't1': float(t1), 'fps': int(fps), 'size': size, 'camera': cam, 'clock': bool(clock),
+        'clock_at': float(t0 if clock_at is None else clock_at), 'setup': setup or [],
+        'audio': str(Path(audio).resolve()) if audio else None, 'video': bool(video),
+        'keep_frames': bool(keep_frames or not video), 'sets': bool(sets), **({'probe': probe} if probe else {})})
+    frames = int(round((t1 - t0) * fps))
+    return (f'capture {job_id}: {scene}, song {t0:g} to {t1:g} s, {frames} frames at {fps} fps, {size[0]}x{size[1]}; '
+            f'started in the background (stage_capture_status(scene={scene!r}, job={job_id!r})). Out: {jd}')
+
+
+def _launch_capture(d, scene, name, video, fields):
+    """Write a capture's job into <scene>/captures/<name or a time stamp> and start its worker in the background
+    (ismail.stage.capture: its own server, a headless browser, the GPU slot); (job id, its folder)."""
+    import re
+    import uuid
     job_id = name or time.strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:4]
     if not re.match(r'^[A-Za-z0-9_\-]+$', job_id):
         raise OpError('name: letters, digits, _ and - only')
@@ -1613,11 +1627,7 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     if video and not capture.ffmpeg():
         raise OpError('no ffmpeg (on PATH or ISMAIL_FFMPEG); or video=False with keep_frames')
     jd.mkdir(parents=True)
-    job = {'id': job_id, 'scene': scene, 'scenes': str(d.parent), 't0': float(t0), 't1': float(t1), 'fps': int(fps),
-           'size': size, 'camera': cam, 'clock': bool(clock), 'clock_at': float(t0 if clock_at is None else clock_at),
-           'setup': setup or [], 'audio': str(Path(audio).resolve()) if audio else None, 'video': bool(video),
-           'keep_frames': bool(keep_frames or not video), 'sets': bool(sets), 'made': time.strftime('%Y-%m-%d %H:%M:%S'),
-           **({'probe': probe} if probe else {})}
+    job = {'id': job_id, 'scene': scene, 'scenes': str(d.parent), **fields, 'made': time.strftime('%Y-%m-%d %H:%M:%S')}
     capture.write_json(jd / 'job.json', job)
     capture.write_json(jd / 'status.json', {'job': job_id, 'scene': scene, 'state': 'starting'})
     env = {**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[2]) + os.pathsep + os.environ.get('PYTHONPATH', '')}
@@ -1625,9 +1635,7 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
     subprocess.Popen([sys.executable, '-m', 'ismail.stage.capture', str(jd / 'job.json')], env=env,
                      stdout=open(jd / 'worker.txt', 'w'), stderr=subprocess.STDOUT, creationflags=flags,
                      start_new_session=os.name != 'nt')
-    frames = int(round((t1 - t0) * fps))
-    return (f'capture {job_id}: {scene}, song {t0:g} to {t1:g} s, {frames} frames at {fps} fps, {size[0]}x{size[1]}; '
-            f'started in the background (stage_capture_status(scene={scene!r}, job={job_id!r})). Out: {jd}')
+    return job_id, jd
 
 
 @op()
@@ -1645,6 +1653,119 @@ def stage_capture_status(scene: str, job: str = None, scenes: str = None) -> str
     if not f.is_file():
         raise OpError(f'no capture {job!r} in {d}')
     return json.dumps(json.loads(f.read_text(encoding='utf-8')), indent=1)
+
+
+CLIP_VIEW = {'pos': [0, 0, 60], 'fwd': [0, 0, -1], 'up': [0, 1, 0]}   # a clip check keeps no picture: any camera
+CLIP_STILL_S, CLIP_MAX_S = 0.5, 60.0
+
+
+def _take_span(d, c):
+    """Seconds a setup actor_play's take runs (its from/to window when given), or None when it cannot be read."""
+    f = d.parent / (c.get('takes') or d.name) / 'takes' / str(c.get('take')) / 'frames.jsonl'
+    try:
+        with open(f, 'rb') as fh:
+            first = json.loads(fh.readline())['t']
+            fh.seek(max(0, f.stat().st_size - 65536))
+            last = json.loads([x for x in fh.read().splitlines() if x.strip()][-1])['t']
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return None
+    a = max(first, float(c['from'])) if c.get('from') is not None else first
+    b = min(last, float(c['to'])) if c.get('to') is not None else last
+    return max(0.0, (b - a) / float(c.get('rate') or 1))
+
+
+@op(mutates=True)
+def stage_clip_check(scene: str, people: list = None, t0: float = 0.0, t1: float = None, scenes: str = None,
+                     setup: list = None, fps: int = 30, job: str = None, wait_s: float = 900, name: str = None) -> str:
+    """Check a stage or avatar scene for clipping before it ships (the 2026-10-26 patterns review: arms through
+    bodies on 10-22, and on 10-23 a speaker "clipping through the stage to about his knees", reached the person). A
+    short frame-locked capture with no video (stage_capture's own server and headless browser, on the GPU slot; the
+    stage the person uses is not touched, nothing is saved) counts each frame, per person, arm limbs 2 cm or more
+    inside a body (their own, or another person's) and feet 2 cm or more inside what they stand on (rays from above
+    the drawn soles against the scene's own meshes, not where the stage thinks they stand, so a wrong ground is caught
+    too). Replies with a table: per person the frames, frames with an arm in their own body and in another's with the
+    deepest cm, frames with a foot sunk with the deepest cm, and PASS or FAIL; under it the worst limb of each failing
+    line and when, and the ground check's cost.
+    people: who to check (default: every person in world.json actors; one with no start pose and nothing playing is a
+    statue and shows no body: NO BODY). setup: live commands run before the first frame, as stage_capture's, e.g.
+    [{"type": "actor_play", "person": "body_a", "take": "t1", "at_music": 0}]; without, everyone rests in their start
+    pose. t0, t1: song seconds; t1 defaults to t0 + 0.5 s for a still scene (nothing played in setup), else the
+    longest take played (at most 60 s). Waits up to wait_s seconds for the GPU and the frames; past that it replies
+    with the job, and stage_clip_check(scene, job=<id>) reads it when it is done (job= starts nothing)."""
+    from . import clipcheck
+    d = (Path(scenes).resolve() / scene) if scenes else _scene_dir(scene)
+    if not (d / 'scene.glb').is_file():
+        raise OpError(f'no scene {scene!r} in {d.parent}')
+    if job:
+        jd = d / 'captures' / job
+        if not (jd / 'job.json').is_file():
+            raise OpError(f'no capture {job!r} in {d / "captures"} (stage_capture_status(scene={scene!r}) lists them)')
+        j = json.loads((jd / 'job.json').read_text(encoding='utf-8'))
+        if not j.get('clip_check'):
+            raise OpError(f'{job} is a capture, not a clip check; run stage_clip_check(scene={scene!r}) for one')
+        return _clip_wait(jd, j, wait_s, clipcheck)
+    try:
+        actors = worldmod.load_world(d.parent, scene).get('actors') or {}
+    except ValueError as e:
+        raise OpError(str(e))
+    if people is not None:
+        if isinstance(people, str):
+            people = [p.strip() for p in people.split(',') if p.strip()]
+        if not people or not all(isinstance(p, str) and p for p in people):
+            raise OpError('people is a list of the scene\'s people, e.g. ["person_speaker"] (default: all of them)')
+        unknown = [p for p in people if p not in actors]
+        if unknown:
+            raise OpError(f'not people in {scene}: {", ".join(unknown)} (world.json actors: {", ".join(actors) or "none"})')
+    else:
+        people = list(actors)
+        if not people:
+            raise OpError(f'{scene} has no people (world.json actors is empty): nothing to check')
+    for c in setup or []:
+        if not isinstance(c, dict) or not c.get('type'):
+            raise OpError('setup is a list of live commands: {"type": "actor_play", ...}')
+    if isinstance(t0, bool) or not isinstance(t0, (int, float)) or t0 < 0:
+        raise OpError('t0 is song seconds, 0 or more')
+    if not 1 <= int(fps) <= 120:
+        raise OpError('fps is 1 to 120')
+    if t1 is None:
+        plays = [c for c in setup or [] if c.get('type') in ('actor_play', 'actor_follow')]
+        spans = [_take_span(d, c) for c in plays if c.get('take')]
+        t1 = t0 + (min(CLIP_MAX_S, max([x for x in spans if x] or [10.0])) if plays else CLIP_STILL_S)
+    if not t1 > t0:
+        raise OpError('t1 is song seconds after t0')
+    _, jd = _launch_capture(d, scene, name, False, {
+        't0': float(t0), 't1': float(t1), 'fps': int(fps), 'size': [64, 36], 'camera': CLIP_VIEW, 'clock': True,
+        'clock_at': float(t0), 'setup': setup or [], 'audio': None, 'video': False, 'keep_frames': False, 'sets': True,
+        'clip_check': people})
+    return _clip_wait(jd, json.loads((jd / 'job.json').read_text(encoding='utf-8')), wait_s, clipcheck)
+
+
+def _clip_wait(jd, j, wait_s, clipcheck):
+    """Wait for a clip check's capture (up to wait_s), then its table; still running: where it is and how to read it."""
+    end = time.time() + max(0.0, float(wait_s or 0))
+    while True:
+        try:
+            s = json.loads((jd / 'status.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            s = {}
+        if s.get('state') in ('done', 'failed') or time.time() >= end:
+            break
+        time.sleep(1.0)
+    st = s.get('state', '?')
+    if st == 'failed':
+        raise OpError(f'clip check {j["id"]} failed: {s.get("error")}'
+                      + (f'; page errors: {s["page_errors"][:3]}' if s.get('page_errors') else '') + f' ({jd / "log.txt"})')
+    if st != 'done':
+        return (f'clip check {j["id"]} is still {st} ({s.get("frame", 0)}/{s.get("frames", "?")} frames); '
+                f'stage_clip_check(scene={j["scene"]!r}, job={j["id"]!r}, scenes={j["scenes"]!r}) reads it when done')
+    log = jd / 'log.txt'
+    frames = clipcheck.probe_lines(log.read_text(encoding='utf-8', errors='replace') if log.is_file() else '')
+    rows = clipcheck.summarize(frames, j['clip_check'])
+    head = f'clip check {j["scene"]} ({j["id"]}, song {j["t0"]:g} to {j["t1"]:g} s, {len(frames)} frames): '
+    out = clipcheck.table(rows, head)
+    if s.get('page_errors'):
+        out += '\npage errors: ' + '; '.join(map(str, s['page_errors'][:5]))
+    return out
 
 
 def _capture_line(s):

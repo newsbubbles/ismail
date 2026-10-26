@@ -109,7 +109,8 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
       }
       place(cam, job, songT, W / H, ed, actors);
       step();
-      const pr = job.probe ? JSON.stringify(probe(actors, job.probe, songT)) : null;
+      const pr = job.clip_check ? JSON.stringify(clipProbe(actors, job.clip_check, songT))
+        : job.probe ? JSON.stringify(probe(actors, job.probe, songT)) : null;
       const blob = await new Promise((res) => r.domElement.toBlob(res, 'image/png'));   // in the task that drew it
       const res = await post(`capture/frame?n=${n}`, blob);
       if (!res.ok) throw new Error(`frame ${n}: ${(await res.json().catch(() => ({}))).error || res.status}`);
@@ -192,6 +193,19 @@ function probeOne(actors, person, t) {
     ck: st.chest && st.chest.dbg ? st.chest.dbg : null, s: st.s != null ? +st.s.toFixed(4) : null, sy: st.standY != null ? +st.standY.toFixed(3) : null,
     s1: at('spine_01'), s2: at('spine_02'), s3: at('spine_03'), nk: at('neck_01'), resting: !st.rig,
     ...(actors.clipOf ? { ...actors.clipOf(person), ms: actors.timing() } : {}) };
+}
+// the clip check (stage_clip_check, before a stage or avatar scene ships: the 2026-10-26 patterns review found arms
+// through bodies and a speaker sunk to the knees in the stage shipped two windows running): per person only the clip
+// counter's list (arm limbs in a body, feet in the ground), the feet's sink and its cost, so a room of people fits one
+// 'probe:' line; a person showing no body says why
+function clipProbe(actors, people, t) {
+  const out = {};
+  for (const p of people) {
+    const c = actors.clipOf ? actors.clipOf(p) : null;
+    out[p] = c ? { clip: c.clip, sink: c.sink, gms: c.gms, playing: actors.playing.has(p) }
+      : { none: actors.shownRig && actors.shownRig(p) ? 'no body fit (no spine or arms in the rig)' : 'shows no body (a statue: no start pose and nothing playing)' };
+  }
+  return { t: +t.toFixed(3), clipcheck: out, ms: actors.timing ? actors.timing() : null };
 }
 // a bone's turn about its own length (+Y) relative to its parent, away from their rest relation, degrees: the upper arm
 // on the clavicle (the shoulder's skin), the forearm on the upper arm (the elbow's)
