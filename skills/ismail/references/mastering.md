@@ -10,7 +10,7 @@ Mastering cannot fix a masked kick, a harsh lead or a clipping track. With a ref
 
 - If the song has a reference, read its loudness: `analyze_overview(source='ref')` prints integrated LUFS and peak. Aim within 1 dB of it.
 - Without one, by genre (integrated): solo piano, classical, ambient -18 to -16 LUFS (keep the dynamics); acoustic, folk, singer-songwriter -14 to -12; pop, rock, hip-hop -11 to -9; EDM, dubstep, drum and bass -9 to -6.
-- Psytrance (full-on, a measured record): the grooves sit at -9.4 to -10.7 dB rms and the breakdowns at -16.9 to -18.3, so the drop from groove to breakdown is about 7-8 dB and should stay there. A version mastered to -8.5 LUFS integrated matched it. The kick leads the loudness: set the limiter by the kick's peaks in the groove, not by the pads.
+- Psytrance (full-on, a measured record): the grooves sit at -9.4 to -10.7 dB rms and the breakdowns at -16.9 to -18.3, so the drop from groove to breakdown is about 7-8 dB and should stay there. A version mastered to -8.5 LUFS integrated matched it.
 - Streaming services turn loud masters down to about -14 LUFS. Louder than the genre needs only costs punch.
 
 ## 2. The master chain
