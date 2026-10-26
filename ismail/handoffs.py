@@ -36,16 +36,51 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP = re.compile(r'[\\/](backups?|_backups|renders|proj|cache|history|history_src|node_modules|\.git)[\\/]')
 
 
-def _songs_default():
-    """$ISMAIL_SONGS, else songs/ of this checkout, else of the main checkout this worktree belongs to."""
+def _documents():
+    """The person's Documents folder as their file browser shows it: on Windows the known folder, which OneDrive
+    backup moves to OneDrive\\Documents; elsewhere ~/Documents when it exists, else the home folder."""
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            from ctypes import wintypes
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:   # CSIDL_PERSONAL
+                return buf.value
+        except (OSError, AttributeError):
+            pass
+    docs = os.path.join(os.path.expanduser('~'), 'Documents')
+    return docs if os.path.isdir(docs) else os.path.expanduser('~')
+
+
+def is_checkout(here=HERE):
+    """True when ismail runs from a copy of its repository (a clone, a worktree or a downloaded zip), False when
+    it is an installed package (pip, uvx, a plugin): a checkout has pyproject.toml beside ismail/."""
+    return os.path.exists(os.path.join(here, '.git')) or os.path.isfile(os.path.join(here, 'pyproject.toml'))
+
+
+def _songs_default(here=HERE):
+    """$ISMAIL_SONGS, else songs/ of this checkout, else of the main checkout this worktree belongs to. An installed
+    package has no checkout: its songs folder is Documents/ismail, the one setup.md makes, never a folder beside
+    the package, which an update or a cache clean can remove."""
     if os.environ.get('ISMAIL_SONGS'):
         return os.environ['ISMAIL_SONGS']
-    git = os.path.join(HERE, '.git')
+    git = os.path.join(here, '.git')
     if os.path.isfile(git):                          # a worktree: '.git' names <main>/.git/worktrees/<name>
         with open(git, encoding='utf8') as f:
             gitdir = f.read().split(':', 1)[1].strip()
         return os.path.join(gitdir.replace(os.sep, '/').split('/.git/')[0], 'songs')
-    return os.path.join(HERE, 'songs')
+    if is_checkout(here):
+        return os.path.join(here, 'songs')
+    return os.path.join(_documents(), 'ismail')
+
+
+def old_songs(here=HERE):
+    """Where an installed ismail up to 0.3.0 kept its own files when no ISMAIL_SONGS was set (songs/ beside the
+    package, inside the Python install), if anything is there and it is not the songs folder now; else None."""
+    old = os.path.normpath(os.path.join(here, 'songs'))
+    if is_checkout(here) or os.path.normcase(old) == os.path.normcase(SONGS) or not os.path.isdir(old):
+        return None
+    return old if os.listdir(old) else None
 
 
 SONGS = os.path.normpath(_songs_default())

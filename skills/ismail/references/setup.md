@@ -113,8 +113,8 @@ Pick the first route that fits:
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
 it is. Every song lives in its own subfolder there. Then point ismail at it with the `ISMAIL_SONGS` environment
-variable, or ismail looks for songs next to the installed package: the first-session check (`guide`) and the
-machine board (`machine`) won't see their songs. The board lives in `<ISMAIL_SONGS>/_machine` (or
+variable. Without it an installed ismail uses Documents/ismail (a clone uses its own `songs/`), so make the folder
+there unless they want another place; `guide` names the folder it uses. The board lives in `<ISMAIL_SONGS>/_machine` (or
 `ISMAIL_MACHINE_DIR`), so every agent on this computer that uses the same songs folder shares one board.
 - **Windows:** find Documents through the known-folder path, not `%USERPROFILE%\Documents`: with OneDrive backup
   on (the default on many new PCs) the Documents they see in Explorer is OneDrive\Documents. In PowerShell:

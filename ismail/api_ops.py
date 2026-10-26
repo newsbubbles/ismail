@@ -15,7 +15,7 @@ from .api import OPS, OpError, op
 # (shelf, what it is for, its op names and name prefixes (ending in _)); the order is the order shown
 CATEGORIES = [
     ('start', 'start here: the guide, projects, undo, batches, the machine and its disk',
-     ('guide', 'project_', 'undo', 'batch', 'credits', 'machine_', 'ops_find', 'song_compress')),
+     ('guide', 'playbook', 'project_', 'undo', 'batch', 'credits', 'machine_', 'ops_find', 'song_compress')),
     ('sketch', 'a quick sketch from words, kept or dropped', ('sketch', 'sketch_keep', 'sketch_wait')),
     ('write', 'tracks, notes, patterns, buses, automation, stem maps',
      ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
@@ -67,7 +67,7 @@ ROLES = {
 }
 
 # the ops a filtered MCP server always serves, so an agent with a few shelves can still find and read what it lacks
-DISCOVERY = ('guide', 'ops_find')
+DISCOVERY = ('guide', 'playbook', 'ops_find')
 
 # what the running MCP server serves: None (every op) or (set of op names, how it was chosen); set by mcp_server
 _SERVED = None

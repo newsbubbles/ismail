@@ -181,6 +181,10 @@ pip install "ismail @ git+https://github.com/newsbubbles/ismail"
 Then `ismail mcp` for any MCP client, `ismail -p <project> <op>` on the command line, or `from ismail import api`.
 Extras and per-client setup are in [docs/reference.md](docs/reference.md).
 
+An install without a clone has the same engine and the same playbook: the `playbook` tool reads it, and
+`python -m ismail.playbook export <your agent's skills folder>` puts it where your agent loads skills. Songs go in
+Documents/ismail unless `ISMAIL_SONGS` names another folder (a clone keeps its own `songs/`).
+
 In Codex it could install as a plugin: `codex plugin marketplace add newsbubbles/ismail`, then `ismail` from the
 plugin list (checked against Codex's docs and a server handshake, not yet in a live Codex session). It runs the server
 with uvx, so it needs [uv](https://docs.astral.sh/uv/).

@@ -583,9 +583,36 @@ def guide(project: str = None, first_answer: str = None, new_person: bool = Fals
                "the new song. Pass project= to guide(first_answer=...) and to every lexicon op once the song has a "
                "folder." if not SK.is_new() else '')
         return FIRST_SESSION.format(marker=SK.marker_path(), showcase=SK.showcase_text(),
-                                    plain_steps=PLAIN_STEPS) + own + '\n\n' + GUIDE
+                                    plain_steps=PLAIN_STEPS) + own + '\n\n' + GUIDE + _where_text()
     return ("Someone new to ismail at this computer (they say so, or have never made a song with it)? "
-            "guide(new_person=True) opens with their first session.\n\n" + GUIDE)
+            "guide(new_person=True) opens with their first session.\n\n" + GUIDE + _where_text())
+
+
+def _where_text():
+    """The guide's last lines: the songs folder this ismail uses, where the playbook is, and files an older install
+    left beside the package."""
+    from .handoffs import SONGS, old_songs
+    L = [f"\n\nWHERE\n- Songs folder: {SONGS} (songs/<slug>/ above means a folder in it; ISMAIL_SONGS changes it)."
+         "\n- The playbook (the method and its rules): the playbook op, or playbook(page='live') for a reference page "
+         "it names. Skip it if you loaded the ismail skill already."]
+    old = old_songs()
+    if old:
+        L.append(f"\n- An older ismail kept its own files in {old}, inside the Python install, where an update can "
+                 f"remove them. Tell the person, and with their yes move what is there into {SONGS}.")
+    return ''.join(L)
+
+
+@op()
+def playbook(page: str = None) -> str:
+    """The playbook: how to make music with ismail, its method and its rules (the ismail skill, the same text as
+    skills/ismail/SKILL.md in a clone). Read it before making anything if you did not load the ismail skill. page:
+    one of its reference pages by name ('live', 'mastering', 'recreate', ...), when the playbook names one; a wrong
+    name lists them. To keep it loaded as a skill: python -m ismail.playbook export <skills folder>."""
+    from . import playbook as PB
+    try:
+        return PB.read(page)
+    except LookupError as e:
+        raise OpError(str(e))
 
 
 @op()

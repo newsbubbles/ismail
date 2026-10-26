@@ -55,6 +55,7 @@ jobs:
         run: |
           python -m venv /tmp/v && /tmp/v/bin/pip install dist/*.whl
           cd /tmp && /tmp/v/bin/ismail ops | head -3
+          env -u ISMAIL_SONGS /tmp/v/bin/python $GITHUB_WORKSPACE/.github/scripts/wheel_check.py
           /tmp/v/bin/python $GITHUB_WORKSPACE/.github/scripts/mcp_handshake.py 80 /tmp/v/bin/ismail mcp
       - name: docker image
         run: |

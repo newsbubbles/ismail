@@ -68,6 +68,7 @@ packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ism
 "ismail.voices.strings" = ["*.json"]
 "ismail.voices.winds" = ["*.json"]
 "ismail.voices.brass" = ["*.json"]
+"ismail.voices.drums" = ["*.json"]
 "ismail.video" = ["templates/*", "templates/*/*"]
 "ismail.exampage" = ["*.html"]
 "ismail.feedback" = ["*.html"]
