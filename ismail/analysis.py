@@ -902,9 +902,11 @@ def chords(path, grid, bars=None, per_bar=2, max_bars=32):
 
 # ------------------------------------------------------------------ melody / notes
 
-def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16, min_conf=0.0):
+def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16, min_conf=0.0, vibrato_ms=None):
     """Monophonic line -> quantized notes (notes_write format). Notes are segmented at onsets (and at pitch changes
-    inside legato phrases); each segment's pitch is the median pYIN f0 of its voiced frames."""
+    inside legato phrases); each segment's pitch is the median pYIN f0 of its voiced frames. vibrato_ms: the pitch
+    is averaged over this window (one vibrato cycle) before the legato split is rounded, so a wide vibrato near a
+    half step stays one note (ledger:M342); it also merges trills faster than the window."""
     y = load(path)
     b0, b1, _ = _range(y, ASR, grid, bars, max_bars)
     _, t0, t1 = _span(y, ASR, grid, b0, b1)
@@ -921,13 +923,22 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     rdb = 20 * np.log10(rms + 1e-9)
     floor = rdb.max() - 30
     midi = np.where(voiced & (prob > min_conf), librosa.hz_to_midi(np.nan_to_num(f0, nan=1.0)), np.nan)
+    # the pitch the splits are judged on: with vibrato_ms, averaged over one vibrato cycle
+    sm = midi
+    if vibrato_ms:
+        from scipy.ndimage import uniform_filter1d
+        w = max(1, int(vibrato_ms / 1000 * ASR / hop))
+        ok = ~np.isnan(midi)
+        den = uniform_filter1d(ok.astype(float), w, mode='nearest')
+        sm = np.where(ok, uniform_filter1d(np.where(ok, midi, 0.0), w, mode='nearest') / np.maximum(den, 1e-9),
+                      np.nan)
     oenv = librosa.onset.onset_strength(y=seg, sr=ASR, hop_length=hop)
     ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=ASR, hop_length=hop, backtrack=True).tolist()
     ldb = 20 * np.log10(librosa.feature.rms(y=seg, hop_length=hop, frame_length=512)[0] + 1e-9)
-    ons = [o for o, nx in zip(ons, ons[1:] + [nfr]) if not _same_note(midi, ldb, oenv, o, nx, hop)]
+    ons = [o for o, nx in zip(ons, ons[1:] + [nfr]) if not _same_note(sm, ldb, oenv, o, nx, hop)]
     # split legato phrases where the rounded pitch changes and stays changed for >= 100 ms
     # (shorter changes are glides or pYIN window smear at note boundaries)
-    r = np.where(np.isnan(midi), -1, np.round(midi)).astype(int)
+    r = np.where(np.isnan(sm), -1, np.round(sm)).astype(int)
     hold = int(0.1 * ASR / hop)
     runs = []  # stable runs: (start_frame, pitch) lasting >= hold frames
     i = 0
@@ -960,7 +971,10 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
         vm = vm[~np.isnan(vm)]
         if len(vm) < max(3, 0.25 * (e - a)):
             continue
-        p = _refine_pitch(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, float(np.median(vm)))
+        if vibrato_ms:     # the centre of the swing; one long FFT of a vibrato note peaks on a sideband
+            p = float(np.mean(vm))
+        else:
+            p = _refine_pitch(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, float(np.median(vm)))
         p = _octave_up(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, p, librosa.note_to_midi(fmax))
         sb = grid.time_to_beat(times[a]) - base_beat
         eb = grid.time_to_beat(times[min(e, nfr - 1)]) - base_beat

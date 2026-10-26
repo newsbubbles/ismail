@@ -2325,15 +2325,19 @@ def analyze_chords(project: str, source: str = None, bars: list = None, per_bar:
 
 @op()
 def analyze_melody(project: str, source: str = 'ref:other', bars: list = None, fmin: str = 'C1', fmax: str = 'C7',
-                   quant: float = 0.25, min_conf: float = 0.0, cents: bool = False) -> str:
+                   quant: float = 0.25, min_conf: float = 0.0, cents: bool = False, vibrato_ms: float = None) -> str:
     """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line. Ends
     with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits within 6 dB on a
     quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax).
     cents=True gives every note's measured pitch as numbers, for intonation and quarter tones (maqam steps):
     tab-separated rows start, note, dur, vel, midi (float), hz, cents from the named note. For the pitch moving
-    inside a note (slides, vibrato, ornaments) read analyze_contour."""
+    inside a note (slides, vibrato, ornaments) read analyze_contour.
+    vibrato_ms: a held note with a wide vibrato (a singer, a violin) reads as two notes a semitone apart when its
+    centre sits near a half step; vibrato_ms=190 (one cycle, about 5 Hz) averages the pitch before rounding. It also
+    merges trills faster than the window, so compare with analyze_roll where an ornament matters.
+    On a full mix the loudest line wins (usually the bass): read a stem, or raise fmin over the bass."""
     P = _load(project)
-    notes, txt = A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)
+    notes, txt = A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf, vibrato_ms=vibrato_ms)
     return A.melody_cents_text(notes, txt) if cents else txt
 
 

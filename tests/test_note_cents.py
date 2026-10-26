@@ -114,3 +114,23 @@ def test_the_contour_reads_the_steps_and_respects_the_window(proj):
 def test_ops_find_finds_the_contour():
     out = OPS['ops_find'](need='pitch contour in cents', n=3)
     assert out.splitlines()[1].split()[0] == 'analyze_contour', out
+
+
+def test_a_vibrato_note_reads_as_one_note(proj):
+    """A held note with a wide vibrato (+-80c at 4 Hz) centred 30c sharp reads as a semitone pair;
+    vibrato_ms= averages one cycle before rounding and reads one note (ledger:M342)."""
+    d, p = proj
+    n = int(1.6 * SR)
+    t = np.arange(n) / SR
+    m = 69.3 + 0.8 * np.sin(2 * np.pi * 4.0 * t)
+    ph = 2 * np.pi * np.cumsum(440 * 2 ** ((m - 69) / 12)) / SR
+    env = np.minimum(1, t / 0.01) * np.minimum(1, (n - np.arange(n)) / (0.02 * SR))
+    y = np.zeros(int(4 * SR))
+    y[:n] = env * sum(np.sin(k * ph) / k for k in range(1, 5))
+    f = wav(d, 'vib', 0.4 * y / np.abs(y).max())
+    plain = rows(OPS['analyze_melody'](p, source=f, bars=[1, 1], fmin='C3', fmax='C6', cents=True))
+    assert len({x[1] for x in plain}) == 2, plain
+    out = OPS['analyze_melody'](p, source=f, bars=[1, 1], fmin='C3', fmax='C6', cents=True, vibrato_ms=250)
+    r = rows(out)      # (the release can read as a short 2nd note)
+    assert r[0][1] == 'A4' and float(r[0][2]) >= 2.5 and abs(float(r[0][4]) - 69.3) < 0.1, out
+    assert all(float(x[2]) <= 0.25 for x in r[1:]), out
