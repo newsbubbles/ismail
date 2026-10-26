@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 (2026-10-26)
+
 ### packaging: an install works like a clone, ready for PyPI (ledger:M351)
 
 - The Rusty toms' data files (`ismail/voices/drums/toms_*.json`) were left out of the package, so the toms failed
