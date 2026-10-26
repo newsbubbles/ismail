@@ -112,6 +112,21 @@ def test_the_counter_measures_each_limb():
     assert got['other'][2] > 0.02 and got['who'][2] == 0                       # the hand in her
 
 
+def test_a_sole_inside_what_it_stands_on_is_measured_from_the_top_that_holds_it():
+    # tops: heights the ray down met (highest first); unders: the ray up's (lowest first); the sole at 0
+    got = _node("""[
+      M.sinkOf([0.45], 1, [], 0, 0),               // the stage's top over the sole, its bottom below: 45 cm in
+      M.sinkOf([0.75], 1, [0.72], 1, 0),           // a table over the foot: its underside in between, clear
+      M.sinkOf([0.75, 0.45], 2, [0.72], 1, 0),     // under a table and in the stage: the stage's top
+      M.sinkOf([0.9, 0.45], 2, [0.45], 1, 0.1),    // a crate on the stage (its bottom on the stage's top), the sole in the stage
+      M.sinkOf([0.9], 1, [0.45], 1, 0.1),          // the crate alone, over the sole: clear
+      M.sinkOf([], 0, [], 0, 0),                   // nothing over the sole
+      M.sinkOf([0.005], 1, [], 0, 0)               // a floor half a centimetre up: under the counter's 2 cm
+    ]""")
+    assert got[0] == pytest.approx(0.45) and got[1] == 0 and got[2] == pytest.approx(0.45)
+    assert got[3] == pytest.approx(0.35) and got[4] == 0 and got[5] == 0 and got[6] == pytest.approx(0.005)
+
+
 def test_a_hand_sent_past_reach_is_eased_in_so_the_elbow_keeps_a_bend():
     got = _node("""{ k: [0.5, 0.85, 0.9, 1.0, 1.2, 1.6].map((e) => M.softReach(e)), knee: M.REACH_KNEE, max: M.REACH_MAX,
       job: (() => { const j = M.newArm().job; j.S.set([0, 1.5, 0]); j.T.set([0, 1.5, 0.81]); j.la = 0.28; j.lb = 0.26;

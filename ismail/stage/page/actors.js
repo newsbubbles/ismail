@@ -14,7 +14,7 @@ import { cutout, b2tPos, GIZMO } from './editor.js';
 import { world } from './world.js';
 import { initControl } from './control.js';
 import { mixTake } from './interp.js';
-import { fitBody, newState, bodyNow, solveArm as solveArmMath, newArm, newDepths, limbDepths, overlapOf, reachIn, depthIn, relaxedArm, CLIP_M, NEAR_M } from './bodycollide.js';
+import { fitBody, newState, bodyNow, solveArm as solveArmMath, newArm, newDepths, limbDepths, overlapOf, reachIn, depthIn, relaxedArm, sinkOf, GROUND_UP, CLIP_M, NEAR_M } from './bodycollide.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
 // where a person stands: the bottom of their stand-in (the band is up on the stage), the room's floor without one
@@ -167,6 +167,16 @@ const REACH_LEAN_W = { spine_01: 0.5, spine_02: 0.8, spine_03: 1 };
 // every CLIP_EVERY_S per limb and body while it lasts (with how many frames and how deep); hips closer than two torsos
 // allow, every OVERLAP_EVERY_S per pair
 const CLIP_EVERY_S = 2, OVERLAP_EVERY_S = 5;
+// the ground check (groundNow): a body's soles against what they stand on. In the headset one sole point every
+// GROUND_EVERY frames, in turn (heel and toe, left and right: one ray, two where a top is over the sole), so each
+// point is measured every 12 frames and a sink shows up to a sixth of a second late; all four every frame the capture
+// probe asks (clipOf). The scene's meshes it looks at are listed again every GROUND_LIST_S (their boxes with them: a
+// thing keyed to move is seen where it was then), and a body rays only those whose box comes within GROUND_NEAR of its
+// hips, listed again when the hips move GROUND_MOVE. The cost on the PC, 2026-10-26, the lecture hall (300 runs a
+// frame in a capture): all four points 0.11 ms, 0.19 with both feet sunk (0.15 and 0.22 against all 50 meshes), so a
+// quarter of that every third frame in the headset; not measured on the Quest
+const GROUND_EVERY = 3, GROUND_LIST_S = 5, GROUND_NEAR = 1.7, GROUND_MOVE = 0.5;
+let gPhase = 0;
 const realNow = performance.now.bind(performance);   // a capture stops performance.now between frames: the cost is real time
 const smooth01 = (x, [a, b]) => { const k = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
 
@@ -191,7 +201,8 @@ export function initActors(ed, live) {
         const fwd = rest.ball_l.p.clone().sub(rest.foot_l.p).setY(0).normalize();
         const left = rest.upperarm_l.p.clone().sub(rest.upperarm_r.p).setY(0).normalize();
         return { who, root, bones, rest, fwd, left, cal: handCalibration(bones, rest), hinge: elbowHinges(rest, fwd), local: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.quaternion.clone()])),
-          localP: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.position.clone()])), bodyFit: fitFromMesh(root, bones, rest, fwd) };
+          localP: Object.fromEntries(Object.entries(bones).map(([n, b]) => [n, b.position.clone()])), bodyFit: fitFromMesh(root, bones, rest, fwd),
+          soles: solesOf(root, bones, fwd) };
       }).then(async (rig) => { await readProfile(rig); return rig; }));
     }
     return loaded.get(who);
@@ -337,6 +348,48 @@ export function initActors(ed, live) {
       return fit;
     } catch (e) { console.warn('[actors] body fit', e); return null; }
   }
+  // ---- the soles, for the ground check (groundNow): where each foot's skin is lowest at the heel and at the toe, in the
+  // foot's and the ball's own frames, measured once at load (the foot bone is the ankle, a hand's width above the sole,
+  // and a foot pitched up on its toes is lowest at the toe). The heel: of the skin the foot bone carries, within 1 cm
+  // of its lowest, the point furthest back; the toe: the same on the ball, furthest forward (shoes are skin too). A foot
+  // with no skin: under its bone at the rig's ground (0 at rest)
+  const SOLE_GROUP = { foot_l: 0, ball_l: 1, foot_r: 2, ball_r: 3 };
+  function solesOf(root, bones, fwd) {
+    try {
+      const grp = [[], [], [], []], v = new THREE.Vector3();
+      root.updateMatrixWorld(true);
+      root.traverse((o) => {
+        const g = o.isSkinnedMesh && o.geometry, si = g && g.attributes.skinIndex, sw = g && g.attributes.skinWeight;
+        if (!si || !sw) return;
+        o.skeleton.update();
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          let k = 0, w = sw.getComponent(i, 0);
+          for (let j = 1; j < 4; j++) { const wj = sw.getComponent(i, j); if (wj > w) { w = wj; k = j; } }
+          const b = o.skeleton.bones[si.getComponent(i, k)], gi = b ? SOLE_GROUP[b.name] : undefined;
+          if (gi === undefined) continue;
+          v.fromBufferAttribute(pos, i); o.applyBoneTransform(i, v); v.applyMatrix4(o.matrixWorld);
+          grp[gi].push(v.clone());
+        }
+      });
+      const end = (ps, sg) => {
+        if (!ps.length) return null;
+        let lo = Infinity, best = null, bd = -Infinity;
+        for (const p of ps) lo = Math.min(lo, p.y);
+        for (const p of ps) if (p.y <= lo + 0.01 && sg * p.dot(fwd) > bd) { bd = sg * p.dot(fwd); best = p; }
+        return best;
+      };
+      const out = {};
+      for (const [sd, gf, gb] of [['l', 0, 1], ['r', 2, 3]]) {
+        const f = bones[`foot_${sd}`], b = bones[`ball_${sd}`] || f;
+        if (!f) return null;
+        const heel = end(grp[gf], -1) || end(grp[gb], -1) || f.getWorldPosition(new THREE.Vector3()).setY(0);
+        const toe = end(grp[gb], 1) || end(grp[gf], 1) || b.getWorldPosition(new THREE.Vector3()).setY(0);
+        out[sd] = [f.name, f.worldToLocal(heel.clone()), b.name, b.worldToLocal(toe.clone())];
+      }
+      return out;
+    } catch (e) { console.warn('[actors] soles', e); return null; }
+  }
   const bodies = new WeakMap();                              // rig.root -> its body: slabs now, arms, counter
   function bodyOf(rig, person) {
     if (!rig.bodyFit) return null;
@@ -344,7 +397,8 @@ export function initActors(ed, live) {
     if (!B) {
       B = { rig, person, st: newState(rig.bodyFit, person), arms: { l: newArm(), r: newArm() }, depths: { l: newDepths(), r: newDepths() },
         others: [], othersRigs: [], matOf: (n) => rig.bones[n].matrixWorld.elements, clip: [], log: new Map(), overlap: [], ms: 0, adjusted: false, moving: false,
-        rch: { l: [0, 0], r: [0, 0] }, relax: { l: 0, r: 0 }, relaxT: { l: -Infinity, r: -Infinity } };
+        rch: { l: [0, 0], r: [0, 0] }, relax: { l: 0, r: 0 }, relaxT: { l: -Infinity, r: -Infinity },
+        sink: { l: 0, r: 0 }, groundAt: -1, countedAt: -1, gms: 0, phase: (gPhase++) % GROUND_EVERY, ground: { list: -1, x: 0, z: 0, near: [], k: 0, pts: new Float64Array(4) } };
       bodies.set(rig.root, B);
     }
     if (person) B.person = B.st.name = person;
@@ -376,7 +430,7 @@ export function initActors(ed, live) {
   }
   // per side, the names the hot path reads (no strings made per frame)
   const SIDE = Object.fromEntries(['l', 'r'].map((sd) => [sd, { up: `upperarm_${sd}`, lo: `lowerarm_${sd}`, ha: `hand_${sd}`, cl: `clavicle_${sd}`,
-    rU: `upper_${sd}`, rF: `fore_${sd}`, sgn: sd === 'l' ? 1 : -1, limbs: ['upper', 'fore', 'hand'].map((k) => `${k}_${sd}`) }]));
+    rU: `upper_${sd}`, rF: `fore_${sd}`, sgn: sd === 'l' ? 1 : -1, limbs: ['upper', 'fore', 'hand'].map((k) => `${k}_${sd}`), foot: `foot_${sd}` }]));
   const av = new THREE.Vector3(), av2 = new THREE.Vector3(), aq = new THREE.Quaternion();
   const posOf = (b, o) => { const e = b.matrixWorld.elements; o[0] = e[12]; o[1] = e[13]; o[2] = e[14]; return o; };
   // one arm to its target: bodycollide's steps, then the two-bone solve (st: the person's state, for the chest's share
@@ -439,6 +493,7 @@ export function initActors(ed, live) {
     const t0 = realNow();
     othersOf(B);
     B.clip.length = 0;
+    B.countedAt = frameN;
     for (const sd of SIDES) {
       if (!B.rig.bones[SIDE[sd].ha]) continue;
       const D = limbsNow(B, sd, true), names = SIDE[sd].limbs;
@@ -446,6 +501,10 @@ export function initActors(ed, live) {
         if (D.self[k] >= CLIP_M) B.clip.push([names[k], 'self', +(D.self[k] * 100).toFixed(1)]);
         if (D.other[k] >= CLIP_M) B.clip.push([names[k], B.othersRigs[D.who[k]].person || '?', +(D.other[k] * 100).toFixed(1)]);
       }
+    }
+    if (B.rig.soles) {
+      if ((frameN + B.phase) % GROUND_EVERY === 0) groundNow(B, B.ground.k = (B.ground.k + 1) & 3);
+      pushGround(B);
     }
     if (!B.clip.length && !B.othersRigs.length && !B.overlap.length) { B.ms += realNow() - t0; return; }
     for (const [limb, w, cm] of B.clip) {
@@ -470,6 +529,96 @@ export function initActors(ed, live) {
       }
     }
     B.ms += realNow() - t0;
+  }
+  // ---- the ground check (the user, 2026-10-23: "main character is clipping through the stage to about his knees"; a
+  // speaker marked by an empty fell to the hall floor, 0.45 m under the stage top, and groundOf was fixed). On purpose
+  // it does not ask groundOf where a person stands: it looks at the drawn soles (solesOf) against the scene's own
+  // meshes, so it catches a mistake there too. Per sole point (heel, toe) a ray down from GROUND_UP above for the tops
+  // and, only when one is there, a ray up for the undersides (bodycollide.js sinkOf); a foot's sink is its deeper
+  // point's. CLIP_M or more goes into the clip list as [foot_l, 'ground', cm], and to the events like an arm
+  let carried = () => false;                                 // main.js: a thing pinned to or held by a person (props.js)
+  const setCarried = (fn) => { carried = fn; };
+  const gSolids = [], gBoxes = [];
+  let gRoot = null, gListT = -Infinity, gListN = 0;
+  // the room's meshes a foot can stand on: drawn (layer 0, opaque), no gizmo or pick box, not a person (a statue, the
+  // empty that marks them) and not carried by one; whether each is shown is asked per hit (sets, hidden things)
+  function groundSolids() {
+    const now = realNow();
+    if (ed.root === gRoot && now - gListT < GROUND_LIST_S * 1000) return gSolids;
+    gRoot = ed.root; gListT = now; gSolids.length = 0; gBoxes.length = 0; gListN++;
+    if (!gRoot) return gSolids;
+    const people = new Set();
+    for (const p of Object.keys(world().actors || {})) { const it = ed.byName.get(p); if (it) people.add(it); }
+    gRoot.traverse((o) => {
+      if (!o.isMesh || o.userData.gizmo || o.userData.pickProxy || !o.layers.isEnabled(0)) return;
+      const m = o.material;
+      if (m && !Array.isArray(m) && m.transparent && m.opacity < 0.5) return;
+      const it = ed.itemOf(o);
+      if (it && it.path && it.path.some((x) => people.has(x) || carried(x.name))) return;
+      gSolids.push(o);
+      gBoxes.push(new THREE.Box3().setFromObject(o));
+    });
+    return gSolids;
+  }
+  // the room's meshes near a body (their boxes within GROUND_NEAR of the hips, flat)
+  function groundNear(B) {
+    const solids = groundSolids(), e = B.rig.bones.pelvis ? B.rig.bones.pelvis.matrixWorld.elements : null;
+    if (!e) return solids;
+    const x = e[12], z = e[14], g = B.ground;
+    if (g.list === gListN && Math.hypot(x - g.x, z - g.z) < GROUND_MOVE) return g.near;
+    g.list = gListN; g.x = x; g.z = z; g.near.length = 0;
+    const r = GROUND_NEAR;
+    for (let i = 0; i < solids.length; i++) {
+      const b = gBoxes[i];
+      if (b.min.x <= x + r && b.max.x >= x - r && b.min.z <= z + r && b.max.z >= z - r) g.near.push(solids[i]);
+    }
+    return g.near;
+  }
+  const gRc = new THREE.Raycaster(), gO = new THREE.Vector3(), gP = new THREE.Vector3(), gN = new THREE.Vector3(), DOWN = new THREE.Vector3(0, -1, 0);
+  const gHits = [], gTops = new Float64Array(16), gUnders = new Float64Array(16);
+  function sinkAt(p, solids) {
+    gRc.set(gO.set(p.x, p.y + GROUND_UP, p.z), DOWN); gRc.far = GROUND_UP - 0.005;
+    gHits.length = 0;
+    gRc.intersectObjects(solids, false, gHits);
+    let nt = 0, nu = 0;
+    for (let i = 0; i < gHits.length && nt < 16; i++) {
+      const h = gHits[i];
+      if (h.face && ed.pickable(h.object) && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.3) gTops[nt++] = h.point.y;
+    }
+    if (!nt) return 0;
+    const far = gTops[0] - p.y - CLIP_M;
+    if (far > 0) {
+      gRc.set(gO.set(p.x, p.y + CLIP_M, p.z), Y); gRc.far = far;
+      gHits.length = 0;
+      gRc.intersectObjects(solids, false, gHits);
+      for (let i = 0; i < gHits.length && nu < 16; i++) {
+        const h = gHits[i];
+        if (h.face && ed.pickable(h.object) && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y < -0.3) gUnders[nu++] = h.point.y;
+      }
+    }
+    gHits.length = 0;
+    return sinkOf(gTops, nt, gUnders, nu, p.y);
+  }
+  // k: one sole point (0 the left heel, 1 the left toe, 2 and 3 the right's) or -1 all four; a foot's sink is its
+  // deeper point's, as last measured
+  function groundNow(B, k) {
+    const so = B.rig.soles, bones = B.rig.bones, P = B.ground.pts;
+    if (!so) return;
+    const t0 = realNow(), solids = groundNear(B), i1 = k < 0 ? 4 : k + 1;
+    for (let i = k < 0 ? 0 : k; i < i1; i++) {
+      const s = so[i < 2 ? 'l' : 'r'], j = (i & 1) * 2, b = bones[s[j]];
+      if (!b) { P[i] = 0; continue; }
+      b.updateWorldMatrix(true, false);
+      P[i] = sinkAt(gP.copy(s[j + 1]).applyMatrix4(b.matrixWorld), solids);
+    }
+    B.sink.l = Math.max(P[0], P[1]); B.sink.r = Math.max(P[2], P[3]);
+    if (k < 0) B.groundAt = frameN;
+    B.gms = realNow() - t0;
+  }
+  // the feet into the clip list as last measured (any there from earlier this frame replaced)
+  function pushGround(B) {
+    for (let i = B.clip.length - 1; i >= 0; i--) if (B.clip[i][1] === 'ground') B.clip.splice(i, 1);
+    for (const sd of SIDES) if (B.sink[sd] >= CLIP_M) B.clip.push([SIDE[sd].foot, 'ground', +(B.sink[sd] * 100).toFixed(1)]);
   }
   // a body resting in its start pose next to someone moving (the couple: her held arms ended in his chest): each frame
   // its arms start from the pose again; once an arm comes within RELAX_NEAR of someone moving, both give way softly (the
@@ -1189,8 +1338,10 @@ export function initActors(ed, live) {
     return { person, moved: true };
   }
   let timing = { update_ms: 0, body_ms: 0 };
+  let frameN = 0;                                          // the page's frames, for "measured this frame"
   function update() {
     const u0 = realNow();
+    frameN++;
     for (const B of listShown()) B.ms = 0;
     for (const st of playing.values()) {
       if (st.live) {
@@ -1697,13 +1848,18 @@ export function initActors(ed, live) {
   const bonesOf = (person) => { const r = shownRig(person); return r ? Object.keys(r.bones).sort() : null; };
   // the clip counter's last frame for a person ([limb, with, cm] at 2 cm or more), hips too close ([other, apart, need]
   // cm), and the last frame's cost (ms, real time)
+  // sink: each foot's depth in what it stands on (cm, the ground check, measured fresh here every frame), gms: its cost
+  // (ms, real time). A body nobody counted this frame (resting with nobody playing near: a static scene) is counted here
   const clipOf = (person) => {
     const r = shownRig(person), B = r && bodies.get(r.root);
     if (!B) return null;
+    if (B.countedAt !== frameN && B.st.on) countClips(B, performance.now() / 1000);
+    if (B.groundAt !== frameN && r.soles) { groundNow(B, -1); pushGround(B); }
     const rc = (a) => [+a[0].toFixed(3), +a[1].toFixed(3)];
     const ao = (o) => [+o.phi.toFixed(2), +o.alpha.toFixed(2), +(o.pushed * 100).toFixed(1), +(o.pulled * 100).toFixed(1)];   // swing, clavicle (rad), cm
     return { clip: B.clip, overlap: B.overlap, rch: { l: rc(B.rch.l), r: rc(B.rch.r) }, relax: { l: +B.relax.l.toFixed(2), r: +B.relax.r.toFixed(2) },
-      arm: { l: ao(B.arms.l.out), r: ao(B.arms.r.out) } };
+      arm: { l: ao(B.arms.l.out), r: ao(B.arms.r.out) }, sink: r.soles ? { l: +(B.sink.l * 100).toFixed(1), r: +(B.sink.r * 100).toFixed(1) } : null,
+      gms: +B.gms.toFixed(3) };
   };
   live.handlers.body_collide = (c) => {
     if (c.on != null) bodyOn = !!c.on;
@@ -1712,5 +1868,5 @@ export function initActors(ed, live) {
     return { on: bodyOn, reach: reachOn, relax: relaxOn, ...timing };
   };
   return { play, stop, follow, setSource, setRecent, playing, load, pose, canPlay, turnBy, setMode, setupOf, moveTo, at, setMirror, anchor, pinsOf, control, rigOf, pinsMeta, mirrorOf, setUnloaded, rest, unrest, setMusicClock,
-    rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf, clipOf, timing: () => timing };
+    rested: () => restP, notResting, boneOf, bonesOf, shownRig, eyesOf, clipOf, setCarried, timing: () => timing };
 }

@@ -18,6 +18,7 @@
 //   count     limbDepths: how deep each limb is inside a body, for the page's clip counter (actors.js)
 //   reach     softReach / reachIn: a hand target near or past full reach is eased in, so the elbow keeps a bend
 //   relax     relaxedArm: where a resting body's arms hang when they give way to someone moving near
+//   ground    sinkOf: how deep a sole is inside what it stands on, from the page's two rays (actors.js groundNow)
 // Plain math on arrays (no three.js), no allocation per frame: a few hundred ball tests a frame for two bodies.
 // Vectors are [x, y, z] (Float64Array(3)); bone matrices are three's column-major matrixWorld.elements.
 
@@ -408,6 +409,25 @@ export function limbDepths(self, others, S, E, H, palm, rU, rF, rH, out) {
   for (const t of FORE_T) { for (let i = 0; i < 3; i++) _p[i] = E[i] + t * (H[i] - E[i]); oneLimb(self, others, out, 1, _p, rF); }
   oneLimb(self, others, out, 2, H, rH); oneLimb(self, others, out, 2, palm, rH);
   return out;
+}
+
+// ---- the ground under a foot (the user, 2026-10-23: "main character is clipping through the stage to about his
+// knees"; a speaker marked by an empty stood on the hall floor, 0.45 m under the stage top). The page casts two rays at
+// a point of the sole (actors.js groundNow): one down from GROUND_UP above it, which meets the tops (faces up), one up
+// from CLIP_M above the sole, which meets the undersides (faces down). Walked from the top down, a top opens a solid
+// and an underside closes it; a solid still open at the sole holds the foot, and its top is where the foot should be.
+// A table or a rail over a foot shows its underside in between and does not count; a floor that is one face (no
+// underside) or a box (whose bottom is below the sole) does. Ties: the underside first (a box stacked on a box).
+// tops: heights, highest first (as the ray down meets them); unders: lowest first (as the ray up meets them); y: the
+// sole. Metres inside (0 clear)
+export const GROUND_UP = 0.6;
+export function sinkOf(tops, nt, unders, nu, y) {
+  let i = 0, j = nu - 1, open = 0, top = 0;
+  while (i < nt || j >= 0) {
+    if (j >= 0 && (i >= nt || unders[j] >= tops[i])) { if (open > 0 && --open === 0) top = 0; j--; }
+    else { if (open++ === 0) top = tops[i]; i++; }
+  }
+  return open > 0 ? Math.max(0, top - y) : 0;
 }
 
 // ---- two bodies too close to stand apart (a placement for the scene, not something to fix by moving feet): the

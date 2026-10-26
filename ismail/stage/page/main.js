@@ -379,6 +379,7 @@ window.VR_waypoints = waypoints;
 window.VR_cues = initCues(ed, live, panels);
 window.VR_anchors = initAnchors(ed, xr, live);   // objects pinned to a hand joint, session only
 window.VR_props = initProps(ed, live, actors);   // props pinned to a person's bone, saved with the scene (props.js)
+actors.setCarried((name) => window.VR_props.pins.has(name));   // the ground check stands no foot on a held guitar
 
 // world.json changed under an open page (stage_world writes it, then sends world_reload): read it again and bring what
 // was built from it up to date, so the room is never reloaded for it (the user, 2026-10-13: "I'm getting sick of
