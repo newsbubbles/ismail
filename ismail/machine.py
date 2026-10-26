@@ -1702,11 +1702,18 @@ def _who():
     return os.environ.get('ISMAIL_SESSION') or os.path.basename(os.getcwd().rstrip('\\/')) or 'unknown'
 
 
-def render_memory_gb(n_samples, n_tracks, n_buses=0, n_sources=0):
-    """Peak memory of one studio render: the mix, buses, sidechain sources and one track in float64, plus the
-    stems as float32 spans (assumed half full)."""
+RENDER_BASE_ARRAYS = 12     # measured (tracemalloc, 10-26): a render peaks at 9.5-11 full-length stereo float64
+                            # arrays (the instrument's temporaries, the mix, the master and stem gain pass), with or
+                            # without track fx; 12 leaves a margin, 3 under-declared by about half (ledger:M336)
+TRUE_PEAK_ARRAYS = 5        # a true_peak limiter's 4x oversampled copy
+
+
+def render_memory_gb(n_samples, n_tracks, n_buses=0, n_sources=0, true_peak=False):
+    """Peak memory of one studio render: the working arrays of one track and the master in float64, buses and
+    sidechain sources, plus the stems as float32 spans (assumed half full)."""
     full = n_samples * 2 * 8
-    return (full * (3 + n_buses + n_sources) + n_samples * 2 * 4 * n_tracks * 0.5) / 2 ** 30
+    arrays = RENDER_BASE_ARRAYS + n_buses + n_sources + (TRUE_PEAK_ARRAYS if true_peak else 0)
+    return (full * arrays + n_samples * 2 * 4 * n_tracks * 0.5) / 2 ** 30
 
 
 # ------------------------------------------------------------------ the board as text

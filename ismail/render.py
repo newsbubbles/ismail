@@ -157,6 +157,7 @@ class Renderer:
         self.offset_samples_in_window = int(round((self.offset - t0) * self.sr))
         self.only = only
         self.post_fx = {}
+        self.pre_master_peak = {}   # each audible track's peak (dB) after its fader, before the master chain
         self.gain_reduction = {}
         self.sounds = {}
         self.use_cache = cache
@@ -267,8 +268,9 @@ class Renderer:
 
     # ------------------------------------------------------------------ cache
     def cache_key(self, name, tr, dep_keys):
+        # the cached file holds the track before its fader and pan, so a mix move reuses it
         sounds = sorted(_sounds_used(tr))
-        blob = json.dumps([tr, self.bpm, self.sr, self.offset, self.t0, self.n, self.r_b0, self.win_b1,
+        blob = json.dumps([_dry(tr), self.bpm, self.sr, self.offset, self.t0, self.n, self.r_b0, self.win_b1,
                            [(s, self.sound_mtime(s)) for s in sounds], dep_keys, _CODE_VERSION,
                            voices.fingerprint(tr.get('instrument'), self.root)],
                           sort_keys=True, default=str)
@@ -279,9 +281,9 @@ class Renderer:
         n = self.n
         inst = instruments.normalize(tr['instrument']) if tr.get('instrument') else None
         auto = tr.get('automation', {})
-        inst_auto, fx_auto, mix_auto = {}, {}, {}
+        inst_auto, fx_auto = {}, {}
         for key, pts in auto.items():
-            if not pts:
+            if not pts or key in _MIX_AUTO:     # fader and pan curves: mix_track
                 continue
             curve = automation_curve(pts, key, self.b_t0,
                                      n, self.bpm, self.sr, self.offset)
@@ -290,8 +292,6 @@ class Renderer:
             elif key.startswith('fx.'):
                 _, i, pname = key.split('.', 2)
                 fx_auto[(int(i), pname)] = curve
-            else:
-                mix_auto[key] = curve
         y = np.zeros((2, n))
         if inst is not None:
             notes = self.track_notes_sec(tr, name)
@@ -317,6 +317,13 @@ class Renderer:
         ctx = Ctx(self, name, fx_auto, n)
         for i, f in enumerate(tr.get('fx', [])):
             y = fxmod.apply_fx(y, fxmod.normalize(f), ctx, i)
+        return y
+
+    def mix_track(self, tr, y):
+        """The track's fader and pan, applied after the cached render."""
+        auto = tr.get('automation', {})
+        mix_auto = {k: automation_curve(auto[k], k, self.b_t0, self.n, self.bpm, self.sr, self.offset)
+                    for k in _MIX_AUTO if auto.get(k)}
         # volume automation is an offset on top of the track's volume_db fader (0 = unchanged)
         vol = tr.get('volume_db', 0.0) + mix_auto.get('volume_db', 0.0)
         pan = mix_auto.get('pan', tr.get('pan', 0.0))
@@ -341,8 +348,11 @@ class Renderer:
                               self.deps(self.project.get('master', {})))
         for name in order:
             tr = tracks[name]
-            keys[name] = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
-            path = os.path.join(self.cache_dir, keys[name] + '.npy')
+            dry = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
+            # tracks that read this one (sidechain, vocoder) hear it after the fader, so their key holds the mix
+            keys[name] = hashlib.sha1(json.dumps([dry, _mix_of(tr)], sort_keys=True, default=str)
+                                      .encode()).hexdigest()[:20]
+            path = os.path.join(self.cache_dir, dry + '.npy')
             t0 = time.time()
             rpath = path[:-4] + '.notes.json'
             if self.use_cache and os.path.exists(path):
@@ -360,6 +370,7 @@ class Renderer:
                     if self.notes_report.get(name):
                         with open(rpath, 'w', encoding='utf-8') as fh:
                             json.dump(self.notes_report[name], fh)
+            y = self.mix_track(tr, y)
             if name in sources:
                 self.post_fx[name] = y
             self.stats[name] = {'sec': round(time.time() - t0, 2), 'cached': cached}
@@ -369,6 +380,7 @@ class Renderer:
             if not audible:
                 continue
             stems[name] = _Stem(y)
+            self.pre_master_peak[name] = float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
             out = tr.get('output', 'master')
             if out != 'master' and out not in buses:
                 raise RenderError(f"track {name!r} outputs to unknown bus {out!r}; buses: {list(buses)}")
@@ -443,6 +455,24 @@ def _code_hash():
 
 
 _CODE_VERSION = _code_hash()
+
+
+# a track's mix settings: applied after the cached render, so they stay out of its cache key
+_MIX = ('volume_db', 'pan', 'sends', 'output', 'mute', 'solo')
+_MIX_AUTO = ('volume_db', 'pan')
+
+
+def _dry(tr):
+    out = {k: v for k, v in tr.items() if k not in _MIX}
+    auto = {k: v for k, v in (tr.get('automation') or {}).items() if k not in _MIX_AUTO}
+    if 'automation' in tr:
+        out['automation'] = auto
+    return out
+
+
+def _mix_of(tr):
+    return [tr.get('volume_db', 0.0), tr.get('pan', 0.0),
+            {k: v for k, v in (tr.get('automation') or {}).items() if k in _MIX_AUTO}]
 
 
 def _sounds_used(tr):

@@ -305,8 +305,10 @@ def _check_voices(spec, P):
 @op()
 def project_new(project: str, bpm: float, length_bars: int, name: str = None, beats_per_bar: int = 4,
                 offset_sec: float = 0.0, reference: str = None, objective: str = None,
-                derived_from: str = None) -> str:
+                derived_from: str = None, master_limiter: bool = True) -> str:
     """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
+    master_limiter: start the master chain with a safety limiter (-0.3 dB); False for a build that writes its
+    own master chain, so the default does not sit ahead of it.
     objective: what this piece is for, in the person's words ("keep a listener asleep for 3 hours"); see project_set.
     derived_from: the project this one is a version of; its objectives and lineage are carried over, so a derivative
     keeps the intent it came from (intent provenance)."""
@@ -316,7 +318,8 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
     os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
     d = {"version": 1, "name": name or os.path.basename(root), "bpm": bpm, "beats_per_bar": beats_per_bar,
          "sr": 44100, "offset_sec": offset_sec, "length_bars": length_bars, "tail_sec": 2.0,
-         "tracks": {}, "buses": {}, "master": {"fx": [{"type": "limiter", "ceiling_db": -0.3, "gain_db": 0.0}], "volume_db": 0.0},
+         "tracks": {}, "buses": {}, "master": {"fx": [{"type": "limiter", "ceiling_db": -0.3, "gain_db": 0.0}] if master_limiter else [],
+                    "volume_db": 0.0},
          "sounds": {}, "reference": None}
     if reference:
         d['reference'] = {"file": os.path.abspath(reference)}
@@ -1843,7 +1846,13 @@ def fx_add(project: str, target: str, fx: dict, index: int = None) -> str:
     lst.insert(i, fx)
     P.save()
     chain = ', '.join(f"{j}:{f['type']}" for j, f in enumerate(lst))
-    return f"{target}: fx chain now [{chain}]"
+    out = f"{target}: fx chain now [{chain}]"
+    lims = [j for j, f in enumerate(lst) if f['type'] == 'limiter']
+    if target == 'master' and fx['type'] == 'limiter' and len(lims) > 1:
+        out += (f"\nnote: the master has {len(lims)} limiters (#{', #'.join(map(str, lims))}); #{lims[0]} is likely the "
+                f"project's default safety limiter, ahead of the rest of the chain. fx_remove target='master' "
+                f"index={lims[0]} drops it (or start with project_new(master_limiter=False))")
+    return out
 
 
 @op(mutates=True)
@@ -2163,8 +2172,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
          f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS, true peak {tp:.1f} dBTP"
          + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else
-            ", over -1 dBTP: an mp3 of it can clip (lower the master limiter's ceiling_db to -1.5, or master_cue "
-            "for delivery)" if tp > -1.0 else '')]
+            ", over -1 dBTP: an mp3 of it can clip (the master limiter with true_peak=True and ceiling_db -1.5, or "
+            "master_cue for delivery)" if tp > -1.0 else '')]
     if waited >= 5:
         L.append(f"  waited {waited / 60:.1f} min in line for the machine (wait='0' refuses at once instead)")
     if R.full and lufs < -20:
@@ -2178,10 +2187,14 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         s = R.stats.get(k, {})
         src = P.d.get('buses', {}).get(k[4:], {}) if k.startswith('bus:') else P.d['tracks'].get(k, {})
         fader = f"  fader {src.get('volume_db', 0.0):+.1f}" + (' (automated)' if (src.get('automation') or {}).get('volume_db') else '')
+        # stems carry the master chain's gain; HOT reads the track before it, so a master gain ahead of a clipper
+        # does not make every part look hot (ledger:M337)
+        pre = R.pre_master_peak.get(k, pk)
         L.append(f"  {k:<14} peak {pk:6.1f} rms {rms:6.1f} dB{fader}" + (f"  ({'cached' if s.get('cached') else 'rendered in ' + str(s['sec']) + 's'})" if s else '')
+                 + (f"  (peak {pre:.1f} before the master chain)" if abs(pre - pk) >= 1.0 else '')
                  + ('  SILENT - check notes/instrument/mute' if pk < -90 else '')
-                 + (f"  HOT: this part alone reaches full scale; lower it {pk + 3:.1f} dB (track_set volume_db) so "
-                    f"it peaks near -3 and the limiter is not flattening it" if pk > HOT_DB and k != 'master'
+                 + (f"  HOT: this part alone reaches full scale; lower it {pre + 3:.1f} dB (track_set volume_db) so "
+                    f"it peaks near -3 and the limiter is not flattening it" if pre > HOT_DB and k != 'master'
                     and not k.startswith('bus:') else ''))
     for (trk, i), gr in R.gain_reduction.items():
         if gr < -0.5:
@@ -2229,7 +2242,9 @@ def _render_gb(d, n, only=None):
     from .render import Renderer
     tracks = [t for k, t in d['tracks'].items() if only is None or k in only]
     deps = set().union(*(Renderer.deps(None, t) for t in d['tracks'].values()))
-    return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps))
+    chains = [t.get('fx', []) for t in d['tracks'].values()] + [b.get('fx', []) for b in d.get('buses', {}).values()]
+    tp = any(f.get('type') == 'limiter' and f.get('true_peak') for c in chains + [d['master'].get('fx', [])] for f in c)
+    return machine.render_memory_gb(n, len(tracks), len(d.get('buses', {})), len(deps), tp)
 
 
 def _render_disk_gb(d, n, only, cache, stems, named):
@@ -2310,15 +2325,19 @@ def analyze_chords(project: str, source: str = None, bars: list = None, per_bar:
 
 @op()
 def analyze_melody(project: str, source: str = 'ref:other', bars: list = None, fmin: str = 'C1', fmax: str = 'C7',
-                   quant: float = 0.25, min_conf: float = 0.0, cents: bool = False) -> str:
+                   quant: float = 0.25, min_conf: float = 0.0, cents: bool = False, vibrato_ms: float = None) -> str:
     """Monophonic pitch -> note list in notes_write format (max 16 bars). Best on a stem or a soloed line. Ends
     with its confidence: pYIN voicing over the notes, and a WARNING when another pitch sits within 6 dB on a
     quarter of the notes or more (a backing in the source: the reading can follow it, so restrict fmin/fmax).
     cents=True gives every note's measured pitch as numbers, for intonation and quarter tones (maqam steps):
     tab-separated rows start, note, dur, vel, midi (float), hz, cents from the named note. For the pitch moving
-    inside a note (slides, vibrato, ornaments) read analyze_contour."""
+    inside a note (slides, vibrato, ornaments) read analyze_contour.
+    vibrato_ms: a held note with a wide vibrato (a singer, a violin) reads as two notes a semitone apart when its
+    centre sits near a half step; vibrato_ms=190 (one cycle, about 5 Hz) averages the pitch before rounding. It also
+    merges trills faster than the window, so compare with analyze_roll where an ornament matters.
+    On a full mix the loudest line wins (usually the bass): read a stem, or raise fmin over the bass."""
     P = _load(project)
-    notes, txt = A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf)
+    notes, txt = A.melody(*P.source(source, bars), bars, fmin, fmax, quant, min_conf=min_conf, vibrato_ms=vibrato_ms)
     return A.melody_cents_text(notes, txt) if cents else txt
 
 
