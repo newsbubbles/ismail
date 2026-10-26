@@ -1,0 +1,5 @@
+# the playbook, which setup.py copies into the package as ismail/_playbook (ismail.playbook.SHIPPED)
+include skills/ismail/SKILL.md
+recursive-include skills/ismail/references *.md
+recursive-include skills/ismail/examples *
+recursive-include skills/ismail/hooks *

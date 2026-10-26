@@ -16,5 +16,7 @@ ref/
 # songs and projects (local work, not part of the tool)
 songs/
 
-# store packages (python -m ismail.release)
+# store packages (python -m ismail.release), and the package build
 dist/
+build/
+ismail/_playbook/

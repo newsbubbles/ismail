@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### packaging: an install works like a clone, ready for PyPI (ledger:M351)
+
+- The Rusty toms' data files (`ismail/voices/drums/toms_*.json`) were left out of the package, so the toms failed
+  on every install that was not a clone, the plugins' included. They ship now, and `tests/test_packaging.py` fails
+  when any file the repository tracks under `ismail/` is not in the package.
+- An installed ismail with no `ISMAIL_SONGS` kept its own files (the machine board, the lexicon, listen sessions)
+  in `songs/` beside the package, inside the Python install, where an update or a cache clean removes them. It now
+  uses Documents/ismail, the folder setup.md makes; a clone keeps its `songs/`. `guide` ends with the songs folder
+  in use, and names the old folder when an earlier install left files there.
+- The playbook ships in the package: a build copies `skills/ismail/` (SKILL.md, references, examples, hooks; only
+  files git tracks, so a machine's private references never ship) into `ismail/_playbook/`. New op `playbook(page=)`
+  reads it in any install (it is served with `guide` and `ops_find` even by a role-filtered server), and
+  `python -m ismail.playbook export <folder>` writes it as a skill folder.
+- Releases: `.github/workflows/publish.yml` is now `release.yml` (the name PyPI's trusted publisher has), runs on a
+  published GitHub release, checks the built wheel in a clean venv outside the repository
+  (`.github/scripts/wheel_check.py`, also in the tests workflow), then uploads to PyPI and then to the MCP Registry,
+  each after an approval in the `pypi` environment.
+
 ### voices: trumpet, a measured lip-reed performer
 
 - New built-in voice `trumpet` (`ismail/voices/brass/trumpet.py`), a performer: `{"type": "code", "voice":
