@@ -305,8 +305,10 @@ def _check_voices(spec, P):
 @op()
 def project_new(project: str, bpm: float, length_bars: int, name: str = None, beats_per_bar: int = 4,
                 offset_sec: float = 0.0, reference: str = None, objective: str = None,
-                derived_from: str = None) -> str:
+                derived_from: str = None, master_limiter: bool = True) -> str:
     """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
+    master_limiter: start the master chain with a safety limiter (-0.3 dB); False for a build that writes its
+    own master chain, so the default does not sit ahead of it.
     objective: what this piece is for, in the person's words ("keep a listener asleep for 3 hours"); see project_set.
     derived_from: the project this one is a version of; its objectives and lineage are carried over, so a derivative
     keeps the intent it came from (intent provenance)."""
@@ -316,7 +318,8 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
     os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
     d = {"version": 1, "name": name or os.path.basename(root), "bpm": bpm, "beats_per_bar": beats_per_bar,
          "sr": 44100, "offset_sec": offset_sec, "length_bars": length_bars, "tail_sec": 2.0,
-         "tracks": {}, "buses": {}, "master": {"fx": [{"type": "limiter", "ceiling_db": -0.3, "gain_db": 0.0}], "volume_db": 0.0},
+         "tracks": {}, "buses": {}, "master": {"fx": [{"type": "limiter", "ceiling_db": -0.3, "gain_db": 0.0}] if master_limiter else [],
+                    "volume_db": 0.0},
          "sounds": {}, "reference": None}
     if reference:
         d['reference'] = {"file": os.path.abspath(reference)}
@@ -1843,7 +1846,13 @@ def fx_add(project: str, target: str, fx: dict, index: int = None) -> str:
     lst.insert(i, fx)
     P.save()
     chain = ', '.join(f"{j}:{f['type']}" for j, f in enumerate(lst))
-    return f"{target}: fx chain now [{chain}]"
+    out = f"{target}: fx chain now [{chain}]"
+    lims = [j for j, f in enumerate(lst) if f['type'] == 'limiter']
+    if target == 'master' and fx['type'] == 'limiter' and len(lims) > 1:
+        out += (f"\nnote: the master has {len(lims)} limiters (#{', #'.join(map(str, lims))}); #{lims[0]} is likely the "
+                f"project's default safety limiter, ahead of the rest of the chain. fx_remove target='master' "
+                f"index={lims[0]} drops it (or start with project_new(master_limiter=False))")
+    return out
 
 
 @op(mutates=True)

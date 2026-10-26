@@ -40,3 +40,4 @@ def test_sound_change_still_rerenders(proj):
     api.render(proj, stems=True)
     api.notes_write(proj, 'lead', 1, "0 C4 4")
     assert 'cached' not in _line(api.render(proj, stems=True), 'lead')
+
