@@ -196,6 +196,7 @@ nudges you, follow it.
 | questions for the person at the desk, answered by voice or typing (notes on a cut, a mix, a set of shots) | `feedback_page(project, round, items, questions)`: hosted here, opened in their own browser (a pane has no mic), kept across reopening; pass the song folder as `project`; `feedback_wait` for their Send, then `feedback_read`. A listener who is not at this computer: `share=True` writes a copy you host anywhere (`<round>/share/`); their answers come back as a message, and `feedback_paste(project, round, text, files)` puts them in the round. For a round on a whole song's structure, offer `moments=True` ("mark anything that strikes you while it plays"): `feedback_read` gives each moment its bars |
 | the person names a quality ("boxy", "too clean", "cut off") | `lexicon_note`, verbatim; measure that moment in the reference and yours (`sound_zoom`, `sound_compare`) before you change it |
 | a link or a track name for a reference (YouTube, SoundCloud) | ask once, then the two yt-dlp commands in `references/recreate.md` section 0 (find the upload, fetch its audio into `ref/`); if it fails, say so once and offer to record it as it plays (`listen_start(streams=['speakers'])`), no retries |
+| a named piece to recreate or cover (a classical work, anything with many parts) | its score, MIDI or a transcription first (into `ref/`, with its `SOURCES.md` row), never its notes from memory; score each draft against it (`cmp_run`; `notes_from_audio_loop` on the recording when there is no score). "X meets Y": ask once whether they want a blend or X itself |
 | a reference arrives partway, as inspiration | set it on the song (`project_set(reference=)`) and name its signature; before each draft `ear_pass`, `sound_compare` and `sound_zoom_diff` on a part, `notes_from_audio_loop` for its riff, `eq_match`, `levels_from_ref` with the identity part checked on top (`references/recreate.md`, "A reference that arrives as inspiration") |
 | a part must play like the reference (timing, accents, swing, runs) | `analyze_grid` + `align`, `analyze_swing`, then a per-note read of the reference window before writing a note (`references/recreate.md` section 3, the per-note pass) |
 | a recording, video or score comes in | a `ref/SOURCES.md` row before you use it; `credits` when the piece goes public |
@@ -272,6 +273,8 @@ nudges you, follow it.
   how the people a sound came from are known. When the song plays samples of a source, its row says what was
   sampled, and `credits` says the piece plays recorded audio. Anything measured from the person needs their yes
   first.
+- **One draft at a time to their ear.** No draft N+1 before the person has heard draft N: each draft is built on
+  what they said about the last one. Two agents drafted a named piece from memory, twice in a row, and missed it.
 - **Long work stays on its deliverable.** Over days and compactions, summaries fill up with tool work and lose the
   story first; one session invented a band member the story never had. Keep `PROGRESS.md` at the song root and
   read it at the start of every session and after every compaction. Before designing anything for a story (a

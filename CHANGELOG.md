@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### skill: reference first for a named piece, one draft at a time (hq:D-219)
+
+- A named piece to recreate or cover starts from its score, MIDI or a transcription, never from memory, and each draft is scored against it; "X meets Y" is asked back once. No draft N+1 before the person has heard draft N.
+
 ### seven small fixes from the songs (ledger:M350, M334, M271h, M277a, M337, M336, M342, M338)
 
 - A fader, pan, send, mute or solo move reuses the track's cached render; only the mix is applied again.
