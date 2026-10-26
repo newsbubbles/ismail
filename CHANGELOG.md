@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### repository: actions pinned, Dependabot, SECURITY.md (ledger:M359)
+
+- Every GitHub Action in the workflows is pinned to a commit SHA (the tag in a comment), so a moved tag cannot
+  change what runs, the release job included. `.github/dependabot.yml` opens one weekly pull request when they have
+  new releases.
+- `SECURITY.md`: report problems privately through the repository's Security tab (private vulnerability reporting is
+  on); the latest release and `main` get fixes; what is in scope.
+- A docstring in `ismail/spatial.py` no longer reads like a call to `eval`. The hashgraph-online plugin scanner
+  flagged it as dynamic code: these changes take ismail's score there from 74 to about 92 (the awesome-ai-plugins
+  listing needs 80).
+
 ## 0.4.0 (2026-10-26)
 
 ### packaging: an install works like a clone, ready for PyPI (ledger:M351)

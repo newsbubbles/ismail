@@ -139,8 +139,8 @@ def _key(k, i):
 
 
 class Trajectory:
-    """A parsed trajectory: eval(t) -> (x, y, z) arrays for times t in seconds (elementwise, so any cut of the
-    time axis gives the same positions)."""
+    """A parsed trajectory: its .eval method takes times t in seconds and gives (x, y, z) arrays (elementwise, so
+    any cut of the time axis gives the same positions)."""
 
     def __init__(self, kind, start_s, loop, **kw):
         self.kind, self.start_s, self.loop = kind, start_s, loop
