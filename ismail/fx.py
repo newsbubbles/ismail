@@ -37,7 +37,7 @@ FX_DEFAULTS = {
                "mix": 0.5},
     "tremolo": {"rate_beats": 0.5, "rate_hz": None, "depth": 0.5, "shape": "sine", "mode": "amp", "phase": 0.0},
     "width": {"width": 1.0, "mono_below_hz": None},
-    "limiter": {"ceiling_db": -0.3, "gain_db": 0.0, "release_ms": 60.0, "lookahead_ms": 3.0},
+    "limiter": {"ceiling_db": -0.3, "gain_db": 0.0, "release_ms": 60.0, "lookahead_ms": 3.0, "true_peak": False},
     "vocoder": {"modulator": None, "bands": 20, "lo_hz": 90.0, "hi_hz": 9000.0, "q": 6.0, "release_ms": 25.0,
                 "mix": 1.0, "unvoiced": 0.15},
     "bitcrush": {"bits": 8, "rate_hz": 11025.0, "mix": 1.0},
@@ -346,6 +346,14 @@ def apply_fx(x, fx, ctx, idx):
         return np.stack([mid + side, mid - side])
     if t == 'limiter':
         xg = x * dsp.undb(fx['gain_db'])
+        if fx['true_peak']:
+            # the ceiling holds between samples too (4x oversampled detection, a catch instead of a hard clip),
+            # so an mp3 of the render keeps it (ledger:M271h, M277a)
+            from . import master as _master
+            y, gr = _master.limit(xg.T, sr, fx['ceiling_db'], fx['release_ms'], fx['lookahead_ms'])
+            y, gr2 = _master.catch(y, sr, fx['ceiling_db'])
+            ctx.note_gr(idx, min(gr, gr2))
+            return y.T
         ceil = dsp.undb(fx['ceiling_db'])
         la = int(fx['lookahead_ms'] / 1000 * sr)
         peak = np.max(np.abs(xg), axis=0)

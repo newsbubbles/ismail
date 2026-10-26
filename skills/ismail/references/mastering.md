@@ -19,7 +19,7 @@ On `track='master'`, in this order:
 1. **eq**: gentle, broad moves only (1-3 dB): a low cut around 25-30 Hz, a small dip where the mix builds up (often 200-400 Hz), air on top only if the reference has it. For a reference, compare long-term spectra (`analyze_spectrum` on `render` and `ref`) over the same section; `eq_match` does this per track.
 2. **compressor** (glue): ratio 1.5-2, attack 20-30 ms (lets transients through), release 100-200 ms, threshold so gain reduction is 1-3 dB on the loud sections. More than that and the drums flatten.
 3. **width**: `mono_below_hz` 120-150 keeps the sub mono (it collapses to mono on club systems and phones anyway); width above that 1.0-1.2 at most.
-4. **limiter** last: raise its `gain_db` until integrated loudness reaches the target, ceiling -1.0 dB for anything that becomes an mp3 (encoding overshoots a -0.3 dB ceiling), gain reduction under 3-4 dB on the loudest bars.
+4. **limiter** last: raise its `gain_db` until integrated loudness reaches the target, gain reduction under 3-4 dB on the loudest bars. For anything that becomes an mp3, set `true_peak: true` and ceiling -1.5 dB: a plain limiter holds sample peaks only, so bright material goes 1-1.4 dB over its ceiling between samples, and a 320k mp3 adds about 0.4 dB more. When re-mastering material that is already mastered, put a soft clip (`distortion` mode tanh, low `drive_db`) ahead of the limiter instead of asking the limiter for all of it.
 
 ## 3. Check it
 

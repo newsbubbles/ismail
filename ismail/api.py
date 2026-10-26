@@ -2172,8 +2172,8 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
          f" in {R.elapsed:.1f}s -> renders/latest.wav{' + renders/' + out + '.wav' if out and mp3 != 'only' else ''}{mp3_note}",
          f"master: {lufs:.1f} LUFS, peak {peak:.1f} dBFS, true peak {tp:.1f} dBTP"
          + (f", CLIPPING {clip:.2f}% of samples (lower levels or add limiter)" if clip > 0.001 else
-            ", over -1 dBTP: an mp3 of it can clip (lower the master limiter's ceiling_db to -1.5, or master_cue "
-            "for delivery)" if tp > -1.0 else '')]
+            ", over -1 dBTP: an mp3 of it can clip (the master limiter with true_peak=True and ceiling_db -1.5, or "
+            "master_cue for delivery)" if tp > -1.0 else '')]
     if waited >= 5:
         L.append(f"  waited {waited / 60:.1f} min in line for the machine (wait='0' refuses at once instead)")
     if R.full and lufs < -20:
