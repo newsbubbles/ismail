@@ -139,7 +139,9 @@ Find any tool by what you need or by role with `ops_find`.
 - **MIDI files in and out.** `midi_write` puts the song (or some tracks, or a window of bars) into a type 1 .mid
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
-  parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live).
+  parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live);
+  `live_played(into='<track>', bar=...)` records what was played into a song track, as it sounded or snapped to 16ths
+  (`fit=True`), and `undo()` takes it back.
 - **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
   woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
   tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with

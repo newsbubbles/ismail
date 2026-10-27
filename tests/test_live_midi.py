@@ -414,3 +414,110 @@ def test_played_bars_and_from_bar_say_what_to_do(eng):
         eng.cmd_played(source='keys', from_bar=1)
     assert 'a grid needs at least 3' in eng.cmd_played(source='keys', fit=True)
     assert 'no output delay was measured' in eng.cmd_played(source='keys')
+
+
+# ------------------------------------------------------------------ recording a take into a song track (into=)
+
+@pytest.fixture
+def song(eng, tmp_path):
+    """The engine's folder as a song with a 'keys' track, its control port where live_* ops find it."""
+    from ismail import api
+    from ismail.live.engine import serve
+    p = str(tmp_path)
+    api.project_new(p, bpm=120, length_bars=8)
+    api.track_add(p, 'keys', instrument='preset:pluck')
+    httpd = serve(eng, 0)
+    os.makedirs(os.path.join(p, 'live'), exist_ok=True)
+    with open(os.path.join(p, 'live', 'engine.json'), 'w', encoding='utf8') as f:
+        json.dump({'port': httpd.server_address[1]}, f)
+    yield p
+    httpd.shutdown()
+
+
+def _keys(path, notes, pedal=()):
+    """A key log: notes (beat sounded, midi, dur, vel) on the heard clock, 0.09 beat after the press; pedal: (down,
+    up) beats."""
+    recs = []
+    for b, m, d, v in notes:
+        recs.append({'wall': 0, 'beat': b, 'press': b - 0.09, 'st': 0x90, 'd1': m, 'd2': v})
+        recs.append({'wall': 0, 'beat': b + d, 'press': b + d - 0.09, 'st': 0x80, 'd1': m, 'd2': 0})
+    for dn, up in pedal:
+        recs.append({'wall': 0, 'beat': dn, 'press': dn - 0.09, 'st': 0xB0, 'd1': 64, 'd2': 127})
+        recs.append({'wall': 0, 'beat': up, 'press': up - 0.09, 'st': 0xB0, 'd1': 64, 'd2': 0})
+    _log(path, sorted(recs, key=lambda r: r['beat']))
+
+
+def _track(p, name='keys'):
+    with open(os.path.join(p, 'project.json'), encoding='utf8') as f:
+        return json.load(f)['tracks'][name]['notes']
+
+
+def test_a_take_is_written_into_a_track_as_it_sounded(song):
+    from ismail import api
+    from ismail.live import ops as LO
+    p = song
+    # bar 1 (not chosen), then bars 3-4: E4 is let go under the pedal, so it lasts until the pedal comes up at 10
+    _keys(os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl'),
+          [(1.0, 50, 0.5, 60), (8.05, 60, 0.5, 90), (9.02, 64, 0.28, 64), (10.51, 67, 0.49, 110),
+           (12.97, 69, 0.43, 77)], pedal=[(8.9, 10.0)])
+    api.notes_write(p, 'keys', 5, '0 C2 1; 3.5 D2 0.5')                  # bar 5: replaced
+    api.notes_write(p, 'keys', 7, '0 E2 1', mode='add')                  # bar 7: kept
+    before = _track(p)
+    r = LO.live_played(p, source='ismail keys', bars=[3, 4], into='keys', bar=5)
+    assert r.startswith("keys: wrote 4 notes from ismail_keys (the engine's bars 3-4) into bars 5-6 (replace, "
+                        "replaced 2 notes), C4-A4, v=64-110"), r
+    assert 'as it sounded' in r and "undo: undo(project=" in r and 'render(project=' in r
+    got = [n for n in _track(p) if 16 <= n[0] < 24]
+    assert got == [[16.05, 60, 0.5, 90], [17.02, 64, 0.98, 64], [18.51, 67, 0.49, 110], [20.97, 69, 0.43, 77]]
+    assert [24.0, 40, 1.0, 100] in [n[:4] for n in _track(p)]           # bar 7 untouched
+    api.undo(p)
+    assert _track(p) == before
+
+    # add merges; from_bar picks the engine bar that lands on `bar` (the take's bar 3 counted from bar 2: one bar in)
+    r = LO.live_played(p, source='ismail keys', bars=[3, 4], into='keys', bar=5, mode='add', from_bar=2)
+    assert 'into bars 5-7 (add)' in r, r
+    starts = sorted(n[0] for n in _track(p))
+    assert 16.0 in starts and 19.5 in starts and 20.05 in starts and 24.97 in starts
+
+
+def test_a_fitted_take_is_written_snapped_as_A_or_B(song):
+    from ismail.live import ops as LO
+    p = song
+    # 3-3-2 from the 'and' of beat 1 of bar 3, 45 ms behind the 16ths
+    rng = np.random.default_rng(2)
+    true = [8.5 + 2 * h + s * 0.25 for h in range(4) for s in (0, 3, 6)]
+    _keys(os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl'),
+          [(t + 0.09 + rng.uniform(-0.015, 0.015), 57, 0.2, 70 + i) for i, t in enumerate(true)])
+    r = LO.live_played(p, bars=[3, 5], fit=True, into='keys', bar=1)
+    assert 'wrote A, as played (each hit on the 16th it was played nearest)' in r and 'rhythm: 3-3-2' in r, r
+    a = _track(p)
+    assert [n[0] for n in a] == [t - 8 for t in true] and all(n[2] == 0.25 for n in a)
+    assert [n[3] for n in a] == list(range(70, 82))                     # velocities kept
+    from ismail import api
+    api.undo(p)                                # the player picked B by ear: take A back, write B
+    assert _track(p) == []
+    r = LO.live_played(p, bars=[3, 5], fit=True, into='keys', bar=1, placement='B')
+    assert 'wrote B, groups from beat 1' in r and "(the engine's bars 3-4) into bars 1-2 (replace)" in r, r
+    assert [n[0] for n in _track(p)] == [t - 8.5 for t in true]
+
+
+def test_recording_says_what_to_do_when_asked_wrong(song, tmp_path):
+    from ismail.api import OpError
+    from ismail.live import ops as LO
+    p = song
+    _keys(os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl'), [(1.0, 60, 0.5, 90), (2.0, 62, 0.5, 90)])
+    with pytest.raises(OpError, match=r"no track 'lead'.*track_add\(project="):
+        LO.live_played(p, into='lead')
+    with pytest.raises(OpError, match='add into='):
+        LO.live_played(p, bar=5)
+    with pytest.raises(OpError, match='use it with fit=True'):
+        LO.live_played(p, into='keys', placement='B')
+    with pytest.raises(OpError, match="mode 'merge'"):
+        LO.live_played(p, into='keys', mode='merge')
+    with pytest.raises(OpError, match='a grid needs at least 3.*leave fit out'):
+        LO.live_played(p, into='keys', fit=True)
+    _keys(os.path.join(p, 'live', 'midi', 'screen_keys.jsonl'), [(1.0, 64, 0.5, 90)])
+    with pytest.raises(OpError, match="keys from 2 inputs .*'screen_keys'.*source="):
+        LO.live_played(p, into='keys')
+    assert 'into bars 1-1' in LO.live_played(p, source='screen_keys', into='keys')    # the log's own name works
+    assert _track(p) == [[1.0, 64, 0.5, 90]]   # only the last call wrote

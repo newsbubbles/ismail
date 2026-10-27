@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### record keys into a track (MIDI parity step 4)
+
+- `live_played(into='<track>', bar=1, mode='replace')` writes what the person played on their keys (via `live_midi`)
+  into a track of the song in the live folder, in one call, instead of the agent copying the lines into
+  `notes_write`. `bar` is where the take's first bar lands (`from_bar` picks which of the engine's bars that is);
+  `mode='replace'` clears the bars the take covers on the track first, `'add'` merges. The track must exist
+  (`track_add` first, the error says so).
+- Without `fit` the take is written as it sounded: off the grid where it was played, each note's velocity and
+  length, note-offs held while the sustain pedal was down. With `fit=True` the snapped notes are written, placement
+  `'A'` (as played, the default) or `'B'` (the groups from beat 1), the two `fit=True` prints.
+- The reply says what was written (track, bars, note count, pitch and velocity range, the engine's bars it came
+  from), how to hear it, and that `undo()` takes it back. It warns when the set's tempo or meter differs from the
+  song's and when the take runs past the song's length.
+- `source=` also takes a key log's own name (`'ismail_keys'`), so a take reads back after its input is unplugged.
+
 ## 0.4.1 (2026-10-27)
 
 ### per-note feel from a reference: analyze_feel, feel_from_ref (ledger:M364)

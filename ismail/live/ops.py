@@ -780,8 +780,9 @@ def live_midi_clock(project: str, port: str = None, on: bool = True, position: b
     return _call(project, 'midi_clock', port=port, on=on, position=position, offset_ms=offset_ms)
 
 
-@op()
-def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None) -> str:
+@op(mutates=True)
+def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None, into: str = None,
+                bar: int = 1, mode: str = 'replace', placement: str = 'A') -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
     bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last
     `bars` bars that had keys, or [a, b] for those bars (ask the player which part; never guess). Per input
@@ -794,8 +795,69 @@ def live_played(project: str, source: str = None, bars=8, fit: bool = False, fro
     the clip start, bar 1 = the take's first bar, or from_bar): A as played, B with the first hit on a downbeat.
     Where the take sits against the kick is a musical choice the data cannot make: play both and let the player
     pick by ear. When every key has the same velocity (a keyboard that sends one), the reply says so and suggests
-    an accent shape; the lines keep the velocity."""
-    return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
+    an accent shape; the lines keep the velocity.
+    Recording into the song: into='<track>' writes the take into that track of the project in this folder (an
+    existing track: track_add first, with the sound to keep), one input at a time. Reach for it when the person
+    wants to record what they played on their MIDI keyboard into a track of the song (keep a take), instead of
+    copying the lines into notes_write. bar: where the take's first bar lands (from_bar picks which of the engine's
+    bars is that first bar; default the first bar with a note). mode='replace' clears the bars the take covers on
+    the track first, 'add' merges. Without fit it writes the take as it sounded: off the grid where it was played,
+    each note's velocity and length, the pedal's holds. With fit=True it writes the snapped notes, placement='A'
+    (as played, the default) or 'B' (the groups from beat 1) as the reply named them; ask the player first. The
+    reply says what was written, how to hear it, and undo() takes it back."""
+    if into is None:
+        if bar != 1 or mode != 'replace' or str(placement).upper() != 'A':
+            raise OpError("bar, mode and placement say where and how into='<track>' writes the take; add into=, or "
+                          "leave them out to read the lines")
+        return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
+    return _record(project, into, source, bars, fit, from_bar, bar, mode, placement)
+
+
+def _record(project, into, source, bars, fit, from_bar, bar, mode, placement):
+    """live_played(into=...): the engine's take written into a song track, as midi_read writes a file's notes."""
+    from ..api import _clear, _kit_warning, _load
+    from ..notation import fmt_num, midi_to_name
+    if mode not in ('replace', 'add'):
+        raise OpError(f"mode {mode!r}: 'replace' (clears the take's bars on the track first) or 'add' (merges)")
+    try:
+        bar = int(bar)
+    except (TypeError, ValueError):
+        bar = 0
+    if bar < 1:
+        raise OpError("bar: the song bar the take's first bar lands on, from 1")
+    P = _load(project)
+    if into not in P.d['tracks']:
+        raise OpError(f"no track {into!r} in {P.root}: track_add(project={project!r}, name={into!r}, instrument=...) "
+                      f"first, with the sound the take should keep (tracks now: {list(P.d['tracks']) or 'none'})")
+    tr = P.track(into)
+    t = _call(project, 'take', source=source, bars=bars, fit=fit, from_bar=from_bar, placement=placement)
+    bpb = P.bpb
+    base = P.bar_to_beat(bar)
+    rows = [[round(base + s, 6), int(p), d, int(v)] for s, p, d, v in t['notes']]
+    last = bar + int((max(r[0] for r in rows) - base) // bpb)
+    removed = _clear(tr, base, P.bar_to_beat(last + 1)) if mode == 'replace' else 0
+    tr['notes'] = sorted(tr['notes'] + rows)
+    P.save()
+    pitches, vels = [r[1] for r in rows], [r[3] for r in rows]
+    eng = (t['first_bar'], t['first_bar'] + last - bar)
+    L = [f"{into}: wrote {len(rows)} notes from {t['source']} (the engine's bars {eng[0]}-{eng[1]}) into bars "
+         f"{bar}-{last} ({mode}" + (f", replaced {removed} notes" if removed else '') + f"), "
+         f"{midi_to_name(min(pitches))}-{midi_to_name(max(pitches))}, v={min(vels)}-{max(vels)}"]
+    L += ['  ' + x for x in t['lines']]
+    if abs(t['bpm'] - P.d['bpm']) > 0.01:
+        L.append(f"the set plays at {fmt_num(round(t['bpm'], 2))} BPM, the song at {fmt_num(P.d['bpm'])}: the notes "
+                 f"keep their beats, so the take plays at the song's tempo")
+    if t['bpb'] != bpb:
+        L.append(f"the set has {t['bpb']} beats a bar, the song {bpb}: the notes keep their beats, so bar numbers "
+                 f"differ")
+    if last > P.d.get('length_bars', last):
+        L.append(f"the song is {P.d['length_bars']} bars long and the take ends in bar {last}: "
+                 f"project_set(length_bars={last}) to hear it all in a full render")
+    L.append(f"hear it: render(project={project!r}, bars=[{bar}, {last}]), then play_file the render (say first that "
+             f"it plays out loud); notes_read(project={project!r}, track={into!r}, bars=[{bar}, {last}]) shows the "
+             f"lines")
+    L.append(f"undo: undo(project={project!r}) puts {into} back as it was before this write")
+    return '\n'.join(L) + _kit_warning(tr, rows)
 
 
 @op()
