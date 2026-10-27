@@ -9,8 +9,9 @@ So the server keeps presence:
 - a voice note no listener took within HEARD_WAIT_S is unheard: the headset says so out loud, the note is kept in
   <state>/unread.jsonl, and the voice_unheard hooks run. A note a listener took but did not answer is said to be
   "handed to <who>" (not the listener's own ack: the user can tell taken from answered).
-- hooks: commands in ~/.ismail/stage_hooks.json, run on entered_vr, left_vr, voice_note and voice_unheard (any
-  agent: a toast, a webhook, `claude -p`, `codex exec`), with STAGE_* in their environment. Never from the scenes
+- hooks: commands in ~/.ismail/stage_hooks.json (the stage.hooks setting), run on this computer on entered_vr,
+  left_vr, voice_note and voice_unheard (any agent: a toast, `claude -p`, `codex exec`), with STAGE_* in their
+  environment. Never from the scenes
   folder by itself: a song's folder travels (a copied world), so its <state>/hooks.json runs only when the home file
   names that scenes folder in "trust".
 - GET /live/presence and <state>/presence.json: in VR or not, the scene, the last note, the listeners, the unread.
@@ -27,6 +28,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from .. import settings
 
 LISTEN_FRESH_S = 40          # a listener is gone when its last poll is older (long polls wait up to 25 to 60 s)
 HEARD_WAIT_S = 6             # a note no listener took by then is unheard
@@ -309,7 +311,7 @@ def _changed():
 
 # ---- hooks
 def home_hooks():
-    return Path(os.environ.get('ISMAIL_STAGE_HOOKS') or Path.home() / '.ismail' / 'stage_hooks.json')
+    return Path(settings.get('stage.hooks'))
 
 
 def _read(f):

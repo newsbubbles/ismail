@@ -16,11 +16,23 @@ from .. import guards, machine
 from . import server as S
 
 
+def _running():
+    """(the phone folder of the running server, its server.json record), or (the phone folder now, None). The folder
+    now comes first; a server started before config_set('phone.home') moved it is found in the old one."""
+    hs = S.homes()
+    for h in hs:
+        try:
+            rec = json.loads((h / 'server.json').read_text(encoding='utf8'))
+            int(rec['port'])
+            return h, rec
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return hs[0], None
+
+
 def _port():
-    try:
-        return int(json.loads((S.HOME / 'server.json').read_text(encoding='utf8'))['port'])
-    except (OSError, ValueError, KeyError):
-        return None
+    rec = _running()[1]
+    return int(rec['port']) if rec else None
 
 
 # the fields of each server op that the person reads on the page: guards.check_private scans them before they go
@@ -53,7 +65,8 @@ def _call(op_name, timeout=30, **args):
     except urllib.error.HTTPError as e:
         res = json.loads(e.read() or b'{}')
     except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
-        raise OpError(f"the phone server does not answer ({e}): phone_start() again (log: {S.HOME / 'server.log'})")
+        raise OpError(f"the phone server does not answer ({e}): phone_start() again "
+                      f"(log: {_running()[0] / 'server.log'})")
     if not res.get('ok'):
         raise OpError(res.get('error', 'phone server error'))
     return guards.with_note(res['result'], note)
@@ -89,14 +102,18 @@ def phone_start(port: int = 8870, inbox: str = None) -> str:
             if inbox:
                 _call('route', inbox=inbox)
             url, hint = _tailnet(_port())
-            return f"already running: {url or hint}\n{st}"
+            h = _running()[0]
+            moved = '' if h == S.home() else (f"\nit keeps its phone folder {h} until phone_restart(): the phone.home "
+                                              f"setting now names {S.home()}")
+            return f"already running: {url or hint}{moved}\n{st}"
         except OpError:
             pass
-    S.HOME.mkdir(parents=True, exist_ok=True)
+    home = S.home()
+    home.mkdir(parents=True, exist_ok=True)
     if not S.ffmpeg():
-        raise OpError("ffmpeg is not on PATH (or $ISMAIL_FFMPEG): the phone stream needs it (winget install -e --id "
-                      "Gyan.FFmpeg)")
-    log = open(S.HOME / 'server.log', 'a', encoding='utf8')
+        raise OpError("ffmpeg is not on PATH (or config_set('ffmpeg', <path>)): the phone stream needs it "
+                      "(winget install -e --id Gyan.FFmpeg)")
+    log = open(home / 'server.log', 'a', encoding='utf8')
     args = [sys.executable, '-m', 'ismail.phone.server', '--port', str(port)] + (['--inbox', inbox] if inbox else [])
     flags = (0x00000008 | 0x00000200 | 0x08000000) if os.name == 'nt' else 0   # detached, own group, no window
     subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL, creationflags=flags,
@@ -111,7 +128,7 @@ def phone_start(port: int = 8870, inbox: str = None) -> str:
         except (OSError, ValueError):
             continue
     else:
-        raise OpError(f"the phone server did not come up on {port}: read {S.HOME / 'server.log'}")
+        raise OpError(f"the phone server did not come up on {port}: read {home / 'server.log'}")
     url, hint = _tailnet(port)
     return (f"phone page up: http://127.0.0.1:{port}/ here" + (f", {url} on the tailnet" if url else '') +
             (f"\n{hint}" if hint else '') +
@@ -122,10 +139,10 @@ def phone_start(port: int = 8870, inbox: str = None) -> str:
 @op()
 def phone_stop() -> str:
     """Stop the phone page server (the person's stream ends)."""
-    port = _port()
-    if port is None:
+    home, rec = _running()
+    if rec is None:
         return 'the phone server was not running'
-    pid = json.loads((S.HOME / 'server.json').read_text(encoding='utf8')).get('pid')
+    pid = rec.get('pid')
     try:
         if os.name == 'nt':
             subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], capture_output=True, timeout=10)
@@ -134,7 +151,7 @@ def phone_stop() -> str:
     except (OSError, subprocess.SubprocessError):
         pass
     try:
-        (S.HOME / 'server.json').unlink()
+        (home / 'server.json').unlink()
     except OSError:
         pass
     return f'stopped the phone server (pid {pid})'
@@ -238,7 +255,7 @@ _LINE_CHARS = 1500
 
 def _cursor_path(who):
     safe = re.sub(r'[^a-z0-9_-]+', '_', str(who).lower()).strip('_') or 'agent'
-    return S.HOME / 'cursors' / f'{safe}.json'
+    return S.home() / 'cursors' / f'{safe}.json'
 
 
 def _cursor_load(who):
@@ -452,14 +469,14 @@ def phone_video_copy(video, video_wait='10m'):
     if src.suffix.lower() == '.mp4' and st.st_size <= VIDEO_AS_IS_MB * 1024 * 1024 and _ffprobe_codec(src) == 'h264':
         return str(src)
     key = hashlib.sha1(f'{src}|{st.st_size}|{st.st_mtime_ns}'.encode('utf8')).hexdigest()[:16]
-    out_dir = S.HOME / 'videos'
+    out_dir = S.home() / 'videos'
     out = out_dir / f'{re.sub(r"[^A-Za-z0-9_-]+", "_", src.stem)[:40]}_{key}.mp4'
     if out.is_file() and out.stat().st_size:
         return str(out)
     ff = S.ffmpeg()
     if not ff:
         raise OpError("a video needs ffmpeg to make a phone-sized copy, and none was found: install ffmpeg and put it "
-                      "on PATH, or set ISMAIL_FFMPEG to its path, then send the video again")
+                      "on PATH, or config_set('ffmpeg', <its path>), then send the video again")
     try:
         wait_s = machine.duration_s(video_wait) if str(video_wait).strip() not in ('', '0', 'none', 'None') else None
     except ValueError as e:
@@ -563,8 +580,8 @@ def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
                       f"{list(REAL_CLASSES)}")
     ff = S.ffmpeg()
     if not ff:
-        raise OpError('floor pairs need ffmpeg (set ISMAIL_FFMPEG)')
-    hist_f = S.HOME / 'floor_rounds.json'
+        raise OpError("floor pairs need ffmpeg (on PATH, or config_set('ffmpeg', <path>))")
+    hist_f = S.home() / 'floor_rounds.json'
     try:
         hist = json.loads(hist_f.read_text(encoding='utf8'))
     except (OSError, ValueError):
@@ -572,7 +589,7 @@ def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
     rates = list(FLOORS) if floor == 'full' or not hist else [FLOORS[len(hist) % len(FLOORS)]]
     eid = exam_id or f'exam_{int(time.time())}'
     rng = random.Random(eid)
-    out_d = os.path.join(os.path.dirname(os.path.abspath(answers_path)) if answers_path else str(S.HOME / 'exams'),
+    out_d = os.path.join(os.path.dirname(os.path.abspath(answers_path)) if answers_path else str(S.home() / 'exams'),
                          f'{eid}_floor')
     os.makedirs(out_d, exist_ok=True)
 
@@ -619,7 +636,7 @@ def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
 def _floor_remember(record):
     """The floor round counts once the exam is on the phone: a pre-flight that refused it used up nothing
     (spanish_guitar 10-11: four refused posts spent the full set on the first round)."""
-    hist_f = S.HOME / 'floor_rounds.json'
+    hist_f = S.home() / 'floor_rounds.json'
     try:
         hist = json.loads(hist_f.read_text(encoding='utf8'))
     except (OSError, ValueError):
@@ -646,8 +663,8 @@ def _measured(title, clips, measured, unmeasured, exam_id, sender):
                           f"logged with the exam)")
         rec = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'exam_id': exam_id, 'title': title, 'who': sender,
                'why': why}
-        S.HOME.mkdir(parents=True, exist_ok=True)
-        with open(S.HOME / 'ear_first.jsonl', 'a', encoding='utf8') as f:
+        S.home().mkdir(parents=True, exist_ok=True)
+        with open(S.home() / 'ear_first.jsonl', 'a', encoding='utf8') as f:
             f.write(json.dumps(rec, ensure_ascii=False) + '\n')
         return {'unmeasured': why}
     if not isinstance(measured, dict):
@@ -815,7 +832,7 @@ def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
     """Take captions back off the phone page, its history and its pinned line: match='text' (several with '|',
     case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
     other personal details on the page: they may be recording the screen (the ops that show text refuse the terms
-    in ~/.ismail/private_terms.txt, or $ISMAIL_PRIVATE_TERMS, and the git email)."""
+    in ~/.ismail/private_terms.txt, or the file the setting guards.private_terms names, and the git email)."""
     return _call('unsay', match=match, since=since, n=n)
 
 

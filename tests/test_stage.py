@@ -427,6 +427,26 @@ def test_hooks_run_on_entering_vr_and_presence_tracks_it(stage, tmp_path, monkey
     assert _get(port, 'live/presence')[1]['hooks'] == {'entered_vr': 1, 'left_vr': 1}
 
 
+def test_a_hook_gets_the_event_in_its_environment_and_nothing_on_stdin(stage, tmp_path, monkeypatch):
+    """A hook gets the event as STAGE_*; its stdin is closed, so a `claude -p` hook never reads it as prompt."""
+    port = stage['port']
+    out = stage['scenes'] / '_stage' / 'stdin.json'
+    cmd = ['python', '-c', 'import sys, json, os; e = {k[6:].lower(): v for k, v in os.environ.items() '
+                           'if k.startswith("STAGE_")}; e["stdin"] = sys.stdin.read() if sys.stdin else ""; '
+                           'open("stdin.json", "w").write(json.dumps(e))']
+    home = tmp_path / 'stage_hooks.json'
+    monkeypatch.setenv('ISMAIL_STAGE_HOOKS', str(home))
+    home.write_text(json.dumps({'entered_vr': [cmd]}), encoding='utf-8')
+    _post(port, 'live/event?scene=attic', {'type': 'headset', 'state': 'entered VR', 'page': 'p1'})
+    for _ in range(50):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    e = json.loads(out.read_text())
+    assert (e['event'], e['scene'], e['stdin']) == ('entered_vr', 'attic', '')
+    assert e['url'].startswith('http') and e['scenes'] == str(stage['scenes'])
+
+
 def test_listen_and_presence_ops(stage, monkeypatch):
     # the listener must be handed the note inside HEARD_WAIT_S, and the check runs on a timer thread: on a loaded
     # Windows CI machine 0.3 s with a 0.6 s sleep read the note while it was still 'waiting' (2026-10-15 and 10-17)

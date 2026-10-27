@@ -130,9 +130,8 @@ def master(y, sr, start_s=0.0, end_s=None, lufs=-16.0, tp=-1.0, out_sr=48000, fa
 
 
 def _ffmpeg():
-    import os
-    import shutil
-    return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    from . import settings
+    return settings.get('ffmpeg')
 
 
 def write_mp3(y, sr, path, ceil_db, bitrate='320k'):
@@ -142,7 +141,7 @@ def write_mp3(y, sr, path, ceil_db, bitrate='320k'):
     import subprocess
     exe = _ffmpeg()
     if not exe:
-        raise RuntimeError("ffmpeg not found; install it or set ISMAIL_FFMPEG to its path")
+        raise RuntimeError("ffmpeg not found; install it or config_set('ffmpeg', <its path>)")
     c, gr = catch(y, sr, ceil_db)
     ch = c.shape[1]
     r = subprocess.run([exe, '-y', '-loglevel', 'error', '-f', 'f32le', '-ar', str(int(sr)), '-ac', str(ch), '-i',

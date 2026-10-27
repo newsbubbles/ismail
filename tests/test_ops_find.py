@@ -50,6 +50,10 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('the lead line when the stem also has a backing part', 'melody_consensus'),
     ('my draft sounds MIDI, mechanical against the reference', 'analyze_feel'),
     ('write the reference timing and velocity into my notes', 'feel_from_ref'),
+    ('where are my songs saved', 'config_get'),
+    ('change the songs folder', 'config_set'),
+    ('set the ffmpeg path', 'config_set'),
+    ('point ismail at blender', 'config_set'),
 ])
 def test_a_need_in_plain_words_finds_its_op_first(need, first):
     out = api.OPS['ops_find'](need=need, n=3)

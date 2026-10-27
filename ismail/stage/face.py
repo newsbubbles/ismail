@@ -3,7 +3,7 @@ time (face.json), which the stage page plays on a person's mouth morphs (people 
 jawOpen, mouthFunnel, ... as glTF morph targets).
 
 Words become phonemes with the CMU Pronouncing Dictionary when its data file is on this machine (cmudict.dict, from
-$ISMAIL_CMUDICT or an installed `cmudict` package; the data is BSD licensed, nothing here imports the package), else
+the cmudict setting or an installed `cmudict` package; the data is BSD licensed, nothing here imports the package), else
 from the spelling. Phonemes become one of nine mouth shapes (the Preston Blair set: A closed lips for M B P, B teeth
 for most consonants and EE, C open for EH, D wide for AA, E round for AO and ER, F pucker for OO and W, G lip under
 teeth for F V, H for L, X rest), and each shape is a small mix of ARKit units (SHAPES). Inside a word consonants get a
@@ -20,7 +20,6 @@ face.json: {fps, start, seconds, units: [names], frames: [[weight per unit] per 
 start and every t are seconds on the recording's clock; frame i shows the mouth at start + i / fps.
 """
 import json
-import os
 import re
 import subprocess
 import sys
@@ -30,6 +29,7 @@ from pathlib import Path
 import numpy as np
 
 from . import perform
+from .. import settings
 
 LEAD_S = 0.04              # the mouth shapes a sound this long before it is heard
 CONSONANT_S = 0.06         # a consonant's share of a word (at most half the word)
@@ -74,10 +74,11 @@ LETTERS = [('oo', 'UW'), ('ee', 'IY'), ('ea', 'IY'), ('ou', 'AW'), ('ow', 'OW'),
 ENGINES = ('auto', 'rhubarb', 'rhubarb_english', 'words')
 
 _DICT = None
+_DICT_FOR = None     # the cmudict setting _DICT was read for: a config_set reaches the next call
 
 
 def _dict_path():
-    p = os.environ.get('ISMAIL_CMUDICT')
+    p = settings.get('cmudict')
     if p:
         return Path(p)
     import importlib.util
@@ -89,9 +90,10 @@ def _dict_path():
 
 def pronouncing():
     """word -> [ARPAbet phonemes] from cmudict.dict (first pronunciation), or {} when it is not here."""
-    global _DICT
-    if _DICT is None:
-        _DICT = {}
+    global _DICT, _DICT_FOR
+    now = settings.get('cmudict')
+    if _DICT is None or now != _DICT_FOR:
+        _DICT, _DICT_FOR = {}, now
         p = _dict_path()
         if p and p.is_file():
             for line in p.read_text(encoding='utf-8', errors='replace').splitlines():
@@ -178,9 +180,9 @@ def _smooth(m, fps):
 
 
 def rhubarb_path():
-    """The Rhubarb Lip Sync program when it is on this machine: $ISMAIL_RHUBARB (the program or its folder), else
+    """The Rhubarb Lip Sync program when it is on this machine: the rhubarb setting (the program or its folder), else
     ~/.ismail/tools/rhubarb/ with the release unpacked in it at any depth; None when it is not here."""
-    env = os.environ.get('ISMAIL_RHUBARB')
+    env = settings.get('rhubarb')
     root = Path(env) if env else Path.home() / '.ismail' / 'tools' / 'rhubarb'
     if root.is_file():
         return root
@@ -200,8 +202,8 @@ def rhubarb_shapes(x, start, end, words=None, exe=None, english=False, timeout=6
     import soundfile as sf
     exe = exe or rhubarb_path()
     if not exe or not Path(exe).is_file():
-        raise ValueError('Rhubarb Lip Sync is not on this machine (set ISMAIL_RHUBARB, or unpack it in '
-                         '~/.ismail/tools/rhubarb/)')
+        raise ValueError("Rhubarb Lip Sync is not on this machine (config_set('rhubarb', <its folder>), or unpack it "
+                         "in ~/.ismail/tools/rhubarb/)")
     exe, sr = Path(exe), perform.SR
     ws = sorted((w for w in words or [] if float(w['end']) > start and float(w['start']) < end),
                 key=lambda w: float(w['start']))

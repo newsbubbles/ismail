@@ -7,7 +7,7 @@ the track's "params" dict is passed as keywords. A module-level INFO dict docume
 {"summary": ..., "range": ..., "velocity": ..., "functions": {...}, "params": {...}}.
 
 A track uses one with {"type": "code", "voice": "<name>", "fn": "voice", "params": {}, "tail": 1.0}.
-Search order: <project>/voices/, then each directory in $ISMAIL_VOICES (os.pathsep-separated), then these
+Search order: <project>/voices/, then each folder of the voices setting (config_get('voices')), then these
 built-ins; each with its family subfolders (strings/, keys/, bass/, fx/ ...). Names are flat: a track says
 "voice": "grand_piano" wherever the file sits. Mimic profiles (<name>.mimic.json) are found the same way. A song voice with a built-in's name overrides it; it can also extend one
 (`from ismail.voices.growl import *`). Data files sit next to the module and are found through __file__.
@@ -18,6 +18,7 @@ import importlib.util
 import inspect
 import os
 import sys
+from .. import settings
 
 BUILTIN = os.path.dirname(os.path.abspath(__file__))
 _LOADED = {}
@@ -39,12 +40,12 @@ def _tree(d):
 
 
 def search_path(root=None):
-    """[(origin, dir)]: the song's voices/, each $ISMAIL_VOICES folder, then the built-ins, each with its family
+    """[(origin, dir)]: the song's voices/, each folder of the voices setting, then the built-ins, each with its family
     subfolders. origin reads 'song', 'env' or 'built-in', plus '/<family>' for a subfolder."""
     tops = []
     if root:
         tops.append(('song', os.path.join(root, 'voices')))
-    for d in filter(None, os.environ.get('ISMAIL_VOICES', '').split(os.pathsep)):
+    for d in settings.get('voices') or []:
         tops.append(('env', d))
     tops.append(('built-in', BUILTIN))
     dirs = []

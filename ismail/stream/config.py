@@ -4,8 +4,9 @@ import os
 import re
 import time
 from pathlib import Path
+from .. import settings
 
-HOME = Path(os.environ.get('ISMAIL_STREAM_HOME') or Path.home() / '.ismail' / 'stream')
+HOME = Path(settings.get('stream.home'))
 PORT = 8875
 
 # what each platform can do here: chat read, chat send, output (push video to it)

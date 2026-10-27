@@ -39,7 +39,7 @@ Song:        songs/<slug>/  (read its PROGRESS.md and Session Sheet first)
 Task:        <one thing: "build voices/bass.py, a reese bass in the style of the reference">
 Files:       <the only files you may write>
 Done means:  <what it must measure or sound like, and how you will check it>
-Machine:     set ISMAIL_SESSION=<my session's name> before any job; heavy jobs go through the board
+Machine:     run jobs as <my session's name> (machine run --as <name>, python -m ismail --as <name>); heavy jobs go through the board
 Hand back:   the files, the numbers, what you were unsure of. No audio played, no messages to the person.
 ```
 
@@ -49,7 +49,7 @@ The governor applies to helpers through the tools themselves: a heavy op (render
 fits) takes a slot and refuses with the reason, and anything outside ismail goes through
 `python -m ismail.machine run`. Nothing extra is needed for that. Two things are yours to hand down:
 
-- **One name.** Each helper sets `ISMAIL_SESSION` to your session's name, so the board shows the crew as one
+- **One name.** Each helper runs its jobs with `--as <your session's name>`, so the board shows the crew as one
   session and a priority the person gives you covers your helpers' jobs too.
 - **One heavy job per crew**, like any session. Helpers queue (`run --wait`, `slot(..., wait=)`) rather than
   pile up; the light work (writing code, reading numbers) runs side by side.

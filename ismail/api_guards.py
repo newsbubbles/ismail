@@ -2,7 +2,7 @@
 goes out (ledger:M209-M210; qa intent_rules 10-16 clusters 1 and 2: "do not ask again for what I already granted" and
 "I should not be the one routing").
 
-The file is local and never tracked: $ISMAIL_STANDING_GRANTS, else ~/.ismail/standing_grants.json (guards.py reads
+The file is local and never tracked: ~/.ismail/standing_grants.json, or the setting guards.grants (guards.py reads
 it on every phone and stage ask). These ops are the only writers: an entry needs the person's own words as its
 source, a keyword that would match every ask is refused, and nothing on the still-ask list (public, money, accounts,
 deleting) can be granted. grant_check is for the asks no op sees: a NEEDS NATE line, a message to the person.

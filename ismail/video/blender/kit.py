@@ -1,7 +1,6 @@
 """Shot kit (runs inside Blender 5.x). One shot = one script in <song>/video/shots/:
 
-    import os, sys; sys.path.insert(0, os.environ['ISMAIL_VIDEO_KIT'])   # set by `python -m ismail.video`
-    import kit
+    import kit                                             # `python -m ismail.video` puts the kit on the path
     S = kit.Shot('s04_foyer', 384, start_bar=9)            # frame 1 = song frame of bar 9 (S.events() use it)
     room = S.room('Foyer'); Z = S.floor(0, 50)             # models extracted by `ismail.video rip` into build/x
     L = S.character('hero', loc=(0, 34, Z), yaw=180)       # rigs/hero.json: bones, poses, eyes, mounts

@@ -122,7 +122,7 @@ def listen_start(streams: list = None, max_min: float = None, mic_ok: str | int 
     words>' (logged in ~/.ismail/mic_consent.jsonl); sent in the last 12 h, naming the mic, microphone, recording or
     listening, and not a no (mic_ok=True is refused: ask them in words first). project: the
     song's folder; the session goes in <project>/listen/ (left out: the running live set's folder, else
-    $ISMAIL_LISTEN_HOME, else _listen/ in the installed songs folder). It refuses a drive with under 2 GB free, and
+    the listen.home setting, else _listen/ in the installed songs folder). It refuses a drive with under 2 GB free, and
     stops by itself if the drive gets there. It stops by itself after max_min (90 min, 20 with a mic: then ask
     whether to go on). While it runs: listen_heard (their words as they say them, with the live set's bar),
     listen_peek (levels and the last 30 s), listen_mark (a moment), listen_note (their typed messages); listen_stop
@@ -146,7 +146,7 @@ def listen_start(streams: list = None, max_min: float = None, mic_ok: str | int 
     if short:
         raise OpError(f"not started: {short}, and a session needs {LI.FREE_FLOOR_GB:g} GB free on its drive (each "
                       f"input takes about 1.4 GB an hour). Free some space there, or give project=<the song's folder "
-                      f"on a drive with room>, or set ISMAIL_LISTEN_HOME to a folder on such a drive.")
+                      f"on a drive with room>, or config_set('listen.home', <a folder on such a drive>).")
     try:
         LI._pa()
     except RuntimeError as e:

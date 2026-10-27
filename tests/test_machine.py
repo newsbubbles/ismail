@@ -584,7 +584,7 @@ def test_a_priority_says_when_its_name_matches_no_job_and_takes_days(board):
         pass
     machine.set_priority('voice', 3600, by='the user')
     miss = machine.priority_match()
-    assert "no job named 'voice'" in miss and 'ismail (1)' in miss and 'ISMAIL_SESSION' in miss
+    assert "no job named 'voice'" in miss and 'ismail (1)' in miss and 'machine run --as' in miss
     assert 'WARNING' in machine.board()
     with machine.slot('cpu', 'round 41', who='voice'):
         pass

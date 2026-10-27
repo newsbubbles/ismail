@@ -25,8 +25,8 @@ One shared server serves every round on 127.0.0.1:
   python -m ismail.feedback serve [--port 8890] [--home <dir>] [--no-stt]
 
 feedback_page finds it or starts it. The rounds it serves are in <home>/rounds.json and its port in
-<home>/server.json (<home>: $ISMAIL_FEEDBACK_HOME, else ~/.ismail/feedback). Voice clips are transcribed in the
-background by the speech server the phone page uses (ismail.phone.server.stt, $ISMAIL_SPEAK), waiting while the CPU
+<home>/server.json (<home>: the feedback.home setting, else ~/.ismail/feedback). Voice clips are transcribed in the
+background by the speech server the phone page uses (ismail.phone.server.stt, the speak setting), waiting while the CPU
 is busy; a clip with a .txt beside it counts as transcribed, and clips left waiting when the server stopped go back
 in line when it starts again.
 """
@@ -39,6 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from .. import settings
 
 PAGE = Path(__file__).resolve().parent / 'page.html'
 PORT0, PORT_SPAN = 8890, 100
@@ -70,7 +71,7 @@ def parse_time(s):
 
 
 def home():
-    return Path(os.environ.get('ISMAIL_FEEDBACK_HOME') or Path.home() / '.ismail' / 'feedback')
+    return Path(settings.get('feedback.home'))
 
 
 def _same(a, b):

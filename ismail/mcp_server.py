@@ -7,12 +7,14 @@ All tools take `project` (a project directory) first, except the stage_* tools, 
 song's scenes folder); see the `guide` tool for the workflow.
 
 Fewer tools, for a harness that caps them (many stop near 128): serve only some roles' or shelves' ops, always with
-guide and ops_find so the agent can still find the rest (the shelves and roles are api_ops.CATEGORIES and ROLES):
+guide, ops_find and the config_* ops so the agent can still find the rest and see its settings (the shelves and
+roles are api_ops.CATEGORIES and ROLES):
   python -m ismail.mcp_server --roles dj,mc            or  --shelves live,stream,phone
   python -m ismail.mcp_server --list-roles             each role's and shelf's tool count, without starting
   python -m ismail.mcp_server --roles dj --max-tools 128   refuses to start when the set is bigger
-The env vars ISMAIL_MCP_ROLES, ISMAIL_MCP_SHELVES and ISMAIL_MCP_MAX_TOOLS do the same for a harness that can't pass
-arguments; an argument wins over its env var.
+The settings mcp.roles, mcp.shelves and mcp.max_tools (config_set, then restart the server) do the same for a
+harness that can't pass arguments; an argument wins over its setting (their old variables ISMAIL_MCP_ROLES,
+ISMAIL_MCP_SHELVES and ISMAIL_MCP_MAX_TOOLS still work).
 """
 import argparse
 import inspect
@@ -29,8 +31,9 @@ from fastmcp import FastMCP  # noqa: E402
 from fastmcp.exceptions import ToolError  # noqa: E402
 
 from ismail.api import OPS, OpError  # noqa: E402
-from ismail.api_ops import CATEGORIES, ROLES, ops_for, serve_only  # noqa: E402
+from ismail.api_ops import CATEGORIES, DISCOVERY, ROLES, ops_for, serve_only  # noqa: E402
 from ismail.guide import GUIDE  # noqa: E402
+from ismail import settings  # noqa: E402
 
 
 def _version():
@@ -92,8 +95,8 @@ def _sizes_line():
 def list_roles():
     """The --list-roles text: each role's and shelf's tool count, and a role's shelves."""
     roles, shelves = sizes()
-    L = [f'ismail MCP tool counts ({len(OPS)} ops in all; each count includes the discovery ops '
-         f'guide and ops_find)', 'roles (--roles):']
+    L = [f'ismail MCP tool counts ({len(OPS)} ops in all; each count includes the ops every server serves: '
+         f'{", ".join(DISCOVERY)})', 'roles (--roles):']
     L += [f'  {r:<7} {n:>4}  {" ".join(ROLES[r])}' for r, n in roles.items()]
     L.append('shelves (--shelves):')
     L += [f'  {s:<10} {n:>4}  {d}' for (s, n), (_, d, _) in zip(shelves.items(), CATEGORIES)]
@@ -119,28 +122,39 @@ def choose(roles=(), shelves=(), max_tools=None):
     return names, how
 
 
+def _setting(key, ap):
+    """A tool-list setting. A bad value in the settings file never stops the server: its unknown names are skipped
+    (or the value is), the rest is served, and stderr says what was skipped. An old variable that does not read
+    stops it, as it always did (a flag on the command line is checked the same way)."""
+    s = settings.setting(key)
+    v, src, problems = settings.resolve(key)
+    for p in problems:
+        if p.startswith(s.env + '='):
+            ap.error(p)
+        print(f'ismail MCP: {key}: {p}. config_get({key!r}) shows it; config_set fixes it', file=sys.stderr,
+              flush=True)
+    return v
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='python -m ismail.mcp_server',
                                  description='ismail MCP server (stdio). With no options it serves every op.')
     ap.add_argument('--roles', help=f"comma-separated roles whose shelves to serve: {', '.join(ROLES)} "
-                                    '(env ISMAIL_MCP_ROLES)')
+                                    '(setting mcp.roles)')
     ap.add_argument('--shelves', help=f"comma-separated shelves to serve: {', '.join(c[0] for c in CATEGORIES)} "
-                                      '(env ISMAIL_MCP_SHELVES)')
+                                      '(setting mcp.shelves)')
     ap.add_argument('--max-tools', type=int, help='refuse to start when more tools than this would be served '
-                                                  '(env ISMAIL_MCP_MAX_TOOLS)')
+                                                  '(setting mcp.max_tools)')
     ap.add_argument('--list-roles', action='store_true', help="print each role's and shelf's tool count and exit")
     a = ap.parse_args(argv)
     if a.list_roles:
         print(list_roles())
         return
-    env = os.environ.get
-    roles = _list(a.roles if a.roles is not None else env('ISMAIL_MCP_ROLES'))
-    shelves = _list(a.shelves if a.shelves is not None else env('ISMAIL_MCP_SHELVES'))
-    cap = a.max_tools if a.max_tools is not None else env('ISMAIL_MCP_MAX_TOOLS') or None
-    if cap is not None and not str(cap).isdigit():
-        ap.error(f'ISMAIL_MCP_MAX_TOOLS must be a whole number, not {cap!r}')
+    roles = _list(a.roles) if a.roles is not None else _setting('mcp.roles', ap)
+    shelves = _list(a.shelves) if a.shelves is not None else _setting('mcp.shelves', ap)
+    cap = a.max_tools if a.max_tools is not None else _setting('mcp.max_tools', ap)
     try:
-        names, how = choose(roles, shelves, None if cap is None else int(cap))
+        names, how = choose(roles, shelves, cap)
     except ValueError as e:
         ap.error(str(e))
     serve_only(names, how)

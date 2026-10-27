@@ -20,6 +20,7 @@ import json
 import os
 import time
 from pathlib import Path
+from . import settings
 
 COMPARED_FILE = 'compared.json'          # <project>/renders/compared.json: the last comparison with the reference
 AUDIO = {'.wav', '.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.aac', '.aif', '.aiff', '.wma'}
@@ -148,7 +149,7 @@ def reference_next():
 def phone_state():
     """{'port', 'kind', 'last_s'} for the phone page server, or None when it is not running. 'last_s' is when the
     person's freshest page (not the headset's) last asked for its state; None when the server does not say."""
-    home = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
+    home = Path(settings.get('phone.home'))
     rec = _read_json(home / 'server.json') or {}
     port = rec.get('port')
     if not port or not _alive(rec.get('pid')):
@@ -164,7 +165,7 @@ def phone_state():
 
 def stage_state():
     """{'port', 'scene', 'scenes'} when the person is in the headset on a running stage, else None."""
-    reg = Path(os.environ.get('ISMAIL_STAGE_REGISTRY') or Path.home() / '.ismail' / 'stage')
+    reg = Path(settings.get('stage.registry'))
     try:
         recs = [_read_json(f) or {} for f in reg.glob('*.json')]
     except OSError:

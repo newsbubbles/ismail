@@ -9,7 +9,7 @@ where and how the stick lands.
   sample faster also shortens its ring). Away from a real drum's own pitch, each hit is then checked as rendered
   and corrected toward the real drums as the whole voice measures them (toms_cal.json): its pitch per round robin,
   and its ring bend fitted to their level envelope (the closed loop; its corrections are cached in memory and in
-  ~/.ismail/cache/toms, or $ISMAIL_TOMS_CACHE).
+  ~/.ismail/cache/toms, or the toms_cache setting).
 - velocity: picks the recorded layer: a harder hit is louder, brighter, and starts sharp and glides down (the head
   stretches; up to +1.3 semitones on the 14", +5 on the 22", measured per layer).
 - pos (0 dead center, 0.25 as recorded, 1 at the edge): the fundamental gives up EDGE_DB toward the edge and its
@@ -26,7 +26,8 @@ perform() takes notes (start s, midi, dur s, velocity) and the lanes 'pos' (0..1
 in STROKES), read at each written onset; the params pos and stroke set them for the whole track.
 
 Samples: not in git. The voice looks for a Big Rusty Samples folder (one holding tom_14, tom_15, tom_18 and tom_22)
-in $TOM_SAMPLES, then in the project's ref/ (or the ref/ beside it, for a project kept in a song's proj/ folder),
+in the samples.toms setting, then in the project's ref/ (or the ref/ beside it, for a project kept in a song's
+proj/ folder),
 then in the engine's big_rusty set (samples_fetch('big_rusty'), which brings every tom folder and stroke)."""
 import glob
 import hashlib
@@ -117,11 +118,20 @@ def _in_ref(ref, depth=3):
     return None
 
 
+def _setting(key):
+    """An ismail setting, or None when the voice runs without ismail importable."""
+    try:
+        from ismail import settings
+        return settings.get(key) or None
+    except Exception:
+        return None
+
+
 def candidates(project_root=None):
-    """[(where, folder)] in the order the voice tries them: $TOM_SAMPLES, the project's ref/ (and the ref/ beside a
-    project kept in a song's proj/), then every folder the engine's big_rusty set has (its env var, a registered
+    """[(where, folder)] in the order the voice tries them: samples.toms, the project's ref/ (and the ref/ beside a
+    project kept in a song's proj/), then every folder the engine's big_rusty set has (its setting, a registered
     folder, the store)."""
-    out = [('$TOM_SAMPLES', os.environ.get('TOM_SAMPLES') or None)]
+    out = [('the samples.toms setting', _setting('samples.toms'))]
     if project_root:
         root = os.path.abspath(project_root)
         for ref in (os.path.join(root, 'ref'), os.path.join(os.path.dirname(root), 'ref')):
@@ -136,7 +146,7 @@ def candidates(project_root=None):
 
 def samples_dir(project_root=None):
     """The Big Rusty Samples folder this voice plays, or an error that says what to fetch or set."""
-    key = ('samp', os.path.abspath(project_root) if project_root else None, os.environ.get('TOM_SAMPLES'))
+    key = ('samp', os.path.abspath(project_root) if project_root else None, _setting('samples.toms'))
     if key in _cache:
         return _cache[key]
     tried = candidates(project_root)
@@ -158,7 +168,7 @@ def samples_dir(project_root=None):
         "the toms voice plays the Big Rusty toms (Karoryfer, CC0), and no folder here holds "
         f"{', '.join(NEEDS)}" + (f" ({'; '.join(seen)})" if seen else '') + ". Ask the person, then "
         f"samples_fetch('big_rusty'): about {size} MB, {lic}; it brings every tom folder and stroke and skips files "
-        "already there. Or set $TOM_SAMPLES to a Big Rusty Samples folder, or put one in the project's ref/.")
+        "already there. Or config_set('samples.toms', <a Big Rusty Samples folder>), or put one in the project's ref/.")
 
 
 def samples_ready(project_root=None):
@@ -395,7 +405,7 @@ def pick_drum(f0, drum='auto'):
 # ------------------------------------------------------------------ the closed loop's corrections, kept on disk
 
 def _disk_dir():
-    return os.environ.get('ISMAIL_TOMS_CACHE') or os.path.join(os.path.expanduser('~'), '.ismail', 'cache', 'toms')
+    return _setting('toms_cache') or os.path.join(os.path.expanduser('~'), '.ismail', 'cache', 'toms')
 
 
 def _disk_file():

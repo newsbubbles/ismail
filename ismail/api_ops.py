@@ -14,8 +14,9 @@ from .api import OPS, OpError, op
 
 # (shelf, what it is for, its op names and name prefixes (ending in _)); the order is the order shown
 CATEGORIES = [
-    ('start', 'start here: the guide, projects, undo, batches, the machine and its disk',
-     ('guide', 'playbook', 'project_', 'undo', 'batch', 'credits', 'machine_', 'ops_find', 'song_compress')),
+    ('start', "start here: the guide, projects, undo, batches, the machine and its disk, ismail's settings",
+     ('guide', 'playbook', 'project_', 'undo', 'batch', 'credits', 'machine_', 'ops_find', 'song_compress',
+      'config_')),
     ('sketch', 'a quick sketch from words, kept or dropped', ('sketch', 'sketch_keep', 'sketch_wait')),
     ('write', 'tracks, notes, patterns, buses, automation, stem maps',
      ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
@@ -66,8 +67,9 @@ ROLES = {
     'dev': [c[0] for c in CATEGORIES],
 }
 
-# the ops a filtered MCP server always serves, so an agent with a few shelves can still find and read what it lacks
-DISCOVERY = ('guide', 'playbook', 'ops_find')
+# the ops a filtered MCP server always serves, so an agent with a few shelves can still find and read what it lacks,
+# and see and change ismail's settings (a DJ's live trim, a stage agent's browser: ledger:M368)
+DISCOVERY = ('guide', 'playbook', 'ops_find', 'config_get', 'config_set', 'config_unset')
 
 # what the running MCP server serves: None (every op) or (set of op names, how it was chosen); set by mcp_server
 _SERVED = None
@@ -102,7 +104,7 @@ def _served_note():
         return []
     return [f"note: this MCP server is filtered to {_SERVED[1]} and serves {len(_SERVED[0])} of {len(OPS)} ops. An op "
             "marked (not on this server) needs the server started with its role or shelf (--roles or --shelves, or "
-            "ISMAIL_MCP_ROLES or ISMAIL_MCP_SHELVES), or the CLI: python -m ismail -p <project> <op>"]
+            "config_set('mcp.roles', [...]) and a restart), or the CLI: python -m ismail -p <project> <op>"]
 
 
 _STOP = set('a an the and or of to in on for with by at from as is are be it its this that my our your their i we '

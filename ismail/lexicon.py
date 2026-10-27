@@ -10,7 +10,7 @@ Words about the work only. Never record emotion, mood, health or any inference a
 measures their eloquence in the vernacular, nothing else. The file is local (songs/_user/, never committed), one
 per machine with a `who` on every entry, and nothing in it leaves the machine without the person's yes.
 
-Storage: append-only JSON lines at $ISMAIL_LEXICON, else <songs>/_user/lexicon.jsonl. An update is a new line with
+Storage: append-only JSON lines at <songs>/_user/lexicon.jsonl (the lexicon setting moves it). An update is a new line with
 the same id; the latest line of an id wins, so the history of a word is kept.
 """
 import contextvars
@@ -22,6 +22,7 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 
 from .handoffs import SONGS
+from . import settings
 
 CRAFTS = ('composer', 'arranger', 'performer', 'sound designer', 'recording engineer', 'mixing engineer',
           'mastering engineer', 'producer', 'dj', 'director', 'cinematographer', 'colourist', 'editor',
@@ -44,7 +45,7 @@ _SCOPED = contextvars.ContextVar('ismail_lexicon_file', default=None)
 
 
 def path():
-    return _SCOPED.get() or os.environ.get('ISMAIL_LEXICON') or os.path.join(SONGS, '_user', 'lexicon.jsonl')
+    return _SCOPED.get() or settings.get('lexicon') or os.path.join(SONGS, '_user', 'lexicon.jsonl')
 
 
 @contextmanager
