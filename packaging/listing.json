@@ -13,7 +13,7 @@
   "server": {
     "name": "ismail",
     "command": "uvx",
-    "args": ["--python", "3.12", "--from", "git+https://github.com/newsbubbles/ismail", "ismail", "mcp"],
+    "args": ["--python", "3.12", "--from", "ismail=={version}", "ismail", "mcp"],
     "env": {"PYTHONWARNINGS": "ignore"}
   },
   "claude-code": {
