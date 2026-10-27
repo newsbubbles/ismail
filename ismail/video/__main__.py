@@ -28,12 +28,21 @@ TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'
 RENDER_WAIT = '4h'                 # a render queue is walk-away work: it outlasts a live set rather than give up
 
 
+def blender_cmd(song, shot, extra=()):
+    """The Blender command for a shot: the kit goes on Blender's Python path first (--python-expr), so a shot
+    script starts with a plain `import kit`; the shot runs after it (-P)."""
+    vd = video_dir(song)
+    shot = shot if os.path.isabs(shot) else os.path.join(vd, 'shots', os.path.basename(shot))
+    return [blender_exe(song), '-b', '--python-expr', f'import sys; sys.path.insert(0, {KIT!r})', '-P', shot,
+            '--'] + list(extra)
+
+
 def _blender(song, shot, extra, log=None):
     vd = video_dir(song)
-    # inside a render's slot the shot carries it ($ISMAIL_SLOT), so anything heavy it starts runs in that slot
+    # inside a render's slot the shot carries it ($ISMAIL_SLOT), so anything heavy it starts runs in that slot;
+    # ISMAIL_VIDEO_KIT stays for the shot scripts of older songs, which put the kit on the path themselves
     env = machine.child_env(env=dict(os.environ, ISMAIL_VIDEO_KIT=KIT, ISMAIL_VIDEO_DIR=vd))
-    shot = shot if os.path.isabs(shot) else os.path.join(vd, 'shots', os.path.basename(shot))
-    cmd = [blender_exe(song), '-b', '-P', shot, '--'] + list(extra)
+    cmd = blender_cmd(song, shot, extra)
     if log:
         with open(log, 'w') as f:
             return subprocess.run(cmd, env=env, stdout=f, stderr=subprocess.STDOUT).returncode

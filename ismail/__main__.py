@@ -8,6 +8,8 @@
   python -m ismail -p song batch @edits.json      (file holds {"ops": [...]} or a bare list)
   python -m ismail mcp                       run the MCP server (stdio)
   python -m ismail mcp --roles dj,mc          only some roles' tools (--list-roles shows the counts)
+  python -m ismail --as <name> -p song render    a heavy op shows on the machine board under your session's name
+  python -m ismail config_get                settings: where songs live, ffmpeg, live levels... (config_set changes one)
 
 Installed with pip or uv (`pip install ismail`, the latest release; `pip install "ismail @ git+https://github.com/newsbubbles/ismail"`
 for main before it is released), `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
@@ -67,8 +69,13 @@ def parse_args(args):
 
 def main(argv):
     project = os.environ.get('ISMAIL_PROJECT', '.')
-    if len(argv) >= 2 and argv[0] == '-p':
-        project, argv = argv[1], argv[2:]
+    while len(argv) >= 2 and argv[0] in ('-p', '--as'):
+        if argv[0] == '-p':
+            project = argv[1]
+        else:                                            # this call's name on the machine board
+            from .machine import SESSION_ENV
+            os.environ[SESSION_ENV] = argv[1]
+        argv = argv[2:]
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__)
         return 0

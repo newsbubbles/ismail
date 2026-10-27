@@ -128,7 +128,8 @@ def test_missing_samples_say_what_to_fetch(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError) as e:
         mod.perform([(0, 43, 0.5, 100)], SR, SR)
     msg = str(e.value)
-    assert "samples_fetch('big_rusty')" in msg and 'tom_14' in msg and 'TOM_SAMPLES' in msg and 'CC0' in msg
+    assert "samples_fetch('big_rusty')" in msg and 'tom_14' in msg and 'CC0' in msg
+    assert "config_set('samples.toms'" in msg
     assert str(partial) in msg                               # says which folder it found lacking
     assert not mod.samples_ready()
 

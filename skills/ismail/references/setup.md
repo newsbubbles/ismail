@@ -96,8 +96,8 @@ Pick the first route that fits:
      On Claude Code 2.1.275 or newer one line does both: `/plugin install ismail --marketplace newsbubbles/ismail`
      (it asks them to confirm the source). An install in the chat box opens the plugin's page and asks where to
      install it: tell them to choose "Install for you".
-  3. **The restart.** The songs folder (below) reaches ismail only when the app starts again, and so do the
-     plugin's tools if they aren't listed yet. Do the songs folder first, so one restart covers both. Say so before
+  3. **The restart.** The plugin's tools appear only when the app starts again, if they aren't listed yet, and so
+     does a songs folder set with `config_set` (below). Do the songs folder first, so one restart covers both. Say so before
      it happens, once: "I'll ask you to quit Claude and open it again; this conversation will still be here." On
      Windows closing the window only hides it: "Quit Claude from the tray (right-click its icon by the clock,
      Quit), then open it again." On macOS: Claude, then Quit Claude, in the menu bar.
@@ -112,19 +112,32 @@ Pick the first route that fits:
   Then every op runs as `python -m ismail -p <project> <op> ...`, and each call takes 15 to 20 seconds to start.
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
-it is. Every song lives in its own subfolder there. Then point ismail at it with the `ISMAIL_SONGS` environment
-variable. Without it an installed ismail uses Documents/ismail (a clone uses its own `songs/`), so make the folder
-there unless they want another place; `guide` names the folder it uses. The board lives in `<ISMAIL_SONGS>/_machine` (or
-`ISMAIL_MACHINE_DIR`), so every agent on this computer that uses the same songs folder shares one board.
+it is. Every song lives in its own subfolder there. An installed ismail uses Documents/ismail (a clone uses its own
+`songs/`), so make the folder there unless they want another place; `guide` names the folder it uses. Another place
+is one setting, `songs` (see Settings below): `config_set('songs', '<folder>')`, or from a shell before the tools
+are there, `uvx --python 3.12 ismail config_set key=songs value="<folder>"`. The board lives in `<songs>/_machine`,
+so every agent on this computer that uses the same songs folder shares one board.
 - **Windows:** find Documents through the known-folder path, not `%USERPROFILE%\Documents`: with OneDrive backup
   on (the default on many new PCs) the Documents they see in Explorer is OneDrive\Documents. In PowerShell:
   ```
-  $docs = [Environment]::GetFolderPath('MyDocuments'); New-Item -ItemType Directory -Force "$docs\ismail" | Out-Null; setx ISMAIL_SONGS "$docs\ismail"
+  $docs = [Environment]::GetFolderPath('MyDocuments'); New-Item -ItemType Directory -Force "$docs\ismail" | Out-Null
   ```
-  New processes see it: the app restart above picks it up. Tell them the folder the way Explorer shows it
-  ("Documents, then ismail").
-- **macOS and Linux:** `export ISMAIL_SONGS=~/Documents/ismail` in their shell profile; for an MCP client also put
-  it in the server's `env` block, since desktop apps don't read shell profiles.
+  ismail finds that same folder by itself. Tell them the folder the way Explorer shows it ("Documents, then ismail").
+- **macOS and Linux:** `mkdir -p ~/Documents/ismail`.
+
+A songs folder set with `config_set` reaches ismail's tools when the app starts again: do it before the restart
+above, so one restart covers both.
+
+### Settings
+
+Everything a person might point ismail at is a setting: where songs live (`songs`), the `ffmpeg`, `blender` and
+`browser` programs when they are not where ismail looks, the live master's levels (`live.trim_db`, `live.cap_db`),
+the phone, stage and listening folders, and the MCP server's tool list (`mcp.roles`). `config_get()` lists them
+with their values and where each value comes from; `config_get('songs')` explains one; `config_set('ffmpeg',
+'C:/tools/ffmpeg/bin/ffmpeg.exe')` checks the value, keeps it in `~/.ismail/config.json` and says whether it applies
+at once or after a restart; `config_unset(key)` returns it to the default. From a shell:
+`python -m ismail config_get`, `python -m ismail config_set key=ffmpeg value=<path>`. A value set the old way, in
+the process that runs ismail, wins over the file: `config_get` marks it, and `config_set` says so.
 
 ## 4. Prove it works, from their side
 

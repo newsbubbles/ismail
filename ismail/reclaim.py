@@ -25,8 +25,9 @@ import re
 import shutil
 import sys
 import time
+from . import settings
 
-ENV = 'ISMAIL_RECLAIM'
+ENV = settings.env_name('reclaim')        # its old variable, still an override (the tests)
 NAME = '_reclaim'
 README = 'README.txt'
 PREAMBLE = ("{root}: files moved here for the user to delete. Nothing here is used by any song or agent.\n"
@@ -54,9 +55,9 @@ def _writable(d):
 
 
 def default(songs=None):
-    """$ISMAIL_RECLAIM, else on Windows <drive of the songs folder>\\_reclaim, else <songs folder>/_reclaim."""
-    if os.environ.get(ENV):
-        return os.path.abspath(os.environ[ENV])
+    """The reclaim setting, else on Windows <drive of the songs folder>\\_reclaim, else <songs folder>/_reclaim."""
+    if settings.get('reclaim'):
+        return os.path.abspath(settings.get('reclaim'))
     songs = _songs(songs)
     if os.name == 'nt':
         drive = os.path.splitdrive(songs)[0]
@@ -79,7 +80,7 @@ def where(songs=None):
 
 
 def root(songs=None):
-    """The reclaim root: $ISMAIL_RECLAIM if set, else on Windows the songs folder's drive root plus _reclaim
+    """The reclaim root: the reclaim setting if set, else on Windows the songs folder's drive root plus _reclaim
     (D:\\_reclaim), else <songs folder>/_reclaim. When that cannot be created or written: <songs folder>/_reclaim
     (where() also says why)."""
     return where(songs)[0]

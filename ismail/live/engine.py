@@ -39,6 +39,7 @@ from . import outputs as O
 from .midi_out import MidiOut
 from .midi_play import MidiPlay
 from .timeline import EPS, QueueError, Timeline, fmt_bar
+from .. import settings
 
 BLOCK = 1024
 QUIET = 1e-6            # a path whose input stops and whose output stays below this goes dormant
@@ -2934,7 +2935,7 @@ def _output_names():
 def registry_path(pid=None):
     """Every running engine leaves a note here (any project folder), so live_start can name the ones still
     holding a device."""
-    d = os.environ.get('ISMAIL_LIVE_REGISTRY') or os.path.join(os.path.expanduser('~'), '.ismail', 'live')
+    d = settings.get('live.registry')
     return d if pid is None else os.path.join(d, f"{pid}.json")
 
 
@@ -2993,7 +2994,7 @@ def warm_effects():
 # ------------------------------------------------------------------ control server
 
 def serve(engine, port=0, idle_min=None):
-    idle_min = float(os.environ.get('ISMAIL_LIVE_IDLE_MIN', 60)) if idle_min is None else idle_min
+    idle_min = float(settings.get('live.idle_min')) if idle_min is None else idle_min
     ops = {'status': engine.cmd_status, 'track': engine.cmd_track, 'queue': engine.cmd_queue,
            'bus': engine.cmd_bus, 'fx': engine.cmd_fx, 'deck': engine.cmd_deck, 'load': engine.cmd_load,
            'transition': engine.cmd_transition, 'moves': engine.cmd_moves,
@@ -3113,8 +3114,8 @@ def main():
     ap.add_argument('--workers', type=int, default=2)
     ap.add_argument('--port', type=int, default=0)
     ap.add_argument('--no-follow', action='store_true', help="device 'default' stays where it opened")
-    ap.add_argument('--trim-db', type=float, default=None, help="master trim (default: ISMAIL_LIVE_TRIM_DB, or -6)")
-    ap.add_argument('--cap-db', type=float, default=None, help="loudness cap (default: ISMAIL_LIVE_CAP_DB, or -16)")
+    ap.add_argument('--trim-db', type=float, default=None, help="master trim (default: the live.trim_db setting, -6)")
+    ap.add_argument('--cap-db', type=float, default=None, help="loudness cap (default: the live.cap_db setting, -16)")
     ap.add_argument('--priority', choices=sorted(PRIORITIES), default=None,
                     help="the engine's own priority, set after the render workers start (they stay normal)")
     a = ap.parse_args()

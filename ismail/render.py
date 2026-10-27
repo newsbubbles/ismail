@@ -9,6 +9,7 @@ import numpy as np
 import soundfile as sf
 
 from . import dsp, fx as fxmod, instruments, notation, voices
+from . import settings
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
@@ -510,12 +511,11 @@ def prune_cache(root, max_bytes=1024 ** 3):
 
 
 def write_mp3(wav_path, mp3_path, bitrate='320k'):
-    """Encode a rendered wav to mp3 with ffmpeg (on PATH, or the binary named by $ISMAIL_FFMPEG)."""
-    import shutil
+    """Encode a rendered wav to mp3 with ffmpeg (on PATH, or the program the ffmpeg setting names)."""
     import subprocess
-    exe = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    exe = settings.get('ffmpeg')
     if not exe:
-        raise RuntimeError("ffmpeg not found; install it or set ISMAIL_FFMPEG to its path")
+        raise RuntimeError("ffmpeg not found; install it or config_set('ffmpeg', <its path>)")
     r = subprocess.run([exe, '-y', '-loglevel', 'error', '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', bitrate,
                         mp3_path], capture_output=True, text=True)
     if r.returncode != 0:

@@ -728,7 +728,8 @@ def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: flo
                           f"mp3_catch_db={M.MP3_CATCH_DB:g} keeps the mp3 under tp; mp3_margin_db=0 keeps the wav "
                           f"at tp")
     if mp3 and not M._ffmpeg():
-        raise OpError("mp3=True needs ffmpeg on PATH (or ISMAIL_FFMPEG set to it); or master the wav alone (mp3=False)")
+        raise OpError("mp3=True needs ffmpeg on PATH (or config_set('ffmpeg', <path>)); or master the wav alone "
+                      "(mp3=False)")
     try:
         y, out_sr, r = M.master(y, in_sr, start_s, end_s, lufs, tp, int(sr), fade_in_s, fade_out_s,
                                 mp3_margin_db=float(mp3_margin_db), tp_catch=bool(tp_catch))

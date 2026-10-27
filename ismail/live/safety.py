@@ -2,17 +2,16 @@
 
 trim -> level rider (slow cap on sustained loudness) -> lookahead peak limiter -> hard clip at the ceiling.
 A set's trim and cap come from live_start(trim_db=, cap_db=), inside TRIM_RANGE and CAP_RANGE. Without them, and
-for the ceiling always, the numbers come from the environment of the process that starts the engine:
-  ISMAIL_LIVE_TRIM_DB     master trim before everything (default -6)
-  ISMAIL_LIVE_CAP_DB      sustained level cap, RMS dBFS over ~3 s (default -16)
-  ISMAIL_LIVE_CEILING_DB  peak ceiling (default -1); no tool sets it, so an agent cannot raise it
+for the ceiling always, the numbers are ismail settings (config_get(group='live')), read when the engine starts:
+  live.trim_db     master trim before everything (default -6)
+  live.cap_db      sustained level cap, RMS dBFS over ~3 s (default -16)
+  live.ceiling_db  peak ceiling (default -1); config_set only lowers it, so an agent cannot raise it
 """
-import os
-
 import numpy as np
 from numba import njit
 
 from ..dsp import SR
+from .. import settings
 
 
 BAD_ABS = 31.6           # +30 dBFS: past this a sample is a fault and is zeroed like a NaN
@@ -22,11 +21,8 @@ TRIM_RANGE = (-30.0, 12.0)   # live_start(trim_db=) takes a value in here
 CAP_RANGE = (-40.0, -8.0)    # live_start(cap_db=) takes a value in here: never louder than a loud club master
 
 
-def _env(name, default):
-    try:
-        return float(os.environ.get(name, default))
-    except ValueError:
-        return float(default)
+def _setting(key):
+    return float(settings.get(key))
 
 
 @njit(cache=True)
@@ -59,11 +55,11 @@ def _clamp(v, rng):
 
 class Safety:
     def __init__(self, sr=SR, trim_db=None, cap_db=None):
-        """trim_db / cap_db: the set's own values (live_start); None falls back to the environment."""
+        """trim_db / cap_db: the set's own values (live_start); None falls back to the settings."""
         self.sr = sr
-        self.trim_db = _env('ISMAIL_LIVE_TRIM_DB', -6.0) if trim_db is None else _clamp(trim_db, TRIM_RANGE)
-        self.cap_db = _env('ISMAIL_LIVE_CAP_DB', -16.0) if cap_db is None else _clamp(cap_db, CAP_RANGE)
-        self.ceiling_db = _env('ISMAIL_LIVE_CEILING_DB', -1.0)
+        self.trim_db = _setting('live.trim_db') if trim_db is None else _clamp(trim_db, TRIM_RANGE)
+        self.cap_db = _setting('live.cap_db') if cap_db is None else _clamp(cap_db, CAP_RANGE)
+        self.ceiling_db = _setting('live.ceiling_db')
         self.ceil = 10 ** (self.ceiling_db / 20)
         self.la = int(0.003 * sr)
         self.att = float(np.exp(-1.0 / (self.la / 4)))

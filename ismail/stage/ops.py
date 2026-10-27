@@ -1581,9 +1581,9 @@ def stage_capture(scene: str, t0: float, t1: float, camera: str = None, shot: st
         raise OpError(f'a capture {job_id!r} is already there ({jd}); pass another name')
     from . import capture
     if not capture.browser():
-        raise OpError('no Edge or Chrome to draw with (set ISMAIL_BROWSER to one)')
+        raise OpError("no Edge or Chrome to draw with (config_set('browser', <path to one>))")
     if video and not capture.ffmpeg():
-        raise OpError('no ffmpeg (on PATH or ISMAIL_FFMPEG); or video=False with keep_frames')
+        raise OpError("no ffmpeg (on PATH, or config_set('ffmpeg', <path>)); or video=False with keep_frames")
     jd.mkdir(parents=True)
     job = {'id': job_id, 'scene': scene, 'scenes': str(d.parent), 't0': float(t0), 't1': float(t1), 'fps': int(fps),
            'size': size, 'camera': cam, 'clock': bool(clock), 'clock_at': float(t0 if clock_at is None else clock_at),

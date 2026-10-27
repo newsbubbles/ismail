@@ -124,7 +124,7 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
     device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
     analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always
     passes the safety chain: trim, loudness cap, limiter, ceiling -1 dBFS. trim_db (-30 to +12) and cap_db (sustained
-    RMS dBFS, -40 to -8) set this set's level; left out, they come from ISMAIL_LIVE_TRIM_DB / ISMAIL_LIVE_CAP_DB in
+    RMS dBFS, -40 to -8) set this set's level; left out, they come from the live.trim_db / live.cap_db settings in
     the environment, else -6 and -16 (quiet, about -22 LUFS). A set for listeners: trim_db=4, cap_db=-12 (about -16
     LUFS). priority: the engine process's own priority, 'above_normal' (default), 'high' or 'normal'; its render
     workers stay normal ('high' can starve them). The reply names any other live engine still running on this

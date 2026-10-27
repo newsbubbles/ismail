@@ -1,8 +1,13 @@
 import os
+import tempfile
 
-import pytest
+# the suite never reads the person's own settings file (ledger:M368): it gets one of its own that does not exist
+# yet, before anything reads a setting; a test that writes settings points ISMAIL_CONFIG at its own (test_settings.py)
+os.environ['ISMAIL_CONFIG'] = os.path.join(tempfile.gettempdir(), f'ismail_suite_{os.getpid()}', 'config.json')
 
-from ismail import machine
+import pytest  # noqa: E402
+
+from ismail import machine  # noqa: E402
 
 HEAVY_FILES = 4         # a run across this many test files (the full suite) is a heavy job
 RENDER_HEAVY = {'test_live_parity.py', 'test_live_song_parity.py', 'test_roundtrip.py'}   # heavy on their own:

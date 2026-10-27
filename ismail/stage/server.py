@@ -55,6 +55,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import perform, presence, takes
+from .. import settings
 
 PAGE = Path(__file__).resolve().parent / 'page'
 SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
@@ -70,7 +71,7 @@ CAPTURE = None
 
 
 def registry_dir():
-    return Path(os.environ.get('ISMAIL_STAGE_REGISTRY') or Path.home() / '.ismail' / 'stage')
+    return Path(settings.get('stage.registry'))
 
 
 def configure(scenes, footage=None, state=None):
@@ -86,7 +87,7 @@ def configure(scenes, footage=None, state=None):
         CONFIG.update(json.loads((Path.home() / '.ismail' / 'stage.json').read_text(encoding='utf-8')))
     except (OSError, ValueError):
         pass
-    SPEAK = os.environ.get('ISMAIL_SPEAK') or CONFIG.get('speak') or SPEAK
+    SPEAK = (settings.get('speak') if settings.source('speak') != 'default' else None) or CONFIG.get('speak') or SPEAK
 
 
 def scene_names():
@@ -106,8 +107,9 @@ BUNDLE_LOCK = threading.Lock()
 
 
 def esbuild_path():
-    """esbuild for the bundle: ESBUILD, or ~/.ismail/stage.json "esbuild", or none (the page loads its modules)."""
-    p = os.environ.get('ESBUILD') or CONFIG.get('esbuild')
+    """esbuild for the bundle: the esbuild setting, or ~/.ismail/stage.json "esbuild", or none (the page loads its
+    modules)."""
+    p = settings.get('esbuild') or CONFIG.get('esbuild')
     return p if p and Path(p).exists() else None
 
 
@@ -426,7 +428,7 @@ def append_lines(f, objs):
 
 def live_engines():
     """The ismail live engines running on this machine (their own registry, one json per process): port -> record."""
-    d = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    d = Path(settings.get('live.registry'))
     out = {}
     for f in d.glob('*.json'):
         try:
@@ -1144,7 +1146,8 @@ def main(argv=None):
         ctx.load_cert_chain(a.cert, a.key)
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = 'https'
-    reg = register(port, scheme, host, start={'host': a.host, 'footage': a.footage, 'esbuild': os.environ.get('ESBUILD'),
+    pinned = settings.get('esbuild') if settings.source('esbuild') == 'env' else None   # a file value is read again
+    reg = register(port, scheme, host, start={'host': a.host, 'footage': a.footage, 'esbuild': pinned,
                                              'tls': bool(a.tls)})
     presence.URL[0] = f'{scheme}://127.0.0.1:{port}'
     print(f'ismail stage on {scheme}://{host}:{port}/  scenes {SCENES}: {scene_names()}', flush=True)

@@ -93,9 +93,16 @@ folders are not in a worktree (`songs/` is git-ignored), so read a song's files 
    When the change moves a road on `ROADMAP.md` (a row starts or lands, or a new capability has no row), update
    that row in the same pull request.
    The test suite takes a CPU slot on the machine's board (`tests/conftest.py`), so it waits like any render.
-   The board follows `ISMAIL_SONGS` (`<ISMAIL_SONGS>/_machine`, or `ISMAIL_MACHINE_DIR`): a test that sets
-   `ISMAIL_SONGS` to a temporary folder gets an empty board of its own and no longer sees the shared machine, so a
-   test of the governor sets `ISMAIL_MACHINE_DIR` to its own folder on purpose and nothing else moves the board.
+   The board follows the songs folder (`<songs>/_machine`, or the `machine.dir` setting): a test that points the
+   songs setting at a temporary folder gets an empty board of its own and no longer sees the shared machine, so a
+   test of the governor moves `machine.dir` to its own folder on purpose and nothing else moves the board. Tests
+   set a setting through its old name (`monkeypatch.setenv(settings.env_name('songs'), ...)`), which wins over the
+   settings file; the suite never reads the person's own file (`tests/conftest.py`).
+   **Settings** (ledger:M368): anything a person or agent configures is a setting in `ismail/settings.py` (key,
+   type, default, one line, group, whether a change applies at once), read with `settings.get(key)` at its use,
+   never from the process environment directly; a value ismail hands its own child processes goes in `PLUMBING`
+   with its reason. `tests/test_settings.py` fails on a variable read that is neither, and on a
+   `docs/reference.md` table that no longer matches (`python -m ismail.settings table` regenerates it).
 5. **Stage your files and hunks only**, never `git add .` or `-a`.
 6. **Contributing is the person's yes; merging is the project's.** Push the branch to the person's fork and open a
    pull request only after they said yes to contributing; the project's maintainer reviews and merges it. Never push
@@ -198,7 +205,7 @@ ledger row and in the report to the user:
 2. **Whose recording?** If anything was measured from **the user** (their voice, their playing, their hands, their
    face, their room, a Quest capture), it is theirs: ask them before it goes anywhere public, every time, and say
    exactly what would be published (a profile of numbers, a preset, a test fixture, a quote). Without a yes it stays
-   local: in the song, in `$ISMAIL_VOICES`, or listed in `references/LOCAL.md`. The same for anyone else recorded.
+   local: in the song, in a folder of the `voices` setting, or listed in `references/LOCAL.md`. The same for anyone else recorded.
 3. **Whose material?** Anything fitted to or derived from an all-rights-reserved recording (a commercial record's
    stem, a film), or carrying a brand, product or artist name (a famous album, an amp maker, a drummer), is
    **held** for the user's licensing and naming decision. Public-domain and permissively licensed sources are fine

@@ -59,11 +59,17 @@ def is_checkout(here=HERE):
 
 
 def _songs_default(here=HERE):
-    """$ISMAIL_SONGS, else songs/ of this checkout, else of the main checkout this worktree belongs to. An installed
-    package has no checkout: its songs folder is Documents/ismail, the one setup.md makes, never a folder beside
-    the package, which an update or a cache clean can remove."""
-    if os.environ.get('ISMAIL_SONGS'):
-        return os.environ['ISMAIL_SONGS']
+    """The 'songs' setting (config_set('songs', ...), or the old ISMAIL_SONGS), else songs_fallback()."""
+    from . import settings
+    if settings.source('songs') != 'default':
+        return settings.get('songs')
+    return songs_fallback(here)
+
+
+def songs_fallback(here=HERE):
+    """songs/ of this checkout, else of the main checkout this worktree belongs to. An installed package has no
+    checkout: its songs folder is Documents/ismail, the one setup.md makes, never a folder beside the package,
+    which an update or a cache clean can remove."""
     git = os.path.join(here, '.git')
     if os.path.isfile(git):                          # a worktree: '.git' names <main>/.git/worktrees/<name>
         with open(git, encoding='utf8') as f:
@@ -75,7 +81,7 @@ def _songs_default(here=HERE):
 
 
 def old_songs(here=HERE):
-    """Where an installed ismail up to 0.3.0 kept its own files when no ISMAIL_SONGS was set (songs/ beside the
+    """Where an installed ismail up to 0.3.0 kept its own files when no songs folder was set (songs/ beside the
     package, inside the Python install), if anything is there and it is not the songs folder now; else None."""
     old = os.path.normpath(os.path.join(here, 'songs'))
     if is_checkout(here) or os.path.normcase(old) == os.path.normcase(SONGS) or not os.path.isdir(old):

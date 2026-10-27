@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 
 import numpy as np
+from . import settings
 
 AUDIO = r'(?:wav|mp3|ogg|oga|flac|m4a|aac|webm|opus)'
 SAME_DB = -40.0        # a residual under this, against the clip's own level, is the same sound to the ear
@@ -44,7 +45,7 @@ def _decode(path):
         return y, sr, {'samplerate': info.samplerate, 'channels': info.channels, 'subtype': info.subtype,
                        'format': info.format}
     except Exception as first:
-        ff = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+        ff = settings.get('ffmpeg')
         if not ff:
             raise first
         r = subprocess.run([ff, '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '2', '-ar', '44100', 'pipe:1'],
@@ -58,8 +59,8 @@ def _decode(path):
 
 def _tags(path):
     """Metadata tags (title, artist, comment, encoder ...) from ffprobe, or {} without it."""
-    fp = shutil.which('ffprobe') or (os.path.join(os.path.dirname(os.environ['ISMAIL_FFMPEG']), 'ffprobe')
-                                     if os.environ.get('ISMAIL_FFMPEG') else None)
+    ff = settings.get('ffmpeg') if settings.source('ffmpeg') != 'default' else None
+    fp = shutil.which('ffprobe') or (os.path.join(os.path.dirname(ff), 'ffprobe') if ff else None)
     if not fp:
         return {}
     try:

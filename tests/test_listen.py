@@ -287,7 +287,7 @@ def test_listen_start_refuses_a_nearly_full_drive_and_a_missing_project(home, tm
     with pytest.raises(api.OpError) as e:
         api.OPS['listen_start'](streams=['speakers'], project=str(tmp_path))
     msg = str(e.value)
-    assert msg.startswith('not started: only 1.2 GB free') and 'project=' in msg and 'ISMAIL_LISTEN_HOME' in msg
+    assert msg.startswith('not started: only 1.2 GB free') and 'project=' in msg and "config_set('listen.home'" in msg
     assert not (tmp_path / 'listen' / 'index.jsonl').exists()
     with pytest.raises(api.OpError) as e:
         api.OPS['listen_start'](streams=['speakers'], project=str(tmp_path / 'nope'))

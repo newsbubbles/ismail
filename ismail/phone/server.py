@@ -14,7 +14,7 @@ behind the room the phone is.
 
 What the person sends lands in <home>/inbox.jsonl, in the routed inbox (phone_route, else the playing engine's
 <project>/notes/phone_inbox.jsonl), and runs the hooks in <home>/hooks.json. Voice notes are transcribed by the
-speech server ($ISMAIL_SPEAK, speakwright's OpenAI-style /v1/audio/transcriptions), waiting while the CPU is over
+speech server (the speak setting, speakwright's OpenAI-style /v1/audio/transcriptions), waiting while the CPU is over
 the machine governor's limit.
 """
 import argparse
@@ -42,14 +42,28 @@ import numpy as np
 
 try:                                       # a package module in ismail; a plain script when phone_start runs it
     from . import vibe
-    from .. import tags
+    from .. import settings, tags
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import vibe
+    import settings
     import tags
 
-HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
+HOME = Path(settings.get('phone.home'))
+
+
+def feed_stdin(p, data):
+    """Write data to a started hook's stdin and close it, in a thread: a hook that never reads it cannot hold the
+    server (the write ends when the hook exits)."""
+    def go():
+        try:
+            p.stdin.write(data)
+            p.stdin.close()
+        except (OSError, ValueError):
+            pass
+    threading.Thread(target=go, daemon=True).start()
+
 OFFERS_KEPT = 200                                # downloads the phone can page back through (/api/offers)
 PAGE = Path(__file__).resolve().parent / 'page'
 # The page's sounds (Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... the same
@@ -72,14 +86,14 @@ PAUSE_FADE_S = 4.0      # a pause tap fades the set out over this long and stops
 MOVE_SETTLE_BARS = 8   # a scheduled vibe becomes the standing one this many bars after the room passed its bar
 SOUND_EXT = ('.wav', '.ogg', '.mp3', '.m4a', '.webm', '.flac')
 SOUND_MAX_S, SOUND_MAX_BYTES = 5.0, 1 << 20
-SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
+SPEAK = settings.get('speak')
 SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
 RING_S = 120.0                     # seconds of encoded stream kept for rewind and late joiners
 MASTER_S = 150.0                   # seconds of the streamed master kept raw, for the music under a voice note
 REF_LEAD_S, REF_TAIL_S = 3.0, 2.0  # how much of it before the note begins and after it ends (ledger:M163)
 REF_GUESS_S = 20.0                 # off the stream (the room speaker), the note's start is a guess: this much either side
-KEEP_MASTER = os.environ.get('ISMAIL_PHONE_KEEP_MASTER', '1') != '0'   # take the master while an engine plays, page or not
+KEEP_MASTER = settings.get('phone.keep_master')   # take the master while an engine plays, page or not
 LEAD_S = 1.0                       # a live join starts this far back, so the phone's buffer fills at once
 BOOT = secrets.token_hex(4)        # this server run: a page that sees it change knows the server restarted
 
@@ -223,11 +237,11 @@ def panel_inputs(inputs):
 
 
 def ffmpeg():
-    return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    return settings.get('ffmpeg')
 
 
 def live_engines():
-    d = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    d = Path(settings.get('live.registry'))
     out = {}
     for f in d.glob('*.json'):
         try:
@@ -735,13 +749,18 @@ class Phone:
             hooks = json.loads((HOME / 'hooks.json').read_text(encoding='utf8'))
         except (OSError, ValueError):
             return
-        env = {**os.environ, 'PHONE_EVENT': rec.get('kind', ''), 'PHONE_TEXT': rec.get('text') or rec.get('what') or '',
-               'PHONE_INBOX': str(self.routes()[-1]), 'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
+        event = {'event': rec.get('kind', ''), 'text': rec.get('text') or rec.get('what') or '',
+                 'inbox': str(self.routes()[-1]), 'line': rec}
+        # the event as JSON on the hook's stdin; the PHONE_* names are kept for hooks written before (ledger:M368)
+        env = {**os.environ, 'PHONE_EVENT': event['event'], 'PHONE_TEXT': event['text'], 'PHONE_INBOX': event['inbox'],
+               'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
+        data = (json.dumps(event, ensure_ascii=False) + '\n').encode('utf8')
         for cmd in (hooks.get(rec.get('kind')) or []) + (hooks.get('any') or []):
             try:
                 with open(HOME / 'hooks.log', 'a', encoding='utf8') as log:
-                    subprocess.Popen(cmd, shell=True, env=env, stdout=log, stderr=log,
-                                     creationflags=0x08000000 if os.name == 'nt' else 0)
+                    p = subprocess.Popen(cmd, shell=True, env=env, stdin=subprocess.PIPE, stdout=log, stderr=log,
+                                         creationflags=0x08000000 if os.name == 'nt' else 0)
+                feed_stdin(p, data)
             except OSError as e:
                 print(f'[phone] hook {cmd!r}: {e}', flush=True)
 
@@ -963,7 +982,7 @@ class Phone:
             enc = self.encoders.get(kbps)
             if enc is None or enc.proc is None:
                 if not ffmpeg():
-                    raise RuntimeError('ffmpeg is not on PATH (or $ISMAIL_FFMPEG): the phone stream needs it')
+                    raise RuntimeError("ffmpeg is not on PATH (or the ffmpeg setting): the phone stream needs it")
                 enc = self.encoders[kbps] = Encoder(kbps, self.fed / SR)
             if self.feeder is None or not self.feeder.is_alive():
                 self.feeder = threading.Thread(target=self._feed, daemon=True)
@@ -1202,7 +1221,7 @@ class Phone:
             if text is None:
                 text = next((r.get('text') for r in self._voice_texts() if r.get('id') == vid), '')
             if not ffmpeg():
-                raise ValueError('ffmpeg is needed to read a voice note (set ISMAIL_FFMPEG)')
+                raise ValueError("ffmpeg is needed to read a voice note (on PATH, or config_set('ffmpeg', <path>))")
             chk = hum.check(hum.decode(f, ffmpeg()), text)
             try:                                      # capture faults, at full rate (ledger:M172)
                 from .. import capture

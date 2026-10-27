@@ -204,6 +204,7 @@ nudges you, follow it.
 | a version of another piece | `project_new(derived_from=)`, and the objective in their words |
 | work that would keep the person waiting more than a few minutes | a helper with a brief, and something for them to hear meanwhile (`references/helpers.md`) |
 | a job over a minute | `machine_status` first; `python -m ismail.machine run` for anything outside ismail |
+| change where songs live, point ismail at ffmpeg, Blender or a browser it did not find, a live trim or cap for every set, the phone, stage or listening folders | `config_get` (every setting, its value and where it comes from), `config_set(key, value)`, `config_unset(key)`; the reply says whether it applies at once or after a restart (`references/setup.md`, Settings) |
 | the person wants the set streamed (Twitch, YouTube, Kick), or chat answered during one | `stream_start`, `venue_list`; the person types the keys; `stream_go` only on their yes, each time; `chat_watch` + `chat_say` (`references/live-streaming.md`) |
 | a live set plays and the person steps away (a walk, bed, another room) | offer the phone page: `phone_start`, then give them its address (`references/phone.md`) |
 | the person is away from the desk for the day (on their phone, in VR) | everything goes through the phone page: answer on it (`phone_say`, panels), exams with `phone_exam`, and read `phone_listen` / `phone_timeline` |
@@ -311,9 +312,9 @@ nudges you, follow it.
   half the machine's threads (a temporary rule, "only for now during sets": `machine on-air` shows it; only the
   user lifts it). Register Blender honestly: a `--cpu` Blender
   render waits too.
-  Set `ISMAIL_SESSION=<your name>` in your shell before you run jobs, so the board names you and a priority the user
-  gives you finds your jobs (without it every job from the repo shows as `ismail`); the board warns when a priority
-  matches no job.
+  Name yourself on the board: `python -m ismail.machine run --as <your name> ...` and `python -m ismail --as
+  <your name> -p <song> <op>`, so a priority the user gives you finds your jobs (without it every job from the repo
+  shows as `ismail`); the board warns when a priority matches no job.
   `run --wait 30m` (or `slot(..., wait=)`) stands in line for a slot instead of being refused. Every finished job
   leaves a line in the board's history (what, which song, how long it waited, its exit, CPU seconds, peak memory, the
   GPU's load and the machine's state at its start): `python -m ismail.machine history --song <slug> --since 7d` sums

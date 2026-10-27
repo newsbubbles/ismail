@@ -121,6 +121,28 @@ def get(base, path):
         return json.loads(r.read())
 
 
+def test_a_phone_hook_gets_the_line_as_json_on_stdin(tmp_path, monkeypatch):
+    """ledger:M368: a hook reads the inbox line from its standard input; the PHONE_* names stay for older hooks."""
+    import sys
+    import types
+    monkeypatch.setattr(S, 'HOME', tmp_path)
+    out = tmp_path / 'got.json'
+    code = ('import sys, json, os; e = json.load(sys.stdin); e["old"] = os.environ["PHONE_EVENT"]; '
+            f'open({str(out)!r}, "w").write(json.dumps(e))')
+    import shlex
+    line = (subprocess.list2cmdline if os.name == 'nt' else shlex.join)([sys.executable, '-c', code])
+    (tmp_path / 'hooks.json').write_text(json.dumps({'tap': [line]}), encoding='utf8')
+    fake = types.SimpleNamespace(routes=lambda: [tmp_path / 'inbox.jsonl'])
+    S.Phone._hooks(fake, {'kind': 'tap', 'what': 'yes', 'id': 7})
+    for _ in range(100):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    e = json.loads(out.read_text())
+    assert (e['event'], e['text'], e['old'], e['line']['id']) == ('tap', 'yes', 'tap', 7)
+    assert e['inbox'] == str(tmp_path / 'inbox.jsonl')
+
+
 def test_status_text_is_read():
     s = S.parse_status(STATUS)
     assert s['bpm'] == 120 and s['bpb'] == 4 and s['beat'] == 17.0 and s['ahead'] == 0.5
@@ -877,7 +899,7 @@ def test_a_video_without_ffmpeg_or_on_a_busy_machine_says_what_to_do(phone, tmp_
     monkeypatch.setattr(shutil, 'which', lambda name, *a, **k: None)
     with pytest.raises(Exception) as e:
         P.phone_panel_show(title='Watch', video=str(src))
-    assert 'ffmpeg' in str(e.value) and 'ISMAIL_FFMPEG' in str(e.value)
+    assert 'ffmpeg' in str(e.value) and "config_set('ffmpeg'" in str(e.value)
     monkeypatch.undo()
     if not S.ffmpeg():
         return

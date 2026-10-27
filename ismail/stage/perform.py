@@ -11,11 +11,12 @@ consumes them: whisper starts a phrase's first word in the silence before it, 0.
 """
 import json
 import re
-import shutil
+import shutil  # noqa: F401  (the ffmpeg setting finds ffmpeg through shutil.which; tests patch it here)
 import subprocess
 import threading
 
 import numpy as np
+from .. import settings
 
 ID = re.compile(r'^[A-Za-z0-9_\-]{1,80}$')
 LOCK = threading.Lock()
@@ -64,8 +65,7 @@ class NoDecoder(RuntimeError):
 
 def pcm(path):
     """The clip as 16 kHz mono float32: a WAV read with soundfile, anything else (the headset's webm/ogg opus) with
-    ffmpeg (on PATH, or $ISMAIL_FFMPEG)."""
-    import os
+    ffmpeg (on PATH, or the ffmpeg setting)."""
     if str(path).lower().endswith('.wav'):
         import soundfile as sf
         x, sr = sf.read(str(path), dtype='float32', always_2d=True)
@@ -73,9 +73,9 @@ def pcm(path):
         if sr != SR:                                   # linear resampling is plenty for a power envelope
             x = np.interp(np.arange(int(len(x) * SR / sr)) * sr / SR, np.arange(len(x)), x).astype(np.float32)
         return x
-    exe = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    exe = settings.get('ffmpeg')
     if not exe:
-        raise NoDecoder('ffmpeg not found: words not snapped (install it or set ISMAIL_FFMPEG)')
+        raise NoDecoder("ffmpeg not found: words not snapped (install it or config_set('ffmpeg', <path>))")
     r = subprocess.run([exe, '-v', 'error', '-i', str(path), '-ac', '1', '-ar', str(SR), '-f', 's16le', '-'],
                        capture_output=True, timeout=120)
     if r.returncode:

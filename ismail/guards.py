@@ -3,12 +3,12 @@
 Three refusals, each saying why and what the next call is:
 
 1. Nothing personal on a page (phone captions and panels, stage captions, panels and asks). Terms come from a local
-   file that never goes in the repository: $ISMAIL_PRIVATE_TERMS, else ~/.ismail/private_terms.txt, one place or name
-   per line, '#' starts a comment line. The git user.email of this checkout is always added. Words match whole and
+   file that never goes in the repository: ~/.ismail/private_terms.txt (the guards.private_terms setting moves it),
+   one place or name per line, '#' starts a comment line. The git user.email of this checkout is always added. Words match whole and
    case-insensitive; an email matches anywhere in the text. With no file, only the email is checked and the reply
    says how to turn the rest on.
 2. Do not ask for what is already granted. A yes/no question whose words a standing grant covers is refused. Grants
-   live in a local file: $ISMAIL_STANDING_GRANTS, else ~/.ismail/standing_grants.json, a JSON list of
+   live in a local file: ~/.ismail/standing_grants.json (the setting guards.grants moves it), a JSON list of
    {"id", "date", "topic", "keywords": [...], "says", "owner", "kind", "source"}. With no file there is no check.
    An entry with an `owner` belongs to that agent: kind "grant" (the default) means the person already said yes to
    this kind of step, so its owner acts and anyone else sends it to the owner; kind "route" means this kind of
@@ -21,7 +21,7 @@ Three refusals, each saying why and what the next call is:
    id of a note the person sent from the phone page (a voice note, or words typed in a panel's text field) or a VR
    voice note (vr:<scene>:<event id>), sent within MIC_NOTE_MAX_H hours, that names the mic or recording and does not
    read as a no; or 'chat: <their exact words>', the same word checks, logged to mic_consent.jsonl beside the other
-   local files ($ISMAIL_MIC_CONSENT_LOG, else ~/.ismail/mic_consent.jsonl).
+   local files (~/.ismail/mic_consent.jsonl, or the setting guards.mic_consent_log).
 
 The local files are read on every call, so a change takes effect at once. Nothing they hold is written to a tracked
 file: a refusal names the matched term to the agent only.
@@ -35,9 +35,10 @@ import subprocess
 from pathlib import Path
 
 from .api import OpError
+from . import settings
 
-PRIVATE_TERMS_ENV = 'ISMAIL_PRIVATE_TERMS'
-GRANTS_ENV = 'ISMAIL_STANDING_GRANTS'
+PRIVATE_TERMS_ENV = settings.env_name('guards.private_terms')   # the old variables: still overrides (the tests)
+GRANTS_ENV = settings.env_name('guards.grants')
 MIC_NOTE_MAX_H = 12.0
 
 
@@ -75,7 +76,7 @@ def _word_re(term):
 # ------------------------------------------------------------------ 1. nothing personal on a page
 
 def private_terms_path():
-    return Path(os.environ.get(PRIVATE_TERMS_ENV) or _local_dir() / 'private_terms.txt').expanduser()
+    return Path(settings.get('guards.private_terms')).expanduser()
 
 
 @functools.lru_cache(maxsize=1)
@@ -181,7 +182,7 @@ def _who(s):
 
 
 def grants_path():
-    return Path(os.environ.get(GRANTS_ENV) or _local_dir() / 'standing_grants.json').expanduser()
+    return Path(settings.get('guards.grants')).expanduser()
 
 
 def overrides_log():
@@ -339,7 +340,7 @@ def check_grant(question, yes_no, override_grant=None, op_name='', sender=None):
 
 MIC_WORDS = re.compile(r'\b(mic|mics|microphone|record|recording|listen|listening)\b', re.IGNORECASE)
 MIC_NO = re.compile(r"\b(no|not|don'?t|do not|never|stop|delete|off|cancel)\b", re.IGNORECASE)
-MIC_CONSENT_ENV = 'ISMAIL_MIC_CONSENT_LOG'
+MIC_CONSENT_ENV = settings.env_name('guards.mic_consent_log')
 _TRUE = {'true', 'yes', '1', 'y', 'on'}
 NEEDS_NOTE = ("mic_ok needs the person's yes to the mic in this session: the id of their note saying so, from the "
               "phone inbox (phone_watch lists ids) or a VR voice note as vr:<scene>:<event id> (stage_events lists "
@@ -380,7 +381,7 @@ def _stage_scene_dirs():
 
 
 def mic_consent_log():
-    return Path(os.environ.get(MIC_CONSENT_ENV) or _local_dir() / 'mic_consent.jsonl').expanduser()
+    return Path(settings.get('guards.mic_consent_log')).expanduser()
 
 
 def _answer_words(r):

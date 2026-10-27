@@ -137,8 +137,10 @@ something you do.
   note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
 - **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json`,
   `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...], "session_stuck": [...]}`,
-  each a shell command (or an argv list) run with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`, `STAGE_FILE`,
-  `STAGE_EVENT_ID`, `STAGE_URL`, `STAGE_SCENES` (and `STAGE_WHO` for session_stuck) in its environment (a toast, a webhook, `claude -p "..."`, `codex exec "..."`); output goes to
+  each a shell command (or an argv list) on this computer (a toast, `claude -p "..."`, `codex exec "..."`). It gets
+  the event on its standard input as one JSON object (`event`, `scene`, `text`, `file`, `event_id`, `url`, `scenes`,
+  and `who` for session_stuck); hooks written before read the same as `STAGE_EVENT`, `STAGE_SCENE` and so on,
+  which still work. Output goes to
   `_stage/hooks.log`. A song's own `_stage/hooks.json` runs only when the home file lists its scenes folder in
   `"trust": [...]`: a scenes folder travels, and must never run commands for whoever opens it.
 
@@ -155,8 +157,8 @@ crude stools, no bottles, block trees and cylinder people: every lesson already 
 - **The variant is a pass on the built room,** a script run after the source's full build and before the Quest diet
   (`pass` in world.json, `pass_env` for its switches). It removes, adds and repaints what changed; everything else
   is the source's. `stage_scene_export` runs the whole line (the source's build, every pass oldest first, the
-  edits of the line merged with the variant's winning, the diet). Room scripts exec `os.environ["VR_BRIDGE"]` at
-  their end so the passes and the diet run. A room with its own Quest merge defines `stage_diet()` and skips that
+  edits of the line merged with the variant's winning, the diet). Room scripts exec the engine bridge, whose path
+  `stage_scene_export` hands them as `VR_BRIDGE`, at their end so the passes and the diet run. A room with its own Quest merge defines `stage_diet()` and skips that
   merge in its build when `VR_DIET` is set: a pass that runs after the merge finds one joined mesh, not the stools.
 - **Check it beside its source from the same camera** before the person sees it: the same view of both, side by
   side, and look for anything that went back to a blockout.
@@ -421,7 +423,7 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   jaw digit per 0.1 s; read it against the words before you film. Without words the jaw only follows loudness, which
   reads as chewing on a mixed recording: use a vocal stem and words.
   With Rhubarb Lip Sync on the machine (free, MIT, about 87 MB for Windows: unpacked in `~/.ismail/tools/rhubarb/`
-  or named by `ISMAIL_RHUBARB`; download it only on the person's yes), `stage_face` hears the mouth shapes in the
+  or named with `config_set('rhubarb', <its folder>)`; download it only on the person's yes), `stage_face` hears the mouth shapes in the
   voice itself: the timing follows the sounds and pauses, in any language and in singing, at about 4 times faster
   than real time. `engine='rhubarb_english'` uses its English recognizer guided by the words (slower than real
   time), `engine='words'` the words only. The reply says which one made the track, and why Rhubarb did not run.

@@ -34,7 +34,7 @@ pip install -e ".[dev]"
 
 If `demucs` fights your torch install, use `pip install --no-deps demucs` and then `pip install dora-search einops julius lameenc openunmix`.
 
-MP3 previews need `ffmpeg` on your PATH (or set `ISMAIL_FFMPEG` to the binary).
+MP3 previews need `ffmpeg` on your PATH (or `config_set('ffmpeg', <its path>)`, see [Settings](#settings)).
 
 Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-specific op is `sound_speak` (text to speech for vocal samples), which uses the engine the OS already has:
 
@@ -43,6 +43,61 @@ Runs on Windows, macOS and Linux; CI tests all three on every push. The one OS-s
 | Windows | SAPI via PowerShell | `David`, `Zira`, any installed |
 | macOS | `say` | `Samantha`, `Alex`, anything in `say -v ?` |
 | Linux | `espeak-ng` or `espeak` | `en-us`, `en+f3` ... (`sudo apt install espeak-ng`) |
+
+## Settings
+
+Where songs live, the ffmpeg, Blender and browser programs ismail runs, the live master's levels, the phone, stage
+and listening folders and the MCP server's tool list are settings. An agent sees them with `config_get` (every
+setting with its value and where the value comes from; `config_get('songs')` for one in full), changes one with
+`config_set('songs', 'D:/music')` (the value is checked, and the reply says whether it applies at once or after a
+restart) and returns one to its default with `config_unset`. From a shell: `python -m ismail config_get`,
+`python -m ismail config_set key=songs value=D:/music`. They are kept in `~/.ismail/config.json`. Each setting's
+old variable (the last column) still works and wins over the file when it is set, so existing scripts and
+configurations keep working. Regenerate this table with `python -m ismail.settings table`.
+
+| setting | type | default | what it sets | a change applies | old variable |
+|---|---|---|---|---|---|
+| `songs` | path | songs/ of a clone, else Documents/ismail | the songs folder: every song is a folder in it, and the machine board lives in it | after a restart: restart ismail (the MCP server, or quit and reopen the app) and its stage, phone and live processes; a CLI call picks it up at once | `ISMAIL_SONGS` |
+| `voices` | paths | none | more folders of code voices, searched after the song's own voices/ and before the built-ins | at its next use | `ISMAIL_VOICES` |
+| `samples` | path | `~/.ismail/samples` | where samples_fetch stores downloaded sample sets | at its next use | `ISMAIL_SAMPLES` |
+| `fx_stacks` | path | `~/.ismail/fx_stacks` | the library of named effect stacks (fx_stack_save) and their measured costs | at its next use | `ISMAIL_FX_STACKS` |
+| `lexicon` | path | `<songs>/_user/lexicon.jsonl` | the file of the person's own words for what they hear (lexicon_*) | at its next use | `ISMAIL_LEXICON` |
+| `reclaim` | path | `<drive of the songs folder>/_reclaim on Windows, else <songs>/_reclaim` | where files moved for the person to delete go (python -m ismail.reclaim, song_compress) | at its next use | `ISMAIL_RECLAIM` |
+| `hrtf` | path | `~/.ismail/hrtf` | the cache of measured head responses the spatial effect loads | at its next use | `ISMAIL_HRTF` |
+| `toms_cache` | path | `~/.ismail/cache/toms` | the cache of the toms voice's prepared strokes | at its next use | `ISMAIL_TOMS_CACHE` |
+| `listen.home` | path | `<songs>/_listen` | where a listening-together session goes when no project is named and no live set runs | at its next use | `ISMAIL_LISTEN_HOME` |
+| `feedback.home` | path | `~/.ismail/feedback` | the feedback pages' server state and answers (feedback_*) | at its next use | `ISMAIL_FEEDBACK_HOME` |
+| `phone.home` | path | `~/.ismail/phone` | the phone page's state: its inbox, voice notes, hooks.json | after a restart: restart the phone page server (phone_stop, then phone_start) | `ISMAIL_PHONE_HOME` |
+| `stream.home` | path | `~/.ismail/stream` | the streaming state: sites, keys file, chat, request queue | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_STREAM_HOME` |
+| `exampage.rounds` | path | `~/.ismail/exampage/rounds.json` | the registry of picture and exam rounds (name -> round folder) | at its next use | `ISMAIL_EXAMPAGE_ROUNDS` |
+| `stage.registry` | path | `~/.ismail/stage` | where each running stage server leaves a note so agents and the guard find it | at its next use | `ISMAIL_STAGE_REGISTRY` |
+| `stage.hooks` | path | `~/.ismail/stage_hooks.json` | the stage hooks file: commands run on entered_vr, voice_note and the other stage events | at its next use | `ISMAIL_STAGE_HOOKS` |
+| `live.registry` | path | `~/.ismail/live` | where each running live engine leaves a note so live_start can name the ones holding a device | at its next use | `ISMAIL_LIVE_REGISTRY` |
+| `machine.dir` | path | `<songs>/_machine` | the machine board every session shares (heavy-job slots, history) | at its next use | `ISMAIL_MACHINE_DIR` |
+| `machine.disk_roots` | paths | `<board>/roots.txt, else every folder beside the checkout` | the folders `machine disk` measures beyond the songs folder | at its next use | `ISMAIL_DISK_ROOTS` |
+| `guards.private_terms` | path | `~/.ismail/private_terms.txt` | places and names that must never leave the machine in a reply or a post, one a line | at its next use | `ISMAIL_PRIVATE_TERMS` |
+| `guards.grants` | path | `~/.ismail/standing_grants.json` | the person's standing grants and routes (grant_*) | at its next use | `ISMAIL_STANDING_GRANTS` |
+| `guards.mic_consent_log` | path | `~/.ismail/mic_consent.jsonl` | the log of the person's yes to a microphone | at its next use | `ISMAIL_MIC_CONSENT_LOG` |
+| `ffmpeg` | path | ffmpeg on PATH | the ffmpeg program: mp3 renders, the phone stream, video, streaming | at its next use | `ISMAIL_FFMPEG` |
+| `blender` | path | the usual install folder, else blender on PATH | the Blender program for music videos and stage exports (a song's video/config.json "blender" wins) | at its next use | `ISMAIL_BLENDER` |
+| `browser` | path | Edge or Chrome where they install, else on PATH | a Chromium browser (Edge or Chrome) for stage captures and preflight | at its next use | `ISMAIL_BROWSER` |
+| `rhubarb` | path | searched where it unpacks | the Rhubarb Lip Sync program or its folder, for stage_face | at its next use | `ISMAIL_RHUBARB` |
+| `cmudict` | path | an installed cmudict package, else the built-in rules | a CMU pronouncing dictionary file, for mouth shapes from words | at its next use | `ISMAIL_CMUDICT` |
+| `esbuild` | path | `"esbuild" in ~/.ismail/stage.json, else on PATH` | the esbuild program the stage server bundles its page with | after a restart: restart the stage server (stage_restart) | `ESBUILD` |
+| `speak` | url | http://127.0.0.1:8765 | the speech server that turns voice notes and recordings into words | after a restart: restart the phone page, stage and ismail servers that use it | `ISMAIL_SPEAK` |
+| `live.trim_db` | float | -6 | the live master's trim in dB when live_start gets no trim_db | at the next live_start | `ISMAIL_LIVE_TRIM_DB` |
+| `live.cap_db` | float | -16 | the live master's sustained level cap (RMS dBFS over ~3 s) when live_start gets no cap_db | at the next live_start | `ISMAIL_LIVE_CAP_DB` |
+| `live.ceiling_db` | float | -1 | the live master's peak ceiling in dBFS; the file can only lower it | at the next live_start | `ISMAIL_LIVE_CEILING_DB` |
+| `live.idle_min` | float | 60 | minutes a live engine with nothing to play waits before it stops itself | at the next live_start | `ISMAIL_LIVE_IDLE_MIN` |
+| `phone.keep_master` | bool | true | the phone server takes the live master while an engine plays, page open or not | after a restart: restart the phone page server (phone_stop, then phone_start) | `ISMAIL_PHONE_KEEP_MASTER` |
+| `mcp.roles` | list | none | serve only these roles' tools (dj, mc, song, ...); --roles wins | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_MCP_ROLES` |
+| `mcp.shelves` | list | none | serve only these shelves' tools (live, stream, phone, ...); --shelves wins | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_MCP_SHELVES` |
+| `mcp.max_tools` | int | no cap | refuse to start the MCP server when it would serve more tools than this; --max-tools wins | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_MCP_MAX_TOOLS` |
+| `samples.jrhodes3d` | path | a registered folder, else the store | a folder holding the jrhodes3d set (the rhodes voice), outside the store | at its next use | `RHODES_SAMPLES` |
+| `samples.big_rusty` | path | a registered folder, else the store | a folder holding the big_rusty set (the rusty and toms voices), outside the store | at its next use | `RUSTY_SAMPLES` |
+| `samples.emilyguitar` | path | a registered folder, else the store | a folder holding the emilyguitar set (the emily voice), outside the store | at its next use | `EMILY_SAMPLES` |
+| `samples.sadie_d2` | path | a registered folder, else the store | a folder holding the sadie_d2 head responses (spatial hrtf='sadie_d2'), outside the store | at its next use | `SADIE_D2_HRTF` |
+| `samples.toms` | path | `the project's ref/, else the big_rusty set` | a Big Rusty Samples folder the toms voice tries first | at its next use | `TOM_SAMPLES` |
 
 ## Use it with Claude Code
 
@@ -126,7 +181,7 @@ Find any tool by what you need or by role with `ops_find`.
   and named renders go to FLAC bit for bit with `song_compress` (a dry report by default; the WAVs move to the
   reclaim folder, never deleted), and every reader finds `<name>.flac` when `<name>.wav` is gone. Everything moved
   out to free space goes to one reclaim folder at the root of the drive (`ismail.reclaim`: `D:\_reclaim` on
-  Windows, `songs/_reclaim` elsewhere, `$ISMAIL_RECLAIM` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
+  Windows, `songs/_reclaim` elsewhere, `config_set('reclaim', <folder>)` to choose): `_reclaim/<what>_<date>/<group>/` keeps each
   file's path from the drive root, with a `manifest.json` and a `README.txt` line per folder, and `machine_disk`
   lists its folders with their sizes. The person deletes a folder there; nothing in ismail deletes.
 - **Mastering for delivery.** `master_cue(source, lufs=-16, tp=-1, mp3=False, mp3_catch_db=1.2)` cuts, fades and
@@ -304,7 +359,7 @@ Presets are not voices: `sub_bass`, the one plain synth a sketch uses, is a sine
 Voices are looked up in this order:
 
 1. `<project>/voices/<name>.py`: the song's own. Same name as a built-in overrides it; a song voice can also extend one (`from ismail.voices.growl import *`, then add words or articulations).
-2. Each folder in `$ISMAIL_VOICES` (a path list): your personal library, outside any repo.
+2. Each folder of the `voices` setting (`config_set('voices', ['<folder>'])`): your personal library, outside any repo.
 3. `ismail/voices/`: the built-ins.
 
 Each of these may have family subfolders (`strings/`, `keys/`, `drums/` ...), searched too; mimic profiles (`<name>.mimic.json`) are found the same way.
@@ -410,7 +465,7 @@ live_start(bpm) -> live_track(track, instrument, fx) -> live_queue([{track, note
   render in time lands a bar later, and the reply says so.
 - **It listens to itself.** `live_listen` runs the same analysis as a render on the last bars played.
 - **Safety.** Every output passes a trim, a loudness rider, a lookahead limiter and a ceiling; each set's level
-  is set at `live_start(trim_db=, cap_db=)` (else `ISMAIL_LIVE_TRIM_DB` / `ISMAIL_LIVE_CAP_DB`, else quiet defaults),
+  is set at `live_start(trim_db=, cap_db=)` (else the `live.trim_db` / `live.cap_db` settings, else quiet defaults),
   inside fixed ranges, and the ceiling stays at -1 dBFS.
 - **Decks.** `live_load` puts a whole ismail song on a cued deck while another plays; `live_transition` queues
   the mix (blend, bass swap, filter, cut) with a DJ strip per deck (isolator, filter knob, fader, transpose).

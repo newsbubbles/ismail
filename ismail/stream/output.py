@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from . import config as C
+from .. import settings
 
 SR = 44100
 BLOCK = 2048
@@ -34,11 +35,11 @@ CAPTURES = ('auto', 'wgc', 'gdi')
 
 
 def ffmpeg():
-    return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    return settings.get('ffmpeg')
 
 
 def live_engines():
-    d = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    d = Path(settings.get('live.registry'))
     out = {}
     for f in d.glob('*.json'):
         try:
@@ -501,7 +502,7 @@ class Output:
 
     def _start_encoder(self):
         if not ffmpeg():
-            raise ValueError('ffmpeg is not on PATH (or $ISMAIL_FFMPEG): streaming needs it')
+            raise ValueError("ffmpeg is not on PATH (or config_set('ffmpeg', <path>)): streaming needs it")
         if self.visual['mode'] == 'page':
             self.open_page()
         if self.nvenc is None:

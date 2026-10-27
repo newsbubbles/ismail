@@ -32,6 +32,7 @@ import os
 
 import numpy as np
 from numba import njit
+from . import settings
 
 C_SOUND = 343.0
 HEAD_A = 0.0875             # head radius, m
@@ -285,7 +286,7 @@ def validate(full):
 # ------------------------------------------------------------------ measured HRTF (optional)
 
 def hrtf_cache_dir():
-    return os.environ.get('ISMAIL_HRTF') or os.path.join(os.path.expanduser('~'), '.ismail', 'hrtf')
+    return settings.get('hrtf')
 
 
 def _min_phase(h, nfft=4096):

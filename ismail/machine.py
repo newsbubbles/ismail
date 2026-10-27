@@ -39,7 +39,7 @@ OpenMP and torch). `machine run` hands its slot to its command ($ISMAIL_SLOT): a
 and those ops run in the run's slot instead of waiting forever for a second one (ledger:M81). While a set is on air the
 CPU jobs beside it share on_air_threads() threads (ledger:M132).
 
-The board lives in <songs>/_machine/ (one per machine, shared by every checkout and worktree), or $ISMAIL_MACHINE_DIR.
+The board lives in <songs>/_machine/ (one per machine, shared by every checkout and worktree), or machine.dir.
 """
 import argparse
 import contextlib
@@ -57,6 +57,7 @@ import time
 import psutil
 
 from .handoffs import SONGS
+from . import settings
 
 SLOTS = {'gpu': 1, 'cpu': 2}
 GPU_HOT_C = 85
@@ -116,6 +117,7 @@ DISK_SKIP = re.compile(r'^\$|^System Volume Information$', re.I)   # a drive's o
 ON_AIR_POLICIES = ('set_first', 'off', 'render_first')
 ON_AIR_DEFAULT = 'set_first'
 ON_AIR_HELD = re.compile(r'blender|eevee|cycles', re.I)   # CPU jobs that are renders on the GPU in all but name
+SESSION_ENV = 'ISMAIL_SESSION'     # a process's own name on the board: `machine run --as <name>` sets it
 SLOT_ENV = 'ISMAIL_SLOT'           # the slot `machine run` hands its command: a slot asked for under it runs in it
 THREAD_ENV = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
               'VECLIB_MAXIMUM_THREADS', 'NUMBA_NUM_THREADS', 'RAYON_NUM_THREADS')
@@ -128,7 +130,7 @@ class MachineBusy(RuntimeError):
 
 
 def board_dir():
-    return os.environ.get('ISMAIL_MACHINE_DIR') or os.path.join(SONGS, '_machine')
+    return settings.get('machine.dir') or os.path.join(SONGS, '_machine')
 
 
 # ------------------------------------------------------------------ readings
@@ -553,7 +555,7 @@ def names_seen(hours=48):
 def priority_match(who=None):
     """'' when a grant's name matches jobs seen in the last 48 h, else a warning naming the names in use (ledger:M143:
     `who` defaults to the working folder's name, so nearly every job from D:/ismail is 'ismail' and a grant to a
-    session matched nothing unless that session sets ISMAIL_SESSION)."""
+    session matched nothing unless that session names itself: machine run --as <name>)."""
     pr = priority()
     who = who or (pr and pr['who'])
     if not who:
@@ -563,7 +565,7 @@ def priority_match(who=None):
         return ''
     names = ', '.join(f"{n} ({c})" for n, c in sorted(seen.items(), key=lambda x: -x[1])[:8]) or 'none'
     return (f"no job named '{who}' ran or waited in the last 48 h, so this priority matches nothing yet. Names in use: "
-            f"{names}. A session shows by its own name when it sets ISMAIL_SESSION=<its name> before it runs jobs.")
+            f"{names}. A session shows by its own name when it runs its jobs as `machine run --as <its name> ...`.")
 
 
 def clear_priority():
@@ -1699,7 +1701,7 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
 
 
 def _who():
-    return os.environ.get('ISMAIL_SESSION') or os.path.basename(os.getcwd().rstrip('\\/')) or 'unknown'
+    return os.environ.get(SESSION_ENV) or os.path.basename(os.getcwd().rstrip('\\/')) or 'unknown'
 
 
 RENDER_BASE_ARRAYS = 12     # measured (tracemalloc, 10-26): a render peaks at 9.5-11 full-length stereo float64
@@ -1881,13 +1883,13 @@ def _day_snapshot(sd, sizes):
 
 def disk_roots():
     """The folders `machine disk` measures beyond songs/ (ledger:M125: on 10-04 the biggest growers were outside it,
-    28.8 GB of launch-video intermediates and an 11 GB game unpack): $ISMAIL_DISK_ROOTS (paths split by os.pathsep),
+    28.8 GB of launch-video intermediates and an 11 GB game unpack): the machine.disk_roots setting,
     else <board>/roots.txt (one path a line, # for a note), else every folder beside the checkout that holds songs/
     (on this machine: the top-level folders of D:)."""
-    env = os.environ.get('ISMAIL_DISK_ROOTS')
+    env = settings.get('machine.disk_roots')
     txt = None if env else _read(os.path.join(board_dir(), 'roots.txt'))
     if env or txt is not None:
-        paths = env.split(os.pathsep) if env else [ln.split('#')[0] for ln in txt.splitlines()]
+        paths = env if env else [ln.split('#')[0] for ln in txt.splitlines()]
         return [os.path.abspath(p.strip()) for p in paths if p.strip() and os.path.isdir(p.strip())]
     beside = os.path.dirname(os.path.dirname(os.path.abspath(SONGS)))
     try:
@@ -2149,6 +2151,8 @@ def main(argv=None):
                    'drive under the floor)')
     r.add_argument('--est', default=None, help='expected duration: 10m, 600s, 1.5h (a bare number is minutes)')
     r.add_argument('--what', default=None, help='what it is, for the board')
+    r.add_argument('--as', dest='as_', default=None, metavar='NAME',
+                   help="your session's name on the board (it carries to the command, so its renders show as you too)")
     r.add_argument('--force', action='store_true', help='only when the user says so')
     r.add_argument('--wait', nargs='?', const='30m', default=None,
                    help='stand in line for the slot instead of being refused: a duration (default 30m)')
@@ -2229,6 +2233,8 @@ def main(argv=None):
     cmd = a.command[1:] if a.command[:1] == ['--'] else a.command
     if not cmd:
         ap.error('run needs a command after --')
+    if a.as_:
+        os.environ[SESSION_ENV] = a.as_                  # _who() names the slot, child_env() hands it down
     kind = 'gpu' if a.gpu else 'cpu'
     threads = (a.threads if a.threads is not None else THREADS if kind == 'cpu' else None) or None
     try:

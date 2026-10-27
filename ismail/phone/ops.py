@@ -94,8 +94,8 @@ def phone_start(port: int = 8870, inbox: str = None) -> str:
             pass
     S.HOME.mkdir(parents=True, exist_ok=True)
     if not S.ffmpeg():
-        raise OpError("ffmpeg is not on PATH (or $ISMAIL_FFMPEG): the phone stream needs it (winget install -e --id "
-                      "Gyan.FFmpeg)")
+        raise OpError("ffmpeg is not on PATH (or config_set('ffmpeg', <path>)): the phone stream needs it "
+                      "(winget install -e --id Gyan.FFmpeg)")
     log = open(S.HOME / 'server.log', 'a', encoding='utf8')
     args = [sys.executable, '-m', 'ismail.phone.server', '--port', str(port)] + (['--inbox', inbox] if inbox else [])
     flags = (0x00000008 | 0x00000200 | 0x08000000) if os.name == 'nt' else 0   # detached, own group, no window
@@ -459,7 +459,7 @@ def phone_video_copy(video, video_wait='10m'):
     ff = S.ffmpeg()
     if not ff:
         raise OpError("a video needs ffmpeg to make a phone-sized copy, and none was found: install ffmpeg and put it "
-                      "on PATH, or set ISMAIL_FFMPEG to its path, then send the video again")
+                      "on PATH, or config_set('ffmpeg', <its path>), then send the video again")
     try:
         wait_s = machine.duration_s(video_wait) if str(video_wait).strip() not in ('', '0', 'none', 'None') else None
     except ValueError as e:
@@ -563,7 +563,7 @@ def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
                       f"{list(REAL_CLASSES)}")
     ff = S.ffmpeg()
     if not ff:
-        raise OpError('floor pairs need ffmpeg (set ISMAIL_FFMPEG)')
+        raise OpError("floor pairs need ffmpeg (on PATH, or config_set('ffmpeg', <path>))")
     hist_f = S.HOME / 'floor_rounds.json'
     try:
         hist = json.loads(hist_f.read_text(encoding='utf8'))
@@ -815,7 +815,7 @@ def phone_unsay(match: str = None, since: str = None, n: int = None) -> str:
     """Take captions back off the phone page, its history and its pinned line: match='text' (several with '|',
     case ignored), since='HH:MM' (today), or n=3 (the last three). Never put where the person lives, their name or
     other personal details on the page: they may be recording the screen (the ops that show text refuse the terms
-    in ~/.ismail/private_terms.txt, or $ISMAIL_PRIVATE_TERMS, and the git email)."""
+    in ~/.ismail/private_terms.txt, or the file the setting guards.private_terms names, and the git email)."""
     return _call('unsay', match=match, since=since, n=n)
 
 

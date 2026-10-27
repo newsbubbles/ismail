@@ -22,6 +22,7 @@ from . import analysis as A
 from . import audiofile
 from . import machine
 from . import provenance
+from . import settings
 from . import sources as sourcesmod
 from . import fx as fxmod
 from . import rig as rigmod
@@ -595,7 +596,8 @@ def _where_text():
     """The guide's last lines: the songs folder this ismail uses, where the playbook is, and files an older install
     left beside the package."""
     from .handoffs import SONGS, old_songs
-    L = [f"\n\nWHERE\n- Songs folder: {SONGS} (songs/<slug>/ above means a folder in it; ISMAIL_SONGS changes it)."
+    L = [f"\n\nWHERE\n- Songs folder: {SONGS} (songs/<slug>/ above means a folder in it; config_set('songs', "
+         "<folder>) moves it, after a restart)."
          "\n- The playbook (the method and its rules): the playbook op, or playbook(page='live') for a reference page "
          "it names. Skip it if you loaded the ismail skill already."]
     old = old_songs()
@@ -898,7 +900,7 @@ def samples_list() -> str:
 
 @op()
 def samples_fetch(name: str, path: str = None) -> str:
-    """Download a sample set into the store (~/.ismail/samples, or $ISMAIL_SAMPLES), only after the person says
+    """Download a sample set into the store (~/.ismail/samples; the samples setting moves it), only after the person says
     yes: tell them its size and licence first (samples_list shows both). path=<a folder that already holds the
     set>: register it instead of downloading (nothing is copied)."""
     from . import samples
@@ -1032,7 +1034,7 @@ def _kept_version(root):
 
 
 def _ffmpeg_ok():
-    return bool(os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg'))
+    return bool(settings.get('ffmpeg'))
 
 
 HOT_DB = -0.5          # a track stem peaking over this is a part at full scale on its own (ledger:M170 S-1)
@@ -1336,7 +1338,7 @@ def _voice_root(project):
 @op()
 def voices_list(project: str = None) -> str:
     """List voice modules (code instruments kept as Python files) and mimic profiles (instruments measured from
-    recordings): the song's own (<project>/voices/), those on $ISMAIL_VOICES, and the built-ins. Use one as {"type": "code", "voice": "<name>"} or its preset; voice_help(name)
+    recordings): the song's own (<project>/voices/), those in the voices setting's folders, and the built-ins. Use one as {"type": "code", "voice": "<name>"} or its preset; voice_help(name)
     shows its velocity mapping, functions and parameters."""
     from . import voices
     rows = voices.available(_voice_root(project))
@@ -2107,7 +2109,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     limits to those tracks (+ their sidechain sources, which stay silent); stems=True writes per-track files for
     analysis as 'track:<name>'. Analysis of a windowed render and its stems still uses song bar numbers (bars outside
     the window raise). mp3='also' writes renders/<out or latest>.mp3 next to the wav, mp3='only' writes the named
-    render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg on PATH or $ISMAIL_FFMPEG.
+    render as mp3 only (latest.wav is always written: analysis reads it); needs ffmpeg (on PATH, or the ffmpeg setting).
     wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once). A bare number is
     minutes: wait='10' is ten minutes; for seconds write wait='600s'.
     Returns levels, clipping and timing; with a reference, whether it was compared since this render; after an mp3
@@ -2587,6 +2589,7 @@ from . import api_zoom  # noqa: E402,F401  (registers sound_zoom, sound_zoom_dif
 from . import api_exam  # noqa: E402,F401  (registers exam_check, the exam pre-flight)
 from . import api_fxstack  # noqa: E402,F401  (registers fx_stack_save/load/list/measure, ledger:M177)
 from . import api_ops  # noqa: E402,F401  (registers ops_find, the op index by purpose and role, ledger:M210)
+from . import api_config  # noqa: E402,F401  (registers config_get/set/unset: ismail's settings, ledger:M368)
 from . import api_listen  # noqa: E402,F401  (registers the listen_* ops: listening together)
 from . import api_feedback  # noqa: E402,F401  (registers the feedback_* ops: voice and typed answer pages)
 from . import api_midi  # noqa: E402,F401  (registers midi_write, midi_read, midi_ports, midi_play: ledger:M113)

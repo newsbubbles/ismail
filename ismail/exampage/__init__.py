@@ -9,7 +9,7 @@ A round is a folder: manifest.json (what the page shows), key.json (never served
 pictures and the sound) and answers.jsonl (one line per submit).
 
 One server serves rounds from every song (ledger:M300). It looks for /eye/<name> in its own folder first, then in the
-round registry, a small JSON file of name -> round folder ($ISMAIL_EXAMPAGE_ROUNDS, else ~/.ismail/exampage/
+round registry, a small JSON file of name -> round folder (the exampage.rounds setting, else ~/.ismail/exampage/
 rounds.json) that it reads on every request. host() and `register` add a round to it; a round whose folder name is
 taken by another song's round gets the song's name in front (round2 -> songb-round2), and host() returns that URL.
 
@@ -23,11 +23,12 @@ import re
 import shutil
 import sys
 import time
+from .. import settings
 
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'words.html')
 PORT = 8871
 SAFE = re.compile(r'^[A-Za-z0-9_.-]+$')
-ROUNDS_ENV = 'ISMAIL_EXAMPAGE_ROUNDS'
+ROUNDS_ENV = settings.env_name('exampage.rounds')   # its old variable, still an override
 
 
 class CannotServe(RuntimeError):
@@ -37,8 +38,8 @@ class CannotServe(RuntimeError):
 # ------------------------------------------------------------------ the round registry (ledger:M300)
 
 def registry_path():
-    """$ISMAIL_EXAMPAGE_ROUNDS (read at each call), else ~/.ismail/exampage/rounds.json."""
-    return os.environ.get(ROUNDS_ENV) or os.path.join(os.path.expanduser('~'), '.ismail', 'exampage', 'rounds.json')
+    """The exampage.rounds setting (read at each call), else ~/.ismail/exampage/rounds.json."""
+    return settings.get('exampage.rounds')
 
 
 def _live(d):

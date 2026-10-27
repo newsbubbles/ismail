@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### settings: config_get / config_set (ledger:M368)
+
+- Everything a person or an agent configures is now a setting in one registry (`ismail/settings.py`, 41 settings
+  in 8 groups: paths, machine, privacy, tools, live, phone, mcp, samples), kept in `~/.ismail/config.json`.
+  `config_get()` lists every setting with its value and where it comes from; `config_get('songs')` shows one in
+  full (what it does, what it takes, its default, whether a change applies at once or after a restart);
+  `config_set(key, value)` checks the type and range, writes the file atomically, warns when a path does not exist,
+  and says when the change applies; `config_unset(key)` returns a setting to its default. Most settings are read at
+  their use, so a change reaches a running server at once; the ones a process reads at its start say which restart
+  they need.
+- Where a value comes from: a setting's old environment variable (`ISMAIL_SONGS`, `ISMAIL_FFMPEG`, ...) when it is
+  set, else the settings file, else the default. Every old variable still works, and still wins over the file, so
+  existing scripts, tests, CI jobs and MCP configurations keep working; the replies say when one overrides the file.
+  `docs/reference.md` lists each setting with its old name (`python -m ismail.settings table` regenerates it).
+- `live.ceiling_db` can be set in the file, but only lowered (-12 to -1), so an agent still cannot raise the
+  ceiling. A trim, cap or idle time in the file is held to the ranges `live_start` takes.
+- The config ops are served by every MCP server, filtered to a role or not, beside `guide` and `ops_find`.
+- The variables ismail sets for its own child processes and tests stay variables, listed with their reasons in
+  `settings.PLUMBING`. `tests/test_settings.py` fails on any variable the package reads that is neither a setting nor
+  plumbing, and on a reference table that no longer matches the registry.
+- `machine run --as <name>` and `python -m ismail --as <name>` name a session on the machine board (they set the
+  per-process `ISMAIL_SESSION`, which still works).
+- Phone and stage hooks get their event as one JSON object on standard input; the `PHONE_*` and `STAGE_*` variables
+  they had stay for hooks written before.
+- Music video shots start with a plain `import kit`: `python -m ismail.video` puts the kit on Blender's path
+  (`--python-expr`). Shots that read `ISMAIL_VIDEO_KIT` keep working.
+- The named-ops guard reads `stage.registry` and `live.registry` from the settings file too (its old variables still
+  win), with the standard library only.
+- The skill and docs say `config_set` / `config_get` wherever they told an agent to set or read a variable.
+
 ### named-ops guard: registry variables read by name
 
 - `named_ops_guard.py` reads `ISMAIL_STAGE_REGISTRY` and `ISMAIL_LIVE_REGISTRY` by their literal names (they are folder paths), so a directory scanner sees no environment variable chosen at run time.

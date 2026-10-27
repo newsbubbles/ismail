@@ -57,8 +57,10 @@ so act on `heard`, not on the engine's now.
 
 Read it with `phone_listen(who='<your name>', since=...)` (a long-poll, which also shows them who is listening), or
 watch the routed file with your harness's file watcher, so a line wakes you even between turns. Hooks in
-`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, with
-`PHONE_EVENT`, `PHONE_TEXT`, `PHONE_LINE` and `PHONE_INBOX` in their environment, for an agent that isn't running.
+`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, for an agent that
+isn't running: each command gets the line on its standard input as one JSON object (`event`, `text`, `inbox`, and
+`line`, the whole inbox row). Hooks written before read the same as `PHONE_EVENT`, `PHONE_TEXT`, `PHONE_INBOX` and
+`PHONE_LINE`, which still work.
 
 Voice notes are transcribed by the speech server on this machine. While the CPU is over the governor's limit they
 wait in a queue: taps still arrive at once, and the page tells them their note is waiting. When the speech server is slow,
@@ -95,7 +97,7 @@ and on the exam's answers file, so "this bit" in a note can be found in the vide
 Every voice note keeps the master the page played under it, from 3 s before the person began to 2 s after they
 stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `<id>_ref.json`). The server keeps the
 last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing
-has to be recording (`ISMAIL_PHONE_KEEP_MASTER=0` turns that off). When they listen on the room speaker with the
+has to be recording (`config_set('phone.keep_master', false)` turns that off at the phone server's next start). When they listen on the room speaker with the
 stream off, the note's start is a guess from when it arrived, and the ref spans 20 s either side
 (`start_is_guess`, `search_s`): search that window, and the room route gets its own latency.
 
@@ -212,7 +214,7 @@ recorded).
 The ops refuse it for you: every op that sends text to the page (`phone_say`, `phone_panel_show`, `phone_ask`,
 `phone_exam`, `phone_now`, `phone_buttons`, the offer and restart lines) and every stage op that shows text
 (`stage_say`, `stage_ask`, `stage_panel_show`, cues, markers, `stage_busy`) scans it first against a local list
-that never goes in the repository: `$ISMAIL_PRIVATE_TERMS`, else `~/.ismail/private_terms.txt`, one place or name
+that never goes in the repository: `~/.ismail/private_terms.txt` (the `guards.private_terms` setting moves it), one place or name
 per line, `#` starting a comment line, plus the git `user.email` of the checkout. Words match whole and
 case-insensitive; an email matches anywhere. A hit refuses with the term, to you only: rephrase without it. With no
 file only the email is checked, and each reply carries one line saying so and how to turn the rest on.
@@ -222,7 +224,7 @@ line and its notification; it cannot reach a recording already made.
 ## Don't ask for what is granted
 
 A person who said "you can always merge reviewed work" should not get the question again. Their standing grants
-live in a local file: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a JSON list of
+live in a local file: `~/.ismail/standing_grants.json` (the `guards.grants` setting moves it), a JSON list of
 `{"id", "date", "topic", "keywords": [...], "says"}`. A yes/no or approve/deny panel (its buttons, or a choice's
 options, are all yes and no words), a `phone_ask`, a `phone_say` that asks ("should I merge #12?"), a `stage_ask`
 or a yes/no `stage_panel_show` whose title or text holds a grant's keyword (whole word, any case) is refused with

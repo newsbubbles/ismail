@@ -1,6 +1,5 @@
 """example shot: a lit, foggy empty stage with a slow push. Replace with a room: S.room('<stem from rip>')."""
-import os, sys; sys.path.insert(0, os.environ['ISMAIL_VIDEO_KIT'])
-import kit
+import kit                          # `python -m ismail.video` puts the kit on Blender's path
 
 N = 96
 S = kit.Shot('s01_example', N, start_bar=1)
