@@ -20,7 +20,7 @@ There are two kinds of test. Use both, in this order.
 ## 0. Before any exam reaches the person: `exam_check`
 
 Run `exam_check` on every exam before you show it, and show it only on READY: `exam_check(page='<the page or its
-URL>', key={'<clip label or file>': '<its class>'}, secrets=['<source names>'], submit_url='<the page Submit>',
+URL>', key={'<clip label or file>': '<its class>'}, secrets=['<clip source names the listener must not see>'], submit_url='<the page Submit>',
 answers_path='<where you read answers>')`. It fails a page whose clips are missing or do not decode, whose loudness
 spreads more than 1 LU, whose answer can be read from anything but the sound (file names, URLs, metadata, the page
 source or a key file it loads, formats, lengths or order that follow the key), or whose Submit lands somewhere you
@@ -31,7 +31,7 @@ leaves one answer line marked `preflight`: skip it when scoring.
 
 Before a real-against-made round, look first (the person's "90 degree rotation": when one sense plateaus, rotate which
 one measures; a spectrogram is an image an eye reads well). `exam_eye_crops(pairs=[[real, made], ...], out=...)`
-cuts the same window from both clips of each pair (a word plus 60 ms either side, when you pass `windows`) and puts
+cuts the same window from both clips of each pair (a word plus 60 ms either side, with `windows=`) and puts
 them side by side as "1" and "2" in a random order, with the key in a file you do not open. Look at each crop, pick
 the side that looks real, and score it with `exam_eye_score(out, {1: '2', ...})`. If you beat chance (it says NOT
 READY), the picture gives it away and the person will most likely hear it too: find what you saw and fix that
@@ -63,7 +63,7 @@ control is a floor pair, below).
 **A floor under every phone round.** A "can't tell" on a phone means nothing until you know what that phone and
 ear can tell apart at all. `phone_exam(..., floor='auto')` adds floor pairs: the real clip against a 64 or 128 kb/s
 MP3 copy of itself, or against itself, at seeded places (never first). The full set (64k, 128k, identical) goes out
-on the first floor round, then one rotating pair per round; pass `floor='full'` again for a new listening device or
+on the first floor round, then one rotating pair per round; `floor='full'` again for a new listening device or
 when a floor answer differs from the first. Each floor pair costs a slot of the 5 to 6 pair budget. The pairs are
 renumbered around them, and the reply and `<answers_path>.floor.json` map the labels back and say which side is the
 MP3. Read the floor first: if they pick the MP3 side as "different" more often than chance, the device and ear
