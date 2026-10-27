@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### skill: a file onto the phone is phone_offer
+
+- phone.md says that when the person wants a file on their phone (a video to post from it), the agent offers it as a download with `phone_offer`, not a panel and not the harness's file upload, which has size caps.
+
 ### record keys into a track (MIDI parity step 4)
 
 - `live_played(into='<track>', bar=1, mode='replace')` writes what the person played on their keys (via `live_midi`)
