@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### named-ops guard: registry variables read by name
+
+- `named_ops_guard.py` reads `ISMAIL_STAGE_REGISTRY` and `ISMAIL_LIVE_REGISTRY` by their literal names (they are folder paths), so a directory scanner sees no environment variable chosen at run time.
+
 ### skill: a file onto the phone is phone_offer
 
 - phone.md says that when the person wants a file on their phone (a video to post from it), the agent offers it as a download with `phone_offer`, not a panel and not the harness's file upload, which has size caps.
