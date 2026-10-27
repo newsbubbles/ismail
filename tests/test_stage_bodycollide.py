@@ -127,6 +127,63 @@ def test_a_sole_inside_what_it_stands_on_is_measured_from_the_top_that_holds_it(
     assert got[3] == pytest.approx(0.35) and got[4] == 0 and got[5] == 0 and got[6] == pytest.approx(0.005)
 
 
+GRID = (Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'page' / 'groundgrid.js').as_uri()
+# made-up meshes for the ground grid: a box's 12 triangles wound outward, a matrix that places (and may mirror) it
+GRID_JS = """
+const G = await import('%s'), B = await import('%s');
+const box = (x0, x1, y0, y1, z0, z1) => {
+  const c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+  const q = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]], mid = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], out = [];
+  for (const f of q) for (const t of [[f[0], f[1], f[2]], [f[0], f[2], f[3]]]) {
+    let [a, b, d] = t.map((i) => c[i]);
+    const e = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], g = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+    const n = [e[1] * g[2] - e[2] * g[1], e[2] * g[0] - e[0] * g[2], e[0] * g[1] - e[1] * g[0]];
+    if (n[0] * (a[0] - mid[0]) + n[1] * (a[1] - mid[1]) + n[2] * (a[2] - mid[2]) < 0) [b, d] = [d, b];
+    out.push(...a, ...b, ...d);
+  }
+  return Float32Array.from(out);
+};
+const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+const at = (dx, sx = 1) => [sx, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, dx, 0, 0, 1];
+const sink = (grids, x, z, y) => {
+  const o = { tops: new Float64Array(32), unders: new Float64Array(32), nt: 0, nu: 0 };
+  for (const g of grids) G.gridHits(g, x, z, y + 0.005, y + 0.6, y + 0.02, o);
+  G.sortHits(o);
+  return { d: B.sinkOf(o.tops, o.nt, o.unders, o.nu, y), tops: Array.from(o.tops.slice(0, o.nt)), unders: Array.from(o.unders.slice(0, o.nu)) };
+};
+const built = (pos, m, step = Infinity) => { const g = G.newGrid(pos, null, m); let n = 0; while (!g.done && n++ < 1e5) G.stepGrid(g, step); return g; };
+"""
+
+
+def _grid(expr):
+    if not shutil.which('node'):
+        pytest.skip('node is not installed')
+    js = GRID_JS % (GRID, MOD) + f'console.log(JSON.stringify({expr}));'
+    r = subprocess.run(['node', '--input-type=module', '-e', js], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def test_the_ground_grid_reads_a_vertical_line_through_a_mesh_as_the_rays_did():
+    got = _grid("""(() => {
+      const stage = built(box(-2, 2, 0, 0.45, -1, 1), I), table = built(box(1, 3, 0.42, 0.45, 2, 3), I);
+      const floor = built(Float32Array.from([-50, 0, -50, -50, 0, 50, 50, 0, 50, -50, 0, -50, 50, 0, 50, 50, 0, -50]), I);
+      return [sink([stage, floor], 0.3, 0.2, 0), sink([table, floor], 2, 2.5, 0), sink([stage], 3, 0, 0), sink([floor], 7, 7, -0.1),
+        sink([stage], 0.3, 0.2, 0.46), sink([built(box(-2, 2, 0, 0.45, -1, 1), I, 5)], 0.3, 0.2, 0),
+        sink([built(box(-2, 2, 0, 0.45, -1, 1), at(-1, -1))], -1.3, 0.2, 0), G.sameMatrix(stage, at(0.1))];
+    })()""")
+    stage, table, beside, floor, onto, stepped, mirrored, moved = got
+    assert stage['d'] == pytest.approx(0.45) and stage['tops'] == [pytest.approx(0.45)] and stage['unders'] == []
+    # a low table over the foot: its underside in between
+    assert table['d'] == 0 and table['tops'] == [pytest.approx(0.45)] and table['unders'] == [pytest.approx(0.42)]
+    assert beside['d'] == 0 and beside['tops'] == []                          # beside the stage: nothing over the sole
+    assert floor['d'] == pytest.approx(0.1)                                    # the big floor's two triangles, 10 cm in
+    assert onto['d'] == 0                                                      # standing on the stage
+    assert stepped == stage                                                    # built 5 triangles a step: the same grid
+    assert mirrored == stage                                                   # mirrored, its tops still face up
+    assert moved is False
+
+
 def test_a_hand_sent_past_reach_is_eased_in_so_the_elbow_keeps_a_bend():
     got = _node("""{ k: [0.5, 0.85, 0.9, 1.0, 1.2, 1.6].map((e) => M.softReach(e)), knee: M.REACH_KNEE, max: M.REACH_MAX,
       job: (() => { const j = M.newArm().job; j.S.set([0, 1.5, 0]); j.T.set([0, 1.5, 0.81]); j.la = 0.28; j.lb = 0.26;

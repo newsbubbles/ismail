@@ -37,7 +37,7 @@ def summarize(frames, people=None):
     rows = {}
     for p in people or []:
         rows[p] = None
-    for fr in frames:
+    for fi, fr in enumerate(frames):
         t = fr.get('t')
         for p, c in fr['clipcheck'].items():
             if people and p not in rows:
@@ -51,7 +51,7 @@ def summarize(frames, people=None):
             r['frames'] += 1
             r['playing'] = r['playing'] or bool(c.get('playing'))
             if c.get('gms') is not None:
-                r['gms'].append(float(c['gms']))
+                r['gms'].append((fi, float(c['gms'])))
             got = {'self': 0.0, 'other': 0.0, 'foot': 0.0}
             what = {}
             for e in c.get('clip') or []:
@@ -103,7 +103,13 @@ def table(rows, head=''):
             out.append(f'  {r["person"]}: deepest ' + '; '.join(worst))
         if r['none']:
             out.append(f'  {r["person"]}: {r["none"]}')
-    ms = [x for r in rows for x in r['gms']]
+    # the first frame builds each mesh's column grid (page/groundgrid.js), so it is told apart; the capture's clock
+    # counts in 0.1 ms steps, so a frame reads 0 or 0.1 and the mean says more than the median
+    ms = [x for r in rows for fi, x in r['gms'] if fi > 0]
+    first = [x for r in rows for fi, x in r['gms'] if fi == 0]
     if ms:
-        out.append(f'the ground check: {sum(ms) / len(ms):.3f} ms a body a frame (mean), {max(ms):.3f} at most, on this PC')
+        out.append(f'the ground check: {sum(ms) / len(ms):.3f} ms a body a frame (mean), {max(ms):.3f} at most'
+                   + (f'; the first frame {max(first):.1f} ms at most (it builds the grids)' if first else '') + ', on this PC')
+    elif first:
+        out.append(f'the ground check: the first frame {max(first):.1f} ms at most (it builds the grids), on this PC')
     return '\n'.join(out)

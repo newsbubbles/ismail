@@ -14,6 +14,7 @@ import { cutout, b2tPos, GIZMO } from './editor.js';
 import { world } from './world.js';
 import { initControl } from './control.js';
 import { mixTake } from './interp.js';
+import { newGrid, stepGrid, sameMatrix, gridHits, sortHits } from './groundgrid.js';
 import { fitBody, newState, bodyNow, solveArm as solveArmMath, newArm, newDepths, limbDepths, overlapOf, reachIn, depthIn, relaxedArm, sinkOf, GROUND_UP, CLIP_M, NEAR_M } from './bodycollide.js';
 
 // who plays whom, facings, partners and the floor are the scene's (world.json via world.js), not the runtime's
@@ -168,13 +169,14 @@ const REACH_LEAN_W = { spine_01: 0.5, spine_02: 0.8, spine_03: 1 };
 // allow, every OVERLAP_EVERY_S per pair
 const CLIP_EVERY_S = 2, OVERLAP_EVERY_S = 5;
 // the ground check (groundNow): a body's soles against what they stand on. In the headset one sole point every
-// GROUND_EVERY frames, in turn (heel and toe, left and right: one ray, two where a top is over the sole), so each
-// point is measured every 12 frames and a sink shows up to a sixth of a second late; all four every frame the capture
-// probe asks (clipOf). The scene's meshes it looks at are listed again every GROUND_LIST_S (their boxes with them: a
-// thing keyed to move is seen where it was then), and a body rays only those whose box comes within GROUND_NEAR of its
-// hips, listed again when the hips move GROUND_MOVE. The cost on the PC, 2026-10-26, the lecture hall (300 runs a
-// frame in a capture): all four points 0.11 ms, 0.19 with both feet sunk (0.15 and 0.22 against all 50 meshes), so a
-// quarter of that every third frame in the headset; not measured on the Quest
+// GROUND_EVERY frames, in turn (heel and toe, left and right), so each point is measured every 12 frames and a sink
+// shows up to a sixth of a second late; all four every frame the capture probe asks (clipOf). The scene's meshes it
+// looks at are listed again every GROUND_LIST_S (their boxes with them: a thing keyed to move is seen where it was
+// then), and a body reads only those whose box comes within GROUND_NEAR of its hips, listed again when the hips move
+// GROUND_MOVE. three's raycast was 50 ms a body on bluefront (VR Dev, 2026-10-27: one merged mesh of 42 000 triangles
+// under the floor, tested whole by every ray), so the lines are read from column grids (groundgrid.js). Now, on the
+// PC in a capture (40 runs a frame): one point 0.008 to 0.028 ms a body on bluefront (0.006 in the lecture hall), all
+// four 0.03 to 0.09 (0.02); not measured on the Quest
 const GROUND_EVERY = 3, GROUND_LIST_S = 5, GROUND_NEAR = 1.7, GROUND_MOVE = 0.5;
 let gPhase = 0;
 const realNow = performance.now.bind(performance);   // a capture stops performance.now between frames: the cost is real time
@@ -533,9 +535,10 @@ export function initActors(ed, live) {
   // ---- the ground check (the user, 2026-10-23: "main character is clipping through the stage to about his knees"; a
   // speaker marked by an empty fell to the hall floor, 0.45 m under the stage top, and groundOf was fixed). On purpose
   // it does not ask groundOf where a person stands: it looks at the drawn soles (solesOf) against the scene's own
-  // meshes, so it catches a mistake there too. Per sole point (heel, toe) a ray down from GROUND_UP above for the tops
-  // and, only when one is there, a ray up for the undersides (bodycollide.js sinkOf); a foot's sink is its deeper
-  // point's. CLIP_M or more goes into the clip list as [foot_l, 'ground', cm], and to the events like an arm
+  // meshes, so it catches a mistake there too. Per sole point (heel, toe) a vertical line from the sole to GROUND_UP
+  // over it, read from each mesh's column grid (groundgrid.js): the tops and the undersides it crosses (bodycollide.js
+  // sinkOf); a foot's sink is its deeper point's. CLIP_M or more goes into the clip list as [foot_l, 'ground', cm], and
+  // to the events like an arm
   let carried = () => false;                                 // main.js: a thing pinned to or held by a person (props.js)
   const setCarried = (fn) => { carried = fn; };
   const gSolids = [], gBoxes = [];
@@ -574,30 +577,63 @@ export function initActors(ed, live) {
     }
     return g.near;
   }
+  // each mesh's column grid (groundgrid.js), made the first time a body comes near it: in the headset GRID_STEP
+  // triangles a check (about 0.3 ms on the PC; a big mesh is skipped until its grid is ready: bluefront's merged build
+  // in under two seconds), at once for the capture probe (its first frame: up to 27 ms a body on bluefront). A mesh
+  // that moves is gridded again; one that has moved GRID_MOVES times (keyed, carried), an instanced or skinned mesh,
+  // or packed positions go to three's raycast instead (false here)
+  const GRID_STEP = 1000, GRID_MOVES = 3;
+  const grids = new WeakMap(), gBuild = { left: 0 };
+  function gridOf(o) {
+    let g = grids.get(o);
+    if (g === false) return false;
+    const m = o.matrixWorld.elements;
+    let moves = 0;
+    if (g && !sameMatrix(g, m)) { moves = g.moves + 1; g = null; }
+    if (!g) {
+      const geo = o.geometry, pa = geo && geo.attributes.position;
+      if (moves >= GRID_MOVES || o.isInstancedMesh || o.isSkinnedMesh || o.morphTargetInfluences || !pa || pa.isInterleavedBufferAttribute
+        || pa.itemSize !== 3 || pa.normalized) { grids.set(o, false); return false; }
+      g = newGrid(pa.array, geo.index ? geo.index.array : null, m);
+      g.moves = moves;
+      grids.set(o, g);
+    }
+    if (!g.done) { if (gBuild.left <= 0) return null; gBuild.left -= stepGrid(g, gBuild.left); }
+    return g.done ? g : null;
+  }
   const gRc = new THREE.Raycaster(), gO = new THREE.Vector3(), gP = new THREE.Vector3(), gN = new THREE.Vector3(), DOWN = new THREE.Vector3(0, -1, 0);
-  const gHits = [], gTops = new Float64Array(16), gUnders = new Float64Array(16);
+  const gHits = [], gSlow = [], gOut = { tops: new Float64Array(32), unders: new Float64Array(32), nt: 0, nu: 0 };
+  // tops from 5 mm over the sole to GROUND_UP, undersides from CLIP_M over it (a box's own bottom at the sole is not one)
   function sinkAt(p, solids) {
-    gRc.set(gO.set(p.x, p.y + GROUND_UP, p.z), DOWN); gRc.far = GROUND_UP - 0.005;
-    gHits.length = 0;
-    gRc.intersectObjects(solids, false, gHits);
-    let nt = 0, nu = 0;
-    for (let i = 0; i < gHits.length && nt < 16; i++) {
-      const h = gHits[i];
-      if (h.face && ed.pickable(h.object) && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.3) gTops[nt++] = h.point.y;
+    const H = gOut, y0 = p.y + 0.005, y1 = p.y + GROUND_UP, u0 = p.y + CLIP_M;
+    H.nt = 0; H.nu = 0; gSlow.length = 0;
+    for (let i = 0; i < solids.length; i++) {
+      const o = solids[i];
+      if (!ed.pickable(o)) continue;
+      const g = gridOf(o);
+      if (g) gridHits(g, p.x, p.z, y0, y1, u0, H);
+      else if (g === false) gSlow.push(o);
     }
-    if (!nt) return 0;
-    const far = gTops[0] - p.y - CLIP_M;
-    if (far > 0) {
-      gRc.set(gO.set(p.x, p.y + CLIP_M, p.z), Y); gRc.far = far;
+    if (gSlow.length) {                                      // three's rays for the meshes with no grid
+      gRc.set(gO.set(p.x, y1, p.z), DOWN); gRc.far = GROUND_UP - 0.005;
       gHits.length = 0;
-      gRc.intersectObjects(solids, false, gHits);
-      for (let i = 0; i < gHits.length && nu < 16; i++) {
+      gRc.intersectObjects(gSlow, false, gHits);
+      for (let i = 0; i < gHits.length; i++) {
         const h = gHits[i];
-        if (h.face && ed.pickable(h.object) && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y < -0.3) gUnders[nu++] = h.point.y;
+        if (H.nt < 32 && h.face && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.3) H.tops[H.nt++] = h.point.y;
       }
+      gRc.set(gO.set(p.x, u0, p.z), Y); gRc.far = GROUND_UP - CLIP_M;
+      gHits.length = 0;
+      gRc.intersectObjects(gSlow, false, gHits);
+      for (let i = 0; i < gHits.length; i++) {
+        const h = gHits[i];
+        if (H.nu < 32 && h.face && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y < -0.3) H.unders[H.nu++] = h.point.y;
+      }
+      gHits.length = 0;
     }
-    gHits.length = 0;
-    return sinkOf(gTops, nt, gUnders, nu, p.y);
+    if (!H.nt) return 0;
+    sortHits(H);
+    return sinkOf(H.tops, H.nt, H.unders, H.nu, p.y);
   }
   // k: one sole point (0 the left heel, 1 the left toe, 2 and 3 the right's) or -1 all four; a foot's sink is its
   // deeper point's, as last measured
@@ -605,6 +641,7 @@ export function initActors(ed, live) {
     const so = B.rig.soles, bones = B.rig.bones, P = B.ground.pts;
     if (!so) return;
     const t0 = realNow(), solids = groundNear(B), i1 = k < 0 ? 4 : k + 1;
+    gBuild.left = k < 0 ? Infinity : GRID_STEP;
     for (let i = k < 0 ? 0 : k; i < i1; i++) {
       const s = so[i < 2 ? 'l' : 'r'], j = (i & 1) * 2, b = bones[s[j]];
       if (!b) { P[i] = 0; continue; }
