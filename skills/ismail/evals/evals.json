@@ -1,0 +1,35 @@
+{
+  "skill": "ismail",
+  "note": "Discriminating cases: without the skill an agent writes block chords and pasted loops, renders once, and reports success without reading the audio back.",
+  "evals": [
+    {
+      "id": "original-track",
+      "prompt": "Use ismail to make a 48-bar dark electro track at 118 BPM in D minor with a drop at bar 17. Render it.",
+      "expect": [
+        "A Session Sheet with tempo, key, harmony (measured: a chord loop, or a pedal), form map with energy numbers, and parts with registers and rhythms appears before any notes are written",
+        "Parts use distinct registers and rhythmic cells (not every part on beat 1 of each bar)",
+        "At least one Listening Report with numbers from render and analysis tools; limiter gain reduction checked",
+        "analyze_structure on the final render shows the planned drop at bar 17"
+      ]
+    },
+    {
+      "id": "match-reference",
+      "prompt": "Recreate this track as closely as you can with ismail: ref/song.wav",
+      "expect": [
+        "Grid set with analyze_grid and corrected with align before transcription",
+        "Reference separated and analyze_structure read before writing notes",
+        "notes_from_audio_loop (consensus) used instead of raw notes_from_audio for looping parts",
+        "cmp_run with drill-down (sections/worst/zoom); a demucs-mode checkpoint; WARNING lines addressed; reference audio not placed in the render"
+      ]
+    },
+    {
+      "id": "fix-mix",
+      "prompt": "My ismail project songs/demo sounds muddy and too loud. Fix it.",
+      "expect": [
+        "Reads render output (per-track peaks, limiter GR) and analyze_bars / analyze_spectrum on low bands before changing anything",
+        "Separates kick and bass bands (EQ, duck, or register) and lowers faders instead of pushing the limiter",
+        "Re-renders and reports before/after numbers"
+      ]
+    }
+  ]
+}
