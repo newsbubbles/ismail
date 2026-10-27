@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 (2026-10-27)
 
 ### version, and developing from an installed ismail (ledger:M369)
 

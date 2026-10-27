@@ -5,12 +5,12 @@
   "description": "Open-source DAW your agent runs itself, no AI audio model: compose, mix, hear it as text, play live.",
   "repository": {"url": "https://github.com/newsbubbles/ismail", "source": "github"},
   "websiteUrl": "https://measuredinstruments.com/ismail/",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "ismail",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "runtimeHint": "uvx",
       "packageArguments": [{"type": "positional", "value": "mcp"}],
       "transport": {"type": "stdio"}
