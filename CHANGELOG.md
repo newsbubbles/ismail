@@ -16,6 +16,12 @@
   tempo (M258); they name the beats they could not follow. On a take drifting +-3%, a planted offbeat at 0.540 of
   the beat read 0.540, per-note offsets came back within 3 ms (median) and levels by position within 1 dB.
 
+### install from PyPI (ledger:M358)
+
+- `pip install ismail` and `uvx --python 3.12 ismail mcp` are now the install lines (README, docs/reference.md, setup.md, the CLI help); GitHub stays the way to get main before it is released (`pip install "ismail @ git+https://github.com/newsbubbles/ismail"`, or a clone).
+- The Claude Code and Codex plugins run the PyPI release of their own version (`uvx --from ismail==<version>`), so a plugin's skill always matches its engine. `packaging/listing.json` holds `ismail=={version}`; `python -m ismail.release` fills it in.
+- The MCP Registry description says what sets ismail apart: an open-source DAW the agent runs itself, no AI audio model.
+
 ### skill: reference first for a named piece, one draft at a time (hq:D-219)
 
 - A named piece to recreate or cover starts from its score, MIDI or a transcription, never from memory, and each draft is scored against it; "X meets Y" is asked back once. No draft N+1 before the person has heard draft N.

@@ -24,15 +24,31 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+      - name: apt package cache (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-espeak-ng-ffmpeg-libsndfile1-v1
       - name: speech and mp3 tools (Linux)
         if: runner.os == 'Linux'
-        # the Azure apt mirror sometimes stalls (an hour on 2026-10-07): give up on a stalled
-        # download after 30 s and retry it, and skip recommended packages we do not need
-        timeout-minutes: 10
+        # the Azure apt mirror sometimes crawls (an hour on 2026-10-07; 68 MB at about 50 KB/s, three 10-minute
+        # timeouts on 2026-10-26/27, ledger:M360). The packages are cached between runs (~/apt-archives), a
+        # half-finished download is kept for the next attempt, and a retry reads the main Ubuntu mirror (these
+        # runners take their mirror from /etc/apt/apt-mirrors.txt); recommended packages we do not need are skipped
+        timeout-minutes: 20
         run: |
-          APT="-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-          sudo apt-get $APT update
-          sudo apt-get $APT install -y --no-install-recommends espeak-ng ffmpeg libsndfile1
+          mkdir -p ~/apt-archives/partial
+          APT="-o Dir::Cache::Archives=$HOME/apt-archives -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for i in 1 2 3; do
+            if timeout 240 sudo apt-get $APT update &&                timeout 360 sudo apt-get $APT install -y --no-install-recommends espeak-ng ffmpeg libsndfile1; then
+              sudo chown -R "$USER" ~/apt-archives
+              exit 0
+            fi
+            echo "apt attempt $i timed out or failed: retrying from archive.ubuntu.com, keeping what downloaded"
+            echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+          done
+          exit 1
       - name: install
         run: pip install -e ".[dev]"
       - name: WORLD for autotune (optional; its tests skip without it)

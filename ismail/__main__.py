@@ -9,8 +9,8 @@
   python -m ismail mcp                       run the MCP server (stdio)
   python -m ismail mcp --roles dj,mc          only some roles' tools (--list-roles shows the counts)
 
-Installed with pip or uv (`pip install "ismail @ git+https://github.com/newsbubbles/ismail"`; it is not on PyPI
-yet), `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
+Installed with pip or uv (`pip install ismail`, the latest release; `pip install "ismail @ git+https://github.com/newsbubbles/ismail"`
+for main before it is released), `ismail` is the same command: `ismail ops`, `ismail -p song render`, `ismail mcp`.
 """
 import codecs
 import inspect
