@@ -6,6 +6,7 @@
 
 - `version`: which ismail runs, a source checkout (path, branch and commit) or an installed release (PyPI, the plugins), and for a release the GitHub tag that holds its source. On the start shelf, so every filtered server has it.
 - development.md "Starting from an installed ismail": call `version`; never edit a package cache; clone, reproduce on the release tag, check main's Unreleased before fixing, build from main. contributing.md points there.
+- A song's `build.py` on a plugin or `uvx` install runs with the tools' own release: `uv run --python 3.12 --with ismail==<version> python build.py` (SKILL.md, setup.md), never a second `pip install` of another version.
 
 ### settings: config_get / config_set (ledger:M368)
 
