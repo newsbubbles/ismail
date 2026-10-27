@@ -46,6 +46,7 @@ dev = ["pytest>=8.0"]
 Homepage = "https://newsbubbles.github.io/ismail/"
 Repository = "https://github.com/newsbubbles/ismail"
 Changelog = "https://github.com/newsbubbles/ismail/blob/main/CHANGELOG.md"
+Organization = "https://measuredinstruments.com"
 
 [project.scripts]
 ismail = "ismail.__main__:cli"

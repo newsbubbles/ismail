@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### version, and developing from an installed ismail (ledger:M369)
+
+- `version`: which ismail runs, a source checkout (path, branch and commit) or an installed release (PyPI, the plugins), and for a release the GitHub tag that holds its source. On the start shelf, so every filtered server has it.
+- development.md "Starting from an installed ismail": call `version`; never edit a package cache; clone, reproduce on the release tag, check main's Unreleased before fixing, build from main. contributing.md points there.
+
 ### settings: config_get / config_set (ledger:M368)
 
 - Everything a person or an agent configures is now a setting in one registry (`ismail/settings.py`, 41 settings
