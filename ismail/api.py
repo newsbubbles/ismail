@@ -2204,19 +2204,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     rd = os.path.join(P.root, 'renders')
     written = ['latest.wav'] + ([out + '.wav'] if out and mp3 != 'only' else [])
     write_renders(rd, y, R.sr, out if out and mp3 != 'only' else None)
-    mp3_note = ''
-    if mp3 != 'none':
-        from .render import write_mp3
-        name = (out or 'latest') + '.mp3'
-        try:
-            write_mp3(os.path.join(rd, 'latest.wav'), os.path.join(rd, name))
-        except RuntimeError as e:
-            raise OpError(f"render finished (renders/latest.wav) but the mp3 failed: {e}")
-        from .tags import tag_mp3
-        song = P.d.get('name') or os.path.basename(P.root)
-        tag_mp3(os.path.join(rd, name), title=song if not out or out == 'latest' else f"{song} ({out})",
-                artist=P.d.get('artist'), album=P.d.get('album') or song)
-        mp3_note = f" + renders/{name} (tagged: {song}, made with ismail)"
+    # stems and the window record first: a failed mp3 must not lose them (ledger:M373)
     if stems:
         sd = os.path.join(rd, 'stems')
         os.makedirs(sd, exist_ok=True)
@@ -2225,6 +2213,19 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
             written.append('stems/' + k.replace(':', '_') + '.wav')
     _record_window(rd, written, None if R.full else
                    {'bars': [bars[0], min(bars[1], P.d['length_bars'])], 'start_sec': R.offset + R.win_b0 * R.spb})
+    mp3_note = ''
+    if mp3 != 'none':
+        from .render import write_mp3
+        name = (out or 'latest') + '.mp3'
+        try:
+            write_mp3(os.path.join(rd, 'latest.wav'), os.path.join(rd, name))
+        except RuntimeError as e:
+            raise OpError(f"render finished (renders/latest.wav{', stems/' if stems else ''}) but the mp3 failed: {e}")
+        from .tags import tag_mp3
+        song = P.d.get('name') or os.path.basename(P.root)
+        tag_mp3(os.path.join(rd, name), title=song if not out or out == 'latest' else f"{song} ({out})",
+                artist=P.d.get('artist'), album=P.d.get('album') or song)
+        mp3_note = f" + renders/{name} (tagged: {song}, made with ismail)"
     prune_cache(P.root)
     peak = 20 * np.log10(np.max(np.abs(y)) + 1e-12)
     clip = float(np.mean(np.abs(y) >= 0.999)) * 100

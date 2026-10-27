@@ -76,7 +76,7 @@ def pcm(path):
     exe = settings.get('ffmpeg')
     if not exe:
         raise NoDecoder("ffmpeg not found: words not snapped (install it or config_set('ffmpeg', <path>))")
-    r = subprocess.run([exe, '-v', 'error', '-i', str(path), '-ac', '1', '-ar', str(SR), '-f', 's16le', '-'],
+    r = subprocess.run([exe, '-nostdin', '-v', 'error', '-i', str(path), '-ac', '1', '-ar', str(SR), '-f', 's16le', '-'],
                        capture_output=True, timeout=120)
     if r.returncode:
         raise RuntimeError(r.stderr.decode(errors='replace').strip()[-300:] or f'ffmpeg exited {r.returncode}')

@@ -156,7 +156,7 @@ def cmd_contact(song, video, n):
                         'stream=nb_read_packets', '-of', 'csv=p=0', video], capture_output=True, text=True)
     total = int(r.stdout.strip() or 0)
     step = max(1, total // n)
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', video, '-vf',
+    subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-i', video, '-vf',
                     f'select=not(mod(n\\,{step})),scale=480:-1,tile=4x{(n + 3) // 4}', '-frames:v', '1', out])
     print(f'{video}: {total} frames -> {out}')
 

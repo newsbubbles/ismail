@@ -72,7 +72,7 @@ def _font():
 
 def has_nvenc():
     try:
-        out = subprocess.run([ffmpeg(), '-hide_banner', '-encoders'], capture_output=True, text=True, timeout=15,
+        out = subprocess.run([ffmpeg(), '-nostdin', '-hide_banner', '-encoders'], capture_output=True, text=True, timeout=15,
                              creationflags=FLAGS & 0x08000000).stdout
         return 'h264_nvenc' in out
     except (OSError, subprocess.SubprocessError):
@@ -87,7 +87,7 @@ def has_gfxcapture():
     global _GFX
     if _GFX is None:
         try:
-            out = subprocess.run([ffmpeg(), '-hide_banner', '-filters'], capture_output=True, text=True, timeout=15,
+            out = subprocess.run([ffmpeg(), '-nostdin', '-hide_banner', '-filters'], capture_output=True, text=True, timeout=15,
                                  creationflags=FLAGS & 0x08000000).stdout
             _GFX = os.name == 'nt' and ' gfxcapture ' in out
         except (OSError, subprocess.SubprocessError, TypeError):

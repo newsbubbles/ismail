@@ -594,7 +594,7 @@ def _floor_pairs(clips, key, floor, floor_from, exam_id, answers_path):
     os.makedirs(out_d, exist_ok=True)
 
     def run(*a):
-        subprocess.run([ff, '-y', '-loglevel', 'error', *a], check=True, capture_output=True)
+        subprocess.run([ff, '-nostdin', '-y', '-loglevel', 'error', *a], check=True, capture_output=True)
 
     groups = {}
     for c in cl:

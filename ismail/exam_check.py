@@ -48,7 +48,7 @@ def _decode(path):
         ff = settings.get('ffmpeg')
         if not ff:
             raise first
-        r = subprocess.run([ff, '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '2', '-ar', '44100', 'pipe:1'],
+        r = subprocess.run([ff, '-nostdin', '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '2', '-ar', '44100', 'pipe:1'],
                            capture_output=True, timeout=120)
         if r.returncode or not r.stdout:
             raise RuntimeError(r.stderr.decode('utf8', 'replace').strip()[:200] or str(first))

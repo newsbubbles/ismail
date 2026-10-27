@@ -29,7 +29,7 @@ NONWORDS = {'hm', 'hmm', 'hmmm', 'mm', 'mmm', 'mmmm', 'la', 'da', 'na', 'doo', '
 
 def decode(path, ffmpeg, sr=SR):
     """A voice note (webm, ogg, m4a, wav) -> mono float32 at sr."""
-    out = subprocess.run([ffmpeg, '-v', 'error', '-i', str(path), '-ac', '1', '-ar', str(sr), '-f', 'f32le', '-'],
+    out = subprocess.run([ffmpeg, '-nostdin', '-v', 'error', '-i', str(path), '-ac', '1', '-ar', str(sr), '-f', 'f32le', '-'],
                          capture_output=True, timeout=120)
     if out.returncode:
         raise ValueError(f"ffmpeg could not read {path}: {out.stderr.decode('utf8', 'replace')[-200:]}")
