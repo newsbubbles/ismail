@@ -59,19 +59,30 @@ def _alias_args(sig, kw):
     return kw
 
 
+# the arguments that name a project folder: a bare song name in one is a folder in the songs setting, for every op
+# and every way in (MCP, the CLI's -p, a library call); live_load and live_parity resolve their `song` themselves
+PROJECT_ARGS = ('project', 'derived_from')
+
+
 def op(mutates=False):
     def deco(fn):
         import functools
         import inspect
         sig = inspect.signature(fn)
+        project_args = [n for n in PROJECT_ARGS if n in sig.parameters]
 
         @functools.wraps(fn)
         def wrapped(*a, **kw):
             kw = _alias_args(sig, kw)
             try:
-                sig.bind(*a, **kw)
+                bound = sig.bind(*a, **kw)
             except TypeError as e:
                 raise OpError(f"bad arguments for {fn.__name__}: {e}. Signature: {fn.__name__}{sig}")
+            bare = [n for n in project_args if settings.is_bare_name(bound.arguments.get(n))]
+            if bare:                                 # ledger:M375: 'my_song' is <songs>/my_song, never the cwd's
+                for n in bare:
+                    bound.arguments[n] = settings.project_dir(bound.arguments[n])
+                a, kw = bound.args, bound.kwargs
             try:
                 return fn(*a, **kw)
             except machine.MachineBusy as e:
@@ -132,10 +143,14 @@ def heavy(kind='cpu'):
 
 class Project:
     def __init__(self, root):
-        self.root = os.path.abspath(root)
+        self.root = settings.project_dir(root)     # a bare song name: a folder in the songs setting (ledger:M375)
         self.file = os.path.join(self.root, 'project.json')
         if not os.path.exists(self.file):
-            raise OpError(f"no project at {self.root}; create one with project_new(project='{root}', bpm=..., length_bars=...)")
+            bare = (f" (a bare song name is a folder in the songs folder, {settings.get('songs')}: "
+                    f"config_get('songs'); a path with a folder in it, './{root}', is taken from the working folder)"
+                    if settings.is_bare_name(root) else '')
+            raise OpError(f"no project at {self.root}{bare}; create one with project_new(project='{root}', bpm=..., "
+                          f"length_bars=...)")
         with open(self.file, encoding='utf8') as f:
             self.d = json.load(f)
 
@@ -307,7 +322,9 @@ def _check_voices(spec, P):
 def project_new(project: str, bpm: float, length_bars: int, name: str = None, beats_per_bar: int = 4,
                 offset_sec: float = 0.0, reference: str = None, objective: str = None,
                 derived_from: str = None, master_limiter: bool = True) -> str:
-    """Create a new project directory. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
+    """Create a new project directory. project: a bare song name ('my_song') makes it in the songs folder
+    (config_get('songs')), as every op reads a bare name; a path ('./my_song', 'D:/elsewhere/my_song') is taken as
+    given. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
     master_limiter: start the master chain with a safety limiter (-0.3 dB); False for a build that writes its
     own master chain, so the default does not sit ahead of it.
     objective: what this piece is for, in the person's words ("keep a listener asleep for 3 hours"); see project_set.

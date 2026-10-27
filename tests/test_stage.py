@@ -427,11 +427,12 @@ def test_hooks_run_on_entering_vr_and_presence_tracks_it(stage, tmp_path, monkey
     assert _get(port, 'live/presence')[1]['hooks'] == {'entered_vr': 1, 'left_vr': 1}
 
 
-def test_a_hook_gets_the_event_as_json_on_stdin(stage, tmp_path, monkeypatch):
-    """ledger:M368: a hook reads the event from its standard input; the STAGE_* names stay for older hooks."""
+def test_a_hook_gets_the_event_in_its_environment_and_nothing_on_stdin(stage, tmp_path, monkeypatch):
+    """A hook gets the event as STAGE_*; its stdin is closed, so a `claude -p` hook never reads it as prompt."""
     port = stage['port']
     out = stage['scenes'] / '_stage' / 'stdin.json'
-    cmd = ['python', '-c', 'import sys, json, os; e = json.load(sys.stdin); e["old"] = os.environ["STAGE_EVENT"]; '
+    cmd = ['python', '-c', 'import sys, json, os; e = {k[6:].lower(): v for k, v in os.environ.items() '
+                           'if k.startswith("STAGE_")}; e["stdin"] = sys.stdin.read() if sys.stdin else ""; '
                            'open("stdin.json", "w").write(json.dumps(e))']
     home = tmp_path / 'stage_hooks.json'
     monkeypatch.setenv('ISMAIL_STAGE_HOOKS', str(home))
@@ -442,7 +443,7 @@ def test_a_hook_gets_the_event_as_json_on_stdin(stage, tmp_path, monkeypatch):
             break
         time.sleep(0.1)
     e = json.loads(out.read_text())
-    assert (e['event'], e['scene'], e['old']) == ('entered_vr', 'attic', 'entered_vr')
+    assert (e['event'], e['scene'], e['stdin']) == ('entered_vr', 'attic', '')
     assert e['url'].startswith('http') and e['scenes'] == str(stage['scenes'])
 
 

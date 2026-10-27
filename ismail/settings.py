@@ -28,6 +28,8 @@ import os
 import re
 import shutil
 import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 CONFIG_ENV = 'ISMAIL_CONFIG'
@@ -64,9 +66,10 @@ NEXT_START = 'at the next live_start'
 SETTINGS = [
     # paths: where ismail keeps things
     Setting('songs', 'ISMAIL_SONGS', 'path', _songs_default,
-            'the songs folder: every song is a folder in it, and the machine board lives in it', 'paths',
+            'the songs folder: a bare song name (project=\'my_song\') is a folder in it for every op, and the '
+            'machine board lives in it', 'paths',
             live=False, when='restart ismail (the MCP server, or quit and reopen the app) and its stage, phone and '
-                             'live processes; a CLI call picks it up at once',
+                             'live processes; a bare song name and a CLI call follow it at once',
             default_doc='songs/ of a clone, else Documents/ismail'),
     Setting('voices', 'ISMAIL_VOICES', 'paths', list,
             'more folders of code voices, searched after the song\'s own voices/ and before the built-ins', 'paths'),
@@ -88,22 +91,28 @@ SETTINGS = [
             'where a listening-together session goes when no project is named and no live set runs', 'paths',
             default_doc='<songs>/_listen'),
     Setting('feedback.home', 'ISMAIL_FEEDBACK_HOME', 'path', _home('feedback'),
-            'the feedback pages\' server state and answers (feedback_*)', 'paths'),
+            'the feedback pages\' server state and answers (feedback_*)', 'paths',
+            live=False, when='stop a running feedback server first (feedback_stop), change it, then start it again: '
+                             'a running one keeps its state in the old folder'),
     Setting('phone.home', 'ISMAIL_PHONE_HOME', 'path', _home('phone'),
             "the phone page's state: its inbox, voice notes, hooks.json", 'paths',
-            live=False, when='restart the phone page server (phone_stop, then phone_start)'),
+            live=False, when='phone_restart() (the phone ops follow at once; a running page server keeps its '
+                             'folder until it restarts)'),
     Setting('stream.home', 'ISMAIL_STREAM_HOME', 'path', _home('stream'),
             'the streaming state: sites, keys file, chat, request queue', 'paths',
             live=False, when=RESTART),
     Setting('exampage.rounds', 'ISMAIL_EXAMPAGE_ROUNDS', 'path', _home('exampage', 'rounds.json'),
             'the registry of picture and exam rounds (name -> round folder)', 'paths'),
     Setting('stage.registry', 'ISMAIL_STAGE_REGISTRY', 'path', _home('stage'),
-            'where each running stage server leaves a note so agents and the guard find it', 'paths'),
+            'where each running stage server leaves a note so agents and the guard find it', 'paths',
+            live=False, when='stop the running stage servers first (stage_stop), change it, then stage_start: a '
+                             'running one keeps its note in the old folder, where agents no longer look'),
     Setting('stage.hooks', 'ISMAIL_STAGE_HOOKS', 'path', _home('stage_hooks.json'),
             'the stage hooks file: commands run on entered_vr, voice_note and the other stage events', 'paths'),
     Setting('live.registry', 'ISMAIL_LIVE_REGISTRY', 'path', _home('live'),
             'where each running live engine leaves a note so live_start can name the ones holding a device',
-            'paths'),
+            'paths', live=False, when='stop the running live engines first (live_stop), change it, then live_start: '
+                                      'a running one keeps its note in the old folder'),
     # the machine board
     Setting('machine.dir', 'ISMAIL_MACHINE_DIR', 'path', None,
             'the machine board every session shares (heavy-job slots, history)', 'machine',
@@ -225,13 +234,34 @@ def _api_ops():
 
 
 def path():
-    """The settings file: $ISMAIL_CONFIG, else ~/.ismail/config.json."""
-    return os.path.expanduser(os.environ.get(CONFIG_ENV) or os.path.join('~', '.ismail', 'config.json'))
+    """The settings file: $ISMAIL_CONFIG, else ~/.ismail/config.json. A relative $ISMAIL_CONFIG is made absolute
+    against this process's folder at its first read, and the variable is set to that, so a process ismail starts
+    from another folder reads the same file."""
+    raw = os.environ.get(CONFIG_ENV)
+    if raw:
+        p = os.path.abspath(os.path.expanduser(raw))
+        if p != raw:
+            os.environ[CONFIG_ENV] = p
+        return p
+    return os.path.expanduser(os.path.join('~', '.ismail', 'config.json'))
+
+
+def _json_problem(p, e):
+    """Why the file does not read, with where and the fix."""
+    if isinstance(e, json.JSONDecodeError):
+        why = f"{e.msg} at line {e.lineno}, column {e.colno}"
+        fix = ('a Windows path needs forward slashes ("D:/music") or doubled backslashes ("D:\\\\music")'
+               if 'escape' in e.msg.lower() else 'fix that spot by hand')
+        return f"the settings file {p} does not read as JSON: {why}; {fix}"
+    if isinstance(e, UnicodeDecodeError):
+        return f"the settings file {p} is not UTF-8 text ({e.reason} at byte {e.start}); save it as UTF-8"
+    return f"the settings file {p} cannot be read ({e})"
 
 
 def load():
-    """(the file's settings as a dict, None or why it could not be read). Read again only when its size or
-    modification time changed; a missing file is an empty one."""
+    """(the file's settings as a dict, None or why it could not be read: the file, the line and column, the fix).
+    Read again only when its size or modification time changed; a missing file is an empty one. A byte order mark
+    (Notepad's UTF-8) is fine."""
     p = path()
     try:
         st = os.stat(p)
@@ -242,11 +272,12 @@ def load():
         if _cache['key'] == key:
             return _cache['data'], _cache['error']
     try:
-        with open(p, encoding='utf8') as f:
+        with open(p, encoding='utf-8-sig') as f:
             data = json.load(f)
-        err = None if isinstance(data, dict) else 'it is not a JSON object of key: value'
+        err = None if isinstance(data, dict) else (f'the settings file {p} is not a JSON object of "key": value '
+                                                   f'({{"songs": "D:/music"}})')
     except (OSError, ValueError) as e:
-        data, err = {}, f'it does not read as JSON ({e})'
+        data, err = {}, _json_problem(p, e)
     if err:
         data = {}
     with _lock:
@@ -373,14 +404,50 @@ def resolve(key, strict=False):
                 raise ValueError(f"{s.env}={raw!r}: {e}") from None
             problems.append(f"{s.env}={raw!r} is ignored: {e}")
     data, err = load()
+    if err:
+        problems.append(f"{err} (it is ignored until then)")
     if key in data:
         try:
             return coerce(s, data[key]), 'file', problems
         except ValueError as e:
             if strict:
                 raise ValueError(f"{path()}: {e}") from None
+            kept = _known_names(s, data[key])
+            if kept is not None:
+                problems.append(f"the file's value: {e}; those are skipped, the rest is used")
+                return kept, 'file', problems
             problems.append(f"the file's value is ignored: {e}")
     return default(key), 'default', problems
+
+
+def _known_names(s, value):
+    """A file's list of names with the unknown ones left out (the MCP server serves the rest), or None when the
+    value is not a list of names at all."""
+    c = _choices(s)
+    if s.type != 'list' or c is None:
+        return None
+    try:
+        names = coerce(s, value, from_env=True)
+    except ValueError:
+        return None
+    kept = [x for x in names if x in c]
+    return kept or None
+
+
+def is_bare_name(p):
+    """True for a bare song name ('my_song'): text with no folder separator that is not '.', '..', a drive
+    ('C:x') or a home path ('~x'). Anything else is a path, taken as given."""
+    return (isinstance(p, str) and bool(p.strip()) and p not in ('.', '..') and not re.search(r'[\\/]', p)
+            and not os.path.isabs(p) and not re.match(r'^[A-Za-z]:', p) and not p.startswith('~'))
+
+
+def project_dir(p):
+    """The folder a project argument names (ledger:M375, Nate 10-27): a bare song name is always a folder in the
+    songs setting, read now, so config_set('songs') moves where it lands at the next call; '.', '..' and any path
+    with a separator are taken as given, from the working folder."""
+    if is_bare_name(p):
+        return os.path.join(os.path.abspath(get('songs')), p.strip())
+    return os.path.abspath(p)
 
 
 def get(key, strict=False):
@@ -393,21 +460,83 @@ def source(key):
     return resolve(key)[1]
 
 
+def is_set(key):
+    """True when the setting is set anywhere: its old variable is in the environment with any value (even empty or
+    not a number, as code that kept out of the way of a set variable always saw it), or the file holds a usable
+    value."""
+    return setting(key).env in os.environ or resolve(key)[1] != 'default'
+
+
+WRITE_TRIES, WRITE_WAIT_S = 3, 0.05     # Windows refuses a replace while another program has the file open
+LOCK_WAIT_S, LOCK_STALE_S = 3.0, 30.0   # two processes changing it at once take turns; a lock this old was left
+
+
 def _write(data):
+    """Write the file whole and atomically (a temp file, then a replace); ValueError when it cannot be, with the
+    temp file removed and the old file as it was."""
     p = path()
-    os.makedirs(os.path.dirname(p) or '.', exist_ok=True)
     tmp = f'{p}.{os.getpid()}.{threading.get_ident()}.tmp'
-    with open(tmp, 'w', encoding='utf8') as f:
-        json.dump(dict(sorted(data.items())), f, indent=1, ensure_ascii=False)
-        f.write('\n')
-    os.replace(tmp, p)
+    last = None
+    try:
+        os.makedirs(os.path.dirname(p) or '.', exist_ok=True)
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(dict(sorted(data.items())), f, indent=1, ensure_ascii=False)
+            f.write('\n')
+        for i in range(WRITE_TRIES):
+            try:
+                os.replace(tmp, p)
+                return
+            except OSError as e:
+                last = e
+                time.sleep(WRITE_WAIT_S)
+    except OSError as e:
+        last = e
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    raise ValueError(f"the settings file {p} could not be written ({last}); another program may have it open, or "
+                     f"the folder is read-only: try again in a moment")
+
+
+@contextmanager
+def _locked():
+    """One process at a time changes the file (a lock file beside it; one older than LOCK_STALE_S was left by a
+    process that died, and is taken over)."""
+    lock = path() + '.lock'
+    end = time.monotonic() + LOCK_WAIT_S
+    fd = None
+    while fd is None:
+        try:
+            os.makedirs(os.path.dirname(lock) or '.', exist_ok=True)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - os.stat(lock).st_mtime > LOCK_STALE_S:
+                    os.remove(lock)
+                    continue
+            except OSError:
+                continue
+            if time.monotonic() > end:
+                raise ValueError(f"the settings file {path()} is being changed by another process ({lock}): try "
+                                 f"again in a moment") from None
+            time.sleep(WRITE_WAIT_S)
+        except OSError as e:
+            raise ValueError(f"the settings file {path()} cannot be changed: {e}") from None
+    try:
+        yield
+    finally:
+        os.close(fd)
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
 
 
 def _editable():
     data, err = load()
     if err:
-        raise ValueError(f"the settings file {path()} cannot be changed while {err}: fix it by hand first (it is "
-                         f"never overwritten while broken)")
+        raise ValueError(f"{err}. It is never overwritten while broken: fix it by hand first")
     return dict(data)
 
 
@@ -419,20 +548,22 @@ def put(key, value):
         v = os.path.abspath(v)
     elif s.type == 'paths':
         v = [os.path.abspath(x) for x in v]
-    data = _editable()
-    data[key] = v
-    _write(data)
+    with _locked():
+        data = _editable()
+        data[key] = v
+        _write(data)
     return v
 
 
 def drop(key):
     """Remove key from the file; returns True if it was there."""
     setting(key)
-    data = _editable()
-    if key not in data:
-        return False
-    del data[key]
-    _write(data)
+    with _locked():
+        data = _editable()
+        if key not in data:
+            return False
+        del data[key]
+        _write(data)
     return True
 
 

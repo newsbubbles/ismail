@@ -10,8 +10,8 @@ So the server keeps presence:
   <state>/unread.jsonl, and the voice_unheard hooks run. A note a listener took but did not answer is said to be
   "handed to <who>" (not the listener's own ack: the user can tell taken from answered).
 - hooks: commands in ~/.ismail/stage_hooks.json (the stage.hooks setting), run on this computer on entered_vr,
-  left_vr, voice_note and voice_unheard (any agent: a toast, `claude -p`, `codex exec`), each given the event as JSON
-  on its stdin (and as STAGE_* for hooks written before). Never from the scenes
+  left_vr, voice_note and voice_unheard (any agent: a toast, `claude -p`, `codex exec`), with STAGE_* in their
+  environment. Never from the scenes
   folder by itself: a song's folder travels (a copied world), so its <state>/hooks.json runs only when the home file
   names that scenes folder in "trust".
 - GET /live/presence and <state>/presence.json: in VR or not, the scene, the last note, the listeners, the unread.
@@ -340,36 +340,23 @@ def hooks():
 URL = ['http://127.0.0.1:8862']
 
 
-def _feed(p, data):
-    """The event to a hook's stdin, then closed, in a thread: a hook that never reads it holds nothing up."""
-    def go():
-        try:
-            p.stdin.write(data)
-            p.stdin.close()
-        except (OSError, ValueError):
-            pass
-    threading.Thread(target=go, daemon=True).start()
-
-
 def fire(event, scene, event_id=None, text=None, file=None, who=None):
     """Run the hooks for an event, each in its own process (never waited for); output goes to <state>/hooks.log."""
     cmds = hooks().get(event) or []
     if not cmds:
         return
     S = _server()
-    info = {'event': event, 'scene': scene or '', 'url': URL[0], 'event_id': str(event_id or ''), 'text': text or '',
-            'file': file or '', 'inbox_seq': SEQ[0], 'scenes': str(S.SCENES), 'state': str(S.STATE), 'who': who or ''}
-    # the event as JSON on the hook's stdin; the STAGE_* names are kept for hooks written before (ledger:M368)
-    env = {**os.environ, **{'STAGE_' + k.upper(): str(v) for k, v in info.items()}}
-    data = (json.dumps(info, ensure_ascii=False) + '\n').encode('utf-8')
+    env = {**os.environ, 'STAGE_EVENT': event, 'STAGE_SCENE': scene or '', 'STAGE_URL': URL[0],
+           'STAGE_EVENT_ID': str(event_id or ''), 'STAGE_TEXT': text or '', 'STAGE_FILE': file or '',
+           'STAGE_INBOX_SEQ': str(SEQ[0]), 'STAGE_SCENES': str(S.SCENES), 'STAGE_STATE': str(S.STATE),
+           'STAGE_WHO': who or ''}
     for c in cmds:
         try:
             log = open(S.STATE / 'hooks.log', 'a', encoding='utf-8')
             log.write(f'{S.now_iso()} {event} {scene}: {c}\n')
             log.flush()
-            p = subprocess.Popen(c, shell=isinstance(c, str), env=env, cwd=str(S.STATE), stdout=log, stderr=log,
-                                 stdin=subprocess.PIPE, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            _feed(p, data)
+            subprocess.Popen(c, shell=isinstance(c, str), env=env, cwd=str(S.STATE), stdout=log, stderr=log,
+                             stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             print(f'[hook] {event} {scene}: {c}', flush=True)
         except (OSError, ValueError) as x:
             print(f'[hook] {event} failed: {c}: {x}', flush=True)

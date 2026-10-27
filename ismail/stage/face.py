@@ -74,6 +74,7 @@ LETTERS = [('oo', 'UW'), ('ee', 'IY'), ('ea', 'IY'), ('ou', 'AW'), ('ow', 'OW'),
 ENGINES = ('auto', 'rhubarb', 'rhubarb_english', 'words')
 
 _DICT = None
+_DICT_FOR = None     # the cmudict setting _DICT was read for: a config_set reaches the next call
 
 
 def _dict_path():
@@ -89,9 +90,10 @@ def _dict_path():
 
 def pronouncing():
     """word -> [ARPAbet phonemes] from cmudict.dict (first pronunciation), or {} when it is not here."""
-    global _DICT
-    if _DICT is None:
-        _DICT = {}
+    global _DICT, _DICT_FOR
+    now = settings.get('cmudict')
+    if _DICT is None or now != _DICT_FOR:
+        _DICT, _DICT_FOR = {}, now
         p = _dict_path()
         if p and p.is_file():
             for line in p.read_text(encoding='utf-8', errors='replace').splitlines():

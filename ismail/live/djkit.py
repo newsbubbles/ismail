@@ -155,9 +155,9 @@ class Set:
     def start(self, bpm, device='default', trim_db=None, cap_db=None, min_free_gb=2.0, priority='above_normal'):
         """live_start at set loudness (trim 4, cap -12, about -16 LUFS, unless given here or set with config_set),
         with the pre-flight in the reply: other engines still holding a device, and free disk for a recording."""
-        if trim_db is None and settings.source('live.trim_db') == 'default':   # set there: the engine reads it
+        if trim_db is None and not settings.is_set('live.trim_db'):   # set there: the engine reads it
             trim_db = 4
-        if cap_db is None and settings.source('live.cap_db') == 'default':
+        if cap_db is None and not settings.is_set('live.cap_db'):
             cap_db = -12
         r = self.O['live_start'](self.P, bpm=bpm, device=device, trim_db=trim_db, cap_db=cap_db, priority=priority)
         free = shutil.disk_usage(self.P).free / 1e9

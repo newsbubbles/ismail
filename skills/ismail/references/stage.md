@@ -137,10 +137,9 @@ something you do.
   note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
 - **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json`,
   `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...], "session_stuck": [...]}`,
-  each a shell command (or an argv list) on this computer (a toast, `claude -p "..."`, `codex exec "..."`). It gets
-  the event on its standard input as one JSON object (`event`, `scene`, `text`, `file`, `event_id`, `url`, `scenes`,
-  and `who` for session_stuck); hooks written before read the same as `STAGE_EVENT`, `STAGE_SCENE` and so on,
-  which still work. Output goes to
+  each a shell command (or an argv list) run on this computer with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`,
+  `STAGE_FILE`, `STAGE_EVENT_ID`, `STAGE_URL`, `STAGE_SCENES` (and `STAGE_WHO` for session_stuck) in its environment
+  (a toast, `claude -p "..."`, `codex exec "..."`); output goes to
   `_stage/hooks.log`. A song's own `_stage/hooks.json` runs only when the home file lists its scenes folder in
   `"trust": [...]`: a scenes folder travels, and must never run commands for whoever opens it.
 

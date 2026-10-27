@@ -349,7 +349,7 @@ NEEDS_NOTE = ("mic_ok needs the person's yes to the mic in this session: the id 
 
 def _phone_home():
     from .phone import server as S
-    return Path(S.HOME)
+    return Path(S.home())
 
 
 def _jsonl(p):

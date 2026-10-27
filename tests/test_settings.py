@@ -210,6 +210,83 @@ def test_the_songs_folder_follows_the_setting(cfg, tmp_path):
 
 # ------------------------------------------------------------------ the ops
 
+def test_a_file_with_a_byte_order_mark_reads(cfg, tmp_path):
+    cfg.parent.mkdir(parents=True)
+    cfg.write_bytes(b'\xef\xbb\xbf' + json.dumps({'live.trim_db': -3}).encode())     # Notepad's UTF-8
+    assert (S.get('live.trim_db'), S.source('live.trim_db')) == (-3.0, 'file')
+    assert api.OPS['config_set']('live.cap_db', -20)
+    assert json.loads(cfg.read_text(encoding='utf-8')) == {'live.cap_db': -20.0, 'live.trim_db': -3}
+
+
+def test_a_bad_escape_is_named_with_where_and_the_fix(cfg):
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('{\n "songs": "D:\\music"\n}\n', encoding='utf8')     # a Windows path written by hand
+    problems = S.resolve('live.trim_db')[2]
+    assert problems and str(cfg) in problems[0] and 'line 2, column' in problems[0]
+    assert 'forward slashes' in problems[0] and 'doubled backslashes' in problems[0]
+    for reply in (api.OPS['config_get'](), api.OPS['config_get']('songs')):
+        assert str(cfg) in reply and 'line 2, column' in reply and 'forward slashes' in reply
+    with pytest.raises(api.OpError) as e:
+        api.OPS['config_set']('live.trim_db', -3)
+    assert str(cfg) in str(e.value) and 'line 2, column' in str(e.value) and 'forward slashes' in str(e.value)
+
+
+def test_a_relative_config_path_is_made_absolute_for_children(cfg, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(S.CONFIG_ENV, 'mine.json')
+    assert S.path() == str(tmp_path / 'mine.json') == os.environ[S.CONFIG_ENV]
+    api.OPS['config_set']('live.trim_db', -2)
+    monkeypatch.chdir(tmp_path.parent)                      # a child started elsewhere reads the same file
+    r = subprocess.run([sys.executable, '-c', "from ismail import settings; print(settings.get('live.trim_db'))"],
+                       capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+    assert r.stdout.strip() == '-2.0', r.stderr
+
+
+def test_a_write_that_windows_refuses_is_retried_then_refused_cleanly(cfg, monkeypatch):
+    api.OPS['config_set']('live.trim_db', -2)
+    real, calls = os.replace, []
+
+    def busy(a, b):
+        calls.append(a)
+        if len(calls) < 3:
+            raise PermissionError(13, 'Access is denied')
+        return real(a, b)
+    monkeypatch.setattr(S.os, 'replace', busy)
+    api.OPS['config_set']('live.trim_db', -3)                # the third try lands
+    assert len(calls) == 3 and S.get('live.trim_db') == -3.0
+    monkeypatch.setattr(S.os, 'replace', lambda a, b: (_ for _ in ()).throw(PermissionError(13, 'Access is denied')))
+    with pytest.raises(api.OpError, match='could not be written'):
+        api.OPS['config_set']('live.trim_db', -4)
+    assert S.get('live.trim_db') == -3.0
+    assert sorted(x.name for x in cfg.parent.iterdir()) == ['config.json']      # no temp file, no lock left
+
+
+def test_two_writers_take_turns_and_a_left_lock_is_taken_over(cfg, monkeypatch):
+    cfg.parent.mkdir(parents=True)
+    lock = Path(str(cfg) + '.lock')
+    lock.write_text('')
+    monkeypatch.setattr(S, 'LOCK_WAIT_S', 0.2)
+    with pytest.raises(api.OpError, match='being changed by another process'):
+        api.OPS['config_set']('live.trim_db', -2)
+    old = lock.stat().st_mtime - S.LOCK_STALE_S - 5
+    os.utime(lock, (old, old))                               # a process that died left it
+    api.OPS['config_set']('live.trim_db', -2)
+    assert S.get('live.trim_db') == -2.0 and not lock.exists()
+
+
+def test_the_replies_show_paths_in_one_kind_of_separator(cfg, tmp_path, monkeypatch):
+    mixed = str(tmp_path).replace(os.sep, '/') + os.sep + 'songs'           # how a default can come out
+    import dataclasses
+    monkeypatch.setitem(S.REGISTRY, 'songs', dataclasses.replace(S.REGISTRY['songs'], default=lambda: mixed))
+    want = os.path.normpath(mixed)
+    got = api.OPS['config_get']('songs')
+    assert want in got and (mixed == want or mixed not in got)
+    got = api.OPS['config_set']('songs', str(tmp_path / 'music'))
+    assert f"(was {want}," in got and 'bare song name' in got
+    assert os.path.normpath(str(cfg)) in got
+    assert want in api.OPS['config_unset']('songs')
+
+
 def test_set_get_unset_round_trip(cfg, tmp_path):
     d = tmp_path / 'stacks'
     d.mkdir()
@@ -345,6 +422,80 @@ def test_the_mcp_server_reads_its_tool_list_settings(cfg):
         mcp_server.main([])
 
 
+def test_djkit_keeps_out_of_the_way_of_any_old_variable(cfg, monkeypatch):
+    from ismail.live.djkit import Set
+    got = {}
+    kit = Set.__new__(Set)
+    cfg.parent.mkdir(parents=True)
+    kit.P, kit.log_path = str(cfg.parent), str(cfg.parent / 'log.txt')
+    kit.O = {'live_start': lambda p, **kw: (got.update(kw), 'started')[1]}
+    monkeypatch.setenv('ISMAIL_LIVE_TRIM_DB', '')          # set, even empty or not a number: as on main
+    monkeypatch.setenv('ISMAIL_LIVE_CAP_DB', 'loud')
+    kit.start(120)
+    assert (got['trim_db'], got['cap_db']) == (None, None)
+    assert S.is_set('live.trim_db') and S.source('live.trim_db') == 'default'
+
+
+def _mcp(argv, monkeypatch):
+    from ismail import mcp_server as M
+    served = {}
+    monkeypatch.setattr(M, 'serve_only', lambda names, how: served.update(names=names, how=how))
+    monkeypatch.setattr(M, 'build', lambda names: type('Srv', (), {'run': lambda self, **kw: None})())
+    monkeypatch.setattr(M.mcp, 'run', lambda **kw: None)
+    M.main(argv)
+    return served
+
+
+def test_a_bad_role_in_the_file_never_stops_the_mcp_server(cfg, monkeypatch, capsys):
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(json.dumps({'mcp.roles': ['mc', 'nosuch'], 'mcp.shelves': ['nosuch'], 'mcp.max_tools': 'lots'}),
+                   encoding='utf8')
+    served = _mcp([], monkeypatch)
+    err = capsys.readouterr().err
+    assert served['how'] == 'roles mc' and served['names']               # the known role is served, the rest skipped
+    assert 'nosuch' in err and 'mcp.shelves' in err and 'mcp.max_tools' in err
+    assert S.resolve('mcp.roles')[:2] == (['mc'], 'file')
+    with pytest.raises(SystemExit):                          # a bad flag is the caller's own typo: refused
+        _mcp(['--roles', 'nosuch'], monkeypatch)
+    monkeypatch.setenv('ISMAIL_MCP_MAX_TOOLS', 'lots')       # and an old variable that does not read, as before
+    with pytest.raises(SystemExit):
+        _mcp(['--roles', 'mc'], monkeypatch)
+
+
+def test_the_phone_ops_follow_the_phone_home_setting(cfg, tmp_path, monkeypatch):
+    from ismail import guards
+    from ismail.phone import ops as PO, server as PS
+    monkeypatch.setattr(PS, '_HOMES_SEEN', [])               # only the folders this test names
+    a, b = tmp_path / 'phone_a', tmp_path / 'phone_b'
+    api.OPS['config_set']('phone.home', str(a))
+    assert PS.home() == a and PO._cursor_path('crew') == a / 'cursors' / 'crew.json' and guards._phone_home() == a
+    assert PO._port() is None
+    a.mkdir()
+    (a / 'server.json').write_text(json.dumps({'port': 18870, 'pid': 0}), encoding='utf8')
+    assert PO._port() == 18870
+    api.OPS['config_set']('phone.home', str(b))                    # no restart of this process
+    assert PS.home() == b and PO._cursor_path('crew').parent.parent == b and guards._phone_home() == b
+    assert PO._running() == (a, {'port': 18870, 'pid': 0})       # phone_stop still finds the server in the old one
+    assert 'phone_restart' in S.applies(S.setting('phone.home'))
+
+
+def test_the_mouth_dictionary_follows_its_setting(cfg, tmp_path):
+    from ismail.stage import face
+    one, two = tmp_path / 'one.dict', tmp_path / 'two.dict'
+    one.write_text('hello HH AH0 L OW1\n', encoding='utf8')
+    two.write_text('hello HH EH1 L OW0\n', encoding='utf8')
+    api.OPS['config_set']('cmudict', str(one))
+    assert face.pronouncing()['hello'] == ['HH', 'AH0', 'L', 'OW1']
+    api.OPS['config_set']('cmudict', str(two))
+    assert face.pronouncing()['hello'] == ['HH', 'EH1', 'L', 'OW0']
+
+
+def test_registries_say_to_stop_running_servers_first(cfg):
+    for key, stop in (('stage.registry', 'stage_stop'), ('live.registry', 'live_stop'),
+                      ('feedback.home', 'feedback_stop')):
+        assert stop in S.applies(S.setting(key)) and stop in api.OPS['config_set'](key, 'X:/elsewhere')
+
+
 def test_machine_run_as_names_the_session(tmp_path):
     from ismail import machine
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(tmp_path / 'board'), CI='1')
@@ -374,8 +525,24 @@ def _guard(cfg):
                                                   ROOT / 'skills' / 'ismail' / 'hooks' / 'named_ops_guard.py')
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    m.CONFIG_FILE = str(cfg)
+    assert m.config_file() == str(cfg)          # ISMAIL_CONFIG, as ismail reads it (the cfg fixture sets it)
     return m
+
+
+def test_the_guard_finds_the_file_ismail_finds(cfg, tmp_path, monkeypatch):
+    g = _guard(cfg)
+    assert g.config_file() == S.path() == str(cfg)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(S.CONFIG_ENV, 'rel.json')
+    assert g.config_file() == str(tmp_path / 'rel.json')
+    monkeypatch.delenv(S.CONFIG_ENV)
+    assert g.config_file() == os.path.join(os.path.expanduser('~'), '.ismail', 'config.json')
+
+
+def test_the_guard_reads_a_file_with_a_byte_order_mark(cfg, tmp_path):
+    cfg.parent.mkdir(parents=True)
+    cfg.write_bytes(b'\xef\xbb\xbf' + json.dumps({'stage.registry': str(tmp_path / 'r')}).encode())
+    assert _guard(cfg).setting('stage.registry') == str(tmp_path / 'r')
 
 
 def test_the_guard_reads_the_registries_from_the_settings_file(cfg, tmp_path, monkeypatch):

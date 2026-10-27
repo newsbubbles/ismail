@@ -50,19 +50,26 @@ except ImportError:
     import settings
     import tags
 
-HOME = Path(settings.get('phone.home'))
+HOME = Path(settings.get('phone.home'))     # this server's folder, fixed when it starts (phone_restart moves it)
+_HOME_AT_IMPORT = HOME
+_HOMES_SEEN = [HOME]
 
 
-def feed_stdin(p, data):
-    """Write data to a started hook's stdin and close it, in a thread: a hook that never reads it cannot hold the
-    server (the write ends when the hook exits)."""
-    def go():
-        try:
-            p.stdin.write(data)
-            p.stdin.close()
-        except (OSError, ValueError):
-            pass
-    threading.Thread(target=go, daemon=True).start()
+def homes():
+    """The phone folder for the ops of a running ismail, read at each call so config_set('phone.home') reaches them
+    at once, then the folders this process used before (newest first): phone_stop still finds a server started under
+    the old one. A test that sets HOME gets only HOME."""
+    if HOME is not _HOME_AT_IMPORT:
+        return [HOME]
+    now = Path(settings.get('phone.home'))
+    if now not in _HOMES_SEEN:
+        _HOMES_SEEN.append(now)
+    return [now] + [h for h in reversed(_HOMES_SEEN) if h != now]
+
+
+def home():
+    """The phone folder now (see homes)."""
+    return homes()[0]
 
 OFFERS_KEPT = 200                                # downloads the phone can page back through (/api/offers)
 PAGE = Path(__file__).resolve().parent / 'page'
@@ -749,18 +756,13 @@ class Phone:
             hooks = json.loads((HOME / 'hooks.json').read_text(encoding='utf8'))
         except (OSError, ValueError):
             return
-        event = {'event': rec.get('kind', ''), 'text': rec.get('text') or rec.get('what') or '',
-                 'inbox': str(self.routes()[-1]), 'line': rec}
-        # the event as JSON on the hook's stdin; the PHONE_* names are kept for hooks written before (ledger:M368)
-        env = {**os.environ, 'PHONE_EVENT': event['event'], 'PHONE_TEXT': event['text'], 'PHONE_INBOX': event['inbox'],
-               'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
-        data = (json.dumps(event, ensure_ascii=False) + '\n').encode('utf8')
+        env = {**os.environ, 'PHONE_EVENT': rec.get('kind', ''), 'PHONE_TEXT': rec.get('text') or rec.get('what') or '',
+               'PHONE_INBOX': str(self.routes()[-1]), 'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
         for cmd in (hooks.get(rec.get('kind')) or []) + (hooks.get('any') or []):
             try:
                 with open(HOME / 'hooks.log', 'a', encoding='utf8') as log:
-                    p = subprocess.Popen(cmd, shell=True, env=env, stdin=subprocess.PIPE, stdout=log, stderr=log,
-                                         creationflags=0x08000000 if os.name == 'nt' else 0)
-                feed_stdin(p, data)
+                    subprocess.Popen(cmd, shell=True, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                     creationflags=0x08000000 if os.name == 'nt' else 0)
             except OSError as e:
                 print(f'[phone] hook {cmd!r}: {e}', flush=True)
 

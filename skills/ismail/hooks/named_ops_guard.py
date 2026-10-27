@@ -68,15 +68,17 @@ def norm(p):
     return unify(p).lower()
 
 
-CONFIG_FILE = None        # ismail's settings file; None: ~/.ismail/config.json (the tests point it elsewhere)
+def config_file():
+    """ismail's settings file, found as ismail finds it: $ISMAIL_CONFIG, else ~/.ismail/config.json."""
+    return os.path.abspath(os.path.expanduser(os.environ.get('ISMAIL_CONFIG') or
+                                              os.path.join('~', '.ismail', 'config.json')))
 
 
 def setting(key):
     """A path setting from ismail's settings file (stage.registry, live.registry), or None. The guard runs outside
-    the package, so it reads the file itself; it never raises."""
+    the package, so it reads the file itself (a byte order mark is fine); it never raises."""
     try:
-        p = CONFIG_FILE or os.path.join(os.path.expanduser('~'), '.ismail', 'config.json')
-        with open(p, encoding='utf-8') as fh:
+        with open(config_file(), encoding='utf-8-sig') as fh:
             v = json.load(fh).get(key)
         return os.path.expanduser(v) if isinstance(v, str) and v.strip() else None
     except Exception:

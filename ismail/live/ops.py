@@ -11,6 +11,7 @@ import urllib.request
 
 from ..api import OpError, heavy, op
 from .. import analysis as A
+from .. import settings
 
 VIEWS = {'bars': A.bar_table, 'envelope': A.envelope, 'pitches': A.pitches, 'drums': A.drums, 'chords': A.chords}
 
@@ -124,8 +125,8 @@ def live_start(project: str, bpm: float, beats_per_bar: int = 4, device: str = '
     device: 'default' (speakers), a device name/index, or 'none' (no audio out; for testing and listen-only
     analysis). workers: render processes (default: cores - 4, from 2 to 4; more for many mimic voices). Output always
     passes the safety chain: trim, loudness cap, limiter, ceiling -1 dBFS. trim_db (-30 to +12) and cap_db (sustained
-    RMS dBFS, -40 to -8) set this set's level; left out, they come from the live.trim_db / live.cap_db settings in
-    the environment, else -6 and -16 (quiet, about -22 LUFS). A set for listeners: trim_db=4, cap_db=-12 (about -16
+    RMS dBFS, -40 to -8) set this set's level; left out, they come from the live.trim_db / live.cap_db settings
+    (config_set), else -6 and -16 (quiet, about -22 LUFS). A set for listeners: trim_db=4, cap_db=-12 (about -16
     LUFS). priority: the engine process's own priority, 'above_normal' (default), 'high' or 'normal'; its render
     workers stay normal ('high' can starve them). The reply names any other live engine still running on this
     machine (two on one device can freeze both). Next: live_track, then live_queue."""
@@ -369,7 +370,7 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     takes to render here, and which track makes the wait."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
-        song = cand if os.path.exists(cand) else os.path.abspath(song)
+        song = cand if os.path.exists(cand) else settings.project_dir(song)   # bare: the songs folder (M375)
     out = _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
                 performers=_song_performers(song), timeout=120)
     gaps = _song_performer_gaps(song)
@@ -622,7 +623,7 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
     renders live (x realtime, in one process, a worker's pace). tracks limits both sides to those tracks. Takes about
     as long as rendering the bars twice. Also api.live_parity."""
     from . import parity
-    song = os.path.abspath(song)
+    song = settings.project_dir(song)                     # a bare song name: the songs folder (ledger:M375)
     if not os.path.exists(os.path.join(song, 'project.json')):
         raise OpError(f"no project at {song}")
     if not isinstance(bars, (list, tuple)) or len(bars) != 2:

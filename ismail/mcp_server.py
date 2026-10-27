@@ -122,6 +122,20 @@ def choose(roles=(), shelves=(), max_tools=None):
     return names, how
 
 
+def _setting(key, ap):
+    """A tool-list setting. A bad value in the settings file never stops the server: its unknown names are skipped
+    (or the value is), the rest is served, and stderr says what was skipped. An old variable that does not read
+    stops it, as it always did (a flag on the command line is checked the same way)."""
+    s = settings.setting(key)
+    v, src, problems = settings.resolve(key)
+    for p in problems:
+        if p.startswith(s.env + '='):
+            ap.error(p)
+        print(f'ismail MCP: {key}: {p}. config_get({key!r}) shows it; config_set fixes it', file=sys.stderr,
+              flush=True)
+    return v
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='python -m ismail.mcp_server',
                                  description='ismail MCP server (stdio). With no options it serves every op.')
@@ -136,12 +150,9 @@ def main(argv=None):
     if a.list_roles:
         print(list_roles())
         return
-    try:
-        roles = _list(a.roles) if a.roles is not None else settings.get('mcp.roles', strict=True)
-        shelves = _list(a.shelves) if a.shelves is not None else settings.get('mcp.shelves', strict=True)
-        cap = a.max_tools if a.max_tools is not None else settings.get('mcp.max_tools', strict=True)
-    except ValueError as e:
-        ap.error(str(e))
+    roles = _list(a.roles) if a.roles is not None else _setting('mcp.roles', ap)
+    shelves = _list(a.shelves) if a.shelves is not None else _setting('mcp.shelves', ap)
+    cap = a.max_tools if a.max_tools is not None else _setting('mcp.max_tools', ap)
     try:
         names, how = choose(roles, shelves, cap)
     except ValueError as e:

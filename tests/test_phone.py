@@ -121,13 +121,14 @@ def get(base, path):
         return json.loads(r.read())
 
 
-def test_a_phone_hook_gets_the_line_as_json_on_stdin(tmp_path, monkeypatch):
-    """ledger:M368: a hook reads the inbox line from its standard input; the PHONE_* names stay for older hooks."""
+def test_a_phone_hook_gets_the_line_in_its_environment_and_nothing_on_stdin(tmp_path, monkeypatch):
+    """A hook gets the line as PHONE_*; its stdin is closed, so a `claude -p` hook never reads the event as prompt."""
     import sys
     import types
     monkeypatch.setattr(S, 'HOME', tmp_path)
     out = tmp_path / 'got.json'
-    code = ('import sys, json, os; e = json.load(sys.stdin); e["old"] = os.environ["PHONE_EVENT"]; '
+    code = ('import sys, json, os; e = {k: os.environ[k] for k in ("PHONE_EVENT", "PHONE_TEXT", "PHONE_INBOX", '
+            '"PHONE_LINE")}; e["stdin"] = sys.stdin.read() if sys.stdin else ""; '
             f'open({str(out)!r}, "w").write(json.dumps(e))')
     import shlex
     line = (subprocess.list2cmdline if os.name == 'nt' else shlex.join)([sys.executable, '-c', code])
@@ -139,8 +140,8 @@ def test_a_phone_hook_gets_the_line_as_json_on_stdin(tmp_path, monkeypatch):
             break
         time.sleep(0.1)
     e = json.loads(out.read_text())
-    assert (e['event'], e['text'], e['old'], e['line']['id']) == ('tap', 'yes', 'tap', 7)
-    assert e['inbox'] == str(tmp_path / 'inbox.jsonl')
+    assert (e['PHONE_EVENT'], e['PHONE_TEXT'], json.loads(e['PHONE_LINE'])['id']) == ('tap', 'yes', 7)
+    assert e['PHONE_INBOX'] == str(tmp_path / 'inbox.jsonl') and e['stdin'] == ''
 
 
 def test_status_text_is_read():

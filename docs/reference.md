@@ -57,7 +57,7 @@ configurations keep working. Regenerate this table with `python -m ismail.settin
 
 | setting | type | default | what it sets | a change applies | old variable |
 |---|---|---|---|---|---|
-| `songs` | path | songs/ of a clone, else Documents/ismail | the songs folder: every song is a folder in it, and the machine board lives in it | after a restart: restart ismail (the MCP server, or quit and reopen the app) and its stage, phone and live processes; a CLI call picks it up at once | `ISMAIL_SONGS` |
+| `songs` | path | songs/ of a clone, else Documents/ismail | the songs folder: a bare song name (project='my_song') is a folder in it for every op, and the machine board lives in it | after a restart: restart ismail (the MCP server, or quit and reopen the app) and its stage, phone and live processes; a bare song name and a CLI call follow it at once | `ISMAIL_SONGS` |
 | `voices` | paths | none | more folders of code voices, searched after the song's own voices/ and before the built-ins | at its next use | `ISMAIL_VOICES` |
 | `samples` | path | `~/.ismail/samples` | where samples_fetch stores downloaded sample sets | at its next use | `ISMAIL_SAMPLES` |
 | `fx_stacks` | path | `~/.ismail/fx_stacks` | the library of named effect stacks (fx_stack_save) and their measured costs | at its next use | `ISMAIL_FX_STACKS` |
@@ -66,13 +66,13 @@ configurations keep working. Regenerate this table with `python -m ismail.settin
 | `hrtf` | path | `~/.ismail/hrtf` | the cache of measured head responses the spatial effect loads | at its next use | `ISMAIL_HRTF` |
 | `toms_cache` | path | `~/.ismail/cache/toms` | the cache of the toms voice's prepared strokes | at its next use | `ISMAIL_TOMS_CACHE` |
 | `listen.home` | path | `<songs>/_listen` | where a listening-together session goes when no project is named and no live set runs | at its next use | `ISMAIL_LISTEN_HOME` |
-| `feedback.home` | path | `~/.ismail/feedback` | the feedback pages' server state and answers (feedback_*) | at its next use | `ISMAIL_FEEDBACK_HOME` |
-| `phone.home` | path | `~/.ismail/phone` | the phone page's state: its inbox, voice notes, hooks.json | after a restart: restart the phone page server (phone_stop, then phone_start) | `ISMAIL_PHONE_HOME` |
+| `feedback.home` | path | `~/.ismail/feedback` | the feedback pages' server state and answers (feedback_*) | after a restart: stop a running feedback server first (feedback_stop), change it, then start it again: a running one keeps its state in the old folder | `ISMAIL_FEEDBACK_HOME` |
+| `phone.home` | path | `~/.ismail/phone` | the phone page's state: its inbox, voice notes, hooks.json | after a restart: phone_restart() (the phone ops follow at once; a running page server keeps its folder until it restarts) | `ISMAIL_PHONE_HOME` |
 | `stream.home` | path | `~/.ismail/stream` | the streaming state: sites, keys file, chat, request queue | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_STREAM_HOME` |
 | `exampage.rounds` | path | `~/.ismail/exampage/rounds.json` | the registry of picture and exam rounds (name -> round folder) | at its next use | `ISMAIL_EXAMPAGE_ROUNDS` |
-| `stage.registry` | path | `~/.ismail/stage` | where each running stage server leaves a note so agents and the guard find it | at its next use | `ISMAIL_STAGE_REGISTRY` |
+| `stage.registry` | path | `~/.ismail/stage` | where each running stage server leaves a note so agents and the guard find it | after a restart: stop the running stage servers first (stage_stop), change it, then stage_start: a running one keeps its note in the old folder, where agents no longer look | `ISMAIL_STAGE_REGISTRY` |
 | `stage.hooks` | path | `~/.ismail/stage_hooks.json` | the stage hooks file: commands run on entered_vr, voice_note and the other stage events | at its next use | `ISMAIL_STAGE_HOOKS` |
-| `live.registry` | path | `~/.ismail/live` | where each running live engine leaves a note so live_start can name the ones holding a device | at its next use | `ISMAIL_LIVE_REGISTRY` |
+| `live.registry` | path | `~/.ismail/live` | where each running live engine leaves a note so live_start can name the ones holding a device | after a restart: stop the running live engines first (live_stop), change it, then live_start: a running one keeps its note in the old folder | `ISMAIL_LIVE_REGISTRY` |
 | `machine.dir` | path | `<songs>/_machine` | the machine board every session shares (heavy-job slots, history) | at its next use | `ISMAIL_MACHINE_DIR` |
 | `machine.disk_roots` | paths | `<board>/roots.txt, else every folder beside the checkout` | the folders `machine disk` measures beyond the songs folder | at its next use | `ISMAIL_DISK_ROOTS` |
 | `guards.private_terms` | path | `~/.ismail/private_terms.txt` | places and names that must never leave the machine in a reply or a post, one a line | at its next use | `ISMAIL_PRIVATE_TERMS` |
@@ -166,7 +166,10 @@ python -m ismail -p songs/demo analyze_melody source=track:bass bars=[1,2]
 
 The last line reads the bass back from its stem as notes: the four you wrote, once per bar. `render` writes `renders/latest.wav` (every analysis tool reads it), plus `renders/<out>.wav` when you name the render (latest.wav is then a hard link to it: one copy on disk). `mp3='also'` adds `renders/<out>.mp3` for listening; `mp3='only'` writes the named render as mp3 only.
 
-Keep your projects under `songs/` (git-ignored) or anywhere else; a project is just a folder.
+Keep your projects under `songs/` (git-ignored) or anywhere else; a project is just a folder. A bare song name
+(`-p demo`, `project='demo'`) is always a folder in the songs folder (the `songs` setting: `config_get('songs')`),
+for every op and wherever the command runs; a path with a folder in it (`songs/demo`, `./demo`, `D:/music/demo`)
+is taken as given, from the working folder, and so is `.`.
 
 ## What's built today
 

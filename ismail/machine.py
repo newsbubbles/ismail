@@ -565,7 +565,9 @@ def priority_match(who=None):
         return ''
     names = ', '.join(f"{n} ({c})" for n, c in sorted(seen.items(), key=lambda x: -x[1])[:8]) or 'none'
     return (f"no job named '{who}' ran or waited in the last 48 h, so this priority matches nothing yet. Names in use: "
-            f"{names}. A session shows by its own name when it runs its jobs as `machine run --as <its name> ...`.")
+            f"{names}. A session shows by its own name when it runs its jobs as `machine run --as <its name> ...`; "
+            f"jobs started through MCP tools take the name from ISMAIL_SESSION in that MCP server's "
+            f"configuration, which still works.")
 
 
 def clear_priority():

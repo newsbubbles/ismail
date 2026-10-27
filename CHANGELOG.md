@@ -12,6 +12,18 @@
   and says when the change applies; `config_unset(key)` returns a setting to its default. Most settings are read at
   their use, so a change reaches a running server at once; the ones a process reads at its start say which restart
   they need.
+- A settings file that does not read (a single backslash in a Windows path, a stray comma) is named in every config
+  reply with its line and column and the fix, and is never overwritten while broken. A byte order mark is fine.
+  Writes take a lock beside the file and retry a replace Windows refuses for a moment; a relative `ISMAIL_CONFIG` is
+  made absolute, so processes ismail starts read the same file.
+- The phone ops read `phone.home` at each call; `phone_restart()` moves the running page server, and `phone_stop`
+  still finds one started under the old folder.
+- A bad role or shelf in the file never stops the MCP server: it serves the known ones and says on stderr what it
+  skipped. A bad `--roles` or `--shelves` flag, or an old variable that does not read, still stops it.
+- A bare song name now always means a folder in the songs folder, never the working folder (ledger:M375): for every
+  op's `project` and `derived_from`, the CLI's `-p`, a library call, `Project('name')` in a build script, and the
+  `song` of `live_load` (after the set's own folder) and `live_parity`. `.` and any path with a separator are taken as
+  given, as before.
 - Where a value comes from: a setting's old environment variable (`ISMAIL_SONGS`, `ISMAIL_FFMPEG`, ...) when it is
   set, else the settings file, else the default. Every old variable still works, and still wins over the file, so
   existing scripts, tests, CI jobs and MCP configurations keep working; the replies say when one overrides the file.
@@ -24,12 +36,10 @@
   plumbing, and on a reference table that no longer matches the registry.
 - `machine run --as <name>` and `python -m ismail --as <name>` name a session on the machine board (they set the
   per-process `ISMAIL_SESSION`, which still works).
-- Phone and stage hooks get their event as one JSON object on standard input; the `PHONE_*` and `STAGE_*` variables
-  they had stay for hooks written before.
 - Music video shots start with a plain `import kit`: `python -m ismail.video` puts the kit on Blender's path
   (`--python-expr`). Shots that read `ISMAIL_VIDEO_KIT` keep working.
-- The named-ops guard reads `stage.registry` and `live.registry` from the settings file too (its old variables still
-  win), with the standard library only.
+- The named-ops guard reads `stage.registry` and `live.registry` from the settings file too, the file ismail reads
+  (`ISMAIL_CONFIG` names another; its old variables still win), with the standard library only.
 - The skill and docs say `config_set` / `config_get` wherever they told an agent to set or read a variable.
 
 ### named-ops guard: registry variables read by name

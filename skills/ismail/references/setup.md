@@ -112,7 +112,9 @@ Pick the first route that fits:
   Then every op runs as `python -m ismail -p <project> <op> ...`, and each call takes 15 to 20 seconds to start.
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
-it is. Every song lives in its own subfolder there. An installed ismail uses Documents/ismail (a clone uses its own
+it is. Every song lives in its own subfolder there: a bare song name (`project='my_song'`) always means that
+subfolder, for every op (a path like `./my_song` is taken from the working folder). An installed ismail uses
+Documents/ismail (a clone uses its own
 `songs/`), so make the folder there unless they want another place; `guide` names the folder it uses. Another place
 is one setting, `songs` (see Settings below): `config_set('songs', '<folder>')`, or from a shell before the tools
 are there, `uvx --python 3.12 ismail config_set key=songs value="<folder>"`. The board lives in `<songs>/_machine`,
@@ -137,7 +139,9 @@ with their values and where each value comes from; `config_get('songs')` explain
 'C:/tools/ffmpeg/bin/ffmpeg.exe')` checks the value, keeps it in `~/.ismail/config.json` and says whether it applies
 at once or after a restart; `config_unset(key)` returns it to the default. From a shell:
 `python -m ismail config_get`, `python -m ismail config_set key=ffmpeg value=<path>`. A value set the old way, in
-the process that runs ismail, wins over the file: `config_get` marks it, and `config_set` says so.
+the process that runs ismail, wins over the file: `config_get` marks it, and `config_set` says so. The file is
+JSON, so a Windows path written by hand takes forward slashes (`"D:/music"`) or doubled backslashes; when it does
+not read, every config reply names the line and column, and `config_set` leaves it alone until it is fixed.
 
 ## 4. Prove it works, from their side
 

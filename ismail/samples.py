@@ -112,7 +112,8 @@ def need(name):
     raise FileNotFoundError(
         f"{user(s)} plays the {name} samples ({s['what']}), which are not on this machine. Ask the person, "
         f"then samples_fetch('{name}'): about {s['size_mb']} MB, {s['licence']}. A folder they already have: "
-        f"samples_fetch('{name}', path=<its {s['sub']} folder>) or ${s['env']}.")
+        f"samples_fetch('{name}', path=<its {s['sub']} folder>), or config_set('samples.{name}', <that folder>) "
+        f"(the old ${s['env']} still works).")
 
 
 def status():

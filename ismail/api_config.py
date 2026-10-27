@@ -14,6 +14,19 @@ from . import settings as S
 DETAIL_MAX = 12      # config_get with no key or group: one line per setting; a group: details up to this many
 
 
+def _shown(s, v):
+    """A value as the replies show it: a path in this system's separators, never "D:/ismail\\songs"."""
+    if s.type == 'path' and isinstance(v, str):
+        v = os.path.normpath(v)
+    elif s.type == 'paths' and isinstance(v, (list, tuple)):
+        v = [os.path.normpath(x) for x in v]
+    return S.show(v)
+
+
+def _file():
+    return os.path.normpath(S.path())
+
+
 def _err(e):
     return OpError(str(e).strip('"\''))
 
@@ -23,20 +36,22 @@ def _source_text(s, src):
         return (f"from {s.env}, set in this process's environment, which wins over the settings file "
                 f"(config_set writes the file, and the file value shows once {s.env} is unset)")
     if src == 'file':
-        return f'from the settings file ({S.path()})'
+        return f'from the settings file ({_file()})'
     return 'the default'
 
 
 def _line(s):
     v, src, problems = S.resolve(s.key)
-    shown = S.show(v) if v not in (None, []) or src != 'default' or not s.default_doc else f'(default: {s.default_doc})'
+    shown = (_shown(s, v) if v not in (None, []) or src != 'default' or not s.default_doc
+             else f'(default: {s.default_doc})')
     tag = {'env': f'  [set by {s.env}]', 'file': '  [settings file]', 'default': ''}[src]
-    return f"  {s.key} = {shown}{tag}" + ('  (!)' if problems else '')
+    own = [p for p in problems if not p.startswith('the settings file ')]    # a broken file is said once, above
+    return f"  {s.key} = {shown}{tag}" + ('  (!)' if own else '')
 
 
 def _detail(s):
     v, src, problems = S.resolve(s.key)
-    L = [f"{s.key} = {S.show(v)}",
+    L = [f"{s.key} = {_shown(s, v)}",
          f"  what: {s.doc}",
          f"  where it comes from: {_source_text(s, src)}",
          f"  takes: {S.what_it_takes(s)}; default: {S.default_text(s)}",
@@ -56,10 +71,11 @@ def config_get(key: str = None, group: str = None) -> str:
     where songs are saved, which ffmpeg or Blender ismail uses, or why a folder is where it is. config_set changes
     one, config_unset returns one to its default."""
     data, err = S.load()
-    head = [f"settings file: {S.path()}" + ('' if os.path.exists(S.path()) else ' (none yet: every value is a default '
+    head = [f"settings file: {_file()}" + ('' if os.path.exists(S.path()) else ' (none yet: every value is a default '
                                                                              'or an old variable)')]
     if err:
-        head.append(f"WARNING: the settings file is ignored: {err}. Fix it by hand; config_set will not overwrite it")
+        head.append(f"WARNING: {err}. Every value below is from an old variable or the default until it reads; "
+                    f"config_set will not overwrite it")
     unknown = sorted(k for k in data if k not in S.REGISTRY)
     if unknown:
         head.append(f"note: the file has keys ismail does not know, ignored: {', '.join(unknown)}")
@@ -105,20 +121,23 @@ def config_set(key: str, value) -> str:
         v = S.put(key, value)
     except ValueError as e:
         raise OpError(f"{e}. Nothing was changed. Example: config_set({key!r}, {_example(s)})")
-    L = [f"{key} = {S.show(v)} in the settings file {S.path()} (was {S.show(old)}, "
+    L = [f"{key} = {_shown(s, v)} in the settings file {_file()} (was {_shown(s, old)}, "
          f"{'the default' if old_src == 'default' else 'from ' + ('the file' if old_src == 'file' else s.env)})"]
     if s.type == 'path' and not os.path.exists(v):
-        L.append(f"note: {v} does not exist yet: make it, or check the spelling")
+        L.append(f"note: {os.path.normpath(v)} does not exist yet: make it, or check the spelling")
     if s.type == 'paths':
         missing = [p for p in v if not os.path.isdir(p)]
         if missing:
-            L.append(f"note: not a folder yet: {', '.join(missing)}")
+            L.append(f"note: not a folder yet: {', '.join(os.path.normpath(p) for p in missing)}")
     if S.source(key) == 'env':
         L.append(f"but {s.env} is set in this process's environment and wins: ismail keeps using "
-                 f"{S.show(S.get(key))} until it is unset where it was set (a shell profile, the MCP server's "
+                 f"{_shown(s, S.get(key))} until it is unset where it was set (a shell profile, the MCP server's "
                  f"configuration) and ismail restarts")
     else:
         L.append(f"applies: {S.applies(s)}")
+    if key == 'songs':
+        L.append("a bare song name (project='my_song') is a folder in it from the next call on; a path with a "
+                 "folder in it ('./my_song', 'D:/elsewhere/my_song') is taken as given")
     L.append(f"config_get({key!r}) reads it back; config_unset({key!r}) returns it to the default")
     return '\n'.join(L)
 
@@ -143,7 +162,7 @@ def config_unset(key: str) -> str:
         raise OpError(str(e))
     v, src, _ = S.resolve(key)
     L = [(f"{key}: removed from the settings file" if had else f"{key} was not in the settings file") +
-         f"; now {S.show(v)} ({'the default' if src == 'default' else 'from ' + s.env + ', which still wins'})"]
+         f"; now {_shown(s, v)} ({'the default' if src == 'default' else 'from ' + s.env + ', which still wins'})"]
     if had:
         L.append(f"applies: {S.applies(s)}")
     return '\n'.join(L)
