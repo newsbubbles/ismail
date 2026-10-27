@@ -594,6 +594,17 @@ straight to the speakers.
      A snare on 2 and 4 gives the player something to hear the placement against.
   4. **Keep the choice for the run.** Once the player says a take is right, later takes in the same run usually need
      the same placement (same keys, same engine): use the same letter first.
+- **Recording a take into the song.** When the player wants what they played kept, write it in one call, never by
+  copying lines into `notes_write`: `live_played(source=..., bars=[a, b], into='<track>', bar=<song bar>)`. The
+  track must exist (`track_add` first, with the sound to keep); the song is the project in the live folder.
+  - Ask which bars first, as above. `bar` is where the take's first bar lands; `from_bar` picks which of the
+    engine's bars that is (default the first bar with a note). `mode='replace'` clears the bars the take covers on
+    the track, `'add'` merges.
+  - Without `fit` it is written as it sounded: the player's own timing off the grid, velocities and lengths, the
+    pedal's holds. That is right for a part that should breathe (a melody, a pad). For a loop or anything that must
+    lock to the drums, `fit=True` writes the snapped notes, `placement='A'` or `'B'` as the player picked by ear.
+  - The reply names the bars written, the note count and range, and how to hear it. To try B after A, `undo()`
+    first: a write that lands in fewer bars only clears its own bars. `undo()` takes back any write.
 - **A take recorded as audio** (an instrument on the mic) has no key log. Take its onset times in beats, unrounded
   (an op that snaps to `quant` has already rounded them), then do the same: onsets within 0.15 beat are one hit,
   fit a 16th grid with a free offset (`fit_grid` in `ismail/live/midi_play.py` is the fit `live_played` uses, drift

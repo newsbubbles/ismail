@@ -2665,6 +2665,12 @@ class Engine:
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
+    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A'):
+        try:
+            return self.midi.take(source, bars, fit, from_bar, placement)
+        except (ValueError, OSError) as e:
+            raise LiveError(str(e))
+
     def cmd_status(self, deck=None):
         if deck is not None and deck not in self.decks:
             raise LiveError(f"no deck {deck!r}; decks: {list(self.decks) or 'none'}")
@@ -2995,7 +3001,8 @@ def serve(engine, port=0, idle_min=None):
            'record': engine.cmd_record, 'stop': engine.cmd_stop, 'device': engine.cmd_device,
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
-           'midi': engine.cmd_midi, 'played': engine.cmd_played, 'keys': engine.cmd_keys,
+           'midi': engine.cmd_midi, 'played': engine.cmd_played, 'take': engine.cmd_take,
+           'keys': engine.cmd_keys,
            'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
            'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo}
     keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')
