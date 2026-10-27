@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.1 (2026-10-27)
+
 ### per-note feel from a reference: analyze_feel, feel_from_ref (ledger:M364)
 
 - `analyze_feel(source, bars, per_beat=2, band, against=None)` measures what makes a draft sound MIDI: the timing
