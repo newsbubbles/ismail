@@ -68,8 +68,8 @@ def norm(p):
     return unify(p).lower()
 
 
-def _registry(env, default):
-    d = os.environ.get(env) or os.path.join(os.path.expanduser('~'), '.ismail', default)
+def _registry(override, default):
+    d = override or os.path.join(os.path.expanduser('~'), '.ismail', default)
     out = []
     try:
         names = [n for n in os.listdir(d) if n.endswith('.json')]
@@ -89,13 +89,13 @@ _CACHE = {}
 
 def stage_records():
     if 'stage' not in _CACHE:
-        _CACHE['stage'] = _registry('ISMAIL_STAGE_REGISTRY', 'stage')
+        _CACHE['stage'] = _registry(os.environ.get('ISMAIL_STAGE_REGISTRY'), 'stage')
     return _CACHE['stage']
 
 
 def live_records():
     if 'live' not in _CACHE:
-        _CACHE['live'] = _registry('ISMAIL_LIVE_REGISTRY', 'live')
+        _CACHE['live'] = _registry(os.environ.get('ISMAIL_LIVE_REGISTRY'), 'live')
     return _CACHE['live']
 
 
