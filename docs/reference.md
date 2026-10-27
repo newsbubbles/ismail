@@ -5,20 +5,24 @@ Install, setup per client, concepts, the voice library, and how each part works.
 
 ## Install
 
-Python 3.10 or newer. ismail installs from GitHub:
+Python 3.10 or newer. ismail is on PyPI:
 
 ```bash
-pip install "ismail @ git+https://github.com/newsbubbles/ismail"                # engine, analysis, CLI, MCP server
-pip install "ismail[perceptual] @ git+https://github.com/newsbubbles/ismail"    # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
-pip install "ismail[separate] @ git+https://github.com/newsbubbles/ismail"      # optional: demucs stem separation for reference tracks
-pip install "ismail[live] @ git+https://github.com/newsbubbles/ismail"          # optional: play live to your speakers (sounddevice)
-pip install "ismail[voice] @ git+https://github.com/newsbubbles/ismail"         # optional: autotune and formant shifts on a voice (pyworld)
-pip install "ismail[video] @ git+https://github.com/newsbubbles/ismail"         # optional: the music-video pipeline (opencv, pycollada, pillow)
+pip install ismail                  # engine, analysis, CLI, MCP server
+pip install "ismail[perceptual]"    # optional: CLAP perceptual metric (torch + transformers, model about 600 MB)
+pip install "ismail[separate]"      # optional: demucs stem separation for reference tracks
+pip install "ismail[live]"          # optional: play live to your speakers (sounddevice)
+pip install "ismail[voice]"         # optional: autotune and formant shifts on a voice (pyworld)
+pip install "ismail[video]"         # optional: the music-video pipeline (opencv, pycollada, pillow)
 ```
 
 Or run the MCP server without installing anything, with [uv](https://docs.astral.sh/uv/):
-`uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`. The `--python 3.12` keeps uv on
+`uvx --python 3.12 ismail mcp`. The `--python 3.12` keeps uv on
 a Python the compiled libraries have wheels for; the first start builds them and can take minutes.
+
+That is the latest release, a version of main that passed the tests and was checked once more as an install. For
+the newest work on main before it is released: `pip install "ismail @ git+https://github.com/newsbubbles/ismail"`,
+or a clone (below).
 
 To work on ismail itself (or to have the skill and examples on disk), clone it and install in place:
 
@@ -52,7 +56,7 @@ lines add ismail's marketplace and install the plugin from it (send them one at 
 
 On Claude Code 2.1.275 or newer one line does both: `/plugin install ismail --marketplace newsbubbles/ismail`. From
 a shell (no pasting): `claude plugin marketplace add newsbubbles/ismail`, then `claude plugin install ismail@ismail`.
-The plugin runs the server with uvx (from this repo) and loads the composing skill. The first time each ismail tool
+The plugin runs the server with uvx (the PyPI release of the plugin's own version) and loads the composing skill. The first time each ismail tool
 runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and a first session
 ([setup.md](../skills/ismail/references/setup.md) says how to count them).
 
@@ -61,7 +65,7 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 1. **Tools.** Open Claude Code in a clone of this repo and the bundled `.mcp.json` registers the server; the tools show up as `mcp__ismail__*`. To use ismail from any folder instead:
 
    ```bash
-   claude mcp add -s user ismail -- uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp
+   claude mcp add -s user ismail -- uvx --python 3.12 ismail mcp
    # or, after pip install: claude mcp add -s user ismail -- ismail mcp
    ```
 
@@ -83,12 +87,12 @@ runs, Claude asks to allow it: expect about 10 to 20 Allow boxes over setup and 
 1. **Tools.** Opening this folder in Cursor picks up `.cursor/mcp.json`, which runs the server from this checkout (`python -m ismail.mcp_server`). To use ismail in other projects, add this entry to `~/.cursor/mcp.json`:
 
    ```json
-   {"mcpServers": {"ismail": {"command": "uvx", "args": ["--python", "3.12", "--from", "git+https://github.com/newsbubbles/ismail", "ismail", "mcp"]}}}
+   {"mcpServers": {"ismail": {"command": "uvx", "args": ["--python", "3.12", "ismail", "mcp"]}}}
    ```
 
 2. **Skill.** `.cursor/rules/ismail.mdc` is an agent-requested rule that points Cursor's agent at `skills/ismail/SKILL.md`. Copy that rule (and the `skills/ismail` folder) into another project to use it there.
 
-Any other MCP client works the same way: run `ismail mcp` (or `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`) over stdio.
+Any other MCP client works the same way: run `ismail mcp` (or `uvx --python 3.12 ismail mcp`) over stdio.
 
 ## Quick start (CLI)
 

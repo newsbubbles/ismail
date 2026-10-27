@@ -82,7 +82,7 @@ Pick the first route that fits:
   1. **Warm it up first.** The plugin starts its server with uvx, which builds the same libraries the first time
      it runs, and a first start that takes minutes can time out. Run the exact command once yourself before the
      plugin lines, and tell them it is the five-minute step:
-     `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail --help`.
+     `uvx --python 3.12 ismail --help`.
   2. **The plugin, with as little pasting as possible.** If a `claude` command runs in your shell
      (`claude --version`), add it yourself, and they paste nothing:
      `claude plugin marketplace add newsbubbles/ismail`, then `claude plugin install ismail@ismail`.
@@ -105,10 +105,10 @@ Pick the first route that fits:
      the count at the start; at the first one say: "A box will ask to allow ismail. Press Allow (or Always allow,
      so it stops asking)."
 - **Any MCP client:** register the server command
-  `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`, the way that client adds MCP
+  `uvx --python 3.12 ismail mcp`, the way that client adds MCP
   servers, after warming it up as above.
 - **Without MCP:** make a virtual environment in a folder of their choice and run
-  `uv pip install "ismail[live] @ git+https://github.com/newsbubbles/ismail"` (or pip, which shows no progress).
+  `uv pip install "ismail[live]"` (or pip, which shows no progress).
   Then every op runs as `python -m ismail -p <project> <op> ...`, and each call takes 15 to 20 seconds to start.
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where

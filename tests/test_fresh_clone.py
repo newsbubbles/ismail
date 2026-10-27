@@ -14,9 +14,9 @@ def test_the_mcp_handshake_reports_ismails_version_not_fastmcps():
     assert mcp.version == _version()
 
 
-def test_the_help_line_does_not_send_people_to_pypi_before_a_release():
+def test_the_help_line_names_both_installs_the_release_and_main():
     import ismail.__main__ as cli
-    assert 'Installed from PyPI' not in cli.__doc__
+    assert 'pip install ismail`' in cli.__doc__
     assert 'git+https://github.com/newsbubbles/ismail' in cli.__doc__
 
 
