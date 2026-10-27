@@ -1,6 +1,6 @@
 [project]
 name = "ismail"
-version = "0.4.1"
+version = "0.4.2"
 description = "A DAW for AI agents: write music as text, read the audio back as text, and play it live. MCP server, CLI and an agent skill."
 readme = "README.md"
 license = {text = "MIT"}
@@ -46,6 +46,7 @@ dev = ["pytest>=8.0"]
 Homepage = "https://newsbubbles.github.io/ismail/"
 Repository = "https://github.com/newsbubbles/ismail"
 Changelog = "https://github.com/newsbubbles/ismail/blob/main/CHANGELOG.md"
+Organization = "https://measuredinstruments.com"
 
 [project.scripts]
 ismail = "ismail.__main__:cli"

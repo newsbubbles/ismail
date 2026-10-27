@@ -78,7 +78,7 @@ other song. Rebuild its project and compare it with the source's before renderin
 **Every song can be made again from its folder.** Each song keeps a script that rebuilds it and renders its audio:
 `build.py` for a studio song, `set.py` for a set, and one written for a song taken out of a live session or a jam
 too (from its set script, its log and its takes). The instruments, voices, samples and takes it uses are copied into
-the folder (`voices/`, `proj/sounds/`), so the script needs nothing outside it. Then its WAVs are disposable: renders,
+the folder (`voices/`, `proj/sounds/`), so the script needs nothing outside it. If `import ismail` fails in a plain `python` (the tools come from a plugin or `uvx`), run the script with the tools' own release: `uv run --python 3.12 --with ismail==<version> python build.py` (`version` names it; setup.md). Then its WAVs are disposable: renders,
 stems and separations can be cleared to free the disk and made again on demand. What stays is what cannot be made
 again (reference audio, recordings and takes) and the masters an upload needs. A WAV with no mp3 beside it gets one
 before it goes, so the person keeps a listenable copy. Nothing is deleted by an agent: cleared files move to the

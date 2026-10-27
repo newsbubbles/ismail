@@ -624,6 +624,54 @@ def _where_text():
     return ''.join(L)
 
 
+def _install_info(pkg_dir=None):
+    """(version, kind, where, git): kind is 'checkout' (a git clone or worktree of the repository) or 'release' (an
+    installed package, from PyPI or a wheel); git is 'branch @ commit' for a checkout, else None."""
+    import subprocess
+    from importlib.metadata import PackageNotFoundError, version as _v
+    from pathlib import Path
+    pkg = Path(pkg_dir) if pkg_dir else Path(__file__).resolve().parent
+    root = pkg.parent
+    ver = None
+    pp = root / 'pyproject.toml'
+    if (root / '.git').exists() and pp.is_file():
+        m = re.search(r'^version = "([^"]+)"', pp.read_text(encoding='utf-8'), re.M)
+        ver = m.group(1) if m else None
+        git = None
+        try:
+            out = [subprocess.run(['git', '-C', str(root)] + a, capture_output=True, text=True, timeout=10).stdout.strip()
+                   for a in (['rev-parse', '--abbrev-ref', 'HEAD'], ['rev-parse', '--short', 'HEAD'])]
+            if out[1]:
+                git = f'{out[0]} @ {out[1]}'
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return ver or '?', 'checkout', str(root), git
+    try:
+        ver = _v('ismail')
+    except PackageNotFoundError:
+        ver = '?'
+    return ver, 'release', str(pkg), None
+
+
+@op()
+def version() -> str:
+    """Which ismail this is: its version, and whether it runs from a source checkout (a clone of the repository: the
+    code is right there, at main or a branch) or from an installed release (PyPI, the Claude Code or Codex plugin:
+    read-only, never edit it). Reach for it before changing or reporting a problem in ismail itself, and when the
+    person asks what version they have. development.md, "Starting from an installed ismail", says what to do next."""
+    ver, kind, where, git = _install_info()
+    L = [f'ismail {ver}']
+    if kind == 'checkout':
+        L.append(f'source checkout: {where}' + (f' ({git})' if git else ''))
+        L.append('changes go on a branch here (development.md); main may be ahead of the latest release')
+    else:
+        L.append(f'installed release: {where} (read-only: a package cache, never edit it)')
+        L.append(f'its source is the GitHub tag v{ver}: git clone --branch v{ver} https://github.com/newsbubbles/ismail')
+        L.append('to change ismail, clone the repository and work from main (development.md, "Starting from an '
+                 'installed ismail"); first check CHANGELOG.md "Unreleased" on main: the fix may already be there')
+    return '\n'.join(L)
+
+
 @op()
 def playbook(page: str = None) -> str:
     """The playbook: how to make music with ismail, its method and its rules (the ismail skill, the same text as
@@ -2156,19 +2204,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
     rd = os.path.join(P.root, 'renders')
     written = ['latest.wav'] + ([out + '.wav'] if out and mp3 != 'only' else [])
     write_renders(rd, y, R.sr, out if out and mp3 != 'only' else None)
-    mp3_note = ''
-    if mp3 != 'none':
-        from .render import write_mp3
-        name = (out or 'latest') + '.mp3'
-        try:
-            write_mp3(os.path.join(rd, 'latest.wav'), os.path.join(rd, name))
-        except RuntimeError as e:
-            raise OpError(f"render finished (renders/latest.wav) but the mp3 failed: {e}")
-        from .tags import tag_mp3
-        song = P.d.get('name') or os.path.basename(P.root)
-        tag_mp3(os.path.join(rd, name), title=song if not out or out == 'latest' else f"{song} ({out})",
-                artist=P.d.get('artist'), album=P.d.get('album') or song)
-        mp3_note = f" + renders/{name} (tagged: {song}, made with ismail)"
+    # stems and the window record first: a failed mp3 must not lose them (ledger:M373)
     if stems:
         sd = os.path.join(rd, 'stems')
         os.makedirs(sd, exist_ok=True)
@@ -2177,6 +2213,19 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
             written.append('stems/' + k.replace(':', '_') + '.wav')
     _record_window(rd, written, None if R.full else
                    {'bars': [bars[0], min(bars[1], P.d['length_bars'])], 'start_sec': R.offset + R.win_b0 * R.spb})
+    mp3_note = ''
+    if mp3 != 'none':
+        from .render import write_mp3
+        name = (out or 'latest') + '.mp3'
+        try:
+            write_mp3(os.path.join(rd, 'latest.wav'), os.path.join(rd, name))
+        except RuntimeError as e:
+            raise OpError(f"render finished (renders/latest.wav{', stems/' if stems else ''}) but the mp3 failed: {e}")
+        from .tags import tag_mp3
+        song = P.d.get('name') or os.path.basename(P.root)
+        tag_mp3(os.path.join(rd, name), title=song if not out or out == 'latest' else f"{song} ({out})",
+                artist=P.d.get('artist'), album=P.d.get('album') or song)
+        mp3_note = f" + renders/{name} (tagged: {song}, made with ismail)"
     prune_cache(P.root)
     peak = 20 * np.log10(np.max(np.abs(y)) + 1e-12)
     clip = float(np.mean(np.abs(y) >= 0.999)) * 100

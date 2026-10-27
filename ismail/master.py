@@ -149,7 +149,7 @@ def write_mp3(y, sr, path, ceil_db, bitrate='320k'):
                        input=np.ascontiguousarray(c, dtype='<f4').tobytes(), capture_output=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.decode(errors='replace').strip()[-300:] or f"ffmpeg exited {r.returncode}")
-    d = subprocess.run([exe, '-loglevel', 'error', '-i', path, '-f', 'f32le', '-ac', str(ch), 'pipe:1'],
+    d = subprocess.run([exe, '-nostdin', '-loglevel', 'error', '-i', path, '-f', 'f32le', '-ac', str(ch), 'pipe:1'],
                        capture_output=True)
     dec = np.frombuffer(d.stdout, dtype='<f4')
     tp = true_peak_db(dec[:len(dec) // ch * ch].reshape(-1, ch).astype(np.float64)) if d.returncode == 0 else None

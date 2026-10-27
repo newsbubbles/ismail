@@ -12,6 +12,23 @@ Several sessions (conversations, agents) work on one machine at once: some work 
 the engine, and the user moves between them. Every rule below exists because breaking it once cost someone work or
 an afternoon.
 
+## Starting from an installed ismail (PyPI or a plugin)
+
+Many people run ismail as an installed release (`pip install ismail`, `uvx ismail`, the Claude Code or Codex plugin),
+not from a clone. Before changing anything, call `version`: it says which ismail runs and from where.
+
+1. **A source checkout:** work on a branch in it, as the rest of this page says.
+2. **An installed release:** that copy is a package cache. Never edit it: it is read-only in spirit, a reinstall
+   replaces it, and a change there is never shared. Clone the repository into a new folder instead
+   (`git clone https://github.com/newsbubbles/ismail`), never inside the person's songs folder.
+3. **Reproduce on their version first.** To see what they see, check out the tag `version` names
+   (`git checkout v<version>`): the skill and the engine of a release match each other.
+4. **Then check main.** Read `CHANGELOG.md` "Unreleased" and the merged pull requests: if the fix is already on main,
+   the answer is the next release (or installing main: `pip install "ismail @ git+https://github.com/newsbubbles/ismail"`),
+   not a second fix. Build new work on a branch from main, never from the tag.
+5. **Their songs stay where they are.** An installed ismail keeps songs in its songs folder (`config_get('songs')`), not
+   in the clone; a fix is tested on a copy, and their files are never moved.
+
 ## The roles: a multi-agent system
 
 ismail is worked on by several agents at once, each with one job, joined by files and messages rather than by a

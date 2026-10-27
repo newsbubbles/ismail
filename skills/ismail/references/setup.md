@@ -110,6 +110,10 @@ Pick the first route that fits:
 - **Without MCP:** make a virtual environment in a folder of their choice and run
   `uv pip install "ismail[live]"` (or pip, which shows no progress).
   Then every op runs as `python -m ismail -p <project> <op> ...`, and each call takes 15 to 20 seconds to start.
+- **Song scripts with the tools from a plugin or `uvx`:** a song's `build.py` or `set.py` imports ismail, and the
+  plugin's copy is not importable from a plain `python`. Run scripts with the same release the tools use (`version`
+  names it): `uv run --python 3.12 --with ismail==<version> python build.py`. Never `pip install` a second copy
+  for them: it can be another version than the tools.
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
 it is. Every song lives in its own subfolder there: a bare song name (`project='my_song'`) always means that

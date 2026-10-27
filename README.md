@@ -20,6 +20,8 @@ music to it as text, and you steer through screens it builds for you.**
 
 The agent you already use does the work in the background. You bring the taste.
 
+Made by Measured Instruments: https://measuredinstruments.com (for agents: https://measuredinstruments.com/agents/)
+
 <!-- mcp-name: io.github.newsbubbles/ismail -->
 
 [![tests](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml/badge.svg)](https://github.com/newsbubbles/ismail/actions/workflows/tests.yml)

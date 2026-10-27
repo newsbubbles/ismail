@@ -20,6 +20,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
 
 
 @pytest.mark.parametrize('need,first', [
+    ('what version of ismail is this', 'version'),
     ('show me the difference between my voice and the render', 'exam_picture_round'),
     ('compare two takes by picture with the person marking', 'exam_picture_round'),
     ('formant track of a vowel', 'analyze_formants'),

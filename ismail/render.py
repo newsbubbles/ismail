@@ -516,7 +516,7 @@ def write_mp3(wav_path, mp3_path, bitrate='320k'):
     exe = settings.get('ffmpeg')
     if not exe:
         raise RuntimeError("ffmpeg not found; install it or config_set('ffmpeg', <its path>)")
-    r = subprocess.run([exe, '-y', '-loglevel', 'error', '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', bitrate,
+    r = subprocess.run([exe, '-nostdin', '-y', '-loglevel', 'error', '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', bitrate,
                         mp3_path], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip()[-300:] or f"ffmpeg exited {r.returncode}")

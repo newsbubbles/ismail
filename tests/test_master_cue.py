@@ -169,3 +169,9 @@ def test_the_catch_alone_takes_only_what_is_over(tmp_path):
     assert np.abs(c[-sr // 4:] - y[-sr // 4:]).max() < 1e-3   # released 250 ms after it
     same, gr0 = M.catch(y * 0.5, sr, -3.0)
     assert gr0 == 0.0 and np.array_equal(same, y * 0.5)
+
+
+def test_out_in_a_folder_that_does_not_exist_yet_is_made(tmp_path):
+    src = _tone(str(tmp_path / 'cue.wav'))
+    OPS['master_cue'](source=src, out=str(tmp_path / 'master' / 'cue_master.wav'), mp3=False)   # ledger:M374
+    assert os.path.exists(tmp_path / 'master' / 'cue_master.wav')

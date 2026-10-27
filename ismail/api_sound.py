@@ -749,6 +749,7 @@ def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: flo
             dest = os.path.join(old, f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}{ext}")
             shutil.move(path, dest)
             moved = moved or dest
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)     # out='master/x.wav' in a new folder (ledger:M374)
     sf.write(out, y, out_sr, subtype='PCM_24')
     mp3_line = None
     if mp3_out:

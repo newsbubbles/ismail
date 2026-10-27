@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 (2026-10-27)
+
+### fixes
+
+- ffmpeg never reads stdin (`-nostdin`): under the MCP server stdin is the tool pipe, and an mp3 encode could hang there until the harness killed it (ledger:M372).
+- `render(stems=True, mp3=...)` writes the stems before the mp3, so a failed mp3 no longer loses them (ledger:M373).
+- `master_cue(out=...)` makes the out folder when it does not exist yet (ledger:M374).
+
+### version, and developing from an installed ismail (ledger:M369)
+
+- `version`: which ismail runs, a source checkout (path, branch and commit) or an installed release (PyPI, the plugins), and for a release the GitHub tag that holds its source. On the start shelf, so every filtered server has it.
+- development.md "Starting from an installed ismail": call `version`; never edit a package cache; clone, reproduce on the release tag, check main's Unreleased before fixing, build from main. contributing.md points there.
+- A song's `build.py` on a plugin or `uvx` install runs with the tools' own release: `uv run --python 3.12 --with ismail==<version> python build.py` (SKILL.md, setup.md), never a second `pip install` of another version.
 
 ### settings: config_get / config_set (ledger:M368)
 
