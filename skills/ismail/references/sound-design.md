@@ -7,7 +7,7 @@ For acoustic and electric instruments (guitar, strings, piano, brass, voice, cro
 ## Voices: instruments written as code
 
 `voices_list` first: a built-in voice (grand_piano, growl, sfx ...) may already be the sound you need, and `voice_help(name)` shows what its velocity does. When you engineer an instrument as code that the song will reuse, write it as a voice module in `<project>/voices/<name>.py` (the engine looks in the project's `voices/` and in
-`$ISMAIL_VOICES`; a song that keeps its voices in `songs/<slug>/voices/` has `build.py` copy them into
+the folders of the `voices` setting, `config_get('voices')`; a song that keeps its voices in `songs/<slug>/voices/` has `build.py` copy them into
 `proj/voices/`) (a `voice(freq, t, vel, gate, sr)` function plus an `INFO` dict), not as a `code` string in the track: the project stays portable, edits re-render automatically, and the voice can later move into the library. Never paste absolute paths or `sys.path` hacks into a `code` instrument.
 
 Note names follow C4 = 60, so C1 is MIDI 24; General MIDI drum charts number C1 as 36. A kit voice that picks its piece by MIDI number from a GM chart is an octave off (every hit fell through to a rim click): map by note name, or add 12. Render one note and read `analyze_spectrum` before writing the rest.

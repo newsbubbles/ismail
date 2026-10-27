@@ -490,9 +490,9 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 - **Live output is quiet by default** (trim -6 dB, sustained cap -16 dBFS rms, ceiling -1 dBFS; about -21 to
   -23 LUFS for a balanced mix). That is too quiet for a listener at a normal volume: one user heard "nothing".
   For a set, start the engine with `live_start(..., trim_db=4, cap_db=-12)`: about -16 LUFS. The arguments set
-  this set's level and win over the environment. Left out, the engine reads `ISMAIL_LIVE_TRIM_DB` and
-  `ISMAIL_LIVE_CAP_DB` from the process that calls `live_start`, which a tool server cannot change between calls,
-  so use the arguments. `live_status` prints the trim and cap in use. Then keep the limiter near 0 dB with faders.
+  this set's level and win over the settings. Left out, the engine takes the `live.trim_db` and `live.cap_db`
+  settings: `config_set('live.trim_db', 4)` makes a level the default for every later set (at its next
+  `live_start`). `live_status` prints the trim and cap in use. Then keep the limiter near 0 dB with faders.
 - **Sounds you are unsure of**: try them on a muted or quiet track (`volume_db=-40`, then fade with a ramp on a
   gain fx) rather than straight onto the main part.
 - **Tempo change** = `live_tempo(project, bpm, at='next_bar')`: no restart, no gap. Clips are in beats, so

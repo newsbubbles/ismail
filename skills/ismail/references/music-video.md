@@ -52,8 +52,7 @@ Frames per beat = fps * 60 / BPM (150 BPM at 30 fps: beat 12, 16th 3, bar 48, tr
 ## Shots (Blender kit)
 
 ```python
-import os, sys; sys.path.insert(0, os.environ['ISMAIL_VIDEO_KIT'])
-import kit
+import kit                                       # `python -m ismail.video` puts the kit on Blender's path
 S = kit.Shot('s04_foyer', 384, start_bar=9)       # frame 1 = the song frame of bar 9
 room = S.room('Foyer'); Z = S.floor(0, 50)
 L = S.character('hero', loc=(0, 34, Z), yaw=180)  # rigs/hero.json

@@ -68,8 +68,25 @@ def norm(p):
     return unify(p).lower()
 
 
+def config_file():
+    """ismail's settings file, found as ismail finds it: $ISMAIL_CONFIG, else ~/.ismail/config.json."""
+    return os.path.abspath(os.path.expanduser(os.environ.get('ISMAIL_CONFIG') or
+                                              os.path.join('~', '.ismail', 'config.json')))
+
+
+def setting(key):
+    """A path setting from ismail's settings file (stage.registry, live.registry), or None. The guard runs outside
+    the package, so it reads the file itself (a byte order mark is fine); it never raises."""
+    try:
+        with open(config_file(), encoding='utf-8-sig') as fh:
+            v = json.load(fh).get(key)
+        return os.path.expanduser(v) if isinstance(v, str) and v.strip() else None
+    except Exception:
+        return None
+
+
 def _registry(override, default):
-    d = override or os.path.join(os.path.expanduser('~'), '.ismail', default)
+    d = override or setting(default + '.registry') or os.path.join(os.path.expanduser('~'), '.ismail', default)
     out = []
     try:
         names = [n for n in os.listdir(d) if n.endswith('.json')]

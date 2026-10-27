@@ -480,7 +480,7 @@ wheels = [
 
 [[package]]
 name = "ismail"
-version = "0.4.1"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastmcp" },
@@ -495,21 +495,21 @@ dependencies = [
     { name = "soundfile" },
     { name = "threadpoolctl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b3/64/245d8e508732db96ad4453eaf5ab613daf9313b48ba3aa468305cb640a95/ismail-0.4.1.tar.gz", hash = "sha256:d033bec982dd08dc8085f0ccf5af8fdb837efa988625cc642fc6b9e9b7f9fbb1", size = 4269873, upload-time = "2026-10-27T03:29:36.905Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/00/2aca8f78be59130f91afe45a0ecbbe586cd8da9c437f7fc7327de437b02e/ismail-0.4.2.tar.gz", hash = "sha256:43ef502c3f2dcfcfd14e99df666f48e3e5d06aa074608b171ecc20ac5adb70a1", size = 4303098, upload-time = "2026-10-27T23:07:53.24Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/45/4be818f4dfc0157af0f1880b1c28048e8428a623db74c40f37dd60da0461/ismail-0.4.1-py3-none-any.whl", hash = "sha256:2d1b42d1b5214174c9a75e630e7eec65fac7bd7ecba477a730cb5d5d09eacb6d", size = 4072514, upload-time = "2026-10-27T03:29:35.084Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/61/2bae44e440e43819d500764c6e2c6978dbda77b619499502e6d908cbcfec/ismail-0.4.2-py3-none-any.whl", hash = "sha256:083bfeb3caa846aadfdc9aef09e5a1c63685edbccc9d15b8194c57e640355e23", size = 4093841, upload-time = "2026-10-27T23:07:50.924Z" },
 ]
 
 [[package]]
 name = "ismail-claude-plugin"
-version = "0.4.1"
+version = "0.4.2"
 source = { virtual = "." }
 dependencies = [
     { name = "ismail" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "ismail", specifier = "==0.4.1" }]
+requires-dist = [{ name = "ismail", specifier = "==0.4.2" }]
 
 [[package]]
 name = "joblib"
