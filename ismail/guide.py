@@ -67,6 +67,8 @@ HEAR (audio -> text), cheapest first
   sound_zoom          one window time-sharp + frequency-sharp sound_zoom_diff  where yours differs from >= 3 takes
   analyze_kit         drum kit pieces (NMF) + their patterns analyze_swing     how late swung hats land
   analyze_sections    loudness per section, dynamic range, a build as loud as its climax
+  analyze_feel        per-note timing and level on a followed beat line: why a draft sounds MIDI (against='ref')
+  feel_from_ref       writes the reference's timing and level into a part's notes (dry_run first; undo)
 
 LIVE (play in real time while you edit; a separate engine process per project folder)
   live_start(bpm) -> live_track(track, instrument) -> live_queue([{track, notes | lanes, bars, loop, at}, ...])
