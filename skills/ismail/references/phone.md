@@ -352,6 +352,9 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   page (`feedback_page`), or send a limited copy whose label says it is limited.
 - Every text box on a panel or exam card has a mic: they say the note, its words go into the box to edit, and the
   answer carries the recording too (`values_audio` on a panel).
+- **A file onto their phone** ("send it to my phone", a video to post from it): `phone_offer(path, label=, auto=True)`,
+  never a panel (a panel plays it, nothing is saved) and never the harness's own file upload (it has size caps and
+  lands in the agent app, not their downloads). Any size and type: it is served in chunks under the label's name.
 - `phone_offer(path, label=, auto=True)`: a download (a render, a take, a PDF). The label is the card and the file's
   name, so write it for a person ("Clair de lune, rain bed (highlight)"), not a slug. An mp3 goes out as a tagged copy:
   title, artist, album (`title=`, `artist=`, `album=`), the date, and ismail with its GitHub link (provenance travels
