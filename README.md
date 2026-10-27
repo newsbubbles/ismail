@@ -27,7 +27,7 @@ The agent you already use does the work in the background. You bring the taste.
 > **If you are an AI agent:** read [AGENTS.md](AGENTS.md) first; it is short. Then the playbook,
 > [skills/ismail/SKILL.md](skills/ismail/SKILL.md). Setup for every client is in
 > [setup.md](skills/ismail/references/setup.md) (one command with uv:
-> `uvx --python 3.12 --from git+https://github.com/newsbubbles/ismail ismail mcp`). Your first tool call is
+> `uvx --python 3.12 ismail mcp`). Your first tool call is
 > `guide`. Find any tool by what you need with `ops_find`. Every render comes back to you as text.
 
 <!-- MEDIA: a short silent mp4 loop of a person in VR driving a character's dance (Marketing cuts it; an mp4
@@ -175,8 +175,12 @@ itself is built this way ([the team](docs/reference.md#the-agent-team),
 Paste the line at the top to your agent and it sets everything up. By hand, Python 3.10 or newer:
 
 ```bash
-pip install "ismail @ git+https://github.com/newsbubbles/ismail"
+pip install ismail
 ```
+
+That is the latest release: a version of main that passed the tests and was checked once more as an install. For the
+newest work on main before it is released, install from GitHub (`pip install "ismail @ git+https://github.com/newsbubbles/ismail"`) or clone
+this repo.
 
 Then `ismail mcp` for any MCP client, `ismail -p <project> <op>` on the command line, or `from ismail import api`.
 Extras and per-client setup are in [docs/reference.md](docs/reference.md).

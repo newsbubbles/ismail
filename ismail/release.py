@@ -172,8 +172,9 @@ def check_skills(errors, warnings, files):
 
 
 def server_entry(meta, **extra):
-    s = meta['server']
-    return {**extra, 'command': s['command'], 'args': list(s['args']), 'env': dict(s['env'])}
+    s = meta['server']  # "ismail=={version}": a plugin runs the PyPI release of its own version (ledger:M358)
+    return {**extra, 'command': s['command'], 'args': [a.replace('{version}', meta['version']) for a in s['args']],
+            'env': dict(s['env'])}
 
 
 def local_command(server):
