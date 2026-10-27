@@ -25,7 +25,7 @@ CATEGORIES = [
       'samples_', 'sound_list', 'sound_make', 'sound_import', 'sound_speak', 'sound_autotune')),
     ('fit', 'matching a sound or a level to a recording, measured',
      ('instrument_fit', 'track_fit', 'track_model', 'eq_match', 'mimic_measure', 'sound_extract', 'sound_compare',
-      'levels_from_ref', 'ref_retune')),
+      'levels_from_ref', 'ref_retune', 'feel_from_ref')),
     ('render', 'rendering, mastering a finished cue for delivery, and playing', ('render', 'play_file', 'master_cue')),
     ('midi', 'MIDI files and ports: the song or some tracks to a .mid any DAW opens, a .mid read into tracks, the '
              'MIDI inputs and outputs, a song played to a synth or a DAW',

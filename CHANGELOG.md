@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### per-note feel from a reference: analyze_feel, feel_from_ref (ledger:M364)
+
+- `analyze_feel(source, bars, per_beat=2, band, against=None)` measures what makes a draft sound MIDI: the timing
+  spread of the notes between the beats, where the offbeat 8th sits as a share of the beat, the level by metric
+  position against the bar's mean and the note-to-note level steps. `against='ref'` prints both columns and the
+  differences, and names the ones that read as MIDI-like.
+- `feel_from_ref(track, bars, source='ref', ...)` writes the reference's timing (as each note's @offset nudge) and
+  level (velocity x 10^(level x dB / 20)) into a track's notes. `dry_run=True` prints the changes; `undo()` takes
+  them back. Notes on slots with no clear onset are left alone, and the reply says when an instrument reads velocity
+  as more than level.
+- Both follow the take's own beats from bar 1, so a record that drifts stays locked while the project keeps one
+  tempo (M258); they name the beats they could not follow. On a take drifting +-3%, a planted offbeat at 0.540 of
+  the beat read 0.540, per-note offsets came back within 3 ms (median) and levels by position within 1 dB.
+
 ### install from PyPI (ledger:M358)
 
 - `pip install ismail` and `uvx --python 3.12 ismail mcp` are now the install lines (README, docs/reference.md, setup.md, the CLI help); GitHub stays the way to get main before it is released (`pip install "ismail @ git+https://github.com/newsbubbles/ismail"`, or a clone).
