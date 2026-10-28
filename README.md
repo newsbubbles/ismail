@@ -19,6 +19,8 @@ ismail runs on your computer and has no service of its own: nothing is sent to u
 for these, each when you ask for it:
 
 - **Sample libraries:** downloaded from GitHub (sfzinstruments) and the University of York (SADIE II) after your yes.
+- **Reference tracks:** when you name a song or give a link (YouTube, SoundCloud), the agent searches for it and
+  downloads its audio with yt-dlp into your song folder, after asking once to install yt-dlp.
 - **Live streaming** (`stream_*` tools, set up by you with your own accounts): your set's audio and video, and the
   chat replies you approve, go to YouTube, Twitch or Kick. Viewers' chat (their names and messages) is read and kept
   in a log on your computer (`chat.jsonl` in the stream folder).
