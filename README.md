@@ -11,7 +11,10 @@ Install in Claude Code:
 
     /plugin install ismail --marketplace newsbubbles/ismail
 
-## What leaves your computer
+## Privacy
+
+What leaves your computer, and when.
+
 
 ismail runs on your computer and has no service of its own: nothing is sent to us. It contacts other services only
 for these, each when you ask for it:
@@ -22,4 +25,4 @@ for these, each when you ask for it:
   in a log on your computer (`chat.jsonl` in the stream folder).
 - **The phone page** loads its fonts from Google Fonts.
 
-Source, docs and issues: https://github.com/newsbubbles/ismail
+Source, docs and issues: https://github.com/newsbubbles/ismail · [Privacy](#privacy)
