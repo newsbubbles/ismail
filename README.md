@@ -15,7 +15,6 @@ Install in Claude Code:
 
 What leaves your computer, and when.
 
-
 ismail runs on your computer and has no service of its own: nothing is sent to us. It contacts other services only
 for these, each when you ask for it:
 
