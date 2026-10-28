@@ -10,6 +10,10 @@
   "homepage": "https://newsbubbles.github.io/ismail/",
   "repository": "https://github.com/newsbubbles/ismail",
   "license": "MIT",
+  "documentationUrl": "https://github.com/newsbubbles/ismail/blob/main/docs/reference.md",
+  "supportUrl": "https://github.com/newsbubbles/ismail/issues",
+  "privacyPolicyUrl": "https://github.com/newsbubbles/ismail/blob/claude-plugin/README.md#privacy",
+  "termsOfServiceUrl": "https://github.com/newsbubbles/ismail/blob/main/LICENSE",
   "keywords": [
     "music",
     "daw",
