@@ -1,7 +1,7 @@
 [project]
 name = "ismail-claude-plugin"
 version = "0.4.3"
-description = "Runs the ismail MCP server from its PyPI release with every dependency at the version in uv.lock (uv run --frozen)."
+description = "Runs the ismail MCP server from its PyPI release, with every dependency locked in uv.lock."
 requires-python = "==3.12.*"
 dependencies = ["ismail==0.4.3"]
 

@@ -20,15 +20,11 @@
   ],
   "mcpServers": {
     "ismail": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "run",
-        "--frozen",
         "--python",
         "3.12",
-        "--project",
-        "${CLAUDE_PLUGIN_ROOT}",
-        "ismail",
+        "ismail==0.4.3",
         "mcp"
       ]
     }
