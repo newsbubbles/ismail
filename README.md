@@ -26,4 +26,21 @@ for these, each when you ask for it:
   in a log on your computer (`chat.jsonl` in the stream folder).
 - **The phone page** loads its fonts from Google Fonts.
 
+## For reviewers
+
+Notes on the two policy holds.
+
+**Runs a pinned uvx package.** The server is `uvx --python 3.12 ismail==0.4.3 mcp`. `ismail` on PyPI is this
+project: each release is built from its tag in https://github.com/newsbubbles/ismail by the release workflow
+(`.github/workflows/release.yml`) and uploaded with PyPI trusted publishing, after an approval in a protected
+environment. `uv.lock` beside the manifest pins every dependency to an exact version and hash (97 entries). We do
+not vendor the source: the package is about 300 files plus numpy, scipy and other compiled wheels, past the
+plugin's 512-file limit.
+
+**Uses a credential from the user's machine.** The hold cites `skills/ismail/references/stage.md`. That file is
+instructions for the agent and reads nothing: "pass" there means a room-building step (`pass_script`, `passes`),
+not a password. The plugin itself reads no credential. The one place ismail uses credentials is live streaming
+(`stream_*` tools in the package): the person types their own stream key or signs in with the platform's own login
+page, the tokens stay on their computer, and they go only to the platform they belong to (YouTube, Twitch, Kick).
+
 Source, docs and issues: https://github.com/newsbubbles/ismail · [Privacy](#privacy)
