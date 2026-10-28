@@ -26,10 +26,7 @@
         "3.12",
         "ismail==0.4.2",
         "mcp"
-      ],
-      "env": {
-        "PYTHONWARNINGS": "ignore"
-      }
+      ]
     }
   }
 }
