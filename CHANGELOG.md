@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 (2026-10-28)
 
 ### what ismail hands its own Blender scripts and hooks is a file you can open (ledger:M382, M383)
 
@@ -22,6 +22,10 @@
   `<songs>/night_bus/proj`, the layout SKILL.md gives a song (`build.py` beside `proj/`), and every op opens
   `night_bus` there. A song that keeps `project.json` in its own folder (older songs, live sets) still opens there. A
   project in `proj/` is named after its song's folder, not "proj".
+- The store packages (Claude, OpenAI, Cursor) start the server with no environment block: the server keeps library
+  warnings off its own stream, so `PYTHONWARNINGS` there did nothing.
+- The Claude directory plugin (branch claude-plugin) starts the server from its own lockfile, `uv run --frozen`, so
+  every library is the version it was tested with; ismail on PyPI keeps its version ranges.
 
 ## 0.4.2 (2026-10-27)
 

@@ -7,13 +7,10 @@
         "--python",
         "3.12",
         "--from",
-        "ismail==0.4.2",
+        "ismail==0.4.3",
         "ismail",
         "mcp"
       ],
-      "env": {
-        "PYTHONWARNINGS": "ignore"
-      },
       "startup_timeout_sec": 300
     }
   }

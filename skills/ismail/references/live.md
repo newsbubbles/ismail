@@ -106,8 +106,8 @@ had the person waiting 10 minutes. Aim for music within about 2 minutes of
 the ask. After the first clip, check that the heard bar moves: a Bluetooth speaker that went to sleep plays
 nothing while `live_status` says STALLED, so tell the person at once ("tap the speaker to wake it").
 
-**Never downgrade in silence.** When a constraint forces a worse sound (a voice that renders too slowly for the
-set, a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that voice, a
+**Never downgrade in silence.** When a constraint forces a worse sound (a voice that renders too slowly for
+the set, a voice that fails its warm-up), say so before it plays and offer the options: fewer tracks on that voice, a
 simpler patch, a pre-rendered clip. The blues set swapped the fitted guitar for an untested one without a word, and the
 user caught it by ear.
 
@@ -333,7 +333,7 @@ songs/<slug>/
   SET.md                the Set Sheet and the running order, kept as the set goes: one row per section
                         (# | name | start bar | grid, e.g. 84 or 126 = 1.5x | key | tracks added / stopped | what
                         the user said that caused it)
-  set/
+  set/                  the set's code, one module per section
     ctl.py              plumbing only, no notes: a djkit Set, the rig helpers
     s01_triphop.py      one module per section, numbered in play order, named by style: rig() makes its
     s02_minimal.py        tracks, clips(start) returns the queue batch, choreo(start) the moves, run(start)
@@ -383,8 +383,8 @@ hand-over is a stop and a start:
    with `phone_route(inbox=...)` stays where it points; `phone_route()` sends it back to the playing engine.
 
 Without a restart, a finished song from another folder plays on a deck by its path (`live_load(deck=,
-song=<its folder>)`), and its tracks render with that song's own voices and sound bank. That plays a piece inside a
-set; it does not make a new one: tracks made with `live_track` and every take still land in the engine's folder.
+song=<its folder>)`), and its tracks render with that song's own voices and sound bank. That plays a piece inside
+a set; it does not make a new one: tracks made with `live_track` and every take still land in the engine's folder.
 
 ## Performers and phrase voices
 

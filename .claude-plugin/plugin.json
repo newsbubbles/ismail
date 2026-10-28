@@ -1,7 +1,7 @@
 {
   "name": "ismail",
   "displayName": "ismail",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "ismail is an open-source (MIT) music studio that an AI model runs through text. The model writes the song as notes, instrument patches and mix settings, renders it on your machine (the plugin starts the ismail server for you, with uv), and reads every render back as numbers: levels, drum lanes, piano rolls, and comparisons against a reference. It does this because it can't hear. Instruments are built from recorded notes of the real thing, and your own ears decide when a piece is done, through short listening checks. No generative audio model makes the sound.",
   "author": {
     "name": "Nate Codes",
@@ -25,13 +25,10 @@
         "--python",
         "3.12",
         "--from",
-        "ismail==0.4.2",
+        "ismail==0.4.3",
         "ismail",
         "mcp"
-      ],
-      "env": {
-        "PYTHONWARNINGS": "ignore"
-      }
+      ]
     }
   }
 }
