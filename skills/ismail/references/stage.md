@@ -137,9 +137,10 @@ something you do.
   note." out loud and goes to `_stage/unread.jsonl`. Read the unread notes when you start listening.
 - **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json`,
   `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...], "session_stuck": [...]}`,
-  each a shell command (or an argv list) run on this computer with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`,
-  `STAGE_FILE`, `STAGE_EVENT_ID`, `STAGE_URL`, `STAGE_SCENES` (and `STAGE_WHO` for session_stuck) in its environment
-  (a toast, `claude -p "..."`, `codex exec "..."`); output goes to
+  each a shell command (or an argv list) run on this computer (a toast, `claude -p "..."`, `codex exec "..."`).
+  Put `{event_file}` in the command where it should get the event: ismail writes the event to a JSON file
+  (`event`, `scene`, `text`, `file`, `event_id`, `url`, `scenes`, and `who` for session_stuck) and puts the file's
+  path there, for example `claude -p "Read {event_file} and answer the note"`. Output goes to
   `_stage/hooks.log`. A song's own `_stage/hooks.json` runs only when the home file lists its scenes folder in
   `"trust": [...]`: a scenes folder travels, and must never run commands for whoever opens it.
 
@@ -154,14 +155,16 @@ crude stools, no bottles, block trees and cylinder people: every lesson already 
   waypoints; the actor bodies come from the source through `assets`). The person's takes, voice notes and snapshots
   stay with the source.
 - **The variant is a pass on the built room,** a script run after the source's full build and before the Quest diet
-  (`pass` in world.json, `pass_env` for its switches). It removes, adds and repaints what changed; everything else
+  (`pass` in world.json, `pass_switches` for its switches). It removes, adds and repaints what changed; everything else
   is the source's. `stage_scene_export` runs the whole line (the source's build, every pass oldest first, the
-  edits of the line merged with the variant's winning, the diet). Room scripts exec the engine bridge, whose path
-  `stage_scene_export` hands them as `VR_BRIDGE`, at their end so the passes and the diet run. A room with its own Quest merge defines `stage_diet()` and skips that
-  merge in its build when `VR_DIET` is set: a pass that runs after the merge finds one joined mesh, not the stools.
+  edits of the line merged with the variant's winning, the diet). `stage_scene_export` hands the build its job as `sys.vr_job`
+  (also saved as `_stage/job_<scene>.json`: the scene, the export folder, the bridge, the passes, the edits, the
+  diet, the switches), and room scripts end with `exec(open(sys.vr_job['bridge']).read())` so the passes and the
+  diet run. A room with its own Quest merge defines `stage_diet()` and skips that merge in its build when
+  `sys.vr_job['diet']` is true: a pass that runs after the merge finds one joined mesh, not the stools.
 - **Check it beside its source from the same camera** before the person sees it: the same view of both, side by
   side, and look for anything that went back to a blockout.
-- **Renders of a scene go in `renders/<scene>/`** (a script reads `STAGE_SCENE`), so a camera both scenes share
+- **Renders of a scene go in `renders/<scene>/`** (a script reads `sys.vr_job['scene']`), so a camera both scenes share
   never overwrites the other's still.
 - **A direction note is a direction, not an open question.** If the person said the place expanded, build it
   expanded; ask only what the notes leave open.

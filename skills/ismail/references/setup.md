@@ -79,10 +79,12 @@ new person meets (dress rehearsals 1 and 2, 2026-10-05 and 10-06):
 
 Pick the first route that fits:
 - **In Claude Code or the desktop app's Code tab:** the plugin brings the tools and this skill in one step.
-  1. **Warm it up first.** The plugin starts its server with uvx, which builds the same libraries the first time
-     it runs, and a first start that takes minutes can time out. Run the exact command once yourself before the
-     plugin lines, and tell them it is the five-minute step:
-     `uvx --python 3.12 ismail --help`.
+  1. **Warm it up first.** The plugin starts its server with uv, from the plugin's own lockfile (every library at
+     the version it was tested with), and fetches those libraries the first time; a first start that takes minutes
+     can time out. Fill uv's download cache once yourself before the plugin lines, and tell them it is the
+     five-minute step: `uvx --python 3.12 ismail --help`. If the plugin's first start still times out (a library
+     the lockfile holds at another version than the newest), reconnect it (`/mcp`): the second start finds what
+     the first one fetched.
   2. **The plugin, with as little pasting as possible.** If a `claude` command runs in your shell
      (`claude --version`), add it yourself, and they paste nothing:
      `claude plugin marketplace add newsbubbles/ismail`, then `claude plugin install ismail@ismail`.
@@ -117,7 +119,8 @@ Pick the first route that fits:
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
 it is. Every song lives in its own subfolder there: a bare song name (`project='my_song'`) always means that
-subfolder, for every op (a path like `./my_song` is taken from the working folder). An installed ismail uses
+subfolder, for every op: its `proj/` (the project, beside the song's `build.py`), or the subfolder itself for a song
+that keeps `project.json` there (a path like `./my_song` is taken from the working folder). An installed ismail uses
 Documents/ismail (a clone uses its own
 `songs/`), so make the folder there unless they want another place; `guide` names the folder it uses. Another place
 is one setting, `songs` (see Settings below): `config_set('songs', '<folder>')`, or from a shell before the tools
