@@ -13,8 +13,7 @@
   "server": {
     "name": "ismail",
     "command": "uvx",
-    "args": ["--python", "3.12", "--from", "ismail=={version}", "ismail", "mcp"],
-    "env": {"PYTHONWARNINGS": "ignore"}
+    "args": ["--python", "3.12", "--from", "ismail=={version}", "ismail", "mcp"]
   },
   "claude-code": {
     "displayName": "ismail",

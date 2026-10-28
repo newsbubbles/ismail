@@ -173,8 +173,10 @@ def check_skills(errors, warnings, files):
 
 def server_entry(meta, **extra):
     s = meta['server']  # "ismail=={version}": a plugin runs the PyPI release of its own version (ledger:M358)
-    return {**extra, 'command': s['command'], 'args': [a.replace('{version}', meta['version']) for a in s['args']],
-            'env': dict(s['env'])}
+    e = {**extra, 'command': s['command'], 'args': [a.replace('{version}', meta['version']) for a in s['args']]}
+    if s.get('env'):    # none since 0.4.3: the server keeps warnings off its own stream (mcp_server.py)
+        e['env'] = dict(s['env'])
+    return e
 
 
 def local_command(server):

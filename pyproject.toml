@@ -1,6 +1,6 @@
 [project]
 name = "ismail"
-version = "0.4.2"
+version = "0.4.3"
 description = "A DAW for AI agents: write music as text, read the audio back as text, and play it live. MCP server, CLI and an agent skill."
 readme = "README.md"
 license = {text = "MIT"}

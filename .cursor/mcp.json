@@ -2,8 +2,7 @@
   "mcpServers": {
     "ismail": {
       "command": "python",
-      "args": ["-m", "ismail.mcp_server"],
-      "env": {"PYTHONWARNINGS": "ignore"}
+      "args": ["-m", "ismail.mcp_server"]
     }
   }
 }
