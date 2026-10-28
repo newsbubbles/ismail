@@ -442,13 +442,28 @@ def is_bare_name(p):
             and not os.path.isabs(p) and not re.match(r'^[A-Za-z]:', p) and not p.startswith('~'))
 
 
-def project_dir(p):
+def project_dir(p, new='proj'):
     """The folder a project argument names (ledger:M375, Nate 10-27): a bare song name is always a folder in the
     songs setting, read now, so config_set('songs') moves where it lands at the next call; '.', '..' and any path
-    with a separator are taken as given, from the working folder."""
+    with a separator are taken as given, from the working folder.
+
+    Inside the song's folder (ledger:M376) the project is <song>/proj when that holds a project.json (the song layout
+    of SKILL.md: build.py beside proj/), else <song> itself when that does (older songs, live sets). A song with
+    neither gets <song>/<new>: 'proj' for a song, '' for a live set's folder (live.md)."""
     if is_bare_name(p):
-        return os.path.join(os.path.abspath(get('songs')), p.strip())
+        song = os.path.join(os.path.abspath(get('songs')), p.strip())
+        for d in (os.path.join(song, 'proj'), song):
+            if os.path.isfile(os.path.join(d, 'project.json')):
+                return d
+        return os.path.join(song, new) if new else song
     return os.path.abspath(p)
+
+
+def song_name(root):
+    """A project's song name: its folder's, or the song folder's for a project in <song>/proj (ledger:M376)."""
+    root = os.path.abspath(root)
+    base = os.path.basename(root)
+    return os.path.basename(os.path.dirname(root)) if base.lower() == 'proj' else base
 
 
 def get(key, strict=False):
