@@ -11,4 +11,15 @@ Install in Claude Code:
 
     /plugin install ismail --marketplace newsbubbles/ismail
 
+## What leaves your computer
+
+ismail runs on your computer and has no service of its own: nothing is sent to us. It contacts other services only
+for these, each when you ask for it:
+
+- **Sample libraries:** downloaded from GitHub (sfzinstruments) and the University of York (SADIE II) after your yes.
+- **Live streaming** (`stream_*` tools, set up by you with your own accounts): your set's audio and video, and the
+  chat replies you approve, go to YouTube, Twitch or Kick. Viewers' chat (their names and messages) is read and kept
+  in a log on your computer (`chat.jsonl` in the stream folder).
+- **The phone page** loads its fonts from Google Fonts.
+
 Source, docs and issues: https://github.com/newsbubbles/ismail
