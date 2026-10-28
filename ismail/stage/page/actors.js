@@ -85,12 +85,21 @@ function mirrorFrame(f, st) {
   g.left = mh('right'); g.right = mh('left');
   return g;
 }
+const gOfB = new THREE.Box3(), gOfC = new THREE.Box3();
 const groundOf = (it) => {
   const FLOOR = world().floor || 0;
   if (!it) return FLOOR;
   // a person marked by an empty has no box: they stand where the empty is (the talk's speaker sank 0.45 m into the
-  // stage to the hall floor, the user, 2026-10-23)
-  const b = new THREE.Box3().setFromObject(it.obj);
+  // stage to the hall floor, the user, 2026-10-23). The pick box (fitProxy) and gizmos hang on the same item and are
+  // not counted: with them a second rest read the box's own bottom (0.36 m over the hall's stage, 2026-10-27)
+  const b = gOfB.makeEmpty();
+  it.obj.updateWorldMatrix(true, true);
+  it.obj.traverse((o) => {
+    const g = o.geometry;
+    if (!g || o.userData.pickProxy || o.userData.gizmo) return;
+    if (!g.boundingBox) g.computeBoundingBox();
+    b.union(gOfC.copy(g.boundingBox).applyMatrix4(o.matrixWorld));
+  });
   const y = b.isEmpty() ? it.obj.getWorldPosition(new THREE.Vector3()).y : b.min.y;
   return Number.isFinite(y) && y > -0.5 && y < 3 ? Math.max(FLOOR, y) : FLOOR;
 };
@@ -381,17 +390,22 @@ export function initActors(ed, live) {
         for (const p of ps) if (p.y <= lo + 0.01 && sg * p.dot(fwd) > bd) { bd = sg * p.dot(fwd); best = p; }
         return best;
       };
-      const out = {};
+      const out = { lift: { l: 0, r: 0 } };
       for (const [sd, gf, gb] of [['l', 0, 1], ['r', 2, 3]]) {
         const f = bones[`foot_${sd}`], b = bones[`ball_${sd}`] || f;
         if (!f) return null;
         const heel = end(grp[gf], -1) || end(grp[gb], -1) || f.getWorldPosition(new THREE.Vector3()).setY(0);
         const toe = end(grp[gb], 1) || end(grp[gf], 1) || b.getWorldPosition(new THREE.Vector3()).setY(0);
+        out.lift[sd] = Math.max(0, -Math.min(heel.y, toe.y));     // footY: the rig at its origin, so under 0 is under its floor
         out[sd] = [f.name, f.worldToLocal(heel.clone()), b.name, b.worldToLocal(toe.clone())];
       }
       return out;
     } catch (e) { console.warn('[actors] soles', e); return null; }
   }
+  // where a foot's ankle goes over the floor: its rest height, plus how far the rest soles reach under the rig's origin
+  // (MakeHuman's shoes: toes 1.75 cm under it on bluefront's Jo and Earl, 1.0 on Hattie; the legs put the ankle at its
+  // rest height, so a standing body's toes were that far in the floor, the bluefront clip check, 2026-10-27)
+  const footY = (rig, sd) => rig.rest[`foot_${sd}`].p.y + (rig.soles && rig.soles.lift ? rig.soles.lift[sd] : 0);
   const bodies = new WeakMap();                              // rig.root -> its body: slabs now, arms, counter
   function bodyOf(rig, person) {
     if (!rig.bodyFit) return null;
@@ -652,6 +666,34 @@ export function initActors(ed, live) {
     if (k < 0) B.groundAt = frameN;
     B.gms = realNow() - t0;
   }
+  // where a person stands: groundOf's height (their mark), moved to the highest floor top under them within GROUND_SNAP
+  // of it (bluefront, 2026-10-27: the couples' marks at 0.09 m, the dance floor's top at 0.10, so a centimetre of their
+  // soles was under it). Once per rest or play, from the column grids (built whole here, kept for the ground check)
+  const GROUND_SNAP = 0.03, sv = new THREE.Vector3();
+  function standY(it) {
+    const y = groundOf(it);
+    if (!it || !ed.root) return y;
+    const w = it.obj.getWorldPosition(sv), solids = groundSolids(), H = gOut, y0 = y - GROUND_SNAP, y1 = y + GROUND_SNAP;
+    H.nt = 0; H.nu = 0; gSlow.length = 0; gBuild.left = Infinity;
+    for (let i = 0; i < solids.length; i++) {
+      const o = solids[i], b = gBoxes[i];
+      if (b.min.x > w.x || b.max.x < w.x || b.min.z > w.z || b.max.z < w.z || b.min.y > y1 || b.max.y < y0 || !ed.pickable(o)) continue;
+      const g = gridOf(o);
+      if (g) gridHits(g, w.x, w.z, y0, y1, y1, H);
+      else if (g === false) gSlow.push(o);
+    }
+    let top = -Infinity;
+    for (let i = 0; i < H.nt; i++) top = Math.max(top, H.tops[i]);
+    if (gSlow.length) {
+      gRc.set(gO.set(w.x, y1, w.z), DOWN); gRc.far = y1 - y0;
+      gHits.length = 0;
+      gRc.intersectObjects(gSlow, false, gHits);
+      for (const h of gHits) if (h.face && gN.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.3) top = Math.max(top, h.point.y);
+      gHits.length = 0; gSlow.length = 0;
+    }
+    H.nt = 0; H.nu = 0;
+    return top > -Infinity ? top : y;
+  }
   // the feet into the clip list as last measured (any there from earlier this frame replaced)
   function pushGround(B) {
     for (let i = B.clip.length - 1; i >= 0; i--) if (B.clip[i][1] === 'ground') B.clip.splice(i, 1);
@@ -723,6 +765,48 @@ export function initActors(ed, live) {
       B.adjusted = true;
     }
     countClips(B, t);
+  }
+  // a start pose as made can hold an arm in a body: on bluefront her dance-hold hand 11.7 cm into his back, the bassist's
+  // upper arm 5.5 cm into his own chest (the clip check, 2026-10-27), and restContact solves a resting arm only while
+  // someone moving is near, so on load nothing pushed them out. Once, as a person comes to rest (and again for those
+  // resting near, whose neighbour has just arrived): each arm with a limb CLIP_M or more in a body is solved like a
+  // moving arm toward the pose's own hand and elbow (the hand where the pose asks, as near as the bodies allow, its
+  // turn kept), and that is the rest pose restContact starts from. Always from the pose as made (S.made), so settling
+  // twice gives the same arm; any other arm is left exactly as made (a hand-written pose is not touched short of a clip)
+  function settleRest(r) {
+    const B = bodies.get(r.rig.root), S = r.S, rig = r.rig;
+    if (!B || !B.st.on || !S || !bodyOn) return;
+    if (!S.made) { S.made = {}; for (const sd of SIDES) for (const n of ARM_CHAIN[sd]) if (S.locals[n]) S.made[n] = S.locals[n].clone(); }
+    const ok = (sd) => S.handW[sd] && ARM_CHAIN[sd].every((n) => rig.bones[n] && S.made[n]);
+    for (const sd of SIDES) {
+      if (!ok(sd)) continue;
+      for (const n of ARM_CHAIN[sd]) rig.bones[n].quaternion.copy(S.made[n]);
+      rig.bones[ARM_CHAIN[sd][0]].updateMatrixWorld(true);
+    }
+    listShown(); othersOf(B);
+    for (const sd of SIDES) {
+      if (!ok(sd)) continue;
+      const D = limbsNow(B, sd, true);
+      if (Math.max(D.self[0], D.self[1], D.self[2], D.other[0], D.other[1], D.other[2]) < CLIP_M) {
+        for (const n of ARM_CHAIN[sd]) S.locals[n].copy(S.made[n]);
+        continue;
+      }
+      const arm = B.arms[sd];
+      arm.prev.phi = arm.prev.alpha = 0; arm.t = null;
+      armSolve(null, rig, sd, S.handW[sd], S.elbowW[sd], S.handQ[sd], null);
+      setWorldQ(rig.bones[SIDE[sd].ha], S.handQ[sd]);
+      arm.prev.phi = arm.prev.alpha = 0; arm.t = null;
+      rig.bones[ARM_CHAIN[sd][0]].updateMatrixWorld(true);
+      for (const n of ARM_CHAIN[sd]) S.locals[n].copy(rig.bones[n].quaternion);
+    }
+  }
+  function settleNear(r) {
+    const RB = bodies.get(r.rig.root);
+    if (!RB) return;
+    for (const q of resting.values()) {
+      const QB = bodies.get(q.rig.root);
+      if (q === r || (QB && Math.hypot(QB.st.pel[0] - RB.st.pel[0], QB.st.pel[2] - RB.st.pel[2]) <= NEAR_M)) settleRest(q);
+    }
   }
   // collision on or off for this page (stage live command body_collide {on}: to compare, and a way out if it misbehaves);
   // reach: the hands eased in from full reach; relax: a resting body's arms give way softly (both on by default)
@@ -994,7 +1078,7 @@ export function initActors(ed, live) {
         const own = st.pins['foot_' + sd];
         // on the floor in front of the seat; a seat too high for that (a bar stool) rests them on a rung, knees bent
         const leg = rig.rest[`thigh_${sd}`].p.distanceTo(rig.rest[`calf_${sd}`].p) + rig.rest[`calf_${sd}`].p.distanceTo(rig.rest[`foot_${sd}`].p);
-        const floorY = st.floor + rig.rest[`foot_${sd}`].p.y, high = hipAt.y - floorY > 0.8 * leg;
+        const floorY = st.floor + footY(rig, sd), high = hipAt.y - floorY > 0.8 * leg;
         const at = own ? own.clone() : hipAt.clone().addScaledVector(fw, high ? SEAT_FOOT * 0.45 : SEAT_FOOT)
           .add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).setY(0).applyQuaternion(base));
         if (!own) at.y = high ? hipAt.y - 0.62 * leg : floorY;
@@ -1015,7 +1099,7 @@ export function initActors(ed, live) {
     for (const sd of ['l', 'r']) {
       const ft = st.feet[sd];
       const want = hipAt.clone().add(rig.rest[`foot_${sd}`].p.clone().sub(rig.rest.pelvis.p).applyQuaternion(base));
-      want.y = st.floor + rig.rest[`foot_${sd}`].p.y;
+      want.y = st.floor + footY(rig, sd);
       const pinned = !!(st.pins && st.pins['foot_' + sd]);
       pinFoot(st, sd, want);
       if (!ft.at) { ft.at = want.clone(); ft.q = base.clone(); }
@@ -1060,7 +1144,7 @@ export function initActors(ed, live) {
   function setUp(c, { person, rig, it, f0, heights, live = false, embodied = false, meta = null, J }) {
     const floor = world().floor || 0;                      // the user's floor while recording or following
     const placed = !!it && !c.in_place;
-    const ground = placed ? groundOf(it) : floor;
+    const ground = placed ? standY(it) : floor;
     const w = placed ? it.obj.getWorldPosition(new THREE.Vector3()) : null;
     const to = placed ? new THREE.Vector3(w.x, ground, w.z) : live ? new THREE.Vector3(f0.head[0], ground, f0.head[2]) : null;
     const h0 = f0.head;
@@ -1296,7 +1380,7 @@ export function initActors(ed, live) {
     if (!spec || spec.idle === false || !it) { unrest(person); if (it) it.obj.visible = true; return null; }
     if (busy(person) || unloadedOf(person)) return null;   // a play began, or its set went, while it loaded
     const r = resting.get(person) || { rig: await cloneRig(rig0) };
-    const w = it.obj.getWorldPosition(new THREE.Vector3()), floor = groundOf(it);
+    const w = it.obj.getWorldPosition(new THREE.Vector3()), floor = standY(it);
     const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), r.rig.fwd);
     const tmp = { person, rig: r.rig, s: 1, floor, to: new THREE.Vector3(w.x, floor, w.z), alignInv: align.invert(),
       feet: { l: {}, r: {} }, J: Object.fromEntries(JOINTS.map((n, i) => [n, i])) };
@@ -1308,6 +1392,7 @@ export function initActors(ed, live) {
     r.rig.root.updateMatrixWorld(true);
     const RB = torsoNow(r.rig, person);                     // its slabs, for the bodies that come near (restContact)
     if (RB) { RB.moving = false; RB.adjusted = false; for (const sd of ['l', 'r']) { RB.arms[sd].prev.phi = 0; RB.arms[sd].prev.alpha = 0; RB.relax[sd] = 0; RB.relaxT[sd] = -Infinity; } }
+    if (RB) settleNear(r);                                  // its arms out of the bodies near, and theirs out of it
     it.obj.visible = false;
     fitProxy(person, r.rig);
     live.emit('actor_rest', { person, start: spec });
@@ -1847,7 +1932,8 @@ export function initActors(ed, live) {
     await readProfile(rig);
     const spec = c.start || rig.profile.start || { pose: 'rest' };
     const w = it ? it.obj.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
-    const tmp = { person, rig, s: 1, floor: groundOf(it), to: new THREE.Vector3(w.x, groundOf(it), w.z), J: Object.fromEntries(JOINTS.map((n, i) => [n, i])),
+    const fy = standY(it);
+    const tmp = { person, rig, s: 1, floor: fy, to: new THREE.Vector3(w.x, fy, w.z), J: Object.fromEntries(JOINTS.map((n, i) => [n, i])),
       alignInv: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rig.fwd).invert(), feet: { l: {}, r: {} } };
     await startPose(tmp, spec);
     const joints = readJoints(rig);
@@ -1871,7 +1957,7 @@ export function initActors(ed, live) {
   async function eyesOf(person, user) {
     const it = ed.byName.get(person);
     if (!it) throw new Error('no such person: ' + person);
-    const rig = await rigOf(person), ground = groundOf(it);
+    const rig = await rigOf(person), ground = standY(it);
     const w = it.obj.getWorldPosition(new THREE.Vector3()), toW = new THREE.Vector3(w.x, ground, w.z);
     const facing = facingOf(ed, person, toW, user ? new THREE.Vector3(user.x, 0, user.z) : null);
     const r = resting.get(person), hb = r && r.rig.bones.head;
