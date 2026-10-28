@@ -370,7 +370,7 @@ def live_load(project: str, deck: str, song: str, bars: list = None, at: str = '
     takes to render here, and which track makes the wait."""
     if not os.path.isabs(song):
         cand = os.path.join(os.path.abspath(project), song)
-        song = cand if os.path.exists(cand) else settings.project_dir(song)   # bare: the songs folder (M375)
+        song = cand if os.path.exists(cand) else settings.project_dir(song, new='')   # bare: songs folder (M375)
     out = _call(project, 'load', deck=deck, song=song, bars=bars, at=at, loop=loop, cue=cue,
                 performers=_song_performers(song), timeout=120)
     gaps = _song_performer_gaps(song)
@@ -623,7 +623,7 @@ def live_parity(song: str, bars: list, tracks: list = None) -> str:
     renders live (x realtime, in one process, a worker's pace). tracks limits both sides to those tracks. Takes about
     as long as rendering the bars twice. Also api.live_parity."""
     from . import parity
-    song = settings.project_dir(song)                     # a bare song name: the songs folder (ledger:M375)
+    song = settings.project_dir(song, new='')             # a bare song name: the songs folder (ledger:M375)
     if not os.path.exists(os.path.join(song, 'project.json')):
         raise OpError(f"no project at {song}")
     if not isinstance(bars, (list, tuple)) or len(bars) != 2:

@@ -80,8 +80,9 @@ def op(mutates=False):
                 raise OpError(f"bad arguments for {fn.__name__}: {e}. Signature: {fn.__name__}{sig}")
             bare = [n for n in project_args if settings.is_bare_name(bound.arguments.get(n))]
             if bare:                                 # ledger:M375: 'my_song' is <songs>/my_song, never the cwd's
+                new = '' if fn.__name__.startswith('live_') else 'proj'      # a new set's folder is the song's (M376)
                 for n in bare:
-                    bound.arguments[n] = settings.project_dir(bound.arguments[n])
+                    bound.arguments[n] = settings.project_dir(bound.arguments[n], new=new)
                 a, kw = bound.args, bound.kwargs
             try:
                 return fn(*a, **kw)
@@ -323,7 +324,8 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
                 offset_sec: float = 0.0, reference: str = None, objective: str = None,
                 derived_from: str = None, master_limiter: bool = True) -> str:
     """Create a new project directory. project: a bare song name ('my_song') makes it in the songs folder
-    (config_get('songs')), as every op reads a bare name; a path ('./my_song', 'D:/elsewhere/my_song') is taken as
+    (config_get('songs')), as <songs>/my_song/proj, the song layout with build.py beside proj/ (every op opens a bare
+    name there, or in the song's own folder for an older song with project.json there); a path ('./my_song', 'D:/elsewhere/my_song') is taken as
     given. offset_sec = time of bar 1 (match a reference's grid with analyze_grid).
     master_limiter: start the master chain with a safety limiter (-0.3 dB); False for a build that writes its
     own master chain, so the default does not sit ahead of it.
@@ -334,7 +336,7 @@ def project_new(project: str, bpm: float, length_bars: int, name: str = None, be
     if os.path.exists(os.path.join(root, 'project.json')):
         raise OpError(f"project already exists at {root}; use project_info / project_set")
     os.makedirs(os.path.join(root, 'sounds'), exist_ok=True)
-    d = {"version": 1, "name": name or os.path.basename(root), "bpm": bpm, "beats_per_bar": beats_per_bar,
+    d = {"version": 1, "name": name or settings.song_name(root), "bpm": bpm, "beats_per_bar": beats_per_bar,
          "sr": 44100, "offset_sec": offset_sec, "length_bars": length_bars, "tail_sec": 2.0,
          "tracks": {}, "buses": {}, "master": {"fx": [{"type": "limiter", "ceiling_db": -0.3, "gain_db": 0.0}] if master_limiter else [],
                     "volume_db": 0.0},
@@ -1013,7 +1015,7 @@ def sketch_keep(project: str, sketch: str, replace: bool = False) -> str:
         d = json.load(f)
     d['lineage'] = [{"project": src, "name": d.get('name'), "objectives": d.get('objectives', []),
                      "kept": "the person picked this sketch"}] + d.get('lineage', [])
-    d['name'] = os.path.basename(root)
+    d['name'] = settings.song_name(root)
     for sub in ('sounds', 'voices'):
         if os.path.isdir(os.path.join(src, sub)):
             shutil.copytree(os.path.join(src, sub), os.path.join(root, sub), dirs_exist_ok=True)
@@ -1317,7 +1319,7 @@ def lexicon_note(project: str = None, said: str = None, means=None, craft: str =
     name confirmed, checked against what they typed there. A name you inferred stays unconfirmed: ask them."""
     from . import lexicon as LX
     from . import sketch as SK
-    song = os.path.basename(os.path.abspath(project)) if project else None
+    song = settings.song_name(project) if project else None
     confirmed = _heard_name(project, track, said, heard, id) if heard else None
     with LX.scoped(SK.lexicon_file(project)):        # ledger:M175: a guest's words stay theirs
         before = LX.find(said, who) if said and not id else []
@@ -2222,7 +2224,7 @@ def render(project: str, bars: list = None, tracks: list = None, stems: bool = F
         except RuntimeError as e:
             raise OpError(f"render finished (renders/latest.wav{', stems/' if stems else ''}) but the mp3 failed: {e}")
         from .tags import tag_mp3
-        song = P.d.get('name') or os.path.basename(P.root)
+        song = P.d.get('name') or settings.song_name(P.root)
         tag_mp3(os.path.join(rd, name), title=song if not out or out == 'latest' else f"{song} ({out})",
                 artist=P.d.get('artist'), album=P.d.get('album') or song)
         mp3_note = f" + renders/{name} (tagged: {song}, made with ismail)"

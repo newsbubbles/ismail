@@ -117,7 +117,8 @@ Pick the first route that fits:
 
 **Make a home for their music**: a folder they can find again (Documents/ismail or Music/ismail). Tell them where
 it is. Every song lives in its own subfolder there: a bare song name (`project='my_song'`) always means that
-subfolder, for every op (a path like `./my_song` is taken from the working folder). An installed ismail uses
+subfolder, for every op: its `proj/` (the project, beside the song's `build.py`), or the subfolder itself for a song
+that keeps `project.json` there (a path like `./my_song` is taken from the working folder). An installed ismail uses
 Documents/ismail (a clone uses its own
 `songs/`), so make the folder there unless they want another place; `guide` names the folder it uses. Another place
 is one setting, `songs` (see Settings below): `config_set('songs', '<folder>')`, or from a shell before the tools

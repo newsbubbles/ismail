@@ -16,6 +16,13 @@
   processes got before. They are still set, and the bridge, the diet and the kit still read them, so every room
   script, pass and hook written for 0.4.2 runs unchanged; world.json `build.env` and `pass_env` are still read.
 
+### fixes
+
+- A bare song name opens the song's `proj/` (ledger:M376): `project_new('night_bus')` makes
+  `<songs>/night_bus/proj`, the layout SKILL.md gives a song (`build.py` beside `proj/`), and every op opens
+  `night_bus` there. A song that keeps `project.json` in its own folder (older songs, live sets) still opens there. A
+  project in `proj/` is named after its song's folder, not "proj".
+
 ## 0.4.2 (2026-10-27)
 
 ### fixes
