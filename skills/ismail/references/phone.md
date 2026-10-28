@@ -57,8 +57,9 @@ so act on `heard`, not on the engine's now.
 
 Read it with `phone_listen(who='<your name>', since=...)` (a long-poll, which also shows them who is listening), or
 watch the routed file with your harness's file watcher, so a line wakes you even between turns. Hooks in
-`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, with
-`PHONE_EVENT`, `PHONE_TEXT`, `PHONE_LINE` and `PHONE_INBOX` in their environment, for an agent that isn't running.
+`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, for an
+agent that isn't running. `{event_file}` in a command is replaced by the path of a JSON file with the line (`event`,
+`text`, `inbox`, and the whole `line`), for example `claude -p "Read {event_file} and answer it"`.
 
 Voice notes are transcribed by the speech server on this machine. While the CPU is over the governor's limit they
 wait in a queue: taps still arrive at once, and the page tells them their note is waiting. When the speech server is slow,

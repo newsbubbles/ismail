@@ -25,7 +25,9 @@ import dae_import  # noqa: E402
 
 
 def _video_dir():
-    if os.environ.get('ISMAIL_VIDEO_DIR'):
+    if getattr(sys, 'ismail_video_dir', None):        # python -m ismail.video sets it before the shot runs
+        return sys.ismail_video_dir
+    if os.environ.get('ISMAIL_VIDEO_DIR'):            # the same, before 0.4.3 (until 0.5)
         return os.environ['ISMAIL_VIDEO_DIR']
     script = next((a for i, a in enumerate(sys.argv) if i > 0 and sys.argv[i - 1] in ('-P', '--python')), None)
     return os.path.dirname(os.path.dirname(os.path.abspath(script))) if script else os.getcwd()

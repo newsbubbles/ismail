@@ -8,22 +8,24 @@
       "keep_out": [[6.4, 19.6, 6.6, 14.4, -1, 3.05]],       boxes grown trees never draw inside (x0 x1 y0 y1 z0 z1)
       "spawn":    {"position": [x, y, z], "target": [x, y, z]},   where a first visit starts (optional)
       "credits":  ["SOURCES.md#lucy"],                      asset credits for what the scene shows
-      "build":    {"script": "video/rooms/blue_front_block.py", "root": "../../../..", "env": {"VR_DETAIL": "1"}},
+      "build":    {"script": "video/rooms/blue_front_block.py", "root": "../../../..", "switches": {"VR_DETAIL": "1"}},
       "derives_from": "bluefront",                          a derived scene: built from that scene's full build
       "pass":     "video/rooms/crossfade_dress.py",         ... plus this pass on the built scene (relative to root;
-      "pass_env": {"CROSSFADE": "1"},                       pass_env is added to the build's env)
+      "pass_switches": {"CROSSFADE": "1"},                  added to the build's switches)
       "assets":   "bluefront",                              actor bodies come from that scene's actors/
       "sky":      "night"
     }
 
 A derived scene (derives_from) has no build of its own: stage_scene_export runs its root ancestor's build script
-with that build's env, the passes of every scene in the line (oldest first) in the bridge (VR_PASS), the edits of
-every scene in the line merged (the variant's win), then the Quest diet (VR_DIET), and exports to the variant's
-folder. So a variant can never start from a blockout by accident.
+with that build's switches, the passes of every scene in the line (oldest first) in the bridge, the edits of
+every scene in the line merged (the variant's win), then the Quest diet, and exports to the variant's
+folder. So a variant can never start from a blockout by accident. The scripts read all of it from sys.vr_job
+(stage_scene_export). The older key names build.env and pass_env are still read, as are the VR_* / STAGE_*
+environment variables the export sets beside the job, until 0.5 (ledger:M382).
 
 `build.script` is relative to `build.root`, which is relative to the scene folder (default "../../../..": the song
-folder, for scenes in <song>/video/vr/scenes/<name>); scene_export runs the script in Blender with VR_EXPORT set to
-the scene folder.
+folder, for scenes in <song>/video/vr/scenes/<name>); scene_export runs the script in Blender with
+sys.vr_job["export"] set to the scene folder.
 scenes/stage.json may name the default scene: {"default": "bluefront"}.
 """
 import json
@@ -220,11 +222,11 @@ def build_of(scenes, name):
         return None
     root = (Path(scenes) / top / b.get('root', '../../../..')).resolve()
     script = (root / b['script']).resolve()
-    env = {str(k): str(v) for k, v in (b.get('env') or {}).items()}
+    env = {str(k): str(v) for k, v in {**(b.get('env') or {}), **(b.get('switches') or {})}.items()}
     passes = []
     for s in reversed(line[:-1]):
         w = load_world(scenes, s)
-        env.update({str(k): str(v) for k, v in ((w.get('pass_env') or {}).items())})
+        env.update({str(k): str(v) for k, v in {**(w.get('pass_env') or {}), **(w.get('pass_switches') or {})}.items()})
         if w.get('pass'):
             passes.append((root / w['pass']).resolve())
     edits = [Path(scenes) / s / 'edits.json' for s in reversed(line) if (Path(scenes) / s / 'edits.json').is_file()]

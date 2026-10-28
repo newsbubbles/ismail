@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### what ismail hands its own Blender scripts and hooks is a file you can open (ledger:M382, M383)
+
+- `stage_scene_export` hands the build its job as `sys.vr_job` in Blender, also saved as
+  `<scenes>/_stage/job_<scene>.json`: the scene, the export folder, the bridge, the passes, the edits, the diet and
+  the switches. Room scripts end with `exec(open(sys.vr_job['bridge']).read())`. world.json `build.switches` and
+  `pass_switches` are the new names for `build.env` and `pass_env`.
+- Stage hooks and phone hooks: `{event_file}` in a hook command is replaced by the path of a JSON file with the
+  event (stage: event, scene, text, file, event_id, url, scenes, who; phone: event, text, inbox and the whole line).
+  A command without it runs exactly as before.
+- `python -m ismail.video` tells the Blender kit its song's video folder as `sys.ismail_video_dir`.
+- Deprecated, removed in 0.5: the `VR_*` / `STAGE_*` / `PHONE_*` / `ISMAIL_VIDEO_*` environment variables these
+  processes got before. They are still set, and the bridge, the diet and the kit still read them, so every room
+  script, pass and hook written for 0.4.2 runs unchanged; world.json `build.env` and `pass_env` are still read.
+
 ## 0.4.2 (2026-10-27)
 
 ### fixes

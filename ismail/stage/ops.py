@@ -287,7 +287,8 @@ def stage_presence(port: int = None) -> str:
     """Is the person in the headset, in which scene, since when; their last voice note and whether it was heard;
     who is listening (stage_listen, or following a scene with stage_events since=); unread notes; the hooks set up
     (~/.ismail/stage_hooks.json; a song's _stage/hooks.json only when that file trusts its scenes folder: commands
-    run on entered_vr, left_vr, voice_note, voice_unheard with STAGE_EVENT, STAGE_SCENE, STAGE_TEXT, STAGE_URL ... in their environment)."""
+    run on entered_vr, left_vr, voice_note, voice_unheard; {event_file} in a command is the path of a JSON file with
+    the event: event, scene, text, file, event_id, url, scenes, who)."""
     rec = link.server_for(port=port)
     p = link.http(rec, 'live/presence')
     lv = p.get('last_voice') or {}
@@ -586,10 +587,15 @@ def _set_now(scene, name, loaded, spec=None):
 
 
 BRIDGE = Path(__file__).resolve().parent / 'bridge' / 'blender_bridge.py'
+# run in Blender before the room script, so the room, its passes and the bridge read the job as sys.vr_job
+JOB_EXPR = 'import json, sys; sys.vr_job = json.load(open({path!r}, encoding="utf-8"))'
 
 
 def export_plan(d, scene):
-    """The command, cwd and env stage_scene_export runs for a scene (its lineage resolved), without running it."""
+    """What stage_scene_export runs for a scene (its lineage resolved), without running it: (build, env, job). The
+    job is the file Blender reads as sys.vr_job: export (the scene folder), bridge, scene, scenes, passes, edits, diet
+    and switches (world.json build.switches plus every pass_switches in the line). env holds the same values under
+    their old VR_* / STAGE_* names, set until 0.5 (ledger:M382)."""
     try:
         b = worldmod.build_of(d, scene)
     except ValueError as e:
@@ -603,32 +609,39 @@ def export_plan(d, scene):
     for p in b['passes']:
         if not p.is_file():
             raise OpError(f'the pass {p} does not exist (world.json "pass", relative to the build root)')
-    env = {**b['env'], 'VR_EXPORT': str(d / scene), 'VR_BRIDGE': str(BRIDGE), 'STAGE_SCENE': scene,
-           'STAGE_SCENES': str(d)}
+    job = {'export': str(d / scene), 'bridge': str(BRIDGE), 'scene': scene, 'scenes': str(d), 'passes': [],
+           'edits': None, 'diet': False, 'switches': dict(b['env'])}
+    env = {**b['env'], 'VR_EXPORT': job['export'], 'VR_BRIDGE': job['bridge'], 'STAGE_SCENE': scene,
+           'STAGE_SCENES': job['scenes']}
     if len(b['line']) > 1:                         # a derived scene: passes, merged edits, the diet in the bridge
         merged = d / '_stage' / f'edits_{scene}_merged.json'
         merged.parent.mkdir(exist_ok=True)
         merged.write_text(json.dumps(worldmod.merged_edits(b['edits']), indent=1), encoding='utf-8')
-        env.update({'VR_PASS': os.pathsep.join(str(p) for p in b['passes']), 'VR_EDITS': str(merged), 'VR_DIET': '1'})
-    return b, env
+        job.update(passes=[str(p) for p in b['passes']], edits=str(merged), diet=True)
+        env.update({'VR_PASS': os.pathsep.join(job['passes']), 'VR_EDITS': str(merged), 'VR_DIET': '1'})
+    return b, env, job
 
 
 @op(mutates=True)
 def stage_scene_export(scene: str, scenes: str = None, args: list = None, wait_min: float = 30) -> str:
     """Rebuild a scene in Blender, in one of the machine's heavy-job slots (stands in line up to wait_min minutes):
-    its world.json "build" script (script, root, env) with VR_EXPORT set to the scene folder. A derived scene
-    (world.json "derives_from") is built from its ancestor's full build, then its line's passes ("pass", oldest
-    first), then the edits of its line merged (its own win), then the Quest diet. Room scripts should exec
-    os.environ["VR_BRIDGE"] (the engine's bridge, which runs the passes and the diet). Scripts can scope their
-    outputs by STAGE_SCENE (renders/<scene>/...). An open page swaps the new room in under the construct (never while
+    its world.json "build" script (script, root, switches), with the export's job readable in Blender as
+    sys.vr_job (also saved as <scenes>/_stage/job_<scene>.json). A derived scene (world.json "derives_from") is
+    built from its ancestor's full build, then its line's passes ("pass", oldest first), then the edits of its line
+    merged (its own win), then the Quest diet. Room scripts end with exec(open(sys.vr_job["bridge"]).read()) (the
+    engine's bridge, which runs the passes and the diet). Scripts can scope their outputs by sys.vr_job["scene"]
+    (renders/<scene>/...). An open page swaps the new room in under the construct (never while
     the person is in VR). Replies with the export's object count and the log path."""
     d = _scenes_dir(scenes) if scenes else Path(link.server_for(scene)['scenes'])
-    b, env = export_plan(d, scene)
+    b, env, job = export_plan(d, scene)
     from ..video import blender_exe
     exe = blender_exe()
     log = d / '_stage' / f'export_{scene}.log'
     log.parent.mkdir(exist_ok=True)
-    cmd = [exe, '-b', '--factory-startup', '-P', str(b['script'])] + (['--'] + [str(a) for a in args] if args else [])
+    jf = d / '_stage' / f'job_{scene}.json'
+    jf.write_text(json.dumps(job, indent=1), encoding='utf-8')
+    cmd = ([exe, '-b', '--factory-startup', '--python-expr', JOB_EXPR.format(path=str(jf)), '-P', str(b['script'])]
+           + (['--'] + [str(a) for a in args] if args else []))
     t0 = time.time()
     with machine.slot('cpu', f'stage_scene_export {scene}', est_s=600, wait=wait_min * 60):
         with open(log, 'w', encoding='utf-8') as fh:
@@ -641,7 +654,7 @@ def stage_scene_export(scene: str, scenes: str = None, args: list = None, wait_m
     line = ' <- '.join(b['line'])
     if len(b['line']) > 1 and len(passes) < len(b['passes']):
         raise OpError(f'exported, but {len(passes)} of {len(b["passes"])} passes ran: the build script {b["script"]} '
-                      f'does not exec the engine bridge (os.environ["VR_BRIDGE"]); {log}')
+                      f'does not exec the engine bridge (exec(open(sys.vr_job["bridge"]).read()) at its end); {log}')
     return f'{done[-1]} in {time.time() - t0:.0f} s (lineage {line}, {len(passes)} passes); log {log}'
 
 

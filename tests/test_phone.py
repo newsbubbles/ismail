@@ -144,6 +144,43 @@ def test_a_phone_hook_gets_the_line_in_its_environment_and_nothing_on_stdin(tmp_
     assert e['PHONE_INBOX'] == str(tmp_path / 'inbox.jsonl') and e['stdin'] == ''
 
 
+def test_a_phone_hook_gets_the_line_as_a_file_where_it_says_event_file(tmp_path, monkeypatch):
+    """{event_file} in a phone hook is the path of a JSON file with the line (0.4.3, ledger:M383)."""
+    import shlex
+    import sys
+    import types
+    monkeypatch.setattr(S, 'HOME', tmp_path)
+    out = tmp_path / 'got.json'
+    code = f'import sys; open({str(out)!r}, "w").write(open(sys.argv[1]).read())'
+    line = (subprocess.list2cmdline if os.name == 'nt' else shlex.join)([sys.executable, '-c', code]) + ' {event_file}'
+    (tmp_path / 'hooks.json').write_text(json.dumps({'voice': [line]}), encoding='utf8')
+    fake = types.SimpleNamespace(routes=lambda: [tmp_path / 'inbox.jsonl'])
+    S.Phone._hooks(fake, {'kind': 'voice', 'text': 'play it again', 'id': 9})
+    for _ in range(100):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    e = json.loads(out.read_text())
+    assert (e['event'], e['text'], e['line']['id']) == ('voice', 'play it again', 9)
+    assert e['inbox'] == str(tmp_path / 'inbox.jsonl')
+
+
+def test_the_event_file_token_is_replaced_and_quoted():
+    from ismail import hook_event as H
+    p = 'C:/a folder/ev.json' if os.name == 'nt' else '/a folder/ev.json'
+    assert H.expand(['tool', '--event', '{event_file}'], p) == ['tool', '--event', p]
+    assert H.expand('tool {event_file}', p).endswith('"' + p + '"' if os.name == 'nt' else "'" + p + "'")
+    assert H.expand('tool --no-file', p) == 'tool --no-file'
+    assert H.wants(['a', 'b {event_file}']) and not H.wants(['a', ['b', 'c']])
+
+
+def test_event_files_are_kept_to_the_newest(tmp_path, monkeypatch):
+    from ismail import hook_event as H
+    monkeypatch.setattr(H, 'KEEP', 3)
+    paths = [H.write(tmp_path, {'n': i}) for i in range(5)]
+    assert len(list((tmp_path / 'hook_events').glob('*.json'))) == 3 and paths[-1].is_file()
+
+
 def test_status_text_is_read():
     s = S.parse_status(STATUS)
     assert s['bpm'] == 120 and s['bpb'] == 4 and s['beat'] == 17.0 and s['ahead'] == 0.5

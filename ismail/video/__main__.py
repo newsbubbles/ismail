@@ -30,17 +30,19 @@ RENDER_WAIT = '4h'                 # a render queue is walk-away work: it outlas
 
 def blender_cmd(song, shot, extra=()):
     """The Blender command for a shot: the kit goes on Blender's Python path first (--python-expr), so a shot
-    script starts with a plain `import kit`; the shot runs after it (-P)."""
+    script starts with a plain `import kit`, and sys.ismail_video_dir says which song's video folder it renders; the
+    shot runs after it (-P)."""
     vd = video_dir(song)
     shot = shot if os.path.isabs(shot) else os.path.join(vd, 'shots', os.path.basename(shot))
-    return [blender_exe(song), '-b', '--python-expr', f'import sys; sys.path.insert(0, {KIT!r})', '-P', shot,
-            '--'] + list(extra)
+    return [blender_exe(song), '-b', '--python-expr',
+            f'import sys; sys.path.insert(0, {KIT!r}); sys.ismail_video_dir = {vd!r}', '-P', shot, '--'] + list(extra)
 
 
 def _blender(song, shot, extra, log=None):
     vd = video_dir(song)
     # inside a render's slot the shot carries it ($ISMAIL_SLOT), so anything heavy it starts runs in that slot;
-    # ISMAIL_VIDEO_KIT stays for the shot scripts of older songs, which put the kit on the path themselves
+    # ISMAIL_VIDEO_KIT / ISMAIL_VIDEO_DIR stay for the shot scripts of older songs, which put the kit on the path
+    # themselves, until 0.5 (ledger:M382)
     env = machine.child_env(env=dict(os.environ, ISMAIL_VIDEO_KIT=KIT, ISMAIL_VIDEO_DIR=vd))
     cmd = blender_cmd(song, shot, extra)
     if log:

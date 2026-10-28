@@ -42,11 +42,12 @@ import numpy as np
 
 try:                                       # a package module in ismail; a plain script when phone_start runs it
     from . import vibe
-    from .. import settings, tags
+    from .. import hook_event, settings, tags
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import vibe
+    import hook_event
     import settings
     import tags
 
@@ -756,9 +757,15 @@ class Phone:
             hooks = json.loads((HOME / 'hooks.json').read_text(encoding='utf8'))
         except (OSError, ValueError):
             return
-        env = {**os.environ, 'PHONE_EVENT': rec.get('kind', ''), 'PHONE_TEXT': rec.get('text') or rec.get('what') or '',
-               'PHONE_INBOX': str(self.routes()[-1]), 'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
-        for cmd in (hooks.get(rec.get('kind')) or []) + (hooks.get('any') or []):
+        cmds = (hooks.get(rec.get('kind')) or []) + (hooks.get('any') or [])
+        ev = {'event': rec.get('kind', ''), 'text': rec.get('text') or rec.get('what') or '',
+              'inbox': str(self.routes()[-1]), 'line': rec}
+        path = hook_event.write(HOME, ev) if hook_event.wants(cmds) else None
+        # the old PHONE_* names, until 0.5 (ledger:M383)
+        env = {**os.environ, 'PHONE_EVENT': ev['event'], 'PHONE_TEXT': ev['text'], 'PHONE_INBOX': ev['inbox'],
+               'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
+        for cmd in cmds:
+            cmd = hook_event.expand(cmd, path) if path else cmd
             try:
                 with open(HOME / 'hooks.log', 'a', encoding='utf8') as log:
                     subprocess.Popen(cmd, shell=True, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
