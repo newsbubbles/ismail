@@ -244,15 +244,80 @@ def test_a_derived_scene_builds_from_its_parents_full_build(tmp_path):
     _scene(d, 'variant', {'derives_from': 'hall', 'pass': 'video/rooms/remodel.py', 'pass_env': {'VARIANT': '1'}},
            {'objects': {'stool': {'location': [5, 5, 0]}}})
     _scene(d, 'late', {'derives_from': 'variant', 'pass': 'video/rooms/late.py'})
-    b, env = export_plan(d, 'late')
+    b, env, job = export_plan(d, 'late')
     assert b['line'] == ['late', 'variant', 'hall'] and b['script'].name == 'hall.py'
     assert [p.name for p in b['passes']] == ['remodel.py', 'late.py']             # oldest first
     assert env['VR_DETAIL'] == '1' and env['VARIANT'] == '1' and env['VR_DIET'] == '1' and env['STAGE_SCENE'] == 'late'
     assert env['VR_EXPORT'].endswith('late') and env['VR_BRIDGE'].endswith('blender_bridge.py')
     merged = json.loads(Path(env['VR_EDITS']).read_text(encoding='utf-8'))
     assert merged['objects']['stool']['location'] == [5, 5, 0] and 'door' in merged['objects']   # the variant's win
-    b0, env0 = export_plan(d, 'hall')
+    # the job carries the same values (sys.vr_job in Blender); env keeps the old names until 0.5 (ledger:M382)
+    assert job['switches'] == {'VR_DETAIL': '1', 'VARIANT': '1'} and job['diet'] is True and job['scene'] == 'late'
+    assert job['export'] == env['VR_EXPORT'] and job['bridge'] == env['VR_BRIDGE'] and job['edits'] == env['VR_EDITS']
+    assert [Path(p).name for p in job['passes']] == ['remodel.py', 'late.py']
+    b0, env0, job0 = export_plan(d, 'hall')
     assert 'VR_PASS' not in env0 and 'VR_DIET' not in env0                        # a root scene builds as it always did
+    assert job0['passes'] == [] and job0['diet'] is False and job0['edits'] is None
+
+
+def test_switches_are_the_new_name_for_a_builds_env(tmp_path):
+    """world.json build.switches / pass_switches, with the older build.env / pass_env still read (until 0.5)."""
+    from ismail.stage.ops import export_plan
+    song = tmp_path / 'song'
+    d = song / 'video' / 'vr' / 'scenes'
+    (song / 'video' / 'rooms').mkdir(parents=True)
+    for f in ('hall.py', 'remodel.py'):
+        (song / 'video' / 'rooms' / f).write_text('# room', encoding='utf-8')
+    _scene(d, 'hall', {'build': {'script': 'video/rooms/hall.py', 'switches': {'VR_DETAIL': '1'}, 'env': {'OLD': '1'}}})
+    _scene(d, 'variant', {'derives_from': 'hall', 'pass': 'video/rooms/remodel.py', 'pass_switches': {'NIGHT': '1'},
+                          'pass_env': {'OLDPASS': '1'}})
+    b, env, job = export_plan(d, 'variant')
+    assert job['switches'] == {'OLD': '1', 'VR_DETAIL': '1', 'OLDPASS': '1', 'NIGHT': '1'}
+    assert env['NIGHT'] == '1' and env['OLD'] == '1'
+
+
+class _FakeBpy:
+    """Just enough of bpy for the bridge's top level (its passes; no export)."""
+    class context:
+        scene = object()
+
+        class view_layer:
+            @staticmethod
+            def update():
+                pass
+
+
+def _run_bridge(monkeypatch, job=None, env=None):
+    import sys
+    import types
+    monkeypatch.setitem(sys.modules, 'bpy', types.SimpleNamespace(context=_FakeBpy.context))
+    if job is None:
+        monkeypatch.delattr(sys, 'vr_job', raising=False)
+    else:
+        monkeypatch.setattr(sys, 'vr_job', job, raising=False)
+    for k in ('VR_PASS', 'VR_EDITS', 'VR_DIET', 'VR_EXPORT', 'VR_BRIDGE', 'VR_DETAIL'):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in (env or {}).items():
+        monkeypatch.setenv(k, v)
+    src = (BRIDGE_FILE).read_text(encoding='utf-8')
+    g = {'__name__': '__room__'}
+    exec(compile(src, str(BRIDGE_FILE), 'exec'), g)
+    return g
+
+
+BRIDGE_FILE = Path(__file__).resolve().parents[1] / 'ismail' / 'stage' / 'bridge' / 'blender_bridge.py'
+
+
+def test_the_bridge_runs_the_jobs_passes_and_still_reads_the_old_variables(tmp_path, monkeypatch):
+    """sys.vr_job (0.4.3) and the VR_* variables (until 0.5) give the bridge the same passes and switches."""
+    p = tmp_path / 'remodel.py'
+    p.write_text('open(__file__ + ".ran", "a").write("x")', encoding='utf-8')
+    g = _run_bridge(monkeypatch, job={'passes': [str(p)], 'switches': {'VR_DETAIL': '1'}})
+    assert (tmp_path / 'remodel.py.ran').read_text() == 'x' and g['_VR_DETAIL'] is True
+    g = _run_bridge(monkeypatch, env={'VR_PASS': str(p), 'VR_DETAIL': '1'})
+    assert (tmp_path / 'remodel.py.ran').read_text() == 'xx' and g['_VR_DETAIL'] is True
+    g = _run_bridge(monkeypatch, job={'passes': []})
+    assert (tmp_path / 'remodel.py.ran').read_text() == 'xx' and g['_VR_DETAIL'] is False
 
 
 def test_lineage_refuses_loops_and_a_build_of_its_own(tmp_path):
@@ -445,6 +510,26 @@ def test_a_hook_gets_the_event_in_its_environment_and_nothing_on_stdin(stage, tm
     e = json.loads(out.read_text())
     assert (e['event'], e['scene'], e['stdin']) == ('entered_vr', 'attic', '')
     assert e['url'].startswith('http') and e['scenes'] == str(stage['scenes'])
+
+
+def test_a_hook_gets_the_event_as_a_file_where_it_says_event_file(stage, tmp_path, monkeypatch):
+    """{event_file} in a hook command is the path of a JSON file with the event (0.4.3, ledger:M383)."""
+    port = stage['port']
+    out = stage['scenes'] / '_stage' / 'from_file.json'
+    cmd = ['python', '-c', 'import sys, json; open("from_file.json", "w").write(open(sys.argv[1]).read())',
+           '{event_file}']
+    home = tmp_path / 'stage_hooks.json'
+    monkeypatch.setenv('ISMAIL_STAGE_HOOKS', str(home))
+    home.write_text(json.dumps({'entered_vr': [cmd]}), encoding='utf-8')
+    _post(port, 'live/event?scene=attic', {'type': 'headset', 'state': 'entered VR', 'page': 'p1'})
+    for _ in range(50):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    e = json.loads(out.read_text())
+    assert (e['event'], e['scene']) == ('entered_vr', 'attic')
+    assert e['url'].startswith('http') and e['scenes'] == str(stage['scenes'])
+    assert list((stage['scenes'] / '_stage' / 'hook_events').glob('*.json'))
 
 
 def test_listen_and_presence_ops(stage, monkeypatch):
