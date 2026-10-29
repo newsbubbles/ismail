@@ -122,6 +122,61 @@
     letter-spacing: 0.12em; text-transform: uppercase; }
 </style>
 <script>
+// The device key (the security floor, part B2): kept in this browser's storage and sent on every request to this
+// server as X-Stage-Key, never in a URL or a cookie. A link ending #pair=<code> claims a key before the stage starts (a
+// fragment never reaches a server or a log) and the code is dropped from the address. pair.js asks for a code (a field,
+// or a number pad in the headset) while one is waiting or the server enforces. Nothing here ever shows the key.
+(() => {
+  const SLOT = 'ismail_stage_key';
+  const get = () => { try { return localStorage.getItem(SLOT); } catch (_) { return null; } };
+  const put = (k) => { try { if (k) localStorage.setItem(SLOT, k); else localStorage.removeItem(SLOT); } catch (_) {} };
+  const send = window.fetch.bind(window), heard = new Set();
+  const tell = (what, j) => { for (const f of heard) { try { f(what, j); } catch (_) {} } };
+  const same = (u) => { try { return new URL(u, location.href).origin === location.origin; } catch (_) { return false; } };
+  window.fetch = (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (!same(url)) return send(input, init);
+    const k = get();
+    let go = init;
+    if (k) {
+      const h = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
+      h.set('X-Stage-Key', k);
+      go = { ...(init || {}), headers: h };
+    }
+    return send(input, go).then((r) => {
+      if (r.status === 401) r.clone().json().then((j) => {
+        if (k && (j.refused === 'revoked' || /device key/.test(j.error || ''))) { put(null); tell('revoked', j); }
+        else if (j.refused === 'unpaired') tell('unpaired', j);
+      }).catch(() => {});
+      return r;
+    });
+  };
+  const ua = navigator.userAgent;
+  const kind = () => /OculusBrowser|Quest|Pico/i.test(ua) ? 'headset' : /Android|iPhone|iPad|Mobile/i.test(ua) ? 'phone' : 'desktop';
+  const name = () => kind() === 'headset' ? (/Quest\s*\d*/i.exec(ua) || ['headset'])[0].trim() : kind();
+  async function claim(code, as = name(), k = kind()) {
+    const r = await send('pair/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: String(code), name: as, kind: k }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.key) throw new Error(j.error || `pairing: ${r.status}`);
+    put(j.key);
+    const out = { device: j.device, kind: j.kind, person: j.person };
+    tell('paired', out);
+    return out;
+  }
+  let ready = Promise.resolve(null);
+  const m = /(?:^#|&)pair=(\d{6})(?=&|$)/.exec(location.hash);
+  if (m) {
+    const rest = location.hash.replace(/(^#|&)pair=\d{6}/, '$1').replace(/^#&/, '#');
+    history.replaceState(history.state, '', location.pathname + location.search + (rest === '#' ? '' : rest));
+    // the agent that made the link named the code: its name and kind stand (null, not the defaults)
+    ready = claim(m[1], null, null).then((r) => { console.log('[boot] paired as ' + r.device); return r; })
+      .catch((e) => { console.warn('[boot] the pairing link did not work: ' + e.message); return null; });
+  }
+  window.VR_pair = { paired: () => !!get(), claim, forget: () => put(null), on: (f) => heard.add(f), ready, kind, name };
+})();
+</script>
+<script>
 // Every console error, warning and boot step goes to the server too (POST /clientlog -> vr/clientlog.jsonl, the
 // server log, and a page_error event on the scene's live bus), so a headset that shows nothing still tells us why.
 (() => {
@@ -147,7 +202,7 @@
     log.first = 0;
     if (!q.length) return;
     const body = JSON.stringify({ page, scene, ua: navigator.userAgent, entries: q.splice(0) });
-    fetch('clientlog', { method: 'POST', body, keepalive: true }).catch(() => {});
+    fetch('clientlog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
   }
   for (const level of ['error', 'warn']) {
     const orig = console[level].bind(console);
@@ -256,6 +311,7 @@ async function fetchText(url, tries = 6) {          // aborted and asked again w
   throw new Error(url + ': no luck after ' + tries + ' tries');
 }
 let src = null;
+if (window.VR_pair) await window.VR_pair.ready;     // a #pair= link claims its key before the stage asks for anything
 try { src = await fetchText('bundle.js'); } catch (e) { console.warn('[boot] no bundle, loading modules one by one:', e.message); }
 if (src) {                                          // an error inside the stage is reported, never a second start
   say(`starting the stage (${(src.length / 1e6).toFixed(1)} MB)`);

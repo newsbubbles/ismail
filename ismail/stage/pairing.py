@@ -13,6 +13,11 @@ of each key, beside the registry (~/.ismail/stage_devices.json), never in the sc
 ~/.ismail/stage.json "auth": "report" (the default: everything is accepted, unpaired requests are stamped and counted)
 or "enforce" (unpaired requests are refused). Enforce comes only after the person has paired the headset and the phone
 in the headset, so the switch can never lock them out in the middle of a session.
+
+Part B2: the page pairs itself (a code field on a desktop or phone, a number pad panel in the headset, or a link whose
+#pair=<code> fragment it claims at once; a fragment never reaches a server or a log). A headless page this PC starts
+(the capture, the preflight) gets a temporary key: kept in memory, never in the device file, gone after temp_s, and its
+principal is {"agent": <its name>, "for": P}, an automated page, not the person.
 """
 import hashlib
 import hmac
@@ -21,6 +26,7 @@ import os
 import secrets
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 CODE_S = 120                                   # a pairing code is good for two minutes, once
@@ -28,6 +34,7 @@ WRONG_MAX, WRONG_WINDOW_S, BLOCK_S = 5, 60, 60  # five wrong codes in a minute f
 WRONG_ALL = 20                                  # over twenty a minute from everyone: every claim pauses a minute
 LIVE_CODES = 3                                  # at most three codes waiting at once; a new one drops the oldest
 KINDS = ('headset', 'phone', 'desktop')
+TEMP_MAX_S = 24 * 3600                          # a temporary key (a headless page) lasts a day at most
 
 
 def _h(key):
@@ -41,7 +48,9 @@ class Auth:
         self.registry = Path(registry)         # ~/.ismail/stage: the agent token lives beside the server records
         self.home = self.registry.parent       # ~/.ismail: stage.json and the device file
         self.lock = threading.Lock()
-        self.codes = {}                        # code -> {name, kind, person, until}
+        self.codes = {}                        # code -> {name, kind, person, until, temp_s}
+        self.temp = {}                         # hash -> record with 'until': temporary keys (headless pages), memory only
+        self.recent = deque(maxlen=20)         # the last unpaired requests enforce would refuse: {t, method, path, addr}
         self.wrong = {}                        # address -> [times of wrong codes]
         self.blocked = {}                      # address -> until
         self.wrong_all, self.paused_until = [], 0.0   # wrong codes from every address; the global pause
@@ -126,10 +135,15 @@ class Auth:
         self._devices = (f.stat().st_mtime_ns, dict(recs))
 
     # ---- pairing
-    def start(self, name, kind, person=None):
+    def start(self, name, kind, person=None, temp_s=None):
+        """A six-digit code for one device. temp_s: the key it gives is temporary (a headless page on this PC)."""
         if kind not in KINDS:
             raise ValueError(f'kind: one of {", ".join(KINDS)}')
         name = str(name or kind)[:40]
+        if temp_s is not None:
+            temp_s = float(temp_s)
+            if not 0 < temp_s <= TEMP_MAX_S:
+                raise ValueError(f'temp_s: seconds, at most {TEMP_MAX_S}')
         with self.lock:
             now = time.time()
             self.codes = {c: v for c, v in self.codes.items() if v['until'] > now}
@@ -138,8 +152,9 @@ class Auth:
             code = f'{secrets.randbelow(10 ** 6):06d}'
             while code in self.codes:
                 code = f'{secrets.randbelow(10 ** 6):06d}'
-            self.codes[code] = {'name': name, 'kind': kind, 'person': person or self.person(), 'until': now + CODE_S}
-        return {'code': code, 'expires_s': CODE_S, 'name': name, 'kind': kind}
+            self.codes[code] = {'name': name, 'kind': kind, 'person': person or self.person(), 'until': now + CODE_S,
+                                'temp_s': temp_s}
+        return {'code': code, 'expires_s': CODE_S, 'name': name, 'kind': kind, **({'temp_s': temp_s} if temp_s else {})}
 
     def claim(self, code, addr, name=None, kind=None):
         """The device's page claims a code: (record, key) once; ValueError with the reason otherwise."""
@@ -167,12 +182,22 @@ class Auth:
             rec = {'hash': _h(key), 'device': (str(name)[:40] if name else v['name']), 'kind': kind if kind in KINDS else v['kind'],
                    'person': v['person'], 'paired': time.strftime('%Y-%m-%dT%H:%M:%S')}
             recs = dict(self.devices())
+            self._drop_expired(now)
             n, base = 2, rec['device']
-            while any(r['device'] == rec['device'] for r in recs.values()):    # device names are unique per stage
+            while any(r['device'] == rec['device'] for r in [*recs.values(), *self.temp.values()]):   # unique per stage
                 rec['device'], n = f'{base} {n}', n + 1
-            recs[rec['hash']] = rec
-            self._save(recs)
+            if v.get('temp_s'):
+                rec['temp'], rec['until'] = True, now + v['temp_s']
+                self.temp[rec['hash']] = rec
+            else:
+                recs[rec['hash']] = rec
+                self._save(recs)
         return {k: v for k, v in rec.items() if k != 'hash'}, key
+
+    def _drop_expired(self, now=None):
+        now = now or time.time()
+        for h in [h for h, r in self.temp.items() if r['until'] < now]:
+            del self.temp[h]
 
     def unpair(self, device):
         with self.lock:
@@ -182,13 +207,24 @@ class Auth:
                 del recs[h]
             if gone:
                 self._save(recs)
-        return len(gone)
+            temp = [h for h, r in self.temp.items() if r['device'] == device]
+            for h in temp:
+                del self.temp[h]
+        return len(gone) + len(temp)
 
     def listing(self):
-        return [{k: v for k, v in r.items() if k != 'hash'} for r in self.devices().values()]
+        self._drop_expired()
+        return [{k: v for k, v in r.items() if k != 'hash'} for r in [*self.devices().values(), *self.temp.values()]]
 
     def valid(self, key_hash):
-        return key_hash in self.devices()
+        return key_hash in self.devices() or self._temp(key_hash) is not None
+
+    def _temp(self, key_hash):
+        r = self.temp.get(key_hash)
+        if r and r['until'] < time.time():
+            self.temp.pop(key_hash, None)
+            return None
+        return r
 
     # ---- who sent a request
     def principal(self, key=None, agent=None, who=None):
@@ -199,6 +235,10 @@ class Auth:
             if r:
                 self.counts['paired'] += 1
                 return {'person': r['person'], 'device': r['device']}, h, None
+            t = self._temp(h)
+            if t:                                  # a headless page this PC started: an automated page, not the person
+                self.counts['agent'] += 1
+                return {'agent': t['device'], 'for': t['person']}, h, None
             self.counts['bad_key'] += 1
             return {'unpaired': True}, None, 'unknown device key (unpaired, or revoked)'
         if agent:
@@ -207,12 +247,24 @@ class Auth:
                 return {'agent': str(who or 'agent')[:60], 'for': self.person()}, None, None
             self.counts['bad_key'] += 1
             return {'unpaired': True}, None, 'wrong agent token'
-        self.counts['unpaired'] += 1
         return {'unpaired': True}, None, None
+
+    def note_unpaired(self, method, path, addr):
+        """An unpaired request enforce would refuse (the server calls this for guarded paths only, so the page's own
+        files do not count): counted in /health, the last 20 listed in /pair/devices (what to pair before enforce)."""
+        self.counts['unpaired'] += 1
+        self.recent.append({'t': time.strftime('%H:%M:%S'), 'method': method, 'path': path, 'addr': addr})
+
+    def waiting(self):
+        """Codes a person could type now (a headless page's temporary code is not one): an unpaired page shows its code
+        field or number pad while this is above zero, or in enforce."""
+        now = time.time()
+        return sum(1 for v in list(self.codes.values()) if v['until'] > now and not v.get('temp_s'))
 
     def health(self):
         paused = max(0, round(self.paused_until - time.time()))
-        return {'mode': self.mode(), 'devices': len(self.devices()), 'pending_codes': len(self.codes),
+        self._drop_expired()
+        return {'mode': self.mode(), 'devices': len(self.devices()), 'temp_keys': len(self.temp), 'pending_codes': self.waiting(),
                 **({'pairing_paused_s': paused} if paused else {}), **self.counts}
 
 

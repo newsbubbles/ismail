@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import secrets
 import shutil
 import struct
 import subprocess
@@ -452,6 +453,14 @@ def stage_preflight(port: int = None, say: bool = True, wait: float = 60, headle
             state['page'] = True
             return f'a page already shows {SCENE}; it is used as it is (the load itself was not redone)'
         url = f'http://127.0.0.1:{rec["port"]}/?scene={SCENE}'
+        if headless:                               # a temporary key, claimed by the link, so enforce lets the page in
+            dev = f'preflight {secrets.token_hex(2)}'
+            try:
+                code = link.http(rec, 'pair/start', {'name': dev, 'kind': 'desktop', 'temp_s': float(wait) + 600})['code']
+                state['paired'] = dev
+                url += f'#pair={code}'
+            except Exception:                      # noqa: BLE001  (a server before part B2: the page goes unpaired)
+                pass
         if not headless:
             raise Blocked(f'no page shows {SCENE}', f'open {url} in a browser, then run stage_preflight again')
         since = _last_event(rec)
@@ -545,6 +554,11 @@ def stage_preflight(port: int = None, say: bool = True, wait: float = 60, headle
         run('say', c_say)
     finally:
         _close_page(page)
+        if state.get('paired'):
+            try:
+                link.http(rec, 'pair/unpair', {'device': state['paired']})
+            except Exception:                      # noqa: BLE001  (the key lapses by itself in minutes)
+                pass
 
     # listen: a synthetic event, never a voice type (those say "nobody is listening" and fire the hooks)
     def c_listen():

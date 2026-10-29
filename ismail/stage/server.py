@@ -457,6 +457,30 @@ def split_host(h):
     return name, int(port) if port else None
 
 
+JSON_POSTS = ('/save', '/anim', '/waypoints', '/cues', '/behaviour_state', '/clientlog', '/take/meta', '/perf/meta')
+
+
+def page_csp(html):
+    """The page's content policy (the B1 review, F3: the device key is in the page's storage, so only the server's own
+    scripts may run): scripts from this origin, blob: (the bundle and behaviours start from memory) and the HTML's own
+    inline blocks by hash, no eval; the fonts from Google. Report-only in report mode, enforced in enforce."""
+    import base64
+    import hashlib
+    try:
+        text = Path(html).read_text(encoding='utf-8')
+    except OSError:
+        text = ''
+    # the HTML parser turns CR LF into LF before the browser hashes a block, so the hash is of the LF text
+    blocks = [m.replace('\r\n', '\n').replace('\r', '\n') for m in
+              re.findall(r'<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>', text, re.S)]
+    hashes = ' '.join("'sha256-%s'" % base64.b64encode(hashlib.sha256(m.encode('utf-8')).digest()).decode() for m in blocks)
+    return ("default-src 'self'; script-src 'self' blob: " + hashes + "; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; media-src 'self' data: blob: mediastream:; connect-src 'self' data: blob:; "
+            "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
+            "report-uri /csp")
+
+
 class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
                       '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json',
@@ -486,12 +510,19 @@ class Handler(SimpleHTTPRequestHandler):
                                                                 self.headers.get('X-Stage-Who'))
         # in enforce, the scene's files too: voice audio, transcripts, takes and performances (motion identifies a
         # person), snapshots, panels. Open: the page's own files and /pair/claim (the B1 review, F2)
-        guarded = path != '/pair/claim' and (self.command not in ('GET', 'HEAD') or path.startswith(
+        guarded = path not in ('/pair/claim', '/csp') and (self.command not in ('GET', 'HEAD') or path.startswith(
             ('/live', '/voice/', '/pair/', '/scenes/'))) or path in ('/livestream', '/world', '/edits', '/takes', '/snapshots',
                                                                   '/actor/profile', '/updates.json', '/waypoints', '/cues')
-        if guarded and auth.mode() == 'enforce' and 'unpaired' in self.principal:
-            return self._refused(401, 'unpaired', problem or 'pair this device first (stage_pair shows a code)')
+        if guarded and 'unpaired' in self.principal:
+            auth.note_unpaired(self.command, path, self.client_addr())
+            if auth.mode() == 'enforce':
+                return self._refused(401, 'unpaired', problem or 'pair this device first (stage_pair shows a code)')
         return True
+
+    def client_addr(self):
+        """Who connected: through the proxy on this PC, the address it saw (the LAST X-Forwarded-For entry is its own)."""
+        fwd = self.headers.get('X-Forwarded-For', '').split(',')[-1].strip() if self.client_address[0] in ('127.0.0.1', '::1') else ''
+        return fwd or self.client_address[0]
 
     def local_direct(self):
         """From this PC itself, not through tailscale serve (which connects from loopback too, with forwarded headers)."""
@@ -511,11 +542,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._refused(415, 'pairing not JSON', 'pairing takes application/json from this site only')
         if u.path == '/pair/claim':
             body = self._body() or {}
-            # the proxy on this PC appends the address it saw: the LAST entry is its own, the first may be the client's
-            fwd = self.headers.get('X-Forwarded-For', '').split(',')[-1].strip() if self.client_address[0] in ('127.0.0.1', '::1') else ''
-            addr = fwd or self.client_address[0]
             try:
-                rec, key = auth.claim(body.get('code'), addr, body.get('name'), body.get('kind'))
+                rec, key = auth.claim(body.get('code'), self.client_addr(), body.get('name'), body.get('kind'))
             except PermissionError as e:
                 self.server.refuse('pairing rate-limited', self)
                 return self._json(429, {'error': str(e), 'refused': 'pairing rate-limited'})
@@ -526,12 +554,14 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, {**rec, 'key': key, 'header': 'X-Stage-Key'})
         if not ('agent' in self.principal or self.local_direct()):
             return self._refused(403, 'pairing from outside', 'pairing starts on this PC (stage_pair), not over the network')
-        if u.path == '/pair/devices':
-            return self._json(200, {'mode': auth.mode(), 'person': auth.person(), 'devices': auth.listing()})
+        if u.path == '/pair/devices':           # with the last unpaired requests enforce would refuse: what is left to pair
+            return self._json(200, {'mode': auth.mode(), 'person': auth.person(), 'devices': auth.listing(),
+                                    'unpaired_recent': list(auth.recent)})
         body = self._body() or {}
         if u.path == '/pair/start':
             try:
-                return self._json(200, auth.start(body.get('name'), body.get('kind', 'headset'), body.get('person')))
+                return self._json(200, auth.start(body.get('name'), body.get('kind', 'headset'), body.get('person'),
+                                                  body.get('temp_s')))
             except ValueError as e:
                 return self._json(400, {'error': str(e)})
         if u.path == '/pair/unpair':
@@ -547,6 +577,12 @@ class Handler(SimpleHTTPRequestHandler):
     def _refused(self, code, reason, msg):
         self.server.refuse(reason, self)
         self.close_connection = True
+        try:                                       # read a small unread body first: closing on it resets the socket
+            n = int(self.headers.get('Content-Length') or 0)   # (Windows), and the page never sees why (a revoked key)
+            if 0 < n <= 1 << 16 and not getattr(self, '_body_read', False):
+                self.rfile.read(n)
+        except (OSError, ValueError):
+            pass
         try:
             self._json(code, {'error': msg, 'refused': reason})
         except OSError:
@@ -555,6 +591,11 @@ class Handler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
+        csp = getattr(self, '_csp', None)
+        if csp:
+            self._csp = None
+            self.send_header('Content-Security-Policy' if self.server.auth.mode() == 'enforce'
+                             else 'Content-Security-Policy-Report-Only', csp)
         super().end_headers()
 
     def _json(self, code, obj):
@@ -567,6 +608,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _body(self):
         n = int(self.headers.get('Content-Length', 0))
+        self._body_read = True
         return json.loads(self.rfile.read(n) or b'null', parse_constant=_not_finite)
 
     def _livestream(self, q):
@@ -909,17 +951,32 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, out)
         if u.path == '/':
             self.path = '/index.html' + (('?' + u.query) if u.query else '')
+        if urlparse(self.path).path in ('/index.html', '/upload.html'):
+            self._csp = page_csp(PAGE / urlparse(self.path).path.lstrip('/'))
         return super().do_GET()
 
     def do_POST(self):
         u = urlparse(self.path)
-        if CAPTURE is not None:
-            return self._capture_post(u)
-        if u.path.startswith('/pair/'):
+        if u.path.startswith('/pair/'):            # first, so a capture page can claim its code too
             try:
                 return self._pair(u)
             except (ValueError, json.JSONDecodeError) as e:
                 return self._json(400, {'error': str(e)})
+        if CAPTURE is not None:
+            return self._capture_post(u)
+        if u.path == '/csp':                      # a content-policy report from a page: counted, the first few logged
+            n = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(min(n, 8192)).decode('utf-8', 'replace')
+            c = self.server.auth.counts
+            c['csp'] = c.get('csp', 0) + 1
+            if c['csp'] <= 50:
+                print('CSP', ' '.join(body.split())[:400], flush=True)
+            return self._json(200, {'ok': True})
+        # enforce: a JSON endpoint takes application/json only (a form or a text/plain POST from another site is
+        # sent with no preflight, so a JSON type means the page's own script sent it); the security floor, test 12
+        if (u.path in JSON_POSTS or u.path.startswith('/live/')) and self.server.auth.mode() == 'enforce' and (
+                (self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json'):
+            return self._refused(415, 'not JSON', f'{u.path} takes application/json')
         # the person's voice is theirs: in enforce mode only a paired device of a person sends audio to be transcribed
         if u.path in ('/voice/in', '/voice/perf') and self.server.auth.mode() == 'enforce' and 'person' not in self.principal:
             return self._refused(401, 'voice from a non-person', 'only a paired device of the person sends their voice')

@@ -44,7 +44,9 @@ import { initCamRec } from './camrec.js';
 import { initSurfaces } from './surfaces.js';
 import { initPointer } from './pointer.js';
 import { ONAIR, ONAIR_FPS, initOnAir } from './onair.js';
+import { initPairing, pairFirst } from './pair.js';
 
+await pairFirst();                                   // in enforce, an unpaired page pairs before it asks for anything
 // the scene: ?scene=, else the server's default (scenes/stage.json "default", else its first scene)
 const name = new URLSearchParams(location.search).get('scene')
   || await fetch('stage', { cache: 'no-store' }).then((r) => r.json()).then((j) => j.default).catch(() => null) || '';
@@ -79,6 +81,7 @@ const updates = initUpdates(ed, live, hands, voice);
 const exitVR = initExit(ed, hands, live);
 const body = initBody(ed, hands);                  // which way the user's body faces (body-anchored panels)
 const panels = initPanels(ed, xr, hands, voice, live, body);
+const pairing = initPairing(ed, panels, live);       // asks for a code when the page has no key (security floor B2)
 const gallery = initGallery(ed, hands, voice, panels, live);
 voice.shotHooks.gallery = gallery;
 live.handlers.gallery_add = (c) => {               // open: true also opens the gallery on it (the user: "make the gallery go to that render")
@@ -302,7 +305,7 @@ ed.renderer.setAnimationLoop(() => {
 });
 
 window.VR = {
-  ed, desktop, xr, live, THREE, body, panels, hands, voice,
+  ed, desktop, xr, live, THREE, body, panels, hands, voice, pairing,
   selftest: () => ed.selftest(),
   save: () => ed.save(),
   undo: () => ed.undo(),

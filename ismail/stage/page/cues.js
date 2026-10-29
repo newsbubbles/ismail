@@ -20,7 +20,7 @@ export function initCues(ed, live, panels) {
     clearTimeout(saveT);
     // the scene and the list as they are now: a switch inside the wait never writes one scene's cues into another
     const url = `cues?scene=${encodeURIComponent(scn())}`, body = JSON.stringify(cues);
-    saveT = setTimeout(() => fetch(url, { method: 'POST', body }).catch(() => {}), 300);
+    saveT = setTimeout(() => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {}), 300);
   };
   async function load() {
     const j = await fetch(`cues?scene=${encodeURIComponent(scn())}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => []);

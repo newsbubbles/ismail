@@ -37,6 +37,21 @@ const BODY_LOOK_DEG = 32, BODY_LOOK_HOLD_MS = 1500, BODY_SLACK_M = 0.25, BODY_DR
 const BODY_WIDTH = 0.42, BODY_DEG = 72, BODY_DIST = 0.6, BODY_DROP = 0.12;   // a 0.42 m panel 72 degrees out sits just
                                                                             // past the Quest 3's view straight ahead
 
+// an image by fetch (which carries the device key, part B2), never by an <img> src (which cannot): null when it fails
+export async function imageFrom(src) {
+  let url = src, made = null;
+  if (!/^(data|blob):/.test(src)) {
+    try {
+      const r = await fetch(src);
+      if (!r.ok) return null;
+      url = made = URL.createObjectURL(await r.blob());
+    } catch (_) { return null; }
+  }
+  const im = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = url; });
+  if (made) URL.revokeObjectURL(made);
+  return im;
+}
+
 export function initPanels(ed, xrApi, hands, voice, live, body) {
   const { scene, camera, renderer } = ed;
   const panels = new Map();              // id -> panel
@@ -135,10 +150,11 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide, ...OVER_WORLD }));   // drawn over the world, like Quest system panels (the user, 2026-10-03: a panel cut through a seated man)
     mesh.layers.set(GIZMO); mesh.renderOrder = 990;
     const p = { id, title: c.title || '', text: c.text || '', buttons: (c.buttons || []).map(String), img: null, cv, tex, mesh, stay: !!c.stay,
+      private: !!c.private,                                    // answers stay in the page (a pairing code's digits)
       width, from: c.from ? String(c.from) : null, hover: null, answer: null, resolve: null, timer: null, t0: performance.now(),
       body: onBody ? { deg: ((c.side || senderSide(c.from)) === 'left' ? -1 : 1) * (c.angle ?? BODY_DEG), dist: c.distance ?? BODY_DIST, dy: -BODY_DROP } : null };
     if (c.image) {
-      p.img = await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = c.image; });
+      p.img = await imageFrom(c.image);
       if (!p.img) p.text = (p.text ? p.text + '\n' : '') + '(could not load ' + c.image + ')';
     }
     draw(p);
@@ -209,7 +225,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     p.answer = a; draw(p);
     voice.EAR.sent();
     const res = { id: p.id, answer: a, via, seconds: +((performance.now() - p.t0) / 1000).toFixed(1) };
-    live.emit('panel_answer', res);
+    if (!p.private) live.emit('panel_answer', res);
     if (!p.stay) setTimeout(() => close(p.id, 'answered'), 600);   // a moment to see the choice light up
     if (p.resolve) { p.resolve(res); p.resolve = null; }
   }
@@ -220,7 +236,7 @@ export function initPanels(ed, xrApi, hands, voice, live, body) {
     const p = panels.get(id);
     if (!p) return { id, answer: null, why: 'closed' };
     if (c.image) {
-      const im = await new Promise((res) => { const x = new Image(); x.onload = () => res(x); x.onerror = () => res(null); x.src = c.image; });
+      const im = await imageFrom(c.image);
       if (!panels.has(id)) return { id, answer: null, why: 'closed' };
       p.img = im;
     }
