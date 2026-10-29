@@ -1,6 +1,7 @@
 """The agent's side of the live link: find the stage server that serves a scene, queue a command for its page, wait
 for the page's answer, read events. Plain HTTP to 127.0.0.1 (the server's registry, ~/.ismail/stage/<port>.json)."""
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -72,12 +73,12 @@ def server_for(scene=None, port=None):
 
 def agent_headers():
     """An agent's credentials for the stage (pairing.py): the token the server keeps beside the registry, readable by
-    this user only, and the agent's name (ISMAIL_AGENT, else "agent"). Empty when no server has made the token yet."""
+    this user only, and the agent's name (its session name, ISMAIL_SESSION, else "agent"). Empty when no server has made the token yet."""
     try:
         t = (registry_dir() / 'agent_token').read_text(encoding='utf-8').strip()
     except OSError:
         return {}
-    return {'X-Stage-Agent': t, 'X-Stage-Who': os.environ.get('ISMAIL_AGENT') or 'agent'} if t else {}
+    return {'X-Stage-Agent': t, 'X-Stage-Who': os.environ.get('ISMAIL_SESSION') or 'agent'} if t else {}
 
 
 def http(rec, path, body=None, timeout=30):
