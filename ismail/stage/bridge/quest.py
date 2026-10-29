@@ -3,16 +3,17 @@ function to help us with this"). The bar's lessons (bf_detail.vr_prep / vr_merge
 
 - every grabbable group joined into one mesh under its root's name (the bedroom drew ~650 pieces per eye; draw calls,
   not triangles, were the cost), groups holding an armature left alone (posed people stay people);
-- a triangle budget per mesh (decimate over VR_TRI_MAX, default 6000; names in KEEP_PREFIX get twice that);
+- a triangle budget per mesh (decimate over the VR_TRI_MAX switch, default 6000; names in KEEP_PREFIX get twice that);
 - textures capped at 1024 px;
 - MakeHuman skin (a node group the exporter cannot read) rebuilt as a plain material: its diffuse picture when there
   is one, else the bar's flat tone; and no mask picture used as a normal or roughness map (the bedroom's Cyrus got
   his lip mask as both: a black face and flat pink arms).
 
-Call quest_diet() just before the bridge, with VR_DETAIL set so the joined parts' sources are left out.
+Call quest_diet() just before the bridge, with the VR_DETAIL switch set so the joined parts' sources are left out.
 """
 import json
 import os
+import sys
 
 import bpy
 
@@ -81,7 +82,8 @@ def skin_and_masks():
 
 
 def budget():
-    tri_max = int(os.environ.get('VR_TRI_MAX', '6000'))
+    sw = (getattr(sys, 'vr_job', None) or {}).get('switches') or {}       # the export's job (stage_scene_export)
+    tri_max = int(sw.get('VR_TRI_MAX') or os.environ.get('VR_TRI_MAX') or 6000)
     cut = []
     for o in list(S.objects):
         if o.type != 'MESH' or o.hide_render or o.get('vr_keep_tris'):

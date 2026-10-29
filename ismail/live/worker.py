@@ -72,8 +72,12 @@ def _perform(inst, notes, total, bpm, root, expr, beat0=0.0):
     """A performer voice (module with perform(notes, total_n, sr, bpm, lanes, **params)) plays the whole event.
     beat0: the song beat at sample 0, for a voice that keys its randomness on it."""
     from .. import dsp, voices
-    mod = voices.load(inst['voice'], root)
     lanes = {k: _lane_curve(p, total) for k, p in (expr or {}).items()}
+    if inst.get('type') == 'mimic':
+        # a mimic with perform on plays phrases (ismail/mimic_perform.py): its lanes are the studio's inst.lane.*
+        return instruments.render_instrument(inst, notes, total, {'lane.' + k: v for k, v in lanes.items()}, bpm,
+                                             SR, root, beat0)
+    mod = voices.load(inst['voice'], root)
     kw = instruments.performer_kw(mod.perform, inst.get('params'), beat0, root)
     y = np.asarray(mod.perform(notes, total, SR, bpm=bpm, lanes=lanes, **kw), dtype=np.float64)
     y = np.stack([y, y]) if y.ndim == 1 else y
@@ -113,6 +117,7 @@ def render_event(inst, notes, lead_s, bpm, root):
     bake, expr, iauto = inst.get('_bake') or [], inst.get('_expr'), inst.get('_auto') or {}
     tail = float(inst.get('_tail', MAX_TAIL_S))
     beat0, chunk, bpb = float(inst.get('_beat0', 0.0)), inst.get('_chunk'), inst.get('_bpb', 4)
+    keyed = '_beat0' in inst            # a sampler picking among sounds: where the bar sits in the song
     inst = {k: v for k, v in inst.items()
             if k not in ('_bake', '_expr', '_auto', '_whole', '_tail', '_beat0', '_chunk', '_bpb')}
     lead = int(round(lead_s * SR))
@@ -126,7 +131,7 @@ def render_event(inst, notes, lead_s, bpm, root):
     else:
         # onset at lead_s into its bar: synth and drum seeds land where the studio puts them
         y = instruments.render_instrument(inst, shifted, total, _auto_curves(iauto, lead_s, total) or None, bpm,
-                                          SR, root, 0.0, bpb)
+                                          SR, root, beat0 - lead_s * bpm / 60.0 if keyed else 0.0, bpb)
     if bake:
         from .. import fx as studio_fx
         ctx = _BakeCtx(bpm)

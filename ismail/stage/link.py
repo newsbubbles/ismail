@@ -1,13 +1,13 @@
 """The agent's side of the live link: find the stage server that serves a scene, queue a command for its page, wait
 for the page's answer, read events. Plain HTTP to 127.0.0.1 (the server's registry, ~/.ismail/stage/<port>.json)."""
 import json
-import os
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from .. import settings
 
 PAGE_FRESH_S = 120         # a page that posted its state within this long is "showing the scene" (a hidden
                            # tab or a lifted headset posts about once a minute; the command waits in its queue)
@@ -21,7 +21,7 @@ def _op_error(msg):
 
 
 def registry_dir():
-    return Path(os.environ.get('ISMAIL_STAGE_REGISTRY') or Path.home() / '.ismail' / 'stage')
+    return Path(settings.get('stage.registry'))
 
 
 def _pid_alive(pid):

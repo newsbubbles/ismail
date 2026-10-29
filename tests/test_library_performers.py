@@ -59,3 +59,43 @@ def test_lead_bends_on_its_lane(tmp_path):
     flat, bent = peak_hz(y[int(0.1 * sr):int(0.45 * sr)], sr), peak_hz(y[int(1.2 * sr):int(1.9 * sr)], sr)
     ratio = bent / flat
     assert abs(12 * np.log2(ratio) - 2) < 0.6, (flat, bent)
+
+
+def test_flute_renders_in_a_song_and_follows_its_lanes(tmp_path):
+    """The flute performer (no rig, no preset) through a track: it renders, and its bend lane moves the pitch."""
+    def peak_hz(x, sr):
+        x = x.mean(1)
+        S = np.abs(np.fft.rfft(x * np.hanning(len(x)), 4 * len(x)))
+        f = np.fft.rfftfreq(4 * len(x), 1 / sr)
+        S[f < 150] = 0
+        return f[np.argmax(S)]
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=120, length_bars=1)
+    api.track_add(root, 'p', instrument={'type': 'code', 'voice': 'flute', 'tail': 1.5, 'params': {'vib': 0}})
+    api.notes_write(root, 'p', 1, '0 A4 4 90')
+    api.automation_set(root, 'p', 'inst.lane.bend', [[1, 0], [1.5, 0], [1.5625, 2]])
+    api.render(root)
+    y, sr = sf.read(os.path.join(root, 'renders', 'latest.wav'))
+    assert np.isfinite(y).all() and 1e-3 < np.sqrt(np.mean(y[:2 * sr] ** 2)) and np.abs(y).max() <= 1.0
+    flat, bent = peak_hz(y[int(0.3 * sr):int(0.95 * sr)], sr), peak_hz(y[int(1.2 * sr):int(1.9 * sr)], sr)
+    assert abs(12 * np.log2(bent / flat) - 2) < 0.3, (flat, bent)
+
+
+def test_trumpet_renders_in_a_song_and_follows_its_lanes(tmp_path):
+    """The trumpet performer (no rig, no preset) through a track: it renders, and its bend lane moves the pitch."""
+    def peak_hz(x, sr, f0):
+        x = x.mean(1)
+        S = np.abs(np.fft.rfft(x * np.hanning(len(x)), 4 * len(x)))
+        f = np.fft.rfftfreq(4 * len(x), 1 / sr)
+        S[(f < 0.8 * f0) | (f > 1.3 * f0)] = 0                  # the fundamental's band (the trumpet's H1 is weak)
+        return f[np.argmax(S)]
+    root = str(tmp_path / 's')
+    api.project_new(root, bpm=120, length_bars=1)
+    api.track_add(root, 'p', instrument={'type': 'code', 'voice': 'trumpet', 'tail': 1.5})
+    api.notes_write(root, 'p', 1, '0 A4 4 100')
+    api.automation_set(root, 'p', 'inst.lane.bend', [[1, 0], [1.5, 0], [1.5625, 2]])
+    api.render(root)
+    y, sr = sf.read(os.path.join(root, 'renders', 'latest.wav'))
+    assert np.isfinite(y).all() and 1e-3 < np.sqrt(np.mean(y[:2 * sr] ** 2)) and np.abs(y).max() <= 1.0
+    flat, bent = peak_hz(y[int(0.3 * sr):int(0.95 * sr)], sr, 440), peak_hz(y[int(1.2 * sr):int(1.9 * sr)], sr, 494)
+    assert abs(12 * np.log2(bent / flat) - 2) < 0.3, (flat, bent)

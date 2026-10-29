@@ -68,8 +68,25 @@ def norm(p):
     return unify(p).lower()
 
 
-def _registry(env, default):
-    d = os.environ.get(env) or os.path.join(os.path.expanduser('~'), '.ismail', default)
+def config_file():
+    """ismail's settings file, found as ismail finds it: $ISMAIL_CONFIG, else ~/.ismail/config.json."""
+    return os.path.abspath(os.path.expanduser(os.environ.get('ISMAIL_CONFIG') or
+                                              os.path.join('~', '.ismail', 'config.json')))
+
+
+def setting(key):
+    """A path setting from ismail's settings file (stage.registry, live.registry), or None. The guard runs outside
+    the package, so it reads the file itself (a byte order mark is fine); it never raises."""
+    try:
+        with open(config_file(), encoding='utf-8-sig') as fh:
+            v = json.load(fh).get(key)
+        return os.path.expanduser(v) if isinstance(v, str) and v.strip() else None
+    except Exception:
+        return None
+
+
+def _registry(override, default):
+    d = override or setting(default + '.registry') or os.path.join(os.path.expanduser('~'), '.ismail', default)
     out = []
     try:
         names = [n for n in os.listdir(d) if n.endswith('.json')]
@@ -89,13 +106,13 @@ _CACHE = {}
 
 def stage_records():
     if 'stage' not in _CACHE:
-        _CACHE['stage'] = _registry('ISMAIL_STAGE_REGISTRY', 'stage')
+        _CACHE['stage'] = _registry(os.environ.get('ISMAIL_STAGE_REGISTRY'), 'stage')
     return _CACHE['stage']
 
 
 def live_records():
     if 'live' not in _CACHE:
-        _CACHE['live'] = _registry('ISMAIL_LIVE_REGISTRY', 'live')
+        _CACHE['live'] = _registry(os.environ.get('ISMAIL_LIVE_REGISTRY'), 'live')
     return _CACHE['live']
 
 

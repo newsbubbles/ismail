@@ -66,6 +66,23 @@ person and an agent change the same scene.
   rebuilt (`stage_scene_export`, swapped in under the construct, so only when they are out or ask): new or changed
   geometry, modelling, modifiers, textures and any material change other than the base colour, a new object, and
   a new merged piece list (a room exported before pieces were numbered splits nothing until its next export).
+- **Screens in the room** (`stage_surface`): an image, a video, text or a live camera on every mesh of a material,
+  now, flat and unlit, until `clear=True`. Slides and a video backdrop on a wall, a teleprompter that scrolls
+  (`text=`, `lines=`, `scroll=` lines a second), a monitor showing a scene camera (`camera=`, `fps=`). Files sit in
+  the scene folder (paths relative to it). The surface keeps its mesh's shape (measured from its UVs; `fit`
+  contain, cover or stretch). Give each screen its own material in the build: a surface covers every mesh of its
+  material, and a plane's UVs decide which way up the picture is (check it once in a capture). Not saved to the
+  scene. In `stage_capture` it is a setup command (`{"type": "surface", ...}`, timed with `at_song`); a video there
+  follows the film's time and a camera renders every frame.
+- **A camera crew** for a talk on the stage: `stage_on_air(scene, camera)` cuts to a camera (the monitor material
+  shows it live, default `monitor_screen`) and logs the cut with its time; `stage_on_air_log` lists the cuts with how
+  long each stayed on air, for cutting the rendered angles afterwards. `stage_pointer` puts a giant foam finger where a
+  person's hand points (shoulder through fingertip), only while it points (`when='point'`), on a layer the headset
+  never shows: the monitor feed and `stage_capture` see it (a capture setup command `{"type": "pointer", ...}`).
+  **Streaming the talk:** a page opened as `<stage url>?scene=<scene>&onair=<first camera>&fps=30` is the stream's
+  picture: the camera on air only, full frame, no UI, titled `ismail on air <scene>`, and it follows every
+  `stage_on_air` cut (other pages keep their view). Capture it with `stream_visual(window='ismail on air <scene>',
+  capture='wgc')` (`references/live-streaming.md`).
 - **Listen:** `stage_events(scene, since=, types=[...], wait=)` is what the person did and said: `voice_in` the
   moment a voice note lands (answer "got it" then), `voice_message` with its text and what they pointed at,
   `gesture`, `select`, `transform_end`, `cmd_done`, `page_error`, frame beats in the client log.
@@ -123,8 +140,10 @@ something you do.
   what it said; decide who sent something from the principal alone.
 - **Hooks** start an agent when nobody is running one: `~/.ismail/stage_hooks.json`,
   `{"entered_vr": [...], "left_vr": [...], "voice_note": [...], "voice_unheard": [...], "session_stuck": [...]}`,
-  each a shell command (or an argv list) run with `STAGE_EVENT`, `STAGE_SCENE`, `STAGE_TEXT`, `STAGE_FILE`,
-  `STAGE_EVENT_ID`, `STAGE_URL`, `STAGE_SCENES` (and `STAGE_WHO` for session_stuck) in its environment (a toast, a webhook, `claude -p "..."`, `codex exec "..."`); output goes to
+  each a shell command (or an argv list) run on this computer (a toast, `claude -p "..."`, `codex exec "..."`).
+  Put `{event_file}` in the command where it should get the event: ismail writes the event to a JSON file
+  (`event`, `scene`, `text`, `file`, `event_id`, `url`, `scenes`, and `who` for session_stuck) and puts the file's
+  path there, for example `claude -p "Read {event_file} and answer the note"`. Output goes to
   `_stage/hooks.log`. A song's own `_stage/hooks.json` runs only when the home file lists its scenes folder in
   `"trust": [...]`: a scenes folder travels, and must never run commands for whoever opens it.
 
@@ -139,14 +158,16 @@ crude stools, no bottles, block trees and cylinder people: every lesson already 
   waypoints; the actor bodies come from the source through `assets`). The person's takes, voice notes and snapshots
   stay with the source.
 - **The variant is a pass on the built room,** a script run after the source's full build and before the Quest diet
-  (`pass` in world.json, `pass_env` for its switches). It removes, adds and repaints what changed; everything else
+  (`pass` in world.json, `pass_switches` for its switches). It removes, adds and repaints what changed; everything else
   is the source's. `stage_scene_export` runs the whole line (the source's build, every pass oldest first, the
-  edits of the line merged with the variant's winning, the diet). Room scripts exec `os.environ["VR_BRIDGE"]` at
-  their end so the passes and the diet run. A room with its own Quest merge defines `stage_diet()` and skips that
-  merge in its build when `VR_DIET` is set: a pass that runs after the merge finds one joined mesh, not the stools.
+  edits of the line merged with the variant's winning, the diet). `stage_scene_export` hands the build its job as `sys.vr_job`
+  (also saved as `_stage/job_<scene>.json`: the scene, the export folder, the bridge, the passes, the edits, the
+  diet, the switches), and room scripts end with `exec(open(sys.vr_job['bridge']).read())` so the passes and the
+  diet run. A room with its own Quest merge defines `stage_diet()` and skips that merge in its build when
+  `sys.vr_job['diet']` is true: a pass that runs after the merge finds one joined mesh, not the stools.
 - **Check it beside its source from the same camera** before the person sees it: the same view of both, side by
   side, and look for anything that went back to a blockout.
-- **Renders of a scene go in `renders/<scene>/`** (a script reads `STAGE_SCENE`), so a camera both scenes share
+- **Renders of a scene go in `renders/<scene>/`** (a script reads `sys.vr_job['scene']`), so a camera both scenes share
   never overwrites the other's still.
 - **A direction note is a direction, not an open question.** If the person said the place expanded, build it
   expanded; ask only what the notes leave open.
@@ -407,7 +428,7 @@ A person in a headset cannot see your terminal. Contact is part of the interface
   jaw digit per 0.1 s; read it against the words before you film. Without words the jaw only follows loudness, which
   reads as chewing on a mixed recording: use a vocal stem and words.
   With Rhubarb Lip Sync on the machine (free, MIT, about 87 MB for Windows: unpacked in `~/.ismail/tools/rhubarb/`
-  or named by `ISMAIL_RHUBARB`; download it only on the person's yes), `stage_face` hears the mouth shapes in the
+  or named with `config_set('rhubarb', <its folder>)`; download it only on the person's yes), `stage_face` hears the mouth shapes in the
   voice itself: the timing follows the sounds and pauses, in any language and in singing, at about 4 times faster
   than real time. `engine='rhubarb_english'` uses its English recognizer guided by the words (slower than real
   time), `engine='words'` the words only. The reply says which one made the track, and why Rhubarb did not run.

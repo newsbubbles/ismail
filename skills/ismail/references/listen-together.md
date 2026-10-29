@@ -30,7 +30,7 @@ Never the system drive by default. In order:
 
 1. `<project>/listen/` when `listen_start(project=<the song's folder>)` names one.
 2. The running live set's folder (`<project>/listen/`), so a jam's session sits with the jam.
-3. `$ISMAIL_LISTEN_HOME`, when set.
+3. The `listen.home` setting, when set (`config_set('listen.home', <folder>)`).
 4. `_listen/` in the installed songs folder, on the checkout's drive.
 
 An id resolves wherever its session went (an index in `_listen/`, plus the old home `~/.ismail/listen`), so
@@ -38,7 +38,7 @@ An id resolves wherever its session went (an index in `_listen/`, plus the old h
 
 **The free-space floor.** Each input takes about 1.4 GB an hour, and the reading copies each stretch once more.
 `listen_start` refuses a drive with under 2 GB free (`FREE_FLOOR_GB` in `ismail/listen.py`) and says what to do:
-free some space, name a project on a drive with room, or set `ISMAIL_LISTEN_HOME`. A running session checks every
+free some space, name a project on a drive with room, or `config_set('listen.home', <a folder on a drive with room>)`. A running session checks every
 10 s; under the floor it stops by itself, keeps what it recorded, and the next listen op says so once (under
 "NEW since your last call", with the mic off on the phone page). `listen_stop` does not read on a short drive.
 The background processes keep their temp files in the session's own `tmp/` folder.
@@ -46,7 +46,7 @@ The background processes keep their temp files in the session's own `tmp/` folde
 ## Words as they are said
 
 With a mic on, the recorder also cuts the mic at pauses (2 s, as the reading groups utterances), or at 8 s at
-most, and sends each chunk (16 kHz, under 300 KB) to the speech server the reading uses (`ISMAIL_SPEAK`, by
+most, and sends each chunk (16 kHz, under 300 KB) to the speech server the reading uses (the `speak` setting, by
 default `http://127.0.0.1:8765`). Nothing starts or installs that server: when it does not answer, `listen_start`
 and `listen_heard` say so, and the recording, `listen_peek`, `listen_mark` and `listen_note` still work;
 `listen_stop` reads the words from the recording once it runs.
@@ -69,7 +69,7 @@ that fails is tried once more, then shown as "not heard" with the reason: never 
   their yes; the note counts only when its recording landed in the scene's `voice/` folder from the headset.
 - their words in chat: `mic_ok='chat: <their exact words>'`, quoted as they wrote them. This is weaker than a note
   they sent, so each one is logged on this computer (`ts`, `op`, the first 300 characters of the quote) in
-  `$ISMAIL_MIC_CONSENT_LOG`, else `~/.ismail/mic_consent.jsonl`, never in the repository.
+  `~/.ismail/mic_consent.jsonl` (the `guards.mic_consent_log` setting moves it), never in the repository.
 
 A note must have come from them (not an agent's line, not a button tapped on your question), within the last 12
 hours; every yes must name the mic, microphone, record, recording or listening, and not read as a no ("delete that

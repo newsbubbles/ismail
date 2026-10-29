@@ -6,17 +6,21 @@ from . import exam_check as EC
 @op()
 def exam_check(clips: list = None, page: str = None, key: dict = None, secrets: list = None,
                answers_path: str = None, submit_url: str = None, submit_body: dict = None,
-               lufs_tol: float = 1.0) -> str:
+               lufs_tol: float = 1.0, choices: list = None, question: str = '') -> str:
     """Run before any exam page goes to the person; show it only on READY. Checks that every clip exists and decodes,
     that the clips sit within lufs_tol of one loudness, and that a blind exam cannot be told by anything but the
     sound: given key={clip label, file name or path: its class} and secrets=[source names, words that must not show],
     no class or secret in file names, URLs, metadata tags or the page source (or the scripts and styles it loads), no
     key file the page loads, no format, length, leading-silence or order that separates the classes. submit_url +
     answers_path: posts a test answer marked preflight and checks it lands where you read answers. clips: paths or
-    [{label, path}]; page: the exam's HTML file or its URL (its clips are found when clips is none)."""
+    [{label, path}]; page: the exam's HTML file or its URL (its clips are found when clips is none).
+    choices (+ question): the exam's one overall single choice. On pairs labelled 1A, 1B, 2A ... whose real side
+    moves between pairs, a choice of sides about the key ('A is the real band' / 'B is the real band', or bare 'A' /
+    'B' under a "which is real?" question) fails, and other side choices warn: ask "real or fake?" per clip."""
     try:
         ready, lines = EC.run(clips=clips, page=page, key=key, secrets=secrets, answers_path=answers_path,
-                              submit_url=submit_url, submit_body=submit_body, lufs_tol=lufs_tol)
+                              submit_url=submit_url, submit_body=submit_body, lufs_tol=lufs_tol, choices=choices,
+                              question=question)
     except (OSError, ValueError) as e:
         raise OpError(f"exam_check: {e}")
     return '\n'.join(lines)
@@ -66,7 +70,10 @@ def exam_picture_round(out: str, items: list, title: str, intro: str = '', seed:
     is on, and each mark has a Remove button; real-first and real-second are balanced and seeded.
     labels: the page's words {real, ours, play} (default "This one is the real one", "This one is ours", "Play the
     real sound"). out: the round's folder; its parent is what the page server serves. host=True starts it on
-    127.0.0.1:port unless it runs. Read the answers with exam_picture_score(out).
+    127.0.0.1:port unless it runs, and registers the round with it, so one server serves rounds from every song; a
+    name another song's round holds gets the song's name in front, and the reply gives the URL and phone link to
+    use. If the round can't be served it says why instead of giving a link. Read the answers with
+    exam_picture_score(out).
     Reach for it whenever the person should see a difference and mark it ("show me the difference", my voice
     against the render, two takes side by side, where does it go wrong): a static spectrogram PNG they can look at
     but not mark is the wrong answer to that (Nate, 10-12)."""
@@ -79,9 +86,15 @@ def exam_picture_round(out: str, items: list, title: str, intro: str = '', seed:
     rnd = man['round']
     if not X.SAFE.match(rnd):
         raise OpError(f"the round folder's name {rnd!r} must be letters, digits, '_', '-' or '.'")
-    url = (X.host(os.path.dirname(os.path.abspath(out)), port) + rnd) if host else None
+    url = None
+    if host:
+        try:
+            url = X.host(os.path.dirname(os.path.abspath(out)), port, rnd)
+        except (OSError, X.CannotServe) as e:
+            raise OpError(f"exam_picture_round: the round is built in {out}, but it can't be served: {e}")
+        rnd = url.rsplit('/', 1)[1]      # the served name: the song's name in front when another round holds it
     return (f"round {rnd}: {len(man['items'])} cards in {out}" + (f"; open {url}" if url else
-            f"; serve with python -m ismail.exampage serve {os.path.dirname(os.path.abspath(out))}") +
+            f"; serve with python -m ismail.exampage register {os.path.abspath(out)}") +
             ". The key is served only after a submit; answers land in answers.jsonl; exam_picture_score(out) reads "
             f"the last one. On the phone: phone_panel_show(link='/eye/{rnd}?from=phone', link_label='Open the picture "
             f"round') (the phone server passes /eye/ through to this page; it works while the page server runs).")

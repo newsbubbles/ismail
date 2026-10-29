@@ -32,6 +32,7 @@ import os
 
 import numpy as np
 from numba import njit
+from . import settings
 
 C_SOUND = 343.0
 HEAD_A = 0.0875             # head radius, m
@@ -139,8 +140,8 @@ def _key(k, i):
 
 
 class Trajectory:
-    """A parsed trajectory: eval(t) -> (x, y, z) arrays for times t in seconds (elementwise, so any cut of the
-    time axis gives the same positions)."""
+    """A parsed trajectory: its .eval method takes times t in seconds and gives (x, y, z) arrays (elementwise, so
+    any cut of the time axis gives the same positions)."""
 
     def __init__(self, kind, start_s, loop, **kw):
         self.kind, self.start_s, self.loop = kind, start_s, loop
@@ -285,7 +286,7 @@ def validate(full):
 # ------------------------------------------------------------------ measured HRTF (optional)
 
 def hrtf_cache_dir():
-    return os.environ.get('ISMAIL_HRTF') or os.path.join(os.path.expanduser('~'), '.ismail', 'hrtf')
+    return settings.get('hrtf')
 
 
 def _min_phase(h, nfft=4096):

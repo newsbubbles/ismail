@@ -1,7 +1,7 @@
 # Dev copies (git worktrees): the decision tree
 
 Read this when you change ismail itself as a dev: the contributor dev, an area dev (the stage dev so far) or a
-helper agent one of them started. Every dev works in its own copy of the repository (a git worktree), so a live
+helper agent one of them started (`helpers.md`). Every dev works in its own copy of the repository (a git worktree), so a live
 set, the phone page and the stage keep running from the main checkout while code changes elsewhere. Branches
 alone would put every agent in one folder and switch code under running servers; copies keep them apart.
 
@@ -71,9 +71,12 @@ enters the repository.
    owner record. The project deletes the remote branch by itself.
 10. **Not cleaned up.** `list` flags it:
     - **MERGED:** `done <path>`. It refuses a copy with uncommitted or untracked files (caches aside): look at
-      them, and move what matters to `_reclaim/` in the main checkout. Never delete them.
+      them, and move what matters with `python -m ismail.reclaim move <path> <what>` (it lands in `_reclaim/` at the
+      root of the drive). Never delete them.
     - **IDLE:** an unmerged copy with no commit for 3 days goes back to its owner, or to the person when it has none.
       `done` refuses anything unmerged: open or finish its pull request, or ask the person before dropping it.
+      A squash-merged copy is merged: `done` takes it when its files are the same as `origin/main`'s or when gh
+      names a merged pull request ending at its last commit, and says which test passed.
       Nothing unmerged is deleted without a yes.
     - **An empty folder left behind.** On Windows git cannot remove a copy's folder while a program's working
       folder is inside it: the files and git's record go, the empty folder stays, and `list` never shows it again.

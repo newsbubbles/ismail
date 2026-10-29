@@ -68,3 +68,110 @@ def test_bad_asks_say_what_to_change(tmp_path):
     sf.write(str(tmp_path / 'silent.wav'), np.zeros((48000, 2)), 48000)
     with pytest.raises(OpError, match='silent'):
         OPS['master_cue'](source=str(tmp_path / 'silent.wav'))
+
+
+def _dense(path, secs=4.0, sr=48000, seed=1):
+    """A dense mix: detuned saw chords over a 128 BPM kick, snare and 16th hats, at -18.6 LUFS (the planet rock
+    remix's mix level), with a low crest so the limiter's re-gain rounds fall short of the ceiling (ledger:M280)."""
+    import pyloudnorm as pyln
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(secs * sr)) / sr
+    y = np.zeros((len(t), 2))
+    for f in (55, 110, 165.0, 277.2, 330, 523.3, 659.3, 880):
+        for ch, det in ((0, 0.996), (1, 1.004)):
+            y[:, ch] += 0.4 * (2 * ((f * det * t + rng.random()) % 1.0) - 1)
+    step = int(round(sr * 60 / 128 / 4))
+    for k, s in enumerate(range(0, len(t), step)):
+        n = min(len(t) - s, int(0.2 * sr))
+        tt = np.arange(n) / sr
+        if k % 4 == 0:
+            y[s:s + n] += (0.3 * np.sin(2 * np.pi * (45 * tt + 150 * (1 - np.exp(-tt * 35)) / 35))
+                           * np.exp(-tt * 10))[:, None]
+        if k % 8 == 4:
+            hit = 0.5 * rng.standard_normal(n) * np.exp(-tt * 22)
+            y[s:s + n, 0] += hit
+            y[s:s + n, 1] += np.roll(hit, 11)
+        n2 = min(len(t) - s, int(0.02 * sr))
+        y[s:s + n2] += 0.25 * rng.standard_normal((n2, 2)) * np.exp(-np.arange(n2) / sr * 250)[:, None]
+    y *= 10 ** ((-18.6 - pyln.Meter(sr).integrated_loudness(y)) / 20)
+    sf.write(path, y, sr, subtype='FLOAT')
+    return path, M.true_peak_db(y) + 18.6           # the peak-to-loudness ratio
+
+
+def _lufs(path):
+    import pyloudnorm as pyln
+    y, sr = sf.read(path, always_2d=True)
+    return pyln.Meter(sr).integrated_loudness(y)
+
+
+def test_a_dense_mix_ends_at_its_true_peak_ceiling(tmp_path):
+    """ledger:M280: 3 dB of limiting asked on a dense mix. The limiter's rounds alone stop 0.3 dB over (the master
+    from before, still reached with tp_catch=False); by default the wav now ends at -1 dBTP."""
+    src, plr = _dense(str(tmp_path / 'mix.wav'))
+    lufs = -1.0 + 3.0 - plr
+    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'old.wav'), tp_catch=False)
+    y, _ = sf.read(str(tmp_path / 'old.wav'), always_2d=True)
+    assert M.true_peak_db(y) > -0.9                 # the shortfall the catch is for
+    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'wav.wav'))
+    y, _ = sf.read(str(tmp_path / 'wav.wav'), always_2d=True)
+    assert M.true_peak_db(y) <= -1.0 + 0.05
+    assert 'WARNING' not in out and 'mp3 ->' not in out
+    out = OPS['master_cue'](source=src, lufs=lufs + 1, tp=-1.0, out=str(tmp_path / 'loud.wav'))
+    y, _ = sf.read(str(tmp_path / 'loud.wav'), always_2d=True)
+    assert 'true-peak catch took' in out           # 4 dB asked: the rounds stop over, the catch takes the rest
+    assert M.true_peak_db(y) <= -1.0 + 0.05
+    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'), mp3_margin_db=1.2)
+    y, _ = sf.read(str(tmp_path / 'm.wav'), always_2d=True)
+    assert M.true_peak_db(y) <= -2.2 + 0.05         # the wav's own ceiling can still be lowered
+
+
+def test_the_mp3_gets_its_own_catch_and_the_wav_stays_as_mastered(tmp_path):
+    import shutil
+    import subprocess
+    exe = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    if not exe:
+        pytest.skip("no ffmpeg on PATH (CI installs it on Linux only): the mp3 encoder ismail uses is ffmpeg's lame")
+    src, plr = _dense(str(tmp_path / 'mix.wav'))
+    lufs = -1.0 + 3.0 - plr
+    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'), mp3=True)
+    assert 'mp3 -> ' in out and 'decoded true peak' in out and 'WARNING' not in out
+    subprocess.run([exe, '-y', '-loglevel', 'error', '-i', str(tmp_path / 'm.mp3'), '-c:a', 'pcm_f32le',
+                    str(tmp_path / 'dec.wav')], check=True)
+    d, _ = sf.read(str(tmp_path / 'dec.wav'), always_2d=True)
+    assert M.true_peak_db(d) <= -1.0
+    OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'w.wav'))
+    a, _ = sf.read(str(tmp_path / 'm.wav'), always_2d=True)
+    b, _ = sf.read(str(tmp_path / 'w.wav'), always_2d=True)
+    assert np.array_equal(a, b)                     # only the mp3 got the extra catch
+    out = OPS['master_cue'](source=src, lufs=lufs, tp=-1.0, out=str(tmp_path / 'm.wav'), mp3=True)
+    assert sorted(os.path.splitext(f)[1] for f in os.listdir(tmp_path / 'old')) == ['.mp3', '.wav']
+
+
+def test_a_mix_already_under_the_ceiling_keeps_its_loudness(tmp_path):
+    """The catch must not over-limit: a master whose gain alone peaks 0.3 dB under -1 dBTP loses under 0.3 LU
+    against the master before the catch."""
+    src, plr = _dense(str(tmp_path / 'mix.wav'), seed=2)
+    lufs = -1.0 - 0.3 - plr
+    OPS['master_cue'](source=src, lufs=lufs, out=str(tmp_path / 'old.wav'), tp_catch=False)
+    out = OPS['master_cue'](source=src, lufs=lufs, out=str(tmp_path / 'new.wav'))
+    assert _lufs(str(tmp_path / 'old.wav')) - _lufs(str(tmp_path / 'new.wav')) < 0.3
+    assert 'WARNING' not in out
+
+
+def test_the_catch_alone_takes_only_what_is_over(tmp_path):
+    sr = 48000
+    t = np.arange(sr) / sr
+    y = np.stack([0.5 * np.sin(2 * np.pi * 440 * t)] * 2, 1)
+    y[sr // 2:sr // 2 + 20] = 0.99                   # one burst over a -6 dB tone
+    c, gr = M.catch(y, sr, -3.0)
+    assert M.true_peak_db(c) <= -3.0 and gr < -2.5
+    assert np.array_equal(c[:sr // 4], y[:sr // 4])          # untouched before the burst
+    assert np.abs(c[-sr // 4:] - y[-sr // 4:]).max() < 1e-3   # released 250 ms after it
+    same, gr0 = M.catch(y * 0.5, sr, -3.0)
+    assert gr0 == 0.0 and np.array_equal(same, y * 0.5)
+
+
+def test_out_in_a_folder_that_does_not_exist_yet_is_made(tmp_path):
+    src = _tone(str(tmp_path / 'cue.wav'))
+    OPS['master_cue'](source=src, out=str(tmp_path / 'master' / 'cue_master.wav'), mp3=False)   # ledger:M374
+    assert os.path.exists(tmp_path / 'master' / 'cue_master.wav')

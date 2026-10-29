@@ -57,8 +57,9 @@ so act on `heard`, not on the engine's now.
 
 Read it with `phone_listen(who='<your name>', since=...)` (a long-poll, which also shows them who is listening), or
 watch the routed file with your harness's file watcher, so a line wakes you even between turns. Hooks in
-`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, with
-`PHONE_EVENT`, `PHONE_TEXT`, `PHONE_LINE` and `PHONE_INBOX` in their environment, for an agent that isn't running.
+`~/.ismail/phone/hooks.json` (`{"voice": ["cmd"], "tap": [...], "any": [...]}`) run on every line, for an
+agent that isn't running. `{event_file}` in a command is replaced by the path of a JSON file with the line (`event`,
+`text`, `inbox`, and the whole `line`), for example `claude -p "Read {event_file} and answer it"`.
 
 Voice notes are transcribed by the speech server on this machine. While the CPU is over the governor's limit they
 wait in a queue: taps still arrive at once, and the page tells them their note is waiting. When the speech server is slow,
@@ -95,7 +96,7 @@ and on the exam's answers file, so "this bit" in a note can be found in the vide
 Every voice note keeps the master the page played under it, from 3 s before the person began to 2 s after they
 stopped (`<id>_ref.wav` beside the note, with the beat at points through it in `<id>_ref.json`). The server keeps the
 last two and a half minutes of the master in memory for this, whenever an engine plays, page open or not, so nothing
-has to be recording (`ISMAIL_PHONE_KEEP_MASTER=0` turns that off). When they listen on the room speaker with the
+has to be recording (`config_set('phone.keep_master', false)` turns that off at the phone server's next start). When they listen on the room speaker with the
 stream off, the note's start is a guess from when it arrived, and the ref spans 20 s either side
 (`start_is_guess`, `search_s`): search that window, and the room route gets its own latency.
 
@@ -122,7 +123,8 @@ also has a "Say more" button: what they say there arrives as `voice` and `voice_
 let them watch and ask questions. `priority='needs you'` (also on `phone_say`) sorts it first and lights the corner key;
 `'low'` sorts last. `link='/eye/<round>?from=phone', link_label='Open the picture round'` adds a big button that opens
 a path on the phone server in the same tab (only a path starting with `/`; the phone server passes `/eye/` through to
-the picture round that `exam_picture_round` hosts, so the eye exam works on the phone while that page server runs). A panel never interrupts a voice note: it waits, silent,
+the picture round that `exam_picture_round` hosts, so the eye exam works on the phone while that page server runs;
+use the `/eye/<round>` name the op returns, which carries the song's name when another song's round has the same one). A panel never interrupts a voice note: it waits, silent,
 until the note is sent.
 In a team of agents, each one with something waiting on the person posts its own panel (`sender=<its role>`, a
 `priority`, one topic per panel) and reads its own answers by `for`; nobody relays for another. A free voice note
@@ -164,7 +166,9 @@ listening exams and two notes).
    at once cannot both win, and every later `phone_listen` or `phone_watch` line of that note carries
    `claimed {by, at}`. The person's page says "taken by X" under the note (the agent it was said to, then its
    claimer), or "nobody has it yet". A note with a `for` is already that agent's: no claim. Claim only what you will act on now.
-   Then pass it on at once, word for word, with its inbox number, id and time. When the owner is unclear, keep it
+   Then pass it on at once, word for word, with its inbox number, id and time. The first line of anything you pass
+   on, or of your answer to another agent's ask, says who it is for and what it is for; without it the person had to
+   ask "who's this for and what's this for again?". When the owner is unclear, keep it
    and ask the team's lead (or the person, when there is no lead). An untagged note nobody claims for 3 minutes is
    the lead's by default: `phone_presence` lists it with LEAD, so the lead's watcher picks it up.
 3. **Who else is here.** `phone_presence()` shows both sides, many to many: each agent calling the phone server and
@@ -209,7 +213,7 @@ recorded).
 The ops refuse it for you: every op that sends text to the page (`phone_say`, `phone_panel_show`, `phone_ask`,
 `phone_exam`, `phone_now`, `phone_buttons`, the offer and restart lines) and every stage op that shows text
 (`stage_say`, `stage_ask`, `stage_panel_show`, cues, markers, `stage_busy`) scans it first against a local list
-that never goes in the repository: `$ISMAIL_PRIVATE_TERMS`, else `~/.ismail/private_terms.txt`, one place or name
+that never goes in the repository: `~/.ismail/private_terms.txt` (the `guards.private_terms` setting moves it), one place or name
 per line, `#` starting a comment line, plus the git `user.email` of the checkout. Words match whole and
 case-insensitive; an email matches anywhere. A hit refuses with the term, to you only: rephrase without it. With no
 file only the email is checked, and each reply carries one line saying so and how to turn the rest on.
@@ -219,7 +223,7 @@ line and its notification; it cannot reach a recording already made.
 ## Don't ask for what is granted
 
 A person who said "you can always merge reviewed work" should not get the question again. Their standing grants
-live in a local file: `$ISMAIL_STANDING_GRANTS`, else `~/.ismail/standing_grants.json`, a JSON list of
+live in a local file: `~/.ismail/standing_grants.json` (the `guards.grants` setting moves it), a JSON list of
 `{"id", "date", "topic", "keywords": [...], "says"}`. A yes/no or approve/deny panel (its buttons, or a choice's
 options, are all yes and no words), a `phone_ask`, a `phone_say` that asks ("should I merge #12?"), a `stage_ask`
 or a yes/no `stage_panel_show` whose title or text holds a grant's keyword (whole word, any case) is refused with
@@ -312,6 +316,11 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   `now_mark=` / `next_mark=`: 'loved' (one they loved before, played again), 'replay' (played earlier, back
   again) or 'new' (just made). A small mark sits beside it; without one, the page shows a heart when they tapped
   Love this while that piece played.
+- The now label expires when what it names stops, so a later script that never calls `phone_now` cannot leave a
+  stale name up: by default it is tied to the clips playing as it goes up and those that start in the next 2 bars
+  (a label put up just before its music is queued); `now_of=[...]` ties it to named clips, tracks or decks
+  instead; `now_of=[]` keeps the old way (up until replaced or cleared). When it expires the page shows the
+  engine's own playing list. An engine that stops answering (a pause) leaves the label as it is.
 - The piece's shape: `phone_now(length=<seconds>, sections=[{'at_s': 0, 'label': 'intro'}, {'at_s': 64, 'label':
   'drop'}], into=<seconds in, if it started before its name went up>)` on every chapter change. The page keeps a
   position line on screen under now/next (elapsed / length, the section, the next one and when), in time or bars as
@@ -338,8 +347,15 @@ actions out unless you pass `page=True`, so a scroll never wakes you. All of it 
   row with `voice_notes_pending` has more rows coming. The answer's note says whether it was typed or said
   (`note_source`, and `note_audio` for the recordings). The reply lists each clip's url, path and length, so the
   post can be checked against what was meant.
+  **A raw take beside a render.** A take recorded raw (no auto gain) sat about 15 dB under a mastered bounce
+  (-31.5 against -16.5 LUFS) with its peaks already near -3.5 dBFS, so it cannot be raised to match without a
+  limiter that changes it. The pre-flight refuses clips more than 1 LUFS apart. Play a raw take on the computer's
+  page (`feedback_page`), or send a limited copy whose label says it is limited.
 - Every text box on a panel or exam card has a mic: they say the note, its words go into the box to edit, and the
   answer carries the recording too (`values_audio` on a panel).
+- **A file onto their phone** ("send it to my phone", a video to post from it): `phone_offer(path, label=, auto=True)`,
+  never a panel (a panel plays it, nothing is saved) and never the harness's own file upload (it has size caps and
+  lands in the agent app, not their downloads). Any size and type: it is served in chunks under the label's name.
 - `phone_offer(path, label=, auto=True)`: a download (a render, a take, a PDF). The label is the card and the file's
   name, so write it for a person ("Clair de lune, rain bed (highlight)"), not a slug. An mp3 goes out as a tagged copy:
   title, artist, album (`title=`, `artist=`, `album=`), the date, and ismail with its GitHub link (provenance travels

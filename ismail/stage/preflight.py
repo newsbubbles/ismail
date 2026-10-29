@@ -458,7 +458,7 @@ def stage_preflight(port: int = None, say: bool = True, wait: float = 60, headle
         page = _launch_page(url)
         if page is None:
             raise Blocked('no Edge or Chrome to open a test page with',
-                          f'set ISMAIL_BROWSER to a Chromium browser, or open {url} yourself and run with headless=False')
+                          f"config_set('browser', <a Chromium browser>), or open {url} yourself, headless=False")
         t_end = time.time() + float(wait)
         loaded = None
         while time.time() < t_end and loaded is None:

@@ -6,7 +6,7 @@
       "id": "original-track",
       "prompt": "Use ismail to make a 48-bar dark electro track at 118 BPM in D minor with a drop at bar 17. Render it.",
       "expect": [
-        "A Session Sheet with tempo, key, chord loop, form map with energy numbers, and parts with registers and rhythms appears before any notes are written",
+        "A Session Sheet with tempo, key, harmony (measured: a chord loop, or a pedal), form map with energy numbers, and parts with registers and rhythms appears before any notes are written",
         "Parts use distinct registers and rhythmic cells (not every part on beat 1 of each bar)",
         "At least one Listening Report with numbers from render and analysis tools; limiter gain reduction checked",
         "analyze_structure on the final render shows the planned drop at bar 17"

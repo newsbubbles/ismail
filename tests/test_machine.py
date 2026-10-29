@@ -384,9 +384,6 @@ def test_low_commit_holds_new_jobs_and_names_the_job_past_its_memory(board, monk
     assert not [f for f in os.listdir(board / 'jobs') if f.endswith('.tmp')]
 
 
-@pytest.mark.xfail(sys.platform == 'darwin', strict=False,
-                   reason="macOS runners: the meter often never sees the job's memory (6 s hold, incompressible bytes; "
-                          "ledger:M166); the assert message prints what it measured")
 def test_the_cli_says_over_memory_in_the_jobs_own_output(board):
     env = dict(os.environ, ISMAIL_MACHINE_DIR=str(board))
     # 2.5x: OVER, not paused (under 3x). Random bytes, not b'x' * n: macOS compresses a page of one repeated byte
@@ -467,8 +464,15 @@ def test_machine_disk_lists_the_songs_their_growth_and_reclaim(board, tmp_path):
     assert 'growth since 2000-01-01' in text and 'big  +0.00 GB' not in text
     lines = text.splitlines()
     assert any(l.strip().startswith('0.00 GB  big') for l in lines)
-    assert '_reclaim (moved out, waiting for the user to clear)' in text
+    assert '_reclaim under songs/, the old per-song places (moved out, waiting for the user to clear)' in text
     assert os.path.join('small', 'live', '_reclaim') in text
+    rr = os.environ['ISMAIL_RECLAIM']                          # the one reclaim folder at the drive root (M229)
+    os.makedirs(os.path.join(rr, 'flac_20261017', 'song'))
+    with open(os.path.join(rr, 'flac_20261017', 'song', 'a.wav'), 'wb') as f:
+        f.write(b'0' * 2 ** 20)
+    text = machine.disk_text(root=str(root), roots=[])
+    assert f"reclaim folder {rr} (moved out, waiting for the user to delete): 0.0 GB in 1 folders" in text
+    assert any(l.strip() == '0.00 GB  flac_20261017' for l in text.splitlines())
     assert sorted(os.listdir(board / 'disk')) == ['2000-01-01.json', __import__('time').strftime('%Y-%m-%d') + '.json']
     assert 'songs/' in api.OPS['machine_disk']()
 
@@ -580,7 +584,7 @@ def test_a_priority_says_when_its_name_matches_no_job_and_takes_days(board):
         pass
     machine.set_priority('voice', 3600, by='the user')
     miss = machine.priority_match()
-    assert "no job named 'voice'" in miss and 'ismail (1)' in miss and 'ISMAIL_SESSION' in miss
+    assert "no job named 'voice'" in miss and 'ismail (1)' in miss and 'machine run --as' in miss
     assert 'WARNING' in machine.board()
     with machine.slot('cpu', 'round 41', who='voice'):
         pass

@@ -2,15 +2,15 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.newsbubbles/ismail",
   "title": "ismail",
-  "description": "A DAW for AI agents: write music as text, read the audio back as text, and play it live.",
+  "description": "Open-source DAW your agent runs itself, no AI audio model: compose, mix, hear it as text, play live.",
   "repository": {"url": "https://github.com/newsbubbles/ismail", "source": "github"},
-  "websiteUrl": "https://newsbubbles.github.io/ismail/",
-  "version": "0.3.0",
+  "websiteUrl": "https://measuredinstruments.com/ismail/",
+  "version": "0.4.3",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "ismail",
-      "version": "0.3.0",
+      "version": "0.4.3",
       "runtimeHint": "uvx",
       "packageArguments": [{"type": "positional", "value": "mcp"}],
       "transport": {"type": "stdio"}

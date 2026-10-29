@@ -6,8 +6,8 @@ jobs on a laptop GTX 1080 until it sat at 92 C pinned at 139 MHz and the user st
     python -m ismail.machine run --gpu -- <command ...>   # run a command in the GPU slot (Blender, whisper, demucs)
     python -m ismail.machine run --cpu --mem 6 -- <cmd>   # a CPU-heavy command expected to need ~6 GB
     python -m ismail.machine run --cpu --disk 3 -- <cmd>  # ... that writes ~3 GB
-    python -m ismail.machine disk                         # where the disk went: songs, _reclaim, the pagefile, and
-                                                          # the folders beyond songs/ (disk_roots(), daily growth)
+    python -m ismail.machine disk                         # where the disk went: songs, the reclaim folder, pagefile,
+                                                          # and the folders beyond songs/ (disk_roots(), daily growth)
     with machine.slot('cpu', 'render song bars 1-64', mem_gb=3): ...     # from Python
 
 Rules (the slots): one GPU-heavy job machine-wide, two CPU-heavy jobs (a live engine on air holds one). No new heavy
@@ -39,13 +39,14 @@ OpenMP and torch). `machine run` hands its slot to its command ($ISMAIL_SLOT): a
 and those ops run in the run's slot instead of waiting forever for a second one (ledger:M81). While a set is on air the
 CPU jobs beside it share on_air_threads() threads (ledger:M132).
 
-The board lives in <songs>/_machine/ (one per machine, shared by every checkout and worktree), or $ISMAIL_MACHINE_DIR.
+The board lives in <songs>/_machine/ (one per machine, shared by every checkout and worktree), or machine.dir.
 """
 import argparse
 import contextlib
 import ctypes
 import json
 import os
+import random
 import shutil
 import re
 import subprocess
@@ -56,6 +57,7 @@ import time
 import psutil
 
 from .handoffs import SONGS
+from . import settings
 
 SLOTS = {'gpu': 1, 'cpu': 2}
 GPU_HOT_C = 85
@@ -67,7 +69,15 @@ CPU_SAMPLE_S = 2.0
 RESERVE_GB = 4.0                   # commit kept free for the desktop, the sessions and the live engine
 NOVICE = ('someone new to computers is never asked to close things (they may not be able to, and it alarms '
           'them): wait quietly and say "the computer is busy, one moment"')
-WAIT_POLL_S = 5.0                  # a waiting job looks again this often
+WAIT_POLL_S = 5.0                  # a waiting job near the front of its line looks again this often
+WAIT_POLL_MAX_S = 60.0             # ... one further back looks less often, down to this (ledger:M307: it is woken
+                                   # when a job ends or a waiter leaves the line, so it misses nothing)
+WAKE_TICK_S = 0.25                 # a waiter asleep in line looks at the board's generation file (one stat) this often
+WAKE_SPREAD_S = 1.0                # woken, a waiter behind the front spreads its look over this long
+GEN_FILE = 'gen'                   # <board>/gen: touched when a job ends or a waiter leaves the line (ledger:M307)
+CPU_FRESH_S = 10.0                 # one CPU sample serves every process this long (<board>/cpu.json)
+GPU_FRESH_S = 5.0                  # one nvidia-smi reading serves every process this long (<board>/gpu.json)
+CLAIM_STALE_S = 15.0               # a reading's claim older than this was left by a sampler that died
 THREADS = 2                        # numeric threads per heavy job
 DISK_FLOOR_GB = 15.0               # no new heavy job while a drive jobs write to has less free than this
 DISK_WARN_GB = 30.0                # the board warns below this
@@ -107,6 +117,7 @@ DISK_SKIP = re.compile(r'^\$|^System Volume Information$', re.I)   # a drive's o
 ON_AIR_POLICIES = ('set_first', 'off', 'render_first')
 ON_AIR_DEFAULT = 'set_first'
 ON_AIR_HELD = re.compile(r'blender|eevee|cycles', re.I)   # CPU jobs that are renders on the GPU in all but name
+SESSION_ENV = 'ISMAIL_SESSION'     # a process's own name on the board: `machine run --as <name>` sets it
 SLOT_ENV = 'ISMAIL_SLOT'           # the slot `machine run` hands its command: a slot asked for under it runs in it
 THREAD_ENV = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
               'VECLIB_MAXIMUM_THREADS', 'NUMBA_NUM_THREADS', 'RAYON_NUM_THREADS')
@@ -119,7 +130,7 @@ class MachineBusy(RuntimeError):
 
 
 def board_dir():
-    return os.environ.get('ISMAIL_MACHINE_DIR') or os.path.join(SONGS, '_machine')
+    return settings.get('machine.dir') or os.path.join(SONGS, '_machine')
 
 
 # ------------------------------------------------------------------ readings
@@ -140,9 +151,82 @@ def _gpu_query():
 _gpu_cache = [0.0, None]
 
 
+def _load_reading(path):
+    try:
+        with open(path, encoding='utf8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) and isinstance(d.get('t'), (int, float)) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _claim(path):
+    """-> 'mine' (made the claim file), 'theirs' (another caller holds it) or 'none' (the board cannot be written:
+    sample without one). A claim left by a sampler that died is removed after CLAIM_STALE_S. A claim only saves
+    work: two samplers at once cost one sample more, never a wrong reading."""
+    try:
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return 'mine'
+    except FileExistsError:
+        pass
+    except OSError:                                    # Windows: a claim being removed, or a board we cannot write
+        return 'theirs' if os.path.exists(path) else 'none'
+    try:
+        if time.time() - os.path.getmtime(path) > CLAIM_STALE_S:
+            _drop(path, patience=0)
+    except OSError:                                    # its sampler let go just now
+        pass
+    return 'theirs'
+
+
+def _shared_reading(name, fresh_s, take):
+    """-> {'t': when it was taken, ...}: a reading every process on this machine shares (ledger:M307: 23 waiters in
+    line each sampled the CPU for 2 s and ran nvidia-smi every 5 s, 8.4% of the CPU together while it was at 99%).
+    <board>/<name>.json holds the last one. A caller that finds it older than fresh_s claims the sampling with an
+    O_EXCL file <board>/<name>.json.claim and takes a new one; the callers that find the claim taken use the last
+    reading, a few seconds older (or, when there is none yet, wait for the first)."""
+    os.makedirs(board_dir(), exist_ok=True)
+    path = os.path.join(board_dir(), name + '.json')
+    claim = path + '.claim'
+    t_give = time.time() + CLAIM_STALE_S
+    while True:
+        d = _load_reading(path)
+        if d is not None and 0 <= time.time() - d['t'] < fresh_s:
+            return d
+        who = _claim(claim)
+        if who == 'theirs' and d is not None:
+            return d                                   # its sampler is at work: the last reading does for now
+        if who == 'theirs' and time.time() < t_give:
+            time.sleep(0.05)                           # the first reading is coming
+            continue
+        if who == 'theirs':
+            who = 'none'                               # no reading came: take one without the claim
+        try:
+            if who == 'mine':
+                d2 = _load_reading(path)               # a sampler finished between our look and our claim
+                if d2 is not None and 0 <= time.time() - d2['t'] < fresh_s:
+                    return d2
+            d = dict(take())
+            d['t'] = time.time()
+            try:
+                tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+                with open(tmp, 'w', encoding='utf8') as f:
+                    json.dump(d, f)
+                os.replace(tmp, path)
+            except OSError:                            # a reader holds it open (Windows), or a full disk
+                pass
+            return d
+        finally:
+            if who == 'mine':
+                _drop(claim, patience=0.5)
+
+
 def gpu():
-    if time.time() - _gpu_cache[0] > 5:
-        _gpu_cache[:] = [time.time(), _gpu_query()]
+    if time.time() - _gpu_cache[0] > GPU_FRESH_S and not (getattr(_locking, 'held', False) and _gpu_cache[0]):
+        # never nvidia-smi inside the board lock (ledger:M303): its holder uses the reading taken before it. One
+        # nvidia-smi serves every process for GPU_FRESH_S (ledger:M307)
+        d = _shared_reading('gpu', GPU_FRESH_S, lambda: {'gpu': _gpu_query()})
+        _gpu_cache[:] = [d['t'], d.get('gpu')]
     return _gpu_cache[1]
 
 
@@ -160,19 +244,18 @@ _cpu_cache = [0.0, None]
 
 
 def cpu_load():
-    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached 10 s
-    in this process and on the board for every process (each CLI call is a new process: each paid 2 s of sampling)."""
-    if time.time() - _cpu_cache[0] < 10 and _cpu_cache[1] is not None:
-        return _cpu_cache[1]
-    shared = os.path.join(board_dir(), 'cpu.json')
-    try:
-        with open(shared, encoding='utf8') as f:
-            d = json.load(f)
-        if time.time() - d['t'] < 10:
-            _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
-            return _cpu_cache[1]
-    except (OSError, ValueError, KeyError):
-        pass
+    """-> (% of all cores busy over CPU_SAMPLE_S, [(% of all cores, process name, pid)] for the top 4), cached
+    CPU_FRESH_S in this process and on the board for every process (each CLI call is a new process: each paid 2 s
+    of sampling). One caller samples at a time and the others read its sample (ledger:M307)."""
+    if _cpu_cache[1] is not None and (time.time() - _cpu_cache[0] < CPU_FRESH_S or getattr(_locking, 'held', False)):
+        return _cpu_cache[1]                           # inside the board lock: the sample taken before it
+    d = _shared_reading('cpu', CPU_FRESH_S, _cpu_sample)
+    _cpu_cache[:] = [d['t'], (d['busy'], [tuple(x) for x in d['top']])]
+    return _cpu_cache[1]
+
+
+def _cpu_sample():
+    """One CPU sample, CPU_SAMPLE_S long: the whole machine and the top 4 processes."""
     procs = []
     for p in psutil.process_iter(['name']):
         try:
@@ -191,16 +274,7 @@ def cpu_load():
         if c >= 1.0 and p.pid and p.info.get('name') not in ('System Idle Process', 'idle'):
             top.append((c, p.info.get('name') or '?', p.pid))
     top.sort(reverse=True)
-    _cpu_cache[:] = [time.time(), (total, top[:4])]
-    try:
-        os.makedirs(board_dir(), exist_ok=True)
-        tmp = shared + f".{os.getpid()}.tmp"
-        with open(tmp, 'w', encoding='utf8') as f:
-            json.dump({'t': _cpu_cache[0], 'busy': total, 'top': top[:4]}, f)
-        os.replace(tmp, shared)
-    except OSError:
-        pass
-    return _cpu_cache[1]
+    return {'busy': total, 'top': top[:4]}
 
 
 def _top_text(top):
@@ -355,8 +429,9 @@ def _disk_why(disk_gb=0.0, disk_path=None, disk_hint=''):
     return (f"disk: {need}{where} (heavy jobs wait below {DISK_FLOOR_GB:.0f} GB free): "
             + (disk_hint + '; ' if disk_hint else '')
             + "`python -m ismail.machine disk` shows where the space went; move finished intermediates (caches, old "
-              "renders, uncut takes) into the project's _reclaim/ folder (never delete: the user clears _reclaim), "
-              "and tell the user")
+              "renders, uncut takes) into the reclaim folder at the root of the drive with ismail.reclaim.move or "
+              "`python -m ismail.reclaim move <path> <what>` (it lands in _reclaim/<what>_<date>/; never delete: "
+              "the user deletes that folder), and tell the user")
 
 
 def _memory_why(js):
@@ -407,6 +482,7 @@ def jobs():
         else:
             try:
                 os.remove(p)
+                _bump()                # a dead job's slot is free: wake the line
             except OSError:
                 pass
     return out
@@ -457,6 +533,7 @@ def set_priority(who, for_s, by, why=''):
     with _board_lock():
         with open(os.path.join(board_dir(), 'priority.json'), 'w', encoding='utf8') as f:
             json.dump(p, f)
+    _bump()                            # the line's order changed
     return p
 
 
@@ -478,7 +555,7 @@ def names_seen(hours=48):
 def priority_match(who=None):
     """'' when a grant's name matches jobs seen in the last 48 h, else a warning naming the names in use (ledger:M143:
     `who` defaults to the working folder's name, so nearly every job from D:/ismail is 'ismail' and a grant to a
-    session matched nothing unless that session sets ISMAIL_SESSION)."""
+    session matched nothing unless that session names itself: machine run --as <name>)."""
     pr = priority()
     who = who or (pr and pr['who'])
     if not who:
@@ -488,12 +565,15 @@ def priority_match(who=None):
         return ''
     names = ', '.join(f"{n} ({c})" for n, c in sorted(seen.items(), key=lambda x: -x[1])[:8]) or 'none'
     return (f"no job named '{who}' ran or waited in the last 48 h, so this priority matches nothing yet. Names in use: "
-            f"{names}. A session shows by its own name when it sets ISMAIL_SESSION=<its name> before it runs jobs.")
+            f"{names}. A session shows by its own name when it runs its jobs as `machine run --as <its name> ...`; "
+            f"jobs started through MCP tools take the name from ISMAIL_SESSION in that MCP server's "
+            f"configuration, which still works.")
 
 
 def clear_priority():
     with _board_lock():
         _remove(os.path.join(board_dir(), 'priority.json'))
+    _bump()
 
 
 def waiters():
@@ -514,6 +594,7 @@ def waiters():
             else:
                 try:
                     os.remove(p)
+                    _bump()            # a dead waiter left the line: the ones behind it move up
                 except OSError:
                     pass
     pr = priority()
@@ -532,7 +613,59 @@ def _ahead(kind, who, since, me=None):
             and _rank(w['who'], w['since'], pr) < mine]
 
 
+def _gen():
+    """The board's generation: the time <board>/gen was last touched (0 when never). One stat."""
+    try:
+        return os.stat(os.path.join(board_dir(), GEN_FILE)).st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _bump():
+    """Wake the waiters (ledger:M307): a job ended, a waiter left the line or the priority changed, so the line may
+    have moved. A waiter asleep in line stats <board>/gen every WAKE_TICK_S and looks at the board when it changes."""
+    p = os.path.join(board_dir(), GEN_FILE)
+    t = time.time_ns()
+    try:
+        os.utime(p, ns=(t, t))
+    except FileNotFoundError:
+        try:
+            os.close(os.open(p, os.O_CREAT | os.O_WRONLY))
+            os.utime(p, ns=(t, t))
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def _wait_poll(kind, who, since, me):
+    """-> (seconds, behind): how long a waiter sleeps before it looks at the board again (ledger:M307). Near the
+    front of its line (it could be next) WAIT_POLL_S; `behind` places further back it cannot start before the jobs
+    ahead of it, and a job ending wakes it anyway, so it looks (1 + behind) times less often, down to
+    WAIT_POLL_MAX_S. 23 waiters looked at the board 4.6 times a second together; now about once."""
+    behind = max(0, len(_ahead(kind, who, since, me)) - SLOTS.get(kind, 1) + 1)
+    s = min(WAIT_POLL_S * (1 + behind), max(WAIT_POLL_S, WAIT_POLL_MAX_S))
+    return s * random.uniform(0.75, 1.25), behind      # jitter: the waiters do not all look at once
+
+
+def _nap(seconds, gen):
+    """Sleep up to `seconds`; wake early when the board's generation is no longer `gen`. -> True when woken."""
+    t_end = time.time() + seconds
+    while True:
+        left = t_end - time.time()
+        if left <= 0:
+            return False
+        time.sleep(min(WAKE_TICK_S, left))
+        if _gen() != gen:
+            return True
+
+
 STALE_LOCK_S = 30.0    # a board lock older than this was left by a holder that died mid-update
+DEAD_HOLDER_S = 2.0    # ... or older than this when the pid in it is gone (no critical section takes that long)
+LOCK_TIMEOUT_S = 30.0  # a caller gives up on the board lock after this long (exit 75 from `run`)
+TICKET_STALE_S = 1.0   # a ticket ahead in the lock's line is looked at (owner alive?) once it is this old
+LOCK_LINE = 'lockq'    # the board lock's line: one ticket file per caller, served oldest first (ledger:M303)
+_locking = threading.local()   # set while this thread holds the board lock: readings come from their caches
 
 
 def _read(path):
@@ -543,16 +676,16 @@ def _read(path):
         return None
 
 
-def _break_stale(lock):
+def _break_stale(lock, seen=None):
     """Take a dead holder's lock away. Renaming it is atomic, so of several waiters that all judged it stale only
-    one moves it; a waiter that moved a lock someone took meanwhile (fresh again) puts it back."""
+    one moves it; a waiter that moved a lock someone took meanwhile (not the lock it judged) puts it back."""
     moved = f"{lock}.stale.{os.getpid()}.{threading.get_ident()}"
     try:
         os.rename(lock, moved)
-    except OSError:                                    # gone already, or another waiter moved it
+    except OSError:                                    # gone already, another waiter moved it, or (Windows) still open
         return
     try:
-        if time.time() - os.path.getmtime(moved) < STALE_LOCK_S:
+        if (_read(moved) != seen) if seen is not None else (time.time() - os.path.getmtime(moved) < STALE_LOCK_S):
             os.link(moved, lock)                       # never over a lock that exists (FileExistsError)
     except OSError:
         pass
@@ -562,39 +695,130 @@ def _break_stale(lock):
         pass
 
 
-@contextlib.contextmanager
-def _board_lock(timeout=10.0):
-    """One writer at a time on the shared board, across every session's processes. A waiter retries while the lock
-    changes hands under it (a holder can let go between our failed create and our look at the lock: that race once
-    killed a job waiting in line), and a holder removes only its own lock."""
-    os.makedirs(os.path.join(board_dir(), 'jobs'), exist_ok=True)
-    lock = os.path.join(board_dir(), 'lock')
-    token = f"{os.getpid()} {threading.get_ident()} {time.time()!r}"
-    t0 = time.time()
+def _holder_gone(token):
+    """True when the lock's token ('pid thread time') names a process that no longer exists."""
+    try:
+        return not psutil.pid_exists(int(str(token).split()[0]))
+    except (ValueError, IndexError, psutil.Error):
+        return False
+
+
+def _lock_stale(lock):
+    """-> (stale, token): a lock past STALE_LOCK_S, or past DEAD_HOLDER_S with its holder's pid gone. A young lock
+    is never opened: on Windows a holder cannot remove a lock a waiter has open, and it stayed behind."""
+    try:
+        age = time.time() - os.path.getmtime(lock)
+    except OSError:                                    # its holder let go just now
+        return False, None
+    if age <= DEAD_HOLDER_S:
+        return False, None
+    token = _read(lock)
+    return (age > STALE_LOCK_S or (token is not None and _holder_gone(token))), token
+
+
+def _ticket_gone(name, now):
+    """A ticket ahead of us whose owner left without removing it: its process died, or its deadline passed (an
+    owner removes its ticket when it gives up). The name says it all (arrival, deadline, pid), so a ticket is never
+    opened: on Windows its owner cannot remove a file a waiter has open. Only tickets older than TICKET_STALE_S are
+    looked at, and a live owner is never skipped before its deadline. Tickets order the lock only: skipping one
+    costs fairness, never safety (the lock file is what keeps writers apart)."""
+    try:
+        made, until, pid = (int(x) for x in name.split('_')[:3])
+    except ValueError:
+        return True                                    # not a ticket
+    if now - made / 1e9 < TICKET_STALE_S:
+        return False
+    if now > until / 1e9 + 1.0:
+        return True
+    try:
+        return not psutil.pid_exists(pid)
+    except psutil.Error:
+        return False
+
+
+def _drop(path, patience):
+    """Remove a lock-line file, quietly, retrying while a reader holds it open (Windows). -> True when gone."""
+    t_end = time.time() + patience
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, token.encode())
-            break
-        except (FileExistsError, PermissionError):     # PermissionError: Windows, a lock being deleted
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            if time.time() >= t_end:
+                return False
+            time.sleep(0.005)
+
+
+@contextlib.contextmanager
+def _board_lock(timeout=None):
+    """One writer at a time on the shared board, across every session's processes, served in arrival order.
+
+    The lock itself is the O_EXCL file <board>/lock holding its owner's token; a holder removes only its own lock. In
+    front of it stands a line (ledger:M303: with about 23 jobs waiting, a new `run` lost the race for the lock again
+    and again and exited 75 after 10 s; one agent needed about 15 tries): each caller makes an O_EXCL ticket file in
+    <board>/lockq named by its arrival time, and only the caller whose ticket is first tries the lock. The others
+    look at the line with a backoff that grows with their place in it, with jitter, so 30 callers do not hammer one
+    file, and each is served after those ahead of it. A ticket whose owner died or passed its deadline is skipped; a
+    lock whose holder died is broken (pid gone: after DEAD_HOLDER_S; any lock: after STALE_LOCK_S). While a thread
+    holds the lock its GPU and CPU readings come from their caches, so nothing slow (nvidia-smi, a 2 s CPU sample)
+    runs inside it."""
+    timeout = LOCK_TIMEOUT_S if timeout is None else timeout
+    os.makedirs(os.path.join(board_dir(), 'jobs'), exist_ok=True)
+    lock = os.path.join(board_dir(), 'lock')
+    line = os.path.join(board_dir(), LOCK_LINE)
+    os.makedirs(line, exist_ok=True)
+    token = f"{os.getpid()} {threading.get_ident()} {time.time()!r}"
+    t0 = time.time()
+    # arrival_deadline_pid_thread_random: names sort in arrival order and say when their owner gives up
+    name = (f"{time.time_ns():020d}_{int((t0 + timeout) * 1e9):020d}_{os.getpid()}_{threading.get_ident()}_"
+            f"{os.urandom(3).hex()}")
+    ticket = os.path.join(line, name)
+    os.close(os.open(ticket, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    ahead, holder = [], None
+    try:
+        while True:
             try:
-                age = time.time() - os.path.getmtime(lock)
-            except OSError:                            # its holder let go just now: try again
-                age = 0.0
-            if age > STALE_LOCK_S:
-                _break_stale(lock)
+                ahead = sorted(n for n in os.listdir(line) if n < name)
+            except OSError:
+                ahead = []
+            if ahead and _ticket_gone(ahead[0], time.time()):
+                _drop(os.path.join(line, ahead[0]), patience=0)
+                continue
+            if not ahead:
+                try:
+                    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.write(fd, token.encode())
+                    break
+                except (FileExistsError, PermissionError):     # PermissionError: Windows, a lock being deleted
+                    stale, holder = _lock_stale(lock)
+                    if stale:
+                        _break_stale(lock, holder)
+                        continue
             if time.time() - t0 > timeout:
-                raise MachineBusy(f"the job board {lock} stayed locked for {timeout:.0f} s; try again")
-            time.sleep(0.02 + 0.03 * (threading.get_ident() % 7) / 7)
+                pid = f"; the lock's holder is pid {holder.split()[0]}" if holder and holder.split() else ''
+                raise MachineBusy(
+                    f"the job board lock {lock} stayed taken for {timeout:.0f} s ({len(ahead)} callers ahead of this "
+                    f"one{pid}); nothing was registered. Try again in a minute, or stand in line for the slot "
+                    f"with `python -m ismail.machine run --wait 30m ...`; `python -m ismail.machine` shows the "
+                    f"board. A lock whose holder died breaks itself within {STALE_LOCK_S:.0f} s")
+            # the first in line looks again soon (a holder keeps the lock for milliseconds); the k-th waits about k
+            # holds, with jitter, so the callers behind it do not all look at once
+            pause = 0.002 if not ahead else min(0.002 * (len(ahead) + 1), 0.05)
+            time.sleep(pause * random.uniform(0.5, 1.5))
+    finally:
+        gone = _drop(ticket, patience=0.5)             # served or given up: out of the line either way
+    _locking.held = True
     try:
         yield
     finally:
+        _locking.held = False
+        if not gone:                                   # a reader held it open all that time: once more, now
+            _drop(ticket, patience=0.5)
         os.close(fd)
         if _read(lock) == token:                       # never remove a lock another holder took
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
+            _drop(lock, patience=1.0)                  # a waiter judging an old lock may hold it open a moment
 
 
 def _ago(t):
@@ -1240,10 +1464,38 @@ class _Meter:
 
 
 def _mem_of(p):
-    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; elsewhere
-    the resident size."""
+    """-> (resident, own) bytes of a process. Own is Windows' private bytes, what the commit charge counts; on macOS
+    the physical footprint (what Activity Monitor shows: resident plus compressed and swapped out); elsewhere the
+    resident size."""
     mi = p.memory_info()
-    return mi.rss, getattr(mi, 'private', mi.rss)
+    own = getattr(mi, 'private', None)
+    if own is None and sys.platform == 'darwin':
+        own = _footprint(p.pid)
+    return mi.rss, mi.rss if own is None else own
+
+
+_RUSAGE = []
+
+
+def _footprint(pid):
+    """macOS: a process's phys_footprint in bytes (proc_pid_rusage, allowed on our own user's processes), or None."""
+    if not _RUSAGE:
+        fn = None
+        for lib in (None, '/usr/lib/libproc.dylib'):
+            try:
+                fn = ctypes.CDLL(lib).proc_pid_rusage
+                break
+            except (OSError, AttributeError):
+                pass
+        if fn is not None:
+            fn.argtypes, fn.restype = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p], ctypes.c_int
+        _RUSAGE.append(fn)
+    if _RUSAGE[0] is None:
+        return None
+    buf = (ctypes.c_uint64 * 32)()         # rusage_info_v0: a 16-byte uuid, then 64-bit fields; phys_footprint is the
+    if _RUSAGE[0](pid, 0, buf) != 0:      # 8th of them (RUSAGE_INFO_V0 = 0)
+        return None
+    return int(buf[9])
 
 
 def _write_bytes(p):
@@ -1362,21 +1614,41 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
     me = psutil.Process()
     since, wid, wpath = time.time(), None, None
     deadline = since + float(wait) if wait else None
+
+    def ask():
+        return '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid, disk_gb=disk_gb,
+                                                        disk_path=disk_path, disk_hint=disk_hint, what=what, cmd=cmd,
+                                                        threads=threads)
+
+    def final(why):            # a job with a lighter way to run (disk_hint) is told it at once: a full drive rarely
+        return not deadline or time.time() >= deadline or (disk_hint and why.startswith('disk:'))   # clears in line
+
+    def busy(why):
+        return MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the machine op shows the "
+                           f"board), wait in line (`run --wait 30m`), do lighter work meanwhile, or pass force=True only "
+                           f"if the user says so.")
+    def rest(gen):             # until the next look, or until a job ends or a waiter leaves the line (ledger:M307)
+        seconds, behind = _wait_poll(kind, who, since, wid)
+        if _nap(seconds, gen) and behind:
+            time.sleep(random.uniform(0, WAKE_SPREAD_S))   # the front looks at once; those behind it spread out
     try:
         while True:
+            gen = _gen()               # before the look: a job that ends while this one looks still wakes it
             if kind == 'cpu' and not force:
                 cpu_load()             # sample outside the board's lock (it takes CPU_SAMPLE_S); check() reuses it
+            # look first without the lock (ledger:M303): a job that cannot start yet, and a waiter whose turn has not
+            # come, never take it. The lock is for the decision itself: the check again, then the board write.
+            why = ask()
+            if why and final(why):
+                raise busy(why)
+            if why and wid is not None:        # in line already, and not this job's turn: look again later
+                rest(gen)
+                continue
             with _board_lock():
-                why = '' if force or kind == 'live' else check(kind, mem_gb, who=who, since=since, me=wid,
-                                                               disk_gb=disk_gb, disk_path=disk_path,
-                                                               disk_hint=disk_hint, what=what, cmd=cmd,
-                                                               threads=threads)
-                # a job with a lighter way to run (disk_hint) is told it at once: a full drive rarely clears in line
-                if not why or not deadline or time.time() >= deadline or (disk_hint and why.startswith('disk:')):
+                why = why or ask()     # still free under the lock? (another job may have taken the slot meanwhile)
+                if not why or final(why):
                     if why:
-                        raise MachineBusy(f"not starting {kind} job '{what}': {why}. Retry when that clears (the "
-                                          f"machine op shows the board), wait in line (`run --wait 30m`), do lighter "
-                                          f"work meanwhile, or pass force=True only if the user says so.")
+                        raise busy(why)
                     # on the board inside the same lock as the check: registered later, the slot looked free to the
                     # next waiter in between (this waiter's line file already gone), and two jobs took one GPU slot
                     job = {'kind': kind, 'what': what, 'who': who, 'pid': me.pid, 'pid_start': me.create_time(),
@@ -1395,10 +1667,11 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
                     with open(wpath, 'w', encoding='utf8') as f:
                         json.dump({'id': wid, 'kind': kind, 'what': what, 'who': who, 'pid': me.pid,
                                    'pid_start': me.create_time(), 'since': since}, f)
-            time.sleep(WAIT_POLL_S)
+            rest(gen)
     finally:
         if wpath:
             _remove(wpath)
+            _bump()                    # out of the line (started or gave up): the ones behind move up
     g = gpu()
     state = {'gpu_temp': g['temp'], 'gpu_clock': g['clock'], 'gpu_reasons': hex(g['reasons']),
              'gpu_trouble': gpu_trouble(g) or None} if g else {}
@@ -1425,18 +1698,26 @@ def slot(kind, what, est_s=None, mem_gb=0.0, who=None, force=False, threads=THRE
         used = meter.stop()
         for f in (path, path[:-5] + '.tmp'):
             _remove(f)
+        _bump()                        # a slot is free: wake the line (ledger:M307)
         _record(job, job['started'] - since, state, used, outcome)
 
 
 def _who():
-    return os.environ.get('ISMAIL_SESSION') or os.path.basename(os.getcwd().rstrip('\\/')) or 'unknown'
+    return os.environ.get(SESSION_ENV) or os.path.basename(os.getcwd().rstrip('\\/')) or 'unknown'
 
 
-def render_memory_gb(n_samples, n_tracks, n_buses=0, n_sources=0):
-    """Peak memory of one studio render: the mix, buses, sidechain sources and one track in float64, plus the
-    stems as float32 spans (assumed half full)."""
+RENDER_BASE_ARRAYS = 12     # measured (tracemalloc, 10-26): a render peaks at 9.5-11 full-length stereo float64
+                            # arrays (the instrument's temporaries, the mix, the master and stem gain pass), with or
+                            # without track fx; 12 leaves a margin, 3 under-declared by about half (ledger:M336)
+TRUE_PEAK_ARRAYS = 5        # a true_peak limiter's 4x oversampled copy
+
+
+def render_memory_gb(n_samples, n_tracks, n_buses=0, n_sources=0, true_peak=False):
+    """Peak memory of one studio render: the working arrays of one track and the master in float64, buses and
+    sidechain sources, plus the stems as float32 spans (assumed half full)."""
     full = n_samples * 2 * 8
-    return (full * (3 + n_buses + n_sources) + n_samples * 2 * 4 * n_tracks * 0.5) / 2 ** 30
+    arrays = RENDER_BASE_ARRAYS + n_buses + n_sources + (TRUE_PEAK_ARRAYS if true_peak else 0)
+    return (full * arrays + n_samples * 2 * 4 * n_tracks * 0.5) / 2 ** 30
 
 
 # ------------------------------------------------------------------ the board as text
@@ -1548,7 +1829,8 @@ def _tree_walk(stack, deadline=None, total=0):
 
 
 def disk_sizes(root=None):
-    """-> ({folder under songs/: bytes}, {path of each _reclaim folder: bytes})."""
+    """-> ({folder under songs/: bytes}, {path of each _reclaim folder under songs/: bytes}). These are the old
+    per-song ones; ismail.reclaim keeps one reclaim folder at the root of the drive (ledger:M229)."""
     root = root or SONGS
     sizes, reclaim = {}, {}
     try:
@@ -1557,6 +1839,9 @@ def disk_sizes(root=None):
         return sizes, reclaim
     for e in entries:
         sizes[e.name] = _tree_bytes(e.path)
+        if e.name == '_reclaim':
+            reclaim[e.name] = sizes[e.name]
+            continue
         stack = [e.path]
         while stack:                                   # _reclaim folders sit a few levels down at most
             d = stack.pop()
@@ -1600,13 +1885,13 @@ def _day_snapshot(sd, sizes):
 
 def disk_roots():
     """The folders `machine disk` measures beyond songs/ (ledger:M125: on 10-04 the biggest growers were outside it,
-    28.8 GB of launch-video intermediates and an 11 GB game unpack): $ISMAIL_DISK_ROOTS (paths split by os.pathsep),
+    28.8 GB of launch-video intermediates and an 11 GB game unpack): the machine.disk_roots setting,
     else <board>/roots.txt (one path a line, # for a note), else every folder beside the checkout that holds songs/
     (on this machine: the top-level folders of D:)."""
-    env = os.environ.get('ISMAIL_DISK_ROOTS')
+    env = settings.get('machine.disk_roots')
     txt = None if env else _read(os.path.join(board_dir(), 'roots.txt'))
     if env or txt is not None:
-        paths = env.split(os.pathsep) if env else [ln.split('#')[0] for ln in txt.splitlines()]
+        paths = env if env else [ln.split('#')[0] for ln in txt.splitlines()]
         return [os.path.abspath(p.strip()) for p in paths if p.strip() and os.path.isdir(p.strip())]
     beside = os.path.dirname(os.path.dirname(os.path.abspath(SONGS)))
     try:
@@ -1751,8 +2036,11 @@ def _roots_text(roots, top, fresh=False, budget=None):
 
 def disk_text(top=12, root=None, roots=None, fresh=False, budget=None):
     """Where the disk went: each drive's free space and pagefile, the biggest folders under songs/ with their growth
-    since the last day a snapshot was kept (<board>/disk/<date>.json), every _reclaim folder, and the folders beyond
-    songs/ (disk_roots(), or roots: a list; [] for none) with their growth (<board>/disk/roots/<date>.json)."""
+    since the last day a snapshot was kept (<board>/disk/<date>.json), the reclaim folder at the root of the drive
+    (ismail.reclaim.root(), each of its folders with its size) and any old _reclaim folders under songs/, and the
+    folders beyond songs/ (disk_roots(), or roots: a list; [] for none) with their growth
+    (<board>/disk/roots/<date>.json)."""
+    from . import reclaim as _rc
     sizes, reclaim = disk_sizes(root)
     sd = os.path.join(board_dir(), 'disk')
     before, day = _day_snapshot(sd, sizes)
@@ -1770,11 +2058,21 @@ def disk_text(top=12, root=None, roots=None, fresh=False, budget=None):
         fast = [f"{n} +{d / G:.1f} GB" for d, n in grown[:5] if d >= 0.5 * G]
         if fast:
             L.append("grew most since " + day + ": " + ', '.join(fast))
+    rr, note = _rc.where(root)
+    rr_in_songs = os.path.normcase(os.path.abspath(rr)) == os.path.normcase(os.path.abspath(os.path.join(
+        root or SONGS, '_reclaim')))
+    if rr_in_songs:
+        reclaim.pop('_reclaim', None)              # the reclaim root itself: listed below, not twice
+    fs = _rc.folders(rr)
+    L.append(f"reclaim folder {rr} (moved out, waiting for the user to delete): "
+             + (f"{sum(b for _, b in fs) / G:.1f} GB in {len(fs)} folders" if fs else 'empty'))
+    L += [f"  {b / G:7.2f} GB  {n}" for n, b in fs]
+    if note:
+        L.append(f"  note: {note}")
     if reclaim:
-        L.append(f"_reclaim (moved out, waiting for the user to clear): {sum(reclaim.values()) / G:.1f} GB")
+        L.append(f"_reclaim under songs/, the old per-song places (moved out, waiting for the user to clear): "
+                 f"{sum(reclaim.values()) / G:.1f} GB")
         L += [f"  {b / G:7.2f} GB  {p}" for p, b in sorted(reclaim.items(), key=lambda kv: -kv[1])]
-    else:
-        L.append("_reclaim: none")
     L += _roots_text(disk_roots() if roots is None else roots, top, fresh, budget)
     return '\n'.join(L)
 
@@ -1855,6 +2153,8 @@ def main(argv=None):
                    'drive under the floor)')
     r.add_argument('--est', default=None, help='expected duration: 10m, 600s, 1.5h (a bare number is minutes)')
     r.add_argument('--what', default=None, help='what it is, for the board')
+    r.add_argument('--as', dest='as_', default=None, metavar='NAME',
+                   help="your session's name on the board (it carries to the command, so its renders show as you too)")
     r.add_argument('--force', action='store_true', help='only when the user says so')
     r.add_argument('--wait', nargs='?', const='30m', default=None,
                    help='stand in line for the slot instead of being refused: a duration (default 30m)')
@@ -1878,7 +2178,7 @@ def main(argv=None):
     oa.add_argument('--policy', default=None, choices=ON_AIR_POLICIES)
     oa.add_argument('--by', default=None, help='who decided (the user)')
     oa.add_argument('--why', default='')
-    dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, _reclaim, the pagefile')
+    dk = sub.add_parser('disk', help='where the disk went: songs folders and their growth, the reclaim folder, the pagefile')
     dk.add_argument('--top', type=int, default=12, help='how many songs folders (and folders beyond songs/) to list')
     dk.add_argument('--fresh', action='store_true', help='walk every folder beyond songs/ again, within the budget '
                     f'(a walk is reused for {DISK_ROOTS_FRESH_S / 60:.0f} min)')
@@ -1935,6 +2235,8 @@ def main(argv=None):
     cmd = a.command[1:] if a.command[:1] == ['--'] else a.command
     if not cmd:
         ap.error('run needs a command after --')
+    if a.as_:
+        os.environ[SESSION_ENV] = a.as_                  # _who() names the slot, child_env() hands it down
     kind = 'gpu' if a.gpu else 'cpu'
     threads = (a.threads if a.threads is not None else THREADS if kind == 'cpu' else None) or None
     try:

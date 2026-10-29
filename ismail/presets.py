@@ -42,7 +42,7 @@ PRESETS = {
                 "mono": True, "amp_env": {"a": 0.002, "d": 0.3, "s": 0.7, "r": 0.05},
                 "lfos": [{"target": "fm", "rate_beats": 0.5, "depth": 0.5, "shape": "triangle"}]},
     "noise_riser": {"type": "synth", "oscs": [{"wave": "saw", "level": 0.0}], "noise": 1.0,
-                    "filter": {"type": "bp", "cutoff": 400, "res": 0.4, "env_amount": 5.0},
+                    "filter": {"type": "bp", "cutoff": 400, "res": 0.4, "env_amount": 4.75},  # tops at 10.8 kHz
                     "filter_env": {"a": 4.0, "d": 0.1, "s": 1.0, "r": 0.3},
                     "amp_env": {"a": 3.0, "d": 0.1, "s": 1.0, "r": 0.3}},
     "kick": {"type": "kick"},

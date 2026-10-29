@@ -9,6 +9,7 @@ import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUnifo
 const SMALL_M = 0.6;          // a thing whose box is under this across is small: it is picked before a body box round it
 
 export const GIZMO = 3;
+export const CAM_ONLY = 5;   // seen by scene cameras (captures, camera surfaces), never by the headset's eyes (pointer.js)
 
 // A night sky for exterior scenes: a dome from a dusky horizon (a faint warm glow, town lights far off) to deep blue
 // overhead, and stars. Layer 0, so the headset and Blender-camera monitors both see it.

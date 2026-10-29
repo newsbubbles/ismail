@@ -290,3 +290,30 @@ def test_voices_list_names_each_voices_function_and_fn_voice_plays_a_performer(t
     p = str(tmp_path / 'g')
     api.project_new(p, 120, 1)
     api.track_add(p, 'gtr', instrument={'type': 'code', 'voice': 'electric', 'fn': 'voice'})
+
+
+def test_ffmpeg_never_reads_the_servers_stdin():
+    """Under the MCP server, stdin is the JSON-RPC pipe: an ffmpeg that reads it hangs the render (ledger:M372)."""
+    import re
+    root = os.path.dirname(api.__file__)
+    bad = []
+    for dp, _, fs in os.walk(root):
+        for f in fs:
+            if f.endswith('.py'):
+                src = open(os.path.join(dp, f), encoding='utf8').read()
+                for m in re.finditer(r"subprocess\.(?:run|Popen)\(\[\s*(?:'ffmpeg'|ffmpeg\(\)|ffmpeg|ff|exe)\s*,([^\]]*)\]", src):
+                    if "'-nostdin'" not in m.group(1) and "'pipe:0'" not in m.group(1):
+                        bad.append(f"{f}: {m.group(0)[:80]}")
+    assert not bad, bad
+
+
+def test_a_failed_mp3_keeps_the_stems(proj, monkeypatch):
+    from ismail import render as R
+    def boom(*a, **k):
+        raise RuntimeError('ffmpeg exited 1')
+    monkeypatch.setattr(R, 'write_mp3', boom)
+    sd = os.path.join(proj, 'renders', 'stems')
+    shutil.rmtree(sd, ignore_errors=True)                                           # the test's own temp project
+    with pytest.raises(api.OpError, match='stems/'):
+        api.render(proj, bars=[1, 1], stems=True, mp3='also', out='m373')            # ledger:M373
+    assert os.path.isdir(sd) and any(f.endswith('.wav') for f in os.listdir(sd))

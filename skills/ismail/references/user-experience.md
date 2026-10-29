@@ -89,6 +89,19 @@ The words never change; the mapping and the outcome do, and the file keeps every
 - Before explaining a change: `lexicon_find(text="eq peak")` finds the person's word for it, so say "less boxy"
   instead of "a 3 dB cut at 400 Hz", unless they speak in Hz themselves.
 
+**Names for the parts.** Your track names are yours: a listener who said "the bass overpowers it" meant the answering
+bass, the agent turned down another one, and three rounds went by before anyone noticed. In a song's first feedback
+round, and whenever a note's words could mean several parts (`feedback_read` says so: "says 'bass', and 3 parts could
+be it"), add the parts block: `feedback_page(..., parts=True)` plays each part alone and in the mix where it stands
+out most, with a box for their name. Then keep each name with the part it names:
+
+```
+lexicon_note(project, said="the answer bass", track="reese", heard="r3")
+```
+
+`heard=` checks it against what they typed in that round, so a name is confirmed only by them; a name you inferred
+(`track=` without `heard=`) stays marked as not confirmed. From then on, use their name for the part.
+
 **Pictures have a vernacular too.** Words about how something looks ("waxy", "cluttered", "flat", "the shadows are
 muddy") go in the same lexicon, with the visual crafts (director, cinematographer, colourist), mapped to what
 changed: a material setting, a light, a grade value.
@@ -119,8 +132,15 @@ a view of the stage) has been the fastest route to a good result. The rules that
   on the phone and spends whole days away from the desk: plan exams that work on a phone and
   earbuds.
 - A desk page that takes their voice or mic opens in their own browser, not an app pane (a pane has no
-  microphone), and brings back everything they typed or said when reopened: `feedback_page` does all of it, and
-  `feedback_read` reads their answers. A hand-built page only for what it cannot do (`blind-tests.md`, page
+  microphone), and brings back everything they typed or said when reopened: `feedback_page` does all of it,
+  `feedback_wait` returns when they press Send, and `feedback_read` reads their answers. A listener elsewhere (a friend
+  the song is for) gets the shared copy, `feedback_page(share=True)`: host its folder where they can open it; viewing
+  is all they need. Their typing and voice notes stay in their browser until "Send my answers" sends them as a
+  message (the share menu, or a copy to paste, with the voice notes as files), and `feedback_paste` reads that
+  message into the round as their Send. Every page also has "Copy my answers". For a round on a whole song's
+  structure, offer `feedback_page(..., moments=True)`: "mark anything that strikes you while it plays". A button (or
+  the M key) puts a pin on a time strip under the song, with tick boxes (too much, too empty, which part) and their
+  words, and `feedback_read` lists each moment with its time and its bars. A hand-built page only for what it cannot do (`blind-tests.md`, page
   mechanics).
 
 ## Bars or time: their unit

@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from ismail.dsp import SR
+from ismail.live import decks as D
 from ismail.live.engine import BLOCK, Engine, LiveError
 from ismail.live.safety import Safety
 from ismail.live.timeline import QueueError, Timeline
@@ -333,6 +334,94 @@ def test_load_cue_transition(eng, tmp_path):
     assert 'loaded Song A' in eng.cmd_load('A', a, at='next_bar')    # the old deck takes the next song (was refused)
     out = eng.cmd_deck('A', cue=False)
     assert out.splitlines()[0].endswith('on air') and out.splitlines()[1].strip().startswith('on air')
+
+
+def test_load_resets_a_deck_emptied_track_by_track(eng, tmp_path):
+    """A blend's bass kill stayed on a deck whose tracks were removed one by one, and the next song loaded there
+    played with no bass. A deck that held a song starts the next from a neutral strip; a fresh deck keeps what
+    live_deck set before its first load."""
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'C4')
+    b = make_song(str(tmp_path / 'songB'), 'Song B', 'G4')
+    eng.cmd_load('A', a, at='next_bar')
+    run(eng, 3.0)
+    eng.cmd_load('B', b, at='next_bar')
+    run(eng, 3.0)
+    eng.cmd_transition('B', at='next_bar', bars=2, style='blend')
+    run(eng, 8.0)
+    st = eng.cmd_status()
+    assert 'deck A: CUE (off air) | fader off' in st and 'asleep: costs the mixer nothing' in st
+    eng.cmd_deck('A', low_db=-40)
+    for k in [k for k, t in eng.tracks.items() if t['deck'] == 'A']:
+        eng.cmd_track(k, remove=True)
+    out = eng.cmd_load('A', a, at='next_bar')
+    assert 'strip reset for the new song' in out and 'fader off' in out and 'L KILL' in out
+    assert eng.decks['A'].values == D.PARAMS and not any(k[0] == 'deck:A' for k in eng.ramps)
+    eng.cmd_deck('C', low_db=-6)                                    # set before its first song: kept
+    out = eng.cmd_load('C', b, at='next_bar', cue=True)
+    assert 'strip reset' not in out and eng.decks['C'].values['low_db'] == -6
+
+
+def test_an_off_air_deck_still_playing_says_so(eng, tmp_path):
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'C4')
+    b = make_song(str(tmp_path / 'songB'), 'Song B', 'G4')
+    eng.cmd_load('A', a, at='next_bar')
+    run(eng, 3.0)
+    eng.cmd_load('B', b, at='next_bar', cue=True)
+    run(eng, 3.0)
+    assert 'AWAKE off air: 2 of 2 tracks still play notes' in eng.cmd_status()
+
+
+def test_removing_a_deck_mid_block_keeps_the_mixer_going(eng, tmp_path):
+    """live_deck(remove=True) from another thread while a block was mixing stopped the mixer for good (heard bar
+    frozen, underruns climbing): the block read the removed deck."""
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'C4')
+    b = make_song(str(tmp_path / 'songB'), 'Song B', 'G4')
+    eng.cmd_load('A', a, at='next_bar')
+    run(eng, 2.0)
+    eng.cmd_load('B', b, at='next_bar', cue=True)
+    run(eng, 2.0)
+    done = []
+
+    def tap(name, p0, y, lat):
+        if not done and name.startswith('track:'):                  # the remove lands mid-block
+            done.append(eng.cmd_deck('B', remove=True))
+    eng.tap = tap
+    run(eng, 1.0)
+    assert done and 'B' not in eng.decks
+
+
+def test_the_mix_loop_survives_a_bad_block(eng):
+    calls = []
+
+    def bad():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError('a bad block')
+        eng.running = False
+        return np.zeros((2, BLOCK), dtype=np.float32)
+    eng.mix_block = bad
+    eng.running = True
+    p0 = eng.pos
+    eng._mix_loop()
+    assert len(calls) == 2 and eng.stats['mix_errors'] == 1 and eng.pos == p0 + BLOCK
+    assert any('a bad block' in n and 'played silent' in n for n in eng.news)
+
+
+def test_cut_takes_the_old_deck_off_air_at_once(eng, tmp_path):
+    """A cut ignores bars: the old deck stops and is cued on the cut bar, so a load onto it is taken right away
+    (it used to stay on air at fader off for the default 16 bars, rendering and refusing loads)."""
+    a = make_song(str(tmp_path / 'songA'), 'Song A', 'C4')
+    b = make_song(str(tmp_path / 'songB'), 'Song B', 'G4')
+    eng.cmd_load('A', a, at='next_bar')
+    run(eng, 3.0)
+    eng.cmd_load('B', b, at='next_bar')
+    run(eng, 4.5)
+    out = eng.cmd_transition('B', at='next_bar', style='cut')
+    assert out.splitlines()[0].startswith('cut from deck A to deck B at bar')
+    run(eng, 4.0)                                              # two bars at 120: well past the cut, far short of 16
+    assert eng.decks['A'].cue and not eng.decks['B'].cue
+    assert not any(eng.tl.playing(k, eng.beat(eng.pos)) for k, t in eng.tracks.items() if t['deck'] == 'A')
+    assert 'loaded Song A' in eng.cmd_load('A', a, at='next_bar')
 
 
 def test_deck_keeps_the_songs_mix(eng, tmp_path):
