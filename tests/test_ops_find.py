@@ -20,6 +20,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
 
 
 @pytest.mark.parametrize('need,first', [
+    ('what version of ismail is this', 'version'),
     ('show me the difference between my voice and the render', 'exam_picture_round'),
     ('compare two takes by picture with the person marking', 'exam_picture_round'),
     ('formant track of a vowel', 'analyze_formants'),
@@ -28,11 +29,52 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('an on-screen keyboard for someone with no MIDI instrument', 'live_keys_page'),
     ('where does my render differ from the real takes', 'sound_zoom_diff'),
     ('zoom into one word at two resolutions', 'sound_zoom'),
+    ('reply to a viewer in the twitch chat', 'chat_say'),
+    ('read the stream chat', 'chat_watch'),
+    ('go live on youtube and twitch at once', 'stream_go'),
+    ('queue a song request from chat', 'request_add'),
+    ('the next request for the DJ to play', 'request_next'),
+    ('how long until my request plays', 'request_where'),
+    ('handle the !request and !vote commands in chat', 'chat_commands'),
+    ('limit requests per viewer with a cooldown', 'venue_rules'),
+    ('credit the viewers who asked for a song', 'request_credits'),
     ('level of one band in one moment of a sound', 'region_measure'),
+    ('is every part of my render in tune', 'analyze_tuning'),
+    ('two parts clash a semitone apart', 'notes_clash'),
+    ('a weird leftover melody, notes out of key', 'notes_clash'),
+    ('can the narrator be heard over the mix', 'analyze_voice_heard'),
+    ('speech on the beat, each syllable on a 16th', 'sound_speak'),
+    ('what instruments exist', 'kit'),
+    ('send the notes to my hardware synth', 'live_midi_out'),
+    ('ableton follows the tempo of the set with midi clock', 'live_midi_clock'),
+    ('record what I played on my keyboard into a track', 'live_played'),
+    ('the lead line when the stem also has a backing part', 'melody_consensus'),
+    ('my draft sounds MIDI, mechanical against the reference', 'analyze_feel'),
+    ('write the reference timing and velocity into my notes', 'feel_from_ref'),
+    ('where are my songs saved', 'config_get'),
+    ('change the songs folder', 'config_set'),
+    ('set the ffmpeg path', 'config_set'),
+    ('point ismail at blender', 'config_set'),
 ])
 def test_a_need_in_plain_words_finds_its_op_first(need, first):
     out = api.OPS['ops_find'](need=need, n=3)
     assert out.splitlines()[1].split()[0] == first, out
+
+
+def _top(need, n):
+    return [l.split()[0] for l in api.OPS['ops_find'](need=need, n=n).splitlines()[1:]]
+
+
+def test_a_dated_drum_finds_the_kit_and_fit_ops():
+    """ledger:M245: the query found phone_sounds and sound_speak (the word 'sound' in their names), and missed the
+    ops that give a drum the genre's character. Their own 'Reach for it when' sentences now say it."""
+    top = _top('the snare sounds dated, make it sound like the genre', 4)
+    assert set(top) == {'analyze_kit', 'sound_extract', 'instrument_fit', 'sound_compare'}, top
+
+
+def test_a_reference_as_inspiration_finds_where_to_set_it_and_compare():
+    top = _top('a reference arrived, use it as inspiration', 3)
+    assert top[0] == 'project_set' and 'compare' in top, top
 
 
 def test_a_role_page_lists_its_shelves_first_and_their_ops():

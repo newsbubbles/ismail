@@ -138,13 +138,16 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #agentbtns:empty{display:none}
 #agentbtns button{border-style:dashed;min-height:52px;font-size:13px}
 /* the log */
-.log div{display:grid;grid-template-columns:42px 1fr;gap:calc(var(--u)*2);padding:calc(var(--u)*2) 0;border-bottom:1px solid var(--line);font-size:15px}
+.log div{display:grid;grid-template-columns:42px minmax(0,1fr);gap:calc(var(--u)*2);padding:calc(var(--u)*2) 0;border-bottom:1px solid var(--line);font-size:15px}
+.log div>*{min-width:0;overflow-wrap:anywhere}
 .log time{font:600 11px/1.6 var(--mono);color:var(--dim)}
 .log .me{color:var(--dim)}
 .log .taken{display:block;font-size:12px;color:var(--dim);opacity:.8}
 .offer{display:flex;justify-content:space-between;align-items:center;gap:calc(var(--u)*2);padding:calc(var(--u)*2) 0;border-bottom:1px solid var(--line);min-width:0}
 .offer span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 .offer a{flex:none;white-space:nowrap}
+.offernav{display:flex;gap:calc(var(--u)*2);margin-top:calc(var(--u)*3)}
+.offernav button{flex:1 1 0}
 /* where we are in the piece: always on screen under now/next */
 #pos{margin-top:calc(var(--u)*3)}
 #pos[hidden]{display:none}
@@ -175,6 +178,7 @@ button:active,button.down{background:var(--panel-2);box-shadow:inset 0 2px 0 rgb
 #panel{background:var(--ground);border-top:3px solid var(--accent);width:100%;max-width:520px;margin:0 auto;padding:calc(var(--u)*5) calc(var(--u)*4) calc(env(safe-area-inset-bottom) + calc(var(--u)*5));max-height:90vh;overflow:auto}
 #panel h2{margin:0 0 calc(var(--u)*2);font:700 22px/1.15 var(--head);font-stretch:85%}
 #panel p{margin:0 0 calc(var(--u)*4);color:#d9d2c4;white-space:pre-wrap}
+#panel h2,#panel p,#panel label,#panel li{overflow-wrap:anywhere}
 #panel img{max-width:100%;border-radius:var(--r);margin-bottom:calc(var(--u)*3);cursor:zoom-in}
 /* a panel picture full screen: pinch, drag, double-tap; the cross, Back or Escape leaves */
 #viewer{position:fixed;inset:0;z-index:10;background:#000;overflow:hidden;touch-action:none;display:flex;align-items:center;justify-content:center}
@@ -244,7 +248,7 @@ textarea{width:100%;background:var(--panel);color:var(--ink);border:1px solid va
 </div>
 <div class="section" id="agentwrap" hidden data-sec="dj buttons"><span class="cap">From the DJ, right now</span><div id="agentbtns"></div></div>
 
-<div class="section" id="offerbox" hidden data-sec="downloads"><span class="cap">Downloads</span><div id="offers"></div></div>
+<div class="section" id="offerbox" hidden data-sec="downloads"><span class="cap">Downloads</span><div id="offers"></div><div class="offernav"><button id="offermore" hidden>Older downloads</button><button id="offerless" hidden>Show fewer</button></div></div>
 <div class="section" id="mine" hidden data-sec="your taps"><span class="cap">What you asked for <span id="tally"></span></span><div class="log" id="taps"></div></div>
 <div class="section" data-sec="dj log"><span class="cap">DJ log</span><div class="log" id="feed"></div></div>
 

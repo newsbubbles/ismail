@@ -121,6 +121,66 @@ def get(base, path):
         return json.loads(r.read())
 
 
+def test_a_phone_hook_gets_the_line_in_its_environment_and_nothing_on_stdin(tmp_path, monkeypatch):
+    """A hook gets the line as PHONE_*; its stdin is closed, so a `claude -p` hook never reads the event as prompt."""
+    import sys
+    import types
+    monkeypatch.setattr(S, 'HOME', tmp_path)
+    out = tmp_path / 'got.json'
+    code = ('import sys, json, os; e = {k: os.environ[k] for k in ("PHONE_EVENT", "PHONE_TEXT", "PHONE_INBOX", '
+            '"PHONE_LINE")}; e["stdin"] = sys.stdin.read() if sys.stdin else ""; '
+            f'open({str(out)!r}, "w").write(json.dumps(e))')
+    import shlex
+    line = (subprocess.list2cmdline if os.name == 'nt' else shlex.join)([sys.executable, '-c', code])
+    (tmp_path / 'hooks.json').write_text(json.dumps({'tap': [line]}), encoding='utf8')
+    fake = types.SimpleNamespace(routes=lambda: [tmp_path / 'inbox.jsonl'])
+    S.Phone._hooks(fake, {'kind': 'tap', 'what': 'yes', 'id': 7})
+    for _ in range(100):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    e = json.loads(out.read_text())
+    assert (e['PHONE_EVENT'], e['PHONE_TEXT'], json.loads(e['PHONE_LINE'])['id']) == ('tap', 'yes', 7)
+    assert e['PHONE_INBOX'] == str(tmp_path / 'inbox.jsonl') and e['stdin'] == ''
+
+
+def test_a_phone_hook_gets_the_line_as_a_file_where_it_says_event_file(tmp_path, monkeypatch):
+    """{event_file} in a phone hook is the path of a JSON file with the line (0.4.3, ledger:M383)."""
+    import shlex
+    import sys
+    import types
+    monkeypatch.setattr(S, 'HOME', tmp_path)
+    out = tmp_path / 'got.json'
+    code = f'import sys; open({str(out)!r}, "w").write(open(sys.argv[1]).read())'
+    line = (subprocess.list2cmdline if os.name == 'nt' else shlex.join)([sys.executable, '-c', code]) + ' {event_file}'
+    (tmp_path / 'hooks.json').write_text(json.dumps({'voice': [line]}), encoding='utf8')
+    fake = types.SimpleNamespace(routes=lambda: [tmp_path / 'inbox.jsonl'])
+    S.Phone._hooks(fake, {'kind': 'voice', 'text': 'play it again', 'id': 9})
+    for _ in range(100):
+        if out.is_file() and out.read_text():
+            break
+        time.sleep(0.1)
+    e = json.loads(out.read_text())
+    assert (e['event'], e['text'], e['line']['id']) == ('voice', 'play it again', 9)
+    assert e['inbox'] == str(tmp_path / 'inbox.jsonl')
+
+
+def test_the_event_file_token_is_replaced_and_quoted():
+    from ismail import hook_event as H
+    p = 'C:/a folder/ev.json' if os.name == 'nt' else '/a folder/ev.json'
+    assert H.expand(['tool', '--event', '{event_file}'], p) == ['tool', '--event', p]
+    assert H.expand('tool {event_file}', p).endswith('"' + p + '"' if os.name == 'nt' else "'" + p + "'")
+    assert H.expand('tool --no-file', p) == 'tool --no-file'
+    assert H.wants(['a', 'b {event_file}']) and not H.wants(['a', ['b', 'c']])
+
+
+def test_event_files_are_kept_to_the_newest(tmp_path, monkeypatch):
+    from ismail import hook_event as H
+    monkeypatch.setattr(H, 'KEEP', 3)
+    paths = [H.write(tmp_path, {'n': i}) for i in range(5)]
+    assert len(list((tmp_path / 'hook_events').glob('*.json'))) == 3 and paths[-1].is_file()
+
+
 def test_status_text_is_read():
     s = S.parse_status(STATUS)
     assert s['bpm'] == 120 and s['bpb'] == 4 and s['beat'] == 17.0 and s['ahead'] == 0.5
@@ -175,6 +235,22 @@ def test_the_agent_drives_the_page(phone, tmp_path):
     with pytest.raises(urllib.error.HTTPError):
         urllib.request.urlopen(base + '/files/notatoken', timeout=5)
 
+
+
+def test_older_downloads_page_back_and_outlive_a_restart(phone, tmp_path):
+    ph, base, _ = phone
+    for i in range(12):
+        f = tmp_path / f'take{i:02d}.txt'
+        f.write_text(f'take {i}')
+        P.phone_offer(str(f), label=f'take {i}')
+    st = get(base, '/api/state?since=0&wait=0')
+    assert [o['label'] for o in st['offers']] == ['take 8', 'take 9', 'take 10', 'take 11'] and st['offers_n'] == 12
+    first = get(base, '/api/offers?skip=0&n=10')
+    assert [o['label'] for o in first['offers']][:2] == ['take 11', 'take 10'] and first['total'] == 12 and first['more']
+    rest = get(base, '/api/offers?skip=10&n=10')
+    assert [o['label'] for o in rest['offers']] == ['take 1', 'take 0'] and not rest['more']
+    assert urllib.request.urlopen(base + rest['offers'][-1]['url'], timeout=5).read() == b'take 0'
+    assert S.Phone().view['offers'][0]['label'] == 'take 0'        # a restarted server still has the history
 
 def test_a_blind_exam_on_the_phone_writes_its_answers(phone, tmp_path):
     ph, base, _ = phone
@@ -861,7 +937,7 @@ def test_a_video_without_ffmpeg_or_on_a_busy_machine_says_what_to_do(phone, tmp_
     monkeypatch.setattr(shutil, 'which', lambda name, *a, **k: None)
     with pytest.raises(Exception) as e:
         P.phone_panel_show(title='Watch', video=str(src))
-    assert 'ffmpeg' in str(e.value) and 'ISMAIL_FFMPEG' in str(e.value)
+    assert 'ffmpeg' in str(e.value) and "config_set('ffmpeg'" in str(e.value)
     monkeypatch.undo()
     if not S.ffmpeg():
         return
@@ -903,7 +979,7 @@ def test_a_panel_carries_a_video_that_plays_and_seeks(phone, tmp_path):
     with pytest.raises(urllib.error.HTTPError) as e:
         ranged(f'bytes={len(blob) + 5}-')
     assert e.value.code == 416
-    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime')):
+    for ext, mime in (('.webm', 'video/webm'), ('.mov', 'video/quicktime'), ('.md', 'text/plain; charset=utf-8')):
         assert S.Handler.TYPES[ext] == mime
     big = tmp_path / 'long.mp4'                    # "the rest" comes a chunk at a time, so 4G starts at once
     data = bytes(range(256)) * (S.Handler.RANGE_CHUNK // 256 + 4096)
@@ -951,6 +1027,17 @@ def test_every_panel_picture_opens_full_screen_and_back_closes_it():
     assert '<div id="viewer" hidden><img id="viewimg"' in html and 'id="viewclose"' in html
     assert '#viewer{position:fixed;inset:0;z-index:10' in html and 'touch-action:none' in html
 
+
+
+def test_a_long_path_in_the_log_wraps_instead_of_widening_the_page():
+    """Nate 10-24: a DJ log note with a full file path made the whole page wider than the phone. A grid track of 1fr
+    grows to its longest word; minmax(0,1fr) and overflow-wrap:anywhere let the path wrap inside its row (checked in
+    a browser at 375 px: 891 px wide before, 375 after)."""
+    html = (S.PAGE / 'index.html').read_text(encoding='utf8')
+    assert '.log div{display:grid;grid-template-columns:42px minmax(0,1fr);' in html
+    assert '.log div>*{min-width:0;overflow-wrap:anywhere}' in html
+    # a panel's text too (the Live DJ's handoff): a path in a panel scrolled the panel sideways, 1156 px in 375
+    assert '#panel h2,#panel p,#panel label,#panel li{overflow-wrap:anywhere}' in html
 
 @pytest.fixture
 def eye_round(tmp_path, monkeypatch):
@@ -1412,3 +1499,56 @@ def test_a_listen_with_lines_names_the_other_watchers(phone):
     out = json.loads(P.phone_listen('watcher a', since=ph.seq - 1, wait=0))
     assert out['watching'] == ['watcher b']
     t.join(10)
+
+
+def _until(cond, s=5.0):
+    end = time.time() + s
+    while time.time() < end and not cond():
+        time.sleep(0.05)
+    return cond()
+
+
+def test_a_now_label_expires_when_what_it_named_stops(phone, monkeypatch):
+    """ledger:M218 (the Live DJ, 10-12): a label a set script put up with phone_now stayed over a later loop that
+    never called it, and the page named the wrong piece. The label is tied to what played under it."""
+    ph, base, _ = phone
+    status = {'text': STATUS}
+    monkeypatch.setattr(S, 'engine_call', lambda port, op, timeout=3, **a: status['text'] if op == 'status' else {})
+    monkeypatch.setattr(S, 'LABEL_GRACE_BARS', 0)
+    assert _until(lambda: ph.engine and ph.engine['clips'] == [['lead', 'ch3']])
+    out = P.phone_now(now='Piece one')
+    assert 'the now label stays while ch3 (lead) plays' in out
+    ph.track_label(S.parse_status(STATUS))
+    assert ph.now_text() == 'Piece one'                                         # still playing: it holds
+    status['text'] = STATUS.replace('lead       code', 'beats      code').replace('playing ch3', 'playing loop1')
+    assert _until(lambda: ph.view['now'] is None)                               # a later loop: it expires
+    assert ph.now_text() == 'loop1 (beats)' and ph.view['now_of'] is None
+    # named by deck: it holds while the deck's tracks play
+    status['text'] = STATUS.replace('lead       code', 'a.lead     code')
+    assert _until(lambda: ph.engine['clips'] == [['a.lead', 'ch3']])
+    assert 'stays while a plays' in P.phone_now(now='Deck song', now_of=['a'])
+    time.sleep(1.5)
+    assert ph.now_text() == 'Deck song'
+    status['text'] = STATUS.replace('lead       code', 'b.lead     code')
+    assert _until(lambda: ph.view['now'] is None)
+    # now_of=[]: up until replaced or cleared, whatever plays
+    P.phone_now(now='Sticky', now_of=[])
+    status['text'] = STATUS
+    time.sleep(1.5)
+    assert ph.now_text() == 'Sticky' and ph.view['now_of'] is None
+    P.phone_now(now='')
+    assert ph.now_text() == 'ch3 (lead)'
+
+
+def test_a_panel_left_unsent_keeps_what_was_typed_said_or_picked():
+    """Nate 10-17 (n6203): he typed and dictated into a panel, left it, came back, and the boxes were empty; Send then
+    sent nothing (ledger:M227). Leaving by Later, another tab or a tap outside keeps the inputs; reopening puts them
+    back; an answer or Not now drops them."""
+    js = (S.PAGE / 'app.js').read_text(encoding='utf8')
+    assert "const panelKept = store.get('panel_kept', {}) || {};" in js
+    assert "function closeSheet() { keepPanel();" in js
+    assert "function showPanel(p) {\n  keepPanel();" in js and "function showNotes() {\n  keepPanel();" in js
+    assert "if (panelKept[p.id] && p.kind !== 'exam') putBack(box, p, panelKept[p.id]);" in js
+    assert js.index('putBack(box, p, panelKept[p.id])') < js.index('(fieldDrafts[p.id] || []).forEach')   # late voice text adds to it
+    assert "function answeredHere(id) { answered.add(id); forgetPanel(id);" in js
+    assert "if (!shown || shown === '__notes' || answered.has(shown)) return;" in js

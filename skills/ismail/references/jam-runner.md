@@ -24,8 +24,12 @@ studio's job done at the speed of the loop.
    them, use the beat the page measured at the take's start and slide the take's onsets along what was playing
    (the kick the microphone hears is the easiest anchor). Take the speakers' sound out of the take before reading
    hits.
-5. **Read** it into a part: beatbox hits to a kit line (loud high hits the snare, quiet high ones the hat, little high
-   energy a kick, kept only when heard in two or more cycles), a strum to chords, a melody to notes on the grid.
+5. **Read** it into a part: beatbox hits to a kit line, a strum to chords, a melody to notes on the grid. For the
+   hits, use `ismail.phone.beatbox.read(y, sr, ref=<the music under the take>)` (or `classify(hits)` on hits you
+   found yourself): it ranks the hits against each other on the take, the dark half by spectral centroid the kick,
+   the hardest of the bright ones the snare, the rest hats. Never fixed band shares or levels: a phone or earbud
+   mic takes most of the low end off a mouth kick, and an absolute rule read 5 of 50 kicks on a real take. Keep a
+   kit slot only when it is heard in two or more cycles.
 6. **Propose**, don't play: write the proposal next to the take (`<take>_proposal.json`) and print one line. The main
    thread decides what goes in.
 7. **Queue** a proposal with `live_queue`, from the bar the person is hearing plus a few, moved on to the next bar

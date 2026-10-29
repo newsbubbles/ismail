@@ -1,6 +1,6 @@
 [project]
 name = "ismail"
-version = "0.3.0"
+version = "0.4.3"
 description = "A DAW for AI agents: write music as text, read the audio back as text, and play it live. MCP server, CLI and an agent skill."
 readme = "README.md"
 license = {text = "MIT"}
@@ -39,12 +39,14 @@ video = ["opencv-python>=4.8", "pycollada>=0.8", "pillow>=10.0"]
 live = ["sounddevice>=0.4"]
 voice = ["pyworld>=0.3.4"]
 listen = ["pyaudiowpatch>=0.2; sys_platform == 'win32'"]
+stream = ["websockets>=12", "grpcio>=1.60", "protobuf>=4.21"]
 dev = ["pytest>=8.0"]
 
 [project.urls]
 Homepage = "https://newsbubbles.github.io/ismail/"
 Repository = "https://github.com/newsbubbles/ismail"
 Changelog = "https://github.com/newsbubbles/ismail/blob/main/CHANGELOG.md"
+Organization = "https://measuredinstruments.com"
 
 [project.scripts]
 ismail = "ismail.__main__:cli"
@@ -57,17 +59,21 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["ismail", "ismail.live", "ismail.voices", "ismail.voices.keys", "ismail.voices.bass", "ismail.voices.fx",
             "ismail.voices.strings", "ismail.voices.winds", "ismail.voices.brass", "ismail.voices.guitar", "ismail.voices.drums", "ismail.video", "ismail.video.blender",
-            "ismail.stage", "ismail.stage.bridge", "ismail.phone", "ismail.exampage", "ismail.feedback"]
+            "ismail.stage", "ismail.stage.bridge", "ismail.phone", "ismail.exampage", "ismail.feedback",
+            "ismail.stream", "ismail.stream.adapters"]
 
 [tool.setuptools.package-data]
+"ismail" = ["kit_tables.json"]
 "ismail.voices" = ["*.json"]
 "ismail.voices.keys" = ["*.json"]
 "ismail.voices.strings" = ["*.json"]
 "ismail.voices.winds" = ["*.json"]
 "ismail.voices.brass" = ["*.json"]
+"ismail.voices.drums" = ["*.json"]
 "ismail.video" = ["templates/*", "templates/*/*"]
 "ismail.exampage" = ["*.html"]
 "ismail.feedback" = ["*.html"]
+"ismail.stream" = ["page/*.html"]
 "ismail.phone" = ["page/*.js", "page/*.html", "page/*.svg", "page/*.webmanifest", "page/cues/*.mp3", "page/*.png"]
 "ismail.stage" = ["page/*.js", "page/*.html", "page/*.mjs", "page/sounds/*.wav", "page/vendor/three/LICENSE",
                   "page/vendor/three/build/*", "page/vendor/three/examples/jsm/**/*"]

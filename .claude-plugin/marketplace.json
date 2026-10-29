@@ -1,14 +1,22 @@
 {
   "name": "ismail",
   "description": "ismail, a DAW for AI agents",
-  "owner": {"name": "Nate Codes", "url": "https://github.com/newsbubbles"},
+  "owner": {
+    "name": "Nate Codes",
+    "url": "https://github.com/newsbubbles"
+  },
   "plugins": [
     {
       "name": "ismail",
       "source": "./",
       "description": "A DAW for AI agents: write music as text, read the audio back as text, and play it live.",
       "category": "creative",
-      "tags": ["music", "audio", "daw", "live"]
+      "tags": [
+        "music",
+        "audio",
+        "daw",
+        "live"
+      ]
     }
   ]
 }

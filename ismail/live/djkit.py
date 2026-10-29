@@ -27,6 +27,7 @@ import random
 import re
 import shutil
 import time
+from .. import settings
 
 VEL = {'X': 112, 'x': 92, 'o': 64, 'g': 40}     # accent, normal, soft, ghost
 
@@ -62,8 +63,8 @@ def per_bar(n_bars, fn, beats_per_bar=4):
 
 
 def metric(feel_bpm, engine_bpm):
-    """Metric modulation: one beat of a feel at feel_bpm, in beats of the running engine (the tempo is fixed per
-    run). 126 over an 84 engine = 2/3: house beats on a trip-hop grid."""
+    """Metric modulation: one beat of a feel at feel_bpm, in beats of the running engine (to keep the engine's
+    tempo; live_tempo changes it). 126 over an 84 engine = 2/3: house beats on a trip-hop grid."""
     return float(engine_bpm) / float(feel_bpm)
 
 
@@ -152,11 +153,11 @@ class Set:
             f.write(time.strftime('%H:%M:%S ') + txt + '\n')
 
     def start(self, bpm, device='default', trim_db=None, cap_db=None, min_free_gb=2.0, priority='above_normal'):
-        """live_start at set loudness (trim 4, cap -12, about -16 LUFS, unless given here or set in the environment),
+        """live_start at set loudness (trim 4, cap -12, about -16 LUFS, unless given here or set with config_set),
         with the pre-flight in the reply: other engines still holding a device, and free disk for a recording."""
-        if trim_db is None and 'ISMAIL_LIVE_TRIM_DB' not in os.environ:      # set there: the engine reads it
+        if trim_db is None and not settings.is_set('live.trim_db'):   # set there: the engine reads it
             trim_db = 4
-        if cap_db is None and 'ISMAIL_LIVE_CAP_DB' not in os.environ:
+        if cap_db is None and not settings.is_set('live.cap_db'):
             cap_db = -12
         r = self.O['live_start'](self.P, bpm=bpm, device=device, trim_db=trim_db, cap_db=cap_db, priority=priority)
         free = shutil.disk_usage(self.P).free / 1e9

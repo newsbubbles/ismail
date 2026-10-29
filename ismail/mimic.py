@@ -23,6 +23,13 @@ BODY_HZ = 2 ** np.arange(np.log2(30), np.log2(18000), 1 / 12)
 NOISE_HZ = 2 ** np.arange(np.log2(20), np.log2(21000), 1 / 3)
 ATK_NFFT, ATK_HOP, ATK_FRAMES = 1024, 256, 28   # attack map: 23 ms windows, 5.8 ms hop, first ~0.17 s
 LOWER_HALF_MEAN = 0.3069       # mean of the lower half of an exponential(1) variable: noise power calibration
+# Per-note random variation, the room's included, may move a note's level while the key is down by half of this
+# either way at most, so two takes of one note differ by this at most (ledger M301). Unbounded, one velocity drew a
+# take 8 dB louder than its neighbours (cs80_lead D5 vel 90, 2026-10-23): on a note shorter than the swell's wander
+# the "unit std" slow curves are short pieces scaled up, so their means became level offsets of many dB, and a
+# random room IR summed in or out of phase with a steady tone. The timbre variation (which partial is louder, how
+# each moves) is kept.
+LEVEL_CAP_DB = 3.0
 
 
 # ------------------------------------------------------------------ analysis
@@ -623,7 +630,8 @@ DEFAULT_PARAMS = {
     'release': 1.0,       # scale on measured release times (sustained) / damper time (decaying)
     'damp': 0.25,         # decaying kinds: seconds to die after the key is released (None = ring on)
     'detail': 1.0,        # 0..1: how much of each measured note's own partial pattern to keep (vs the smooth model)
-    'variation': 1.0,     # per-note random variation (level, brightness, timing of partials)
+    'variation': 1.0,     # per-note random variation (brightness, timing of partials, level: two takes of a note
+                          # differ by LEVEL_CAP_DB at most, room included)
     'seed': None,
     'swell': 1.0,         # scale on the measured slow swells of a sustained note (bow pressure, breath)
     'room': None,         # reverb time (RT60, s) of a room around the instrument; None = the room measured from
@@ -713,11 +721,14 @@ def _vibrato(rng, tc, delay, rate, depth, rate_sd, depth_sd, onset):
 
 
 def _smooth_noise(rng, n, rate_hz, sr_ctrl):
-    """Band-limited random walk-ish signal, unit std, at control rate."""
-    x = rng.standard_normal(n + 64)
+    """Band-limited random walk-ish signal, unit std in expectation, at control rate. Every value sees the whole
+    smoothing window, and the scale is the window's own (white noise through h has std sqrt(sum(h**2))), not the
+    slice's: a short note gets a short stretch of the same slow curve a long note has. Dividing by the slice's
+    own std stretched a nearly flat slice to unit std, so short notes came out tens of cents off (ledger:M306)."""
     k = max(1, int(sr_ctrl / max(rate_hz, 0.1)))
-    x = np.convolve(x, np.hanning(2 * k + 1), 'same')[32:32 + n]
-    return x / (x.std() + 1e-9)
+    h = np.hanning(2 * k + 1)
+    x = rng.standard_normal(n + 2 * k)
+    return np.convolve(x, h, 'valid') / np.sqrt(np.sum(h ** 2))
 
 
 def render(profile, freq, t, vel, gate, sr=SR, **params):
@@ -777,13 +788,15 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
     dv = vel - vel_ref
     base = slope * lk + gain + p['detail'] * det + (p['bright'] + p['vel_bright'] * dv) * lk
     base += 20 * np.log10(max(vel, 1e-3) / max(vel_ref, 1e-3)) + profile.get('norm_db', 0.0)
-    base += p['variation'] * rng.normal(0, 0.7, len(kk))
+    bvar = p['variation'] * rng.normal(0, 0.7, len(kk))
+    base += bvar
 
     tc = np.arange(0, n + CTRL, CTRL) / sr                # control times
     ncs = len(tc)
     sr_c = sr / CTRL
-    atk = _blend(a, b, w, 'attack', fk) * p['attack'] * (1 + p['variation'] * rng.normal(0, 0.08, len(kk)))
-    atk = np.maximum(atk, 0.002)
+    atk0 = _blend(a, b, w, 'attack', fk) * p['attack']
+    atk = np.maximum(atk0 * (1 + p['variation'] * rng.normal(0, 0.08, len(kk))), 0.002)
+    atk0 = np.maximum(atk0, 0.002)
     if kind == 'sustained':
         ov = _blend(a, b, w, 'overshoot', fk)
         shim = _blend(a, b, w, 'shimmer', fk)
@@ -802,7 +815,9 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
     weak = lvl0 < lvl0.max() - p['floor'] if p['floor'] is not None else np.zeros(len(kk), bool)
     mono = bool(p['mono'])
     players = max(1, int(p['players']))
-    phi_c = None
+    phi_c = phi0 = None
+    ts = np.arange(n) / sr                               # sample times, shared by every partial and layer
+    ar = np.arange(n)
     for pl in range(players):
         prng = np.random.default_rng(seed + 7919 * (pl + 1))
         cents = 0.0 if players == 1 else prng.uniform(-1, 1) * p['detune']
@@ -811,7 +826,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         vib = _vibrato(prng, tc, delay, vr, vib_d, vib_rsd, vib_dsd, vib_on) if vib_d > 0 else np.zeros(ncs)
         vib += drift * _smooth_noise(prng, ncs, 1.5, sr_c)
         f0c = freq * 2 ** ((cents + vib) / 1200)
-        f0s = np.interp(np.arange(n) / sr, tc, f0c)
+        f0s = np.interp(ts, tc, f0c)
         phase = 2 * np.pi * np.cumsum(f0s) / sr
         pan = 0.0 if players == 1 else prng.uniform(-0.6, 0.6)
         if mono:
@@ -821,6 +836,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         yl = np.zeros(n)
         yr = yl if one else np.zeros(n)
         tot_env = np.zeros(ncs)
+        tot0 = np.zeros(ncs)                              # the same partials without the random parts
         # the whole note swells and dips slowly (bow pressure, breath), fading in after the attack
         swell_db = (mix('swell') * p['swell'] * _smooth_noise(prng, ncs, 0.8, sr_c) *
                     np.clip(te / 0.4, 0, 1)) if kind == 'sustained' else 0.0
@@ -831,27 +847,22 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
             fi = k * stretch[i] * f0c
             lvl = base[i] + np.interp(np.log2(fi), body_hz, body_db)
             if kind == 'sustained':
-                x = np.clip(te / atk[i], 0, 1)
-                up = x * x * (3 - 2 * x)                 # an S-shaped rise: the player eases in, no corner
-                env_db = 20 * np.log10(up + 1e-4) + ov[i] * np.exp(-np.maximum(te - atk[i], 0) / 0.08) * (te >= atk[i] * 0.5)
+                env_db = _env_sustained(te, atk[i], ov[i], gate, rel[i])
+                env0 = _env_sustained(te, atk0[i], ov[i], gate, rel[i])
                 env_db += shim[i] * p['variation'] * _smooth_noise(prng, ncs, 6.0, sr_c) + swell_db
-                after = np.maximum(te - gate, 0)
-                env_db -= 60 * after / rel[i]
             else:
-                up = np.clip(te / atk[i], 0, 1)
-                d = np.maximum(te - atk[i], 0)
-                tb = t1[i] / 3.0                           # 20 dB into the prompt decay
-                env_db = 20 * np.log10(up + 1e-4) - np.where(d < tb, 60 * d / t1[i], 20 + 60 * (d - tb) / t2[i])
-                if p['damp'] is not None:
-                    after = np.maximum(te - gate, 0)
-                    env_db -= 60 * after / max(p['damp'] * p['release'] * (1 + 200 / fk[i]), 0.01)
+                damp_t = (max(p['damp'] * p['release'] * (1 + 200 / fk[i]), 0.01) if p['damp'] is not None
+                          else None)
+                env_db = _env_decaying(te, atk[i], t1[i], t2[i], gate, damp_t)
+                env0 = _env_decaying(te, atk0[i], t1[i], t2[i], gate, damp_t)
+            tot0 += 10 ** ((lvl0[i] - bvar[i] + env0) / 10)   # at the nominal pitch: no vibrato, no drift
             amp_c = 10 ** ((lvl + env_db) / 20)
             if amp_c.max() < 1e-5:
                 continue
             tot_env += amp_c ** 2
             # compute the partial only while it sounds: a long tail after the release is mostly silence
             m = min(n, (int(np.nonzero(amp_c >= 1e-5)[0][-1]) + 2) * CTRL)
-            amp = np.interp(np.arange(m) / sr, tc, amp_c)
+            amp = np.interp(ts[:m], tc, amp_c)
             ph0 = prng.uniform(0, 2 * np.pi)
             dphi = p['width'] * prng.uniform(-np.pi / 2, np.pi / 2) if k > 1 else 0.0
             dl = 1 + p['width'] * prng.uniform(-0.12, 0.12)
@@ -863,7 +874,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
                 g = 10 ** (bdb[i] / 20)
                 # struck together, the strings start in phase: the first cancellation comes 1/(2*beat) s later,
                 # the dip a listener hears as the note "fading out in the middle"
-                th2 = th + 2 * np.pi * bhz[i] * np.arange(m) / sr
+                th2 = th + 2 * np.pi * bhz[i] * ar[:m] / sr
                 mg = (g - 1) / (g + 1)
                 yl[:m] += amp * (np.sin(th) + mg * np.sin(th2)) / np.sqrt(1 + mg * mg) * dl
                 if not one:
@@ -887,6 +898,12 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         out[0] += yl * gl * np.sqrt(2)
         out[1] += yr * gr * np.sqrt(2)
         phi_c = tot_env if phi_c is None else phi_c + tot_env
+        phi0 = tot0 if phi0 is None else phi0 + tot0
+
+    # how far the random parts moved the note's level while the key is down (_post bounds it, with the room's)
+    held = max(1, int(np.searchsorted(tc, max(gate, 0.05))))
+    e_var, e_0 = float(np.sum(phi_c[:held])), float(np.sum(phi0[:held]))
+    dev_db = 10 * np.log10(e_var / e_0) if e_var > 0 and e_0 > 0 else 0.0
 
     # noise: sustained part follows the harmonic envelope, attack part is a burst at the onset
     nz_hz = np.log2(np.array(profile['noise_hz']))
@@ -900,8 +917,7 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         sus_env = 10 ** ((harm_db - ref_db) / 20)
     atk_t = max(float(np.mean(atk[:3])), 0.01)
     atk_env = np.exp(-np.maximum(tc, 0) / (0.5 * atk_t + 0.015))
-    fr = np.fft.rfftfreq(n, 1 / sr)
-    lf = np.log2(np.maximum(fr, 1.0))
+    fr, lf = _freq_grid(n, sr)
     layers = [(ns, sus_env, ref_db)]
     if not ('atk_tf' in a and 'atk_tf' in b):       # the calibrated attack map replaces the generic burst
         layers.append((na, atk_env, ref_db))
@@ -911,13 +927,82 @@ def render(profile, freq, t, vel, gate, sr=SR, **params):
         for ch in range(1 if mono else 2):
             wn = rng.standard_normal(n)
             shaped = np.fft.irfft(np.fft.rfft(wn) * g, n)
-            out[ch] += shaped * np.interp(np.arange(n) / sr, tc, envc)
+            out[ch] += shaped * np.interp(ts, tc, envc)
         if mono:
             out[1] = out[0]
     if 'atk_tf' in a and 'atk_tf' in b and p['knock'] > 0:
         out += _attack_noise(a, b, w, rng, n, sr, p['knock'], _rms_window(out, a['kind'], sr))
     out /= players ** 0.5
-    return _post(out, profile, p, sr, seed)
+    return _post(out, profile, p, sr, seed, int(max(gate, 0.05) * sr), dev_db)
+
+
+def _env_sustained(te, atk, ov, gate, rel):
+    """dB envelope of a sustained partial: an S-shaped rise (the player eases in, no corner), the measured
+    overshoot, the release after the gate."""
+    x = np.clip(te / atk, 0, 1)
+    up = x * x * (3 - 2 * x)
+    env = 20 * np.log10(up + 1e-4) + ov * np.exp(-np.maximum(te - atk, 0) / 0.08) * (te >= atk * 0.5)
+    return env - 60 * np.maximum(te - gate, 0) / rel
+
+
+def _env_decaying(te, atk, t1, t2, gate, damp_t):
+    """dB envelope of a decaying partial: a rise, the prompt decay for 20 dB then the after decay, and the damper
+    (damp_t seconds per 60 dB, None = ring on) after the gate."""
+    up = np.clip(te / atk, 0, 1)
+    d = np.maximum(te - atk, 0)
+    tb = t1 / 3.0                                       # 20 dB into the prompt decay
+    env = 20 * np.log10(up + 1e-4) - np.where(d < tb, 60 * d / t1, 20 + 60 * (d - tb) / t2)
+    if damp_t is not None:
+        env = env - 60 * np.maximum(te - gate, 0) / damp_t
+    return env
+
+
+_FREQ_GRIDS = {}
+
+
+def _freq_grid(n, sr):
+    """rfft bin frequencies of an n-sample note and their log2 (floored at 1 Hz): the notes of a chord share n."""
+    v = _FREQ_GRIDS.get((n, sr))
+    if v is None:
+        fr = np.fft.rfftfreq(n, 1 / sr)
+        v = (fr, np.log2(np.maximum(fr, 1.0)))
+        if len(_FREQ_GRIDS) > 32:
+            _FREQ_GRIDS.clear()
+        _FREQ_GRIDS[(n, sr)] = v
+    return v
+
+
+def _hann(nfft):
+    """Periodic Hann window (scipy get_window('hann', nfft), as librosa's stft uses)."""
+    return 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(nfft) / nfft)
+
+
+def _stft(x, nfft, hop, win):
+    """librosa.stft(x, n_fft=nfft, hop_length=hop, center=True) with zero padding, as (frames, bins). numpy only:
+    librosa's first stft in a process costs seconds (lazy imports, numba), and that landed on a deck's first bars."""
+    xp = np.pad(x, nfft // 2)
+    nfr = 1 + (len(xp) - nfft) // hop
+    frames = np.lib.stride_tricks.sliding_window_view(xp, nfft)[::hop][:nfr]
+    return np.fft.rfft(frames * win, axis=1)
+
+
+def _istft(Z, nfft, hop, win, length):
+    """librosa.istft(Z.T, hop_length=hop, n_fft=nfft, center=True, length=length) for (frames, bins) Z."""
+    pad = nfft // 2
+    nfr = min(len(Z), int(np.ceil((length + 2 * pad) / hop)))
+    frames = np.fft.irfft(Z[:nfr], n=nfft, axis=1) * win
+    y = np.zeros(nfft + hop * (nfr - 1))
+    wss = np.zeros_like(y)
+    w2 = win ** 2
+    for j in range(nfr):
+        y[j * hop:j * hop + nfft] += frames[j]
+        wss[j * hop:j * hop + nfft] += w2
+    y, wss = y[pad:pad + length], wss[pad:pad + length]
+    if len(y) < length:
+        y, wss = np.pad(y, (0, length - len(y))), np.pad(wss, (0, length - len(wss)))
+    nz = wss > np.finfo(wss.dtype).tiny
+    y[nz] /= wss[nz]
+    return y
 
 
 def _rms_window(out, kind, sr):
@@ -929,7 +1014,6 @@ def _rms_window(out, kind, sr):
 def _attack_noise(a, b, w, rng, n, sr, gain, rms_now):
     """The attack map as STFT-shaped noise. Levels were measured with the recording at atk_ref_db rms over the
     calibration window; scale to this render's rms there."""
-    import librosa
     ta = 10 ** (np.array(a['atk_tf']) / 10)
     tb = 10 ** (np.array(b['atk_tf']) / 10)
     var = ta * (1 - w) + tb * w                            # variance density per band x frame
@@ -946,12 +1030,14 @@ def _attack_noise(a, b, w, rng, n, sr, gain, rms_now):
     sh = ATK_NFFT // (2 * ATK_HOP)
     need = ATK_NFFT + ATK_HOP * (ATK_FRAMES - 1)
     res = np.zeros((2, n))
+    win = _hann(ATK_NFFT)
     for ch in range(2):
         wn = rng.standard_normal(need + ATK_NFFT)
-        Z = librosa.stft(wn, n_fft=ATK_NFFT, hop_length=ATK_HOP, center=True)
-        Gc = np.zeros((G.shape[0], Z.shape[1]))
-        Gc[:, sh:sh + G.shape[1]] = G[:, :max(0, min(G.shape[1], Z.shape[1] - sh))]
-        z = librosa.istft(Z * Gc, hop_length=ATK_HOP, n_fft=ATK_NFFT, center=True, length=len(wn))
+        Z = _stft(wn, ATK_NFFT, ATK_HOP, win)               # (frames, bins)
+        Gc = np.zeros((Z.shape[0], G.shape[0]))
+        k = max(0, min(G.shape[1], Z.shape[0] - sh))
+        Gc[sh:sh + k] = G[:, :k].T
+        z = _istft(Z * Gc, ATK_NFFT, ATK_HOP, win, len(wn))
         m = min(n, need)
         res[ch, :m] = z[:m]
     return res
@@ -994,7 +1080,9 @@ def _room_ir(rt, sr, rng):
     return ir / np.sqrt((ir ** 2).sum() / 2)
 
 
-def _post(out, profile, p, sr, seed):
+def _post(out, profile, p, sr, seed, held_n=None, dev_db=0.0):
+    """Resonators, room, mono. held_n: samples while the key is down; dev_db: how far the random parts moved the
+    note's level there. The level move with the room's is held within +-LEVEL_CAP_DB / 2."""
     rng = np.random.default_rng(seed + 17)
     n = out.shape[1]
     mono = out.mean(axis=0)
@@ -1031,7 +1119,17 @@ def _post(out, profile, p, sr, seed):
             wet = np.stack([w, w])
         else:
             wet = np.stack([fftconvolve(out[0], ir[0])[:n], fftconvolve(out[1], ir[1])[:n]])
-        out = out + wet * 10 ** (p['room_mix'] / 20)
+        g = 10 ** (p['room_mix'] / 20)
+        # a steady tone meets one random complex gain of the IR, so dry and wet sum in or out of phase: count how
+        # far that moves the level from dry and wet adding in power
+        h = slice(0, held_n or n)
+        e_dry = float(np.sum(out[:, h] ** 2))
+        out = out + wet * g
+        e_tot = float(np.sum(out[:, h] ** 2))
+        if e_dry > 0 and e_tot > 0:
+            dev_db += 10 * np.log10(e_tot / (e_dry * (1 + g * g)))
+    if abs(dev_db) > LEVEL_CAP_DB / 2:      # the timbre and the room's colour stay; only the level is pulled in
+        out = out * 10 ** ((np.clip(dev_db, -LEVEL_CAP_DB / 2, LEVEL_CAP_DB / 2) - dev_db) / 20)
     if p['mono']:
         out = np.repeat(out.mean(axis=0, keepdims=True), 2, axis=0)
     return out

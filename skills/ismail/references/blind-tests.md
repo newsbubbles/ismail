@@ -20,7 +20,7 @@ There are two kinds of test. Use both, in this order.
 ## 0. Before any exam reaches the person: `exam_check`
 
 Run `exam_check` on every exam before you show it, and show it only on READY: `exam_check(page='<the page or its
-URL>', key={'<clip label or file>': '<its class>'}, secrets=['<source names>'], submit_url='<the page Submit>',
+URL>', key={'<clip label or file>': '<its class>'}, secrets=['<clip source names the listener must not see>'], submit_url='<the page Submit>',
 answers_path='<where you read answers>')`. It fails a page whose clips are missing or do not decode, whose loudness
 spreads more than 1 LU, whose answer can be read from anything but the sound (file names, URLs, metadata, the page
 source or a key file it loads, formats, lengths or order that follow the key), or whose Submit lands somewhere you
@@ -31,7 +31,7 @@ leaves one answer line marked `preflight`: skip it when scoring.
 
 Before a real-against-made round, look first (the person's "90 degree rotation": when one sense plateaus, rotate which
 one measures; a spectrogram is an image an eye reads well). `exam_eye_crops(pairs=[[real, made], ...], out=...)`
-cuts the same window from both clips of each pair (a word plus 60 ms either side, when you pass `windows`) and puts
+cuts the same window from both clips of each pair (a word plus 60 ms either side, with `windows=`) and puts
 them side by side as "1" and "2" in a random order, with the key in a file you do not open. Look at each crop, pick
 the side that looks real, and score it with `exam_eye_score(out, {1: '2', ...})`. If you beat chance (it says NOT
 READY), the picture gives it away and the person will most likely hear it too: find what you saw and fix that
@@ -63,7 +63,7 @@ control is a floor pair, below).
 **A floor under every phone round.** A "can't tell" on a phone means nothing until you know what that phone and
 ear can tell apart at all. `phone_exam(..., floor='auto')` adds floor pairs: the real clip against a 64 or 128 kb/s
 MP3 copy of itself, or against itself, at seeded places (never first). The full set (64k, 128k, identical) goes out
-on the first floor round, then one rotating pair per round; pass `floor='full'` again for a new listening device or
+on the first floor round, then one rotating pair per round; `floor='full'` again for a new listening device or
 when a floor answer differs from the first. Each floor pair costs a slot of the 5 to 6 pair budget. The pairs are
 renumbered around them, and the reply and `<answers_path>.floor.json` map the labels back and say which side is the
 MP3. Read the floor first: if they pick the MP3 side as "different" more often than chance, the device and ear
@@ -95,6 +95,12 @@ box, each saved with its word. The key is served only after they submit, and `ex
 card and every pin on the REAL picture or OURS. In the Voice agent's work the pins named what 40 rounds of numbers
 missed ("fire plumes between the columns, ours are straight smears"). The page server is `python -m
 ismail.exampage serve <rounds folder>` (127.0.0.1:8871; the op starts it), with byte ranges so long audio seeks.
+One server serves rounds from every song: the op registers each round with the running server (a registry file,
+~/.ismail/exampage/rounds.json), so a round in another song's folder opens while one song's exam is up. If another
+song's round already has the folder's name, the URL carries the song's name in front (`/eye/songb-round2`): use the
+URL and phone link the op returns, never one you put together. When the round can't be served (the running server
+is older than the registry, or none would start) the op says why and gives no link. `python -m ismail.exampage
+register <round folder>` registers a round built with `host=False`.
 
 ## 2. The blind exam: can the user tell?
 
@@ -106,6 +112,11 @@ In a guitar study the blind exam went from 1 of 16 undetected to 20 of 22 in fou
 in the band, then the full mix. The guitar study's single-gesture trials climbed round by round. A full-mix blind
 test pitched too hard was told apart every time, round after round, and its misses never pointed at one thing to
 fix. A round the person always gets, or never gets, gives no direction: make the next one easier or harder.
+
+**Two band rounds the person still wins: climb back to one note.** When the person picks the record in two
+band-level rounds in a row, stop climbing up. Go back to an isolated note of the part they name: one or two notes
+of it alone, the real one and ours, and look at all the harmonics. A tell they have named for a while will not move in a band
+round. In the metal work three band rounds in a row lost to the record while the guitar tell stayed open (10-22).
 
 **Make the test fair, or it measures the wrong thing.**
 - **One gesture per clip, on every side.** Cut at the next onset. When the real clip ran on into the player's next notes, every trial was decided by that and the round was wasted.
@@ -120,6 +131,10 @@ fix. A round the person always gets, or never gets, gives no direction: make the
   all "can't tell" ("I don't get this test"): at that distance the hall's diffuse sound sat about 9 dB over the
   direct sound. Give the ear contrast (the same note moving between two seats, or a fixed reference seat beside
   the one tested) or a closer listener, and say what to listen for.
+- **Ask "real or fake?" for each clip.** On a page of pairs, every clip gets its own real or fake answer (a chip or
+  a choice per clip). Never ask one "A or B is real?" question for the whole page when the real side moves between
+  pairs: A is the real one in some pairs and B in others, so that one answer names nothing. `exam_check(choices=)`
+  and `phone_exam` refuse that shape (Nate, metal round 3).
 - **Check alignment.** The onsets of A and B must come from the same detector as R's, run on the full signal. A mask edge once made every A lag 12 ms.
 
 **The listening device is part of the exam.**
@@ -138,15 +153,20 @@ fix. A round the person always gets, or never gets, gives no direction: make the
 - **Log each round's floor** in the song's notes: the ear gets finer, and the next round can aim one notch smaller.
 
 **Page mechanics.** Keep the page in the song (`songs/<slug>/exam/<round>/`). Clips of the record are what the test is for: serve it on this computer or to the user's own phone over their private network, and keep a page holding someone else's recording off a public host.
-- **Always host it, always open it where the person already is.** Serve it on 127.0.0.1 and open `http://127.0.0.1:<port>/<round>/` for them in the browser they can see beside the conversation (a browser pane, preview, web view or browser tool, whichever your harness has). Never send the user a file path or a `file://` page: browsers block audio from file pages, and an external browser means switching away (where a copy button may not work).
-- **A page that takes their voice or mic is the exception: open it in their own browser.** A browser pane inside an agent app usually has no microphone, so a page with voice boxes, recorded takes or any mic input is served on 127.0.0.1 and opened in the person's default browser. It keeps everything they typed or said on this computer (a notes file plus a folder of voice clips, transcribed) and puts it all back when they reopen the page, so closing a tab loses nothing. One person had to ask for this five times (2026-10-15). **Switch it on with `feedback_page(project, round, items, questions)`**: items are clips, pictures or text, each question gets a text box and a Record button, everything lands in `work/feedback/<round>/` (`answers.json`, `voice/` with each transcript beside its clip), one shared local server serves every round, and the page opens in their default browser. Read what came in with `feedback_read(project, round, since=)`; `feedback_list` and `feedback_stop` list the rounds and stop the server. Build a page by hand only for what it cannot do (a blind key, takes recorded for a voice model, a video timeline with notes at a time): then start from a page that already does it (`songs/crossroads/video/review/server.py`, `songs/vox/rec/server.py` on that machine), copied into your song's `work/`, and open it with `start`, `open` or `xdg-open` and the URL.
-- **Submit, don't copy.** A small server serves the round and takes `POST /<round>/answers`, appending them with a timestamp to `exam/<round>/answers.txt`; the user presses Submit and says "done", and you read the file. Keep a copy button as a fallback that also shows the text in a box. Songs are not in the repository, so there is no shared copy: if a song on this machine has one (`songs/tambopata/work/exam_server.py`, `songs/vox/rec/server.py`), copy it into your song's `work/`; otherwise write it (about 40 lines of `http.server`).
+- **Always host it, always open it where the person already is.** Serve it on 127.0.0.1 and open `http://127.0.0.1:<port>/<round>/` for them in the browser they can see beside the conversation (a browser pane, preview, web view or browser tool, whichever your harness has). Never hand over a page as a file path or a `file://` page: browsers block audio from file pages, and an external browser means switching away (where a copy button may not work).
+- **A page that takes their voice or mic is the exception: open it in their own browser.** A browser pane inside an agent app usually has no microphone, so a page with voice boxes, recorded takes or any mic input is served on 127.0.0.1 and opened in the person's default browser. It keeps everything they typed or said on this computer (a notes file plus a folder of voice clips, transcribed) and puts it all back when they reopen the page, so closing a tab loses nothing. One person had to ask for this five times (2026-10-15). **Switch it on with `feedback_page(project, round, items, questions)`**: items are clips, pictures or text, each question gets a text box and a Record button, everything lands in `<project>/work/feedback/<round>/` (`answers.json`, `voice/` with each transcript beside its clip), one shared local server serves every round, and the page opens in their default browser. Pass the song folder as `project`, not `proj/`, so the answers survive a rebuild. The page saves as they type, so a first save is not an answer: wait for their Send with `feedback_wait(project, round, timeout_s)`, then `feedback_read(project, round, since=)` (it says SENT or STILL WRITING). Never ask them to type "done". `feedback_list` and `feedback_stop` list the rounds and stop the server. Build a page by hand only for what it cannot do (a blind key, takes recorded for a voice model, a video timeline with notes at a time): then start from a page that already does it (`songs/crossroads/video/review/server.py`, `songs/vox/rec/server.py` on that machine), copied into your song's `work/`, and open it with `start`, `open` or `xdg-open` and the URL.
+- **Submit, don't copy.** A small server serves the round and takes `POST /<round>/answers`, appending them with a timestamp to `exam/<round>/answers.txt`; the user presses Submit, and you read the file when it changes. Keep a copy button as a fallback that also shows the text in a box. Songs are not in the repository, so there is no shared copy: if a song on this machine has one (`songs/tambopata/work/exam_server.py`, `songs/vox/rec/server.py`), copy it into your song's `work/`; otherwise write it (about 40 lines of `http.server`).
 - **Check the page in the pane before handing it over**: count the trials and clips, request one clip, run the answer collector, read the console errors (a JS string broken by a literal newline was caught this way).
 - Each trial: players, a radio per clip plus "can't tell", and a text box for the tell. Log every round's answers verbatim in the song's `notes/feedback.md`, with the key beside them.
 
 ## 3. Reading the answers
 
 - **The ear beats the stem.** Separated stems are biased dark above about 1.5 kHz. A harmonic correction measured against the stems pointed the wrong way (cut the top), while the user heard "upper harmonics too muted". When the ear and a stem-based measurement disagree about timbre, the ear wins.
+- **Score the window, not the file.** Statistics over time (a per-frame spread, steadiness, an envelope) count
+  everything in the file, release tail included. A scratch render's stems ran past the exam window into the tail:
+  a band's steadiness read 15.7 dB over the file and 3.0 over the window the person heard, and two test rounds drew
+  the wrong conclusion. Cut the measuring window to exactly what is heard (`sound_compare(a_window=, b_window=)`;
+  it says when the lengths or tails differ and no window was given).
 - **Long-window metrics are blind to fakeness.** 8-bar spectral envelopes within 1.8 dB and stem balance within 0.7 dB, while the user heard "30% there". Report those numbers, but never as proof that a sound is convincing.
 - **Every tell is a missing mechanism.** "Too clean" meant pick scrape, air, fret rattle and hum. "Real notes don't start at the hit, but in the middle of the strum" meant the player eases in. "A dip in the middle of the note" meant finger pressure (a level curve). Add the mechanism, not a filter that imitates it.
 - **A fit pinned at the edge of its range is a missing mechanism too.** Three times a tone fit hit a bound; each time the fix was physics (a pickup tone knob's LC resonance, a velocity-sensing pickup, frequency-dependent string loss), not a wider bound.

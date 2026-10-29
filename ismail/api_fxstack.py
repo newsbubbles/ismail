@@ -1,6 +1,6 @@
 """Named effect stacks (ledger:M177, Nate 10-07: "a stack of effects in the engine that you can save as like a
 specific effect stack and you can also store like how that runs on this device"). A stack is a named effect chain
-with notes, kept in the library (~/.ismail/fx_stacks, or $ISMAIL_FX_STACKS) or in a song folder (<song>/fx_stacks);
+with notes, kept in the library (~/.ismail/fx_stacks, or the fx_stacks setting) or in a song folder (<song>/fx_stacks);
 the built-in ones come with ismail (voices/fx_stacks.json). What a stack costs is the machine's, not the song's: a
 10 s test through the chain the way the live engine runs it, kept per device in the library's costs.json, so
 live_track(fx='stack:<name>') and live_load can say before a set that a chain will not keep up.
@@ -14,6 +14,7 @@ import time
 import numpy as np
 
 from .api import OpError, op
+from . import settings
 
 BUILTIN = os.path.join(os.path.dirname(__file__), 'voices', 'fx_stacks.json')
 TEST_S = 10.0
@@ -22,7 +23,7 @@ NAME = re.compile(r'^[a-z0-9][a-z0-9_-]{0,47}$')
 
 
 def library():
-    return os.environ.get('ISMAIL_FX_STACKS') or os.path.join(os.path.expanduser('~'), '.ismail', 'fx_stacks')
+    return settings.get('fx_stacks')
 
 
 def device():

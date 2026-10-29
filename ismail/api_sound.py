@@ -35,16 +35,50 @@ ZOOM_HINT = ("\nclose numbers but it still sounds different, or a voice or playe
              "(references/listening.md, When to zoom)")
 
 
+def _tail_s(y, floor_db=-50.0):
+    """Seconds at the end of y under floor_db against its peak (a release tail or silence past the sound)."""
+    a = np.abs(y).max(axis=0)
+    hop = max(1, int(SD.SR * 0.01))
+    n = len(a) // hop
+    if n < 2:
+        return 0.0
+    blk = a[:n * hop].reshape(n, hop).max(axis=1)
+    loud = np.nonzero(blk > blk.max() * 10 ** (floor_db / 20))[0]
+    return (n - 1 - int(loud[-1])) * hop / SD.SR if len(loud) else 0.0
+
+
+def _window_hint(ya, yb, a_cut, b_cut):
+    """Score the window, not the file (metal 10-22): a whole file's statistics over time count its release tail."""
+    da, db = ya.shape[1] / SD.SR, yb.shape[1] / SD.SR
+    ta, tb = (0.0 if a_cut else _tail_s(ya)), (0.0 if b_cut else _tail_s(yb))
+    if (a_cut and b_cut) or (abs(da - db) <= 0.5 and max(ta, tb) <= 0.5):
+        return ''
+    return (f"\nwindow: A is {da:.1f} s" + (f" ({ta:.1f} s of tail under -50 dB)" if ta > 0.5 else '')
+            + f", B {db:.1f} s" + (f" ({tb:.1f} s of tail)" if tb > 0.5 else '')
+            + ". Every statistic over time here counts the whole of each, release tail included. If the person "
+              "hears a window (an exam clip), pass a_window/b_window (or a_span/b_span) for exactly that window: "
+              "score the window, not the file")
+
+
 @op()
 def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window: list = None, a_span: list = None,
-                  b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0) -> str:
+                  b_span: list = None, fmin: float = 25.0, fmax: float = 16000.0, fit_score: bool = False) -> str:
     """A/B two sounds: 1/3-octave bands side by side (with << >> where A is >6 dB off), envelope from onset,
     centroid, stereo width, and one distance number. a/b are sources ('sound:<name>', 'ref:drums', 'track:x',
-    ...); window=[t0, t1] seconds or span=[start_bar, end_bar] (fractional) selects a slice."""
+    ...); window=[t0, t1] seconds or span=[start_bar, end_bar] (fractional) selects a slice. Reach for it when one
+    part or one hit does not sound like the reference or the genre (a snare that sounds dated, a lead that does not
+    sit like the record's): yours against theirs, on the window where it plays. Score the window, not the file:
+    the envelope and every statistic over time count all of each sound, so a render or stem that runs past what
+    the person hears (its release tail) reads apart from the clip they heard; the reply says when the lengths or
+    tails differ and no window was given, and warns of any band more than 20 dB apart (text only). The distance is
+    the number it has always been, so scores across rounds compare; fit_score=True scores the way instrument_fit
+    does instead (each dB a band is past 20 dB off adds 0.15, the 25 Hz band counts for fmin=25)."""
     P = _load(project)
-    da = SD.descriptor(_audio(P, a, a_window, a_span))
-    db = SD.descriptor(_audio(P, b, b_window, b_span))
-    return SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax)[1] + ZOOM_HINT
+    ya, yb = _audio(P, a, a_window, a_span), _audio(P, b, b_window, b_span)
+    da, db = SD.descriptor(ya), SD.descriptor(yb)
+    return (SD.compare_text(da, db, a.split(':')[-1], b.split(':')[-1], fmin, fmax,
+                            **(SD.FIT_SCORE if fit_score else {}))[1]
+            + _window_hint(ya, yb, bool(a_window or a_span), bool(b_window or b_span)) + ZOOM_HINT)
 
 
 @op(mutates=True)
@@ -52,12 +86,16 @@ def sound_compare(project: str, a: str, b: str, a_window: list = None, b_window:
 def instrument_fit(project: str, target: str, instrument, params: dict, notes: str = '0 C4 1',
                    length_sec: float = None, fx: list = None, iters: int = 80, save_as: str = None,
                    apply_to_track: str = None, target_window: list = None, seed: int = 0, fmin: float = 25.0,
-                   fmax: float = 16000.0) -> str:
-    """Search instrument parameters so its sound matches a target (spectrum + envelope + width).
+                   fmax: float = 16000.0, wait: str = '10m') -> str:
+    """Search instrument parameters so its sound matches a target (spectrum + envelope + width; a band more than
+    20 dB off costs extra and the reply warns of it).
     target: a source like 'sound:refsnare' (cut one first with sound_import); instrument: dict, 'preset:x' or
     'track:<name>' (start from that track's instrument); params: {"path": [lo, hi]} e.g. {"tone_hz": [100, 250],
     "filter.cutoff": [300, 8000], "oscs.0.detune": [0, 40]}; notes: what to play (beats at project tempo; use the
-    target's pitch); fmin/fmax restrict the spectral match to a range (e.g. ignore kick bleed below 70 Hz). Saves the result as sound save_as and/or sets it on apply_to_track."""
+    target's pitch); fmin/fmax restrict the spectral match to a range (e.g. ignore kick bleed below 70 Hz). Saves the result as sound save_as and/or sets it on apply_to_track.
+    wait: when the machine is busy, stand in line this long ('10m' default, '0' refuses at once), as render does.
+    Reach for it when a drum or a sound must have the genre's or the reference's character (a snare, kick or bass
+    that sounds dated or generic): fit it to a hit from analyze_kit's components or sound_extract."""
     P = _load(project)
     if isinstance(instrument, str) and instrument.startswith('track:'):
         base = P.track(instrument[6:]).get('instrument')
@@ -91,9 +129,15 @@ def instrument_fit(project: str, target: str, instrument, params: dict, notes: s
     best, d1, d0, vals = SD.fit(full, params, tdesc, notes_sec, L, fx, P.d['bpm'], iters, seed, fmin=fmin, fmax=fmax,
                                 root=P.root)
     y = SD.render_oneshot(best['inst'], notes_sec, L, best['fx'], P.d['bpm'], root=P.root)
-    _, cmp_txt = SD.compare_text(SD.descriptor(y), tdesc, 'fitted', target.split(':')[-1], fmin, fmax)
+    ydesc = SD.descriptor(y)
+    _, cmp_txt = SD.compare_text(ydesc, tdesc, 'fitted', target.split(':')[-1], fmin, fmax, warn=False,
+                                 **SD.FIT_SCORE)
     out = [f"fit: distance {d0:.2f} -> {d1:.2f} after {iters} renders",
            "fitted params: " + json.dumps({k: round(v, 4) for k, v in vals.items()})]
+    far = SD.far_warning(ydesc, tdesc, fmin, fmax, 'fitted', 'target')
+    if far:
+        out.append(far + "; widen or change the params that make that band (an oscillator's octave or level, the "
+                         "filter) and fit again")
     # keep only the keys the caller gave plus type, so the stored instrument stays readable
     compact = json.loads(json.dumps(base))
     for k in params:
@@ -128,7 +172,10 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     (0-based within the bar, 16ths by default) over bars [a, b] (which='all'|'odd'|'even'; every=8 takes bars
     a, a+8, a+16... i.e. the same position of an 8-bar loop), aligned by
     cross-correlation. Sounds that repeat identically (drum samples, stabs) add up; everything else averages down.
-    Reports how consistent the occurrences were."""
+    Reports how consistent the occurrences were. Reach for it when a drum in your song sounds dated or generic and
+    the genre's own hit is in a reference: extract it (from analyze_kit's component wav, not the full drum stem,
+    which carries the kick) and fit your sound to it. The extracted hit is a target, not a part: it plays
+    in the song only when the user asked for samples."""
     P = _load(project)
     path, g = P.source(source, bars)
     y, sr = sf.read(path, dtype='float64', always_2d=True)
@@ -174,7 +221,15 @@ def sound_extract(project: str, name: str, source: str, bars: list, step: int, s
     return (f"sound {name!r}: average of {len(aligned)} occurrences (bars {used}"
             f"{f'; skipped {skipped}, past the end' if skipped else ''}); consistency {cons:.2f} "
             f"(1 = identical each time, <0.5 = the event varies or is buried; widen/narrow the bar set)\n"
-            f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}")
+            f"centroid {d['centroid']:.0f} Hz, width {d['width']:.2f}\n"
+            f"a target to fit (instrument_fit target={name!r}), not a part: it plays in the song only when the user "
+            f"asked for samples")
+
+
+def _has_sapi():
+    """Windows SAPI is the engine that gives word and phone timings (tests patch this, never sys.platform)."""
+    import sys
+    return sys.platform == 'win32'
 
 
 def _tts(text, voice, rate, tmp_base):
@@ -187,10 +242,17 @@ def _tts(text, voice, rate, tmp_base):
         tmp = tmp_base + '.wav'
         v = voice or 'David'
         safe = text.replace("'", "''")
+        log = tmp_base + '.txt'        # the engine's word and phone events: true timings (ismail.speech)
         ps = ("Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
               f"$v = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{v}*' }} | Select-Object -First 1; "
-              "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
-              f"$s.Rate = {int(rate)}; $s.SetOutputToWaveFile('{tmp}'); $s.Speak('{safe}'); $s.Dispose()")
+              "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; $global:L = New-Object System.Collections.ArrayList; "
+              "$s.add_SpeakProgress({ param($o, $e) [void]$global:L.Add(\"W`t$($e.AudioPosition.TotalMilliseconds)"
+              "`t$($e.Text)\") }); "
+              "$s.add_PhonemeReached({ param($o, $e) [void]$global:L.Add(\"P`t$($e.AudioPosition.TotalMilliseconds)"
+              "`t$($e.Duration.TotalMilliseconds)`t$((@($e.Phoneme.ToCharArray() | ForEach-Object { [int]$_ })) "
+              "-join '+')\") }); "
+              f"$s.Rate = {int(rate)}; $s.SetOutputToWaveFile('{tmp}'); $s.Speak('{safe}'); $s.Dispose(); "
+              f"[IO.File]::WriteAllLines('{log}', [string[]]$global:L, (New-Object Text.UTF8Encoding $false))")
         r = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=60)
         return tmp, v, r
     wpm = int(round(175 * 1.1 ** max(-10, min(10, rate))))  # SAPI-style rate -10..10 -> words per minute
@@ -214,32 +276,91 @@ def _tts(text, voice, rate, tmp_base):
 
 
 @op(mutates=True)
-def sound_speak(project: str, name: str, text: str, voice: str = None, rate: int = 0, normalize: bool = True) -> str:
+def sound_speak(project: str, name: str, text: str, voice: str = None, rate: int = 0, normalize: bool = True,
+                rhythm: str = None, bpm: float = None) -> str:
     """Text-to-speech into the sound bank with the OS's own engine: Windows SAPI (voices like David, Zira; the
     default is David), macOS `say` (Alex, Samantha ...), Linux espeak-ng (en-us, en-gb ...). A voice the engine
     doesn't have falls back to its default. rate -10..10. Use as a vocoder modulator (vocoder fx,
-    modulator='sound:<name>' or a muted track holding it as audio clips), a sampler source, or an audio clip."""
+    modulator='sound:<name>' or a muted track holding it as audio clips), a sampler source, or an audio clip.
+    On Windows the engine's own word and phone timings are saved next to the sound (sounds/<name>.timings.json);
+    other systems give no timings. Reach for rhythm= when spoken words must land on the beat (a narrator, a chopped
+    vocal line): rhythm='night 0; shift 2; engineer 12 14 16' gives each word one 16th position per syllable
+    (counted from the line's beat 1, negative before it; '-' skips a syllable; one position keeps the word whole),
+    and each syllable is cut where the next one starts and set on its 16th at bpm (default the project's). The
+    sound then starts on its first syllable's slot; the reply says where to place it. Windows SAPI only (the
+    timings come from its events; built in a song and proven there)."""
     import tempfile
     import os
+    import sys
+    from . import speech
+    spec = None
+    if rhythm:
+        if not _has_sapi():
+            raise OpError("rhythm= needs the speech engine's word and phone timings, which only Windows SAPI gives; "
+                          "on this system speak the line without rhythm= and cut it by ear (sound_zoom)")
+        try:
+            spec = speech.parse_rhythm(rhythm)
+        except speech.RhythmError as e:
+            raise OpError(f"rhythm: {e}")
     P = _load(project)
-    tmp, used, r = _tts(text, voice, rate, os.path.join(tempfile.gettempdir(), f"ismail_tts_{os.getpid()}"))
+    base = os.path.join(tempfile.gettempdir(), f"ismail_tts_{os.getpid()}")
+    tmp, used, r = _tts(text, voice, rate, base)
     if r.returncode != 0 or not os.path.exists(tmp):
         raise OpError(f"TTS failed: {(r.stderr or r.stdout).strip()[:300]}")
     voice = used
+    words, end = [], 0.0
+    if os.path.exists(base + '.txt'):
+        with open(base + '.txt', encoding='utf-8-sig') as f:
+            words, end = speech.parse_sapi_log(f.read().splitlines())
+        os.remove(base + '.txt')
     y, sr = sf.read(tmp, dtype='float64', always_2d=True)
     os.remove(tmp)
     y = y.T
     if y.shape[0] == 1:
         y = np.vstack([y, y])
-    a = np.max(np.abs(y), axis=0)
-    nz = np.nonzero(a > 1e-3)[0]
-    if len(nz):
-        y = y[:, nz[0]:nz[-1] + 1]
+    if spec:
+        if not words:
+            raise OpError("the speech engine gave no word timings for this line; try again, or another voice")
+        m = y.mean(0)
+        loud = np.flatnonzero(np.abs(m) > 0.05 * (np.abs(m).max() + 1e-12))
+        bpm = bpm or P.d['bpm']
+        try:
+            m, first = speech.place(words, m, sr, (loud[-1] + 1) / sr if len(loud) else end, spec, bpm)
+        except speech.RhythmError as e:
+            raise OpError(f"rhythm: {e}")
+        y = np.vstack([m, m])
+        nz = np.nonzero(np.abs(m) > 1e-4)[0]
+        y = y[:, :nz[-1] + 1] if len(nz) else y
+        shift = 0.0
+    else:
+        a = np.max(np.abs(y), axis=0)
+        nz = np.nonzero(a > 1e-3)[0]
+        shift = nz[0] / sr if len(nz) else 0.0
+        if len(nz):
+            y = y[:, nz[0]:nz[-1] + 1]
     if normalize:
         y = y / (np.max(np.abs(y)) + 1e-12) * 0.891
-    _write_sound(P, name, y, sr, note=f"tts '{text}' ({voice})")
+    _write_sound(P, name, y, sr, note=f"tts '{text}' ({voice})" + (f" on rhythm '{rhythm}' at {bpm:g} BPM" if spec else ''))
     P.save()
-    return f"sound {name!r}: {y.shape[1] / sr:.2f}s of speech '{text}' ({voice}, {sr} Hz)"
+    out = f"sound {name!r}: {y.shape[1] / sr:.2f}s of speech '{text}' ({voice}, {sr} Hz)"
+    if words:
+        import json
+        with open(os.path.join(P.root, 'sounds', f"{name}.timings.json"), 'w', encoding='utf8') as f:
+            json.dump({"engine": "sapi", "text": text, "note": "seconds in the spoken line" +
+                       (" before rhythm= placed it" if spec else " from the sound's start") +
+                       "; phones are SAPI US English phone ids",
+                       "words": [{"word": w, "start": round(ph[0][0] - shift, 4),
+                                  "phones": [[round(t - shift, 4), i] for t, i in ph]} for w, ph in words]},
+                      f, indent=1)
+        out += f"; word and phone timings in sounds/{name}.timings.json ({len(words)} words)"
+    else:
+        out += "; word timings are not available on this OS (Windows SAPI gives them)"
+    if spec:
+        bar16 = 4 * P.bpb
+        out += (f"\nset on 16ths at {bpm:g} BPM: the sound starts on 16th {first:g} of the line, so place it at "
+                f"<the line's bar> {'+' if first >= 0 else '-'} {abs(first) / bar16:g} bars "
+                f"({abs(first):g}/{bar16} of a bar)")
+    return out
 
 
 def _has(d, path):
@@ -263,12 +384,13 @@ def _set_deep(d, path, v):
 @op(mutates=True)
 @heavy()
 def track_fit(project: str, track: str, params: dict, bars: list, iters: int = 30, apply: bool = False,
-              seed: int = 0) -> str:
+              seed: int = 0, wait: str = '10m') -> str:
     """Tune a track IN CONTEXT: render the track's whole stem group (stem_map) over bars [a, b] and score it against
     the same window of the reference stem with the perceptual (CLAP) metric plus band levels. params:
     {path: [lo, hi]} with 'inst.<param path>' (inst.filter.cutoff, inst.oscs.0.detune ...), 'fx.<i>.<param>',
     'volume_db' or 'pan'. 8-16 bars and 20-40 iterations is a good budget (each iteration renders the window).
-    apply=True writes the best values into the track."""
+    apply=True writes the best values into the track. wait: when the machine is busy, stand in line this long
+    ('10m' default, '0' refuses at once), as render does."""
     from . import trackfit as TF
     from .api_cmp import ref_stems
     P = _load(project)
@@ -570,14 +692,23 @@ def sound_autotune(path: str, key: str = 'C', scale: str = 'chromatic', notes: l
 
 @op(mutates=True)
 def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: float = -16.0, tp: float = -1.0,
-               sr: int = 48000, out: str = None, fade_in_s: float = 0.0, fade_out_s: float = 0.4) -> str:
+               sr: int = 48000, out: str = None, fade_in_s: float = 0.0, fade_out_s: float = 0.4,
+               mp3_margin_db: float = 0.0, tp_catch: bool = True, mp3: bool = False,
+               mp3_catch_db: float = 1.2) -> str:
     """Master a finished cue (a teaser, a stinger, a song for posting) for delivery: cut source to start_s..end_s
     (seconds; end_s=None keeps the rest), fade the ends (cos^2; 0.4 s out by default), resample to sr, then ONE fixed
-    gain to `lufs` integrated (BS.1770). Only if that gain puts the true peak (4x oversampled) over `tp` dBTP does a
-    lookahead peak limiter take the excess, and its gain reduction is reported. Never a dynamic loudness ride (ffmpeg
-    loudnorm falls back to one on some files). Writes 24-bit wav to out= (default <source>_master.wav beside it); a
-    file already there is moved to old/ beside it first, never overwritten. -16 LUFS / -1 dBTP suits most platforms;
-    -14 / -1 for a louder stream. Read the report before anyone listens: it is the measurement line for the round."""
+    gain to `lufs` integrated (BS.1770). Only if that gain puts the true peak (4x oversampled) over the ceiling does a
+    lookahead peak limiter take the excess, and its gain reduction is reported; then a true-peak catch (4x
+    oversampled, +-1.5 ms lookahead, 25 ms release, no re-gain after it) takes whatever the limiter left, so the wav
+    ends at or under `tp`. With the catch the limiter gets up to 6 rounds, each aiming lower by what the last re-gain
+    put over. mp3=True also writes a 320k mp3 beside the wav, made from a copy caught again at tp - mp3_catch_db (a
+    320k encode lands up to 1.25 dB over its wav, so 1.2 keeps it under `tp`); only the mp3 gets that catch, the wav
+    keeps its loudness, and the decoded mp3's true peak is reported. mp3_margin_db lowers the wav's own ceiling to
+    tp - mp3_margin_db (0 by default). tp_catch=False is the master from before (3 plain rounds, no catch). Never a
+    dynamic loudness ride (ffmpeg loudnorm falls back to one on some files). Writes 24-bit wav to out= (default
+    <source>_master.wav beside it, the mp3 as <out>.mp3); a file already there is moved to old/ beside it first,
+    never overwritten. -16 LUFS / -1 dBTP suits most platforms; -14 / -1 for a louder stream. Read the report
+    before anyone listens: it is the measurement line for the round."""
     import shutil
     import time
     from . import master as M
@@ -591,34 +722,67 @@ def master_cue(source: str, start_s: float = 0.0, end_s: float = None, lufs: flo
         raise OpError(f"lufs={lufs} is outside -40..-5: delivery targets are about -16 (posts) or -14 (streams)")
     if tp > 0:
         raise OpError(f"tp={tp} dBTP would allow clipping: keep the ceiling at or under 0, -1 is usual")
+    for name, v in (('mp3_margin_db', mp3_margin_db), ('mp3_catch_db', mp3_catch_db)):
+        if not 0 <= v <= 3:
+            raise OpError(f"{name}={v} is outside 0..3: a 320k mp3 peaks up to 1.25 dB over its wav, so "
+                          f"mp3_catch_db={M.MP3_CATCH_DB:g} keeps the mp3 under tp; mp3_margin_db=0 keeps the wav "
+                          f"at tp")
+    if mp3 and not M._ffmpeg():
+        raise OpError("mp3=True needs ffmpeg on PATH (or config_set('ffmpeg', <path>)); or master the wav alone "
+                      "(mp3=False)")
     try:
-        y, out_sr, r = M.master(y, in_sr, start_s, end_s, lufs, tp, int(sr), fade_in_s, fade_out_s)
+        y, out_sr, r = M.master(y, in_sr, start_s, end_s, lufs, tp, int(sr), fade_in_s, fade_out_s,
+                                mp3_margin_db=float(mp3_margin_db), tp_catch=bool(tp_catch))
     except ValueError as e:
         raise OpError(str(e))
     if out is None:
         out = os.path.splitext(source)[0] + '_master.wav'
     if os.path.abspath(out) == os.path.abspath(source):
         raise OpError("out= is the source itself: give a new name (the source is never overwritten)")
+    mp3_out = os.path.splitext(out)[0] + '.mp3' if mp3 else None
     moved = None
-    if os.path.exists(out):
-        old = os.path.join(os.path.dirname(os.path.abspath(out)), 'old')
-        os.makedirs(old, exist_ok=True)
-        stem = os.path.splitext(os.path.basename(out))[0]
-        moved = os.path.join(old, f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
-        shutil.move(out, moved)
+    for path in (out, mp3_out):
+        if path and os.path.exists(path):
+            old = os.path.join(os.path.dirname(os.path.abspath(path)), 'old')
+            os.makedirs(old, exist_ok=True)
+            stem, ext = os.path.splitext(os.path.basename(path))
+            dest = os.path.join(old, f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}{ext}")
+            shutil.move(path, dest)
+            moved = moved or dest
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)     # out='master/x.wav' in a new folder (ledger:M374)
     sf.write(out, y, out_sr, subtype='PCM_24')
+    mp3_line = None
+    if mp3_out:
+        try:
+            mgr, mtp = M.write_mp3(y, out_sr, mp3_out, tp - mp3_catch_db)
+        except RuntimeError as e:
+            raise OpError(f"the wav is written ({out}) but its mp3 failed: {e}")
+        mp3_line = (f"mp3 -> {mp3_out} (320k, from a copy caught at {tp - mp3_catch_db:g} dBTP: "
+                    + (f"{-mgr:.2f} dB at most" if mgr < 0 else "nothing over it")
+                    + (f"; decoded true peak {mtp:.2f} dBTP" if mtp is not None else '') + ")")
+        if mtp is not None and mtp > tp:
+            mp3_line += f"\nWARNING: the mp3 peaks {mtp - tp:.2f} dB over {tp:g}: raise mp3_catch_db"
     lim = (f"limiter took {-r['limiter_gr_db']:.1f} dB at most (the gain alone would peak at "
            f"{r['peak_after_gain_dbtp']:.1f} dBTP)" if r['limiter_gr_db'] < 0 else
            f"no limiting (peak {r['peak_after_gain_dbtp']:.1f} dBTP after the gain)")
+    ceil = r['ceiling_dbtp']
+    aim = f"{tp:g}" if ceil == tp else f"{tp:g}, the wav aimed at {ceil:g} (mp3_margin_db)"
     lines = [f"mastered -> {out}" + (f" (the old one is now {moved})" if moved else ''),
              f"{r['length_s']:.2f} s, {r['sr']} Hz, {r['channels']} ch, 24-bit; cut {r['trimmed'][0]:.2f}-"
              f"{r['trimmed'][1]:.2f} s of the source",
-             f"measured: {r['lufs']:.1f} LUFS integrated, true peak {r['true_peak_dbtp']:.1f} dBTP (target {lufs:g} / "
-             f"{tp:g}); source was {r['source_lufs']:.1f} LUFS, gain {r['gain_db']:+.1f} dB; {lim}"]
+             f"measured: {r['lufs']:.1f} LUFS integrated, true peak {r['true_peak_dbtp']:.2f} dBTP (target {lufs:g} / "
+             f"{aim}); source was {r['source_lufs']:.1f} LUFS, gain {r['gain_db']:+.1f} dB; {lim}"]
+    if r['catch_gr_db'] < 0:
+        lines.append(f"true-peak catch took {-r['catch_gr_db']:.2f} dB at most (the limiter's rounds left peaks over "
+                     f"{ceil:g}); no re-gain after it, so the loudness lands {r['lufs'] - lufs:+.2f} LU from the "
+                     f"target")
     if r['over_ceiling']:
-        lines.append(f"WARNING: still {r['true_peak_dbtp'] - tp:.1f} dB over the ceiling after {M.ROUNDS} rounds: "
-                     f"the target is too loud for this mix; try lufs={lufs - 2:g}")
+        lines.append(f"WARNING: still {r['true_peak_dbtp'] - ceil:.1f} dB over the ceiling after "
+                     f"{M.TP_ROUNDS if tp_catch else M.ROUNDS} rounds: "
+                     f"the target is too loud for this mix; try lufs={lufs - 2:g}, or tp_catch=True")
     elif r['limiter_gr_db'] < -3:
         lines.append(f"note: over 3 dB of limiting can be heard on transients; lufs={lufs - 2:g} keeps them")
+    if mp3_line:
+        lines.append(mp3_line)
     lines.append("next: these lines are the cue's measurement; then the person listens to the file")
     return '\n'.join(lines)

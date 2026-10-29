@@ -10,7 +10,7 @@ Words about the work only. Never record emotion, mood, health or any inference a
 measures their eloquence in the vernacular, nothing else. The file is local (songs/_user/, never committed), one
 per machine with a `who` on every entry, and nothing in it leaves the machine without the person's yes.
 
-Storage: append-only JSON lines at $ISMAIL_LEXICON, else <songs>/_user/lexicon.jsonl. An update is a new line with
+Storage: append-only JSON lines at <songs>/_user/lexicon.jsonl (the lexicon setting moves it). An update is a new line with
 the same id; the latest line of an id wins, so the history of a word is kept.
 """
 import contextvars
@@ -22,6 +22,7 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 
 from .handoffs import SONGS
+from . import settings
 
 CRAFTS = ('composer', 'arranger', 'performer', 'sound designer', 'recording engineer', 'mixing engineer',
           'mastering engineer', 'producer', 'dj', 'director', 'cinematographer', 'colourist', 'editor',
@@ -44,7 +45,7 @@ _SCOPED = contextvars.ContextVar('ismail_lexicon_file', default=None)
 
 
 def path():
-    return _SCOPED.get() or os.environ.get('ISMAIL_LEXICON') or os.path.join(SONGS, '_user', 'lexicon.jsonl')
+    return _SCOPED.get() or settings.get('lexicon') or os.path.join(SONGS, '_user', 'lexicon.jsonl')
 
 
 @contextmanager
@@ -136,8 +137,10 @@ def _norm_craft(craft):
     return c
 
 
-def note(said=None, means=None, craft=None, song=None, where=None, outcome=None, why=None, who='user', id=None):
-    """Add an entry, or update entry `id` (means, craft, outcome, why). -> the entry as stored."""
+def note(said=None, means=None, craft=None, song=None, where=None, outcome=None, why=None, who='user', id=None,
+         track=None, confirmed=None):
+    """Add an entry, or update entry `id` (means, craft, outcome, why, track). -> the entry as stored. track: the part
+    the words name (ledger:M253); confirmed: where the person named it after hearing it ('feedback r3'), else None."""
     now = time.strftime('%Y-%m-%dT%H:%M:%S')
     if outcome is not None and outcome not in OUTCOMES:
         raise ValueError(f"outcome {outcome!r}: use one of {', '.join(OUTCOMES)}")
@@ -145,16 +148,17 @@ def note(said=None, means=None, craft=None, song=None, where=None, outcome=None,
         means = [m.strip() for m in means.split(';') if m.strip()]
     craft = _norm_craft(craft)
     with _lock():
-        return _note(said, means, craft, song, where, outcome, why, who, id, now)
+        return _note(said, means, craft, song, where, outcome, why, who, id, now, track, confirmed)
 
 
-def _note(said, means, craft, song, where, outcome, why, who, id, now):
+def _note(said, means, craft, song, where, outcome, why, who, id, now, track=None, confirmed=None):
     if id:
         cur = {e['id']: e for e in entries()}
         if id not in cur:
             raise ValueError(f"no entry {id!r}; lexicon_find to look one up")
         rec = {'id': id, 'date': now}
-        for k, v in (('means', means), ('craft', craft), ('outcome', outcome), ('why', why), ('where', where)):
+        for k, v in (('means', means), ('craft', craft), ('outcome', outcome), ('why', why), ('where', where),
+                     ('track', track), ('confirmed', confirmed)):
             if v is not None:
                 rec[k] = v
         if said:
@@ -167,6 +171,8 @@ def _note(said, means, craft, song, where, outcome, why, who, id, now):
     rec = {'id': f'L{n:04d}', 'said': said.strip(), 'who': who, 'first': now, 'date': now, 'song': song,
            'where': where, 'means': means or [], 'craft': craft, 'outcome': outcome or 'open', 'why': why,
            'trade': round(trade_share(said), 3)}
+    if track:
+        rec['track'], rec['confirmed'] = track, confirmed
     _append(rec)
     return rec
 
@@ -190,7 +196,9 @@ def find(text, who='user', limit=8):
 def line(e):
     m = '; '.join(e.get('means') or []) or '(not mapped yet)'
     tail = ' '.join(x for x in (e.get('craft') or '', e.get('song') or '', e.get('where') or '') if x)
-    return (f"{e['id']} \"{e['said']}\" -> {m} | {e.get('outcome', 'open')}" + (f": {e['why']}" if e.get('why') else '')
+    part = (f" | the part {e['track']}" + (f", confirmed by ear ({e['confirmed']})" if e.get('confirmed') else
+                                          ", not confirmed by them yet") if e.get('track') else '')
+    return (f"{e['id']} \"{e['said']}\" -> {m}{part} | {e.get('outcome', 'open')}" + (f": {e['why']}" if e.get('why') else '')
             + (f" | {tail}" if tail else ''))
 
 

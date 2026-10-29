@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "ismail": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.12",
+        "--from",
+        "ismail==0.4.3",
+        "ismail",
+        "mcp"
+      ],
+      "startup_timeout_sec": 300
+    }
+  }
+}

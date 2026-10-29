@@ -1,23 +1,39 @@
 """The Blender side of the VR scene editor. Any build script execs this at its end (after the scene is built, before
 it renders):
-    exec(open('.../vr/blender_bridge.py').read())
-VR_EXPORT=<dir>   writes <dir>/scene.glb (Y-up glTF, modifiers applied, curves as meshes, volumes left out) and
-                  <dir>/manifest.json (every object's Blender name, type, world location and quaternion, light energy
-                  and colour, material base colours), then quits without rendering.
-VR_PASS=<f>[;<f>] a derived scene's passes (world.json derives_from + pass), run in order on the built parent
-                  scene before the edits (each file is exec'd with S = the scene); paths joined by os.pathsep
-VR_DIET=1         the Quest diet (quest.py next to this file, found through VR_BRIDGE) after the passes and
-                  edits, before the export: merged groups, triangle and texture budgets, MakeHuman skin.
-                  A room script that defines stage_diet() before exec'ing this file gets its own diet instead
-                  (it must skip that diet in its build when VR_DIET is set, so the passes see whole objects)
-VR_EDITS=<file>   applies an edits.json written by the editor (Blender world space, Z-up):
-                  {"objects": {name: {"location": [x,y,z], "quaternion": [w,x,y,z], "scale": [x,y,z]}},
-                   "lights": {name: {"energy": W, "color": [r,g,b]}},
-                   "materials": {name: {"base_color": [r,g,b]}}}"""
+    import sys
+    exec(open(sys.vr_job['bridge']).read())
+stage_scene_export runs the build with its job readable as sys.vr_job (a dict, also saved as
+<scenes>/_stage/job_<scene>.json):
+export    <dir>: writes <dir>/scene.glb (Y-up glTF, modifiers applied, curves as meshes, volumes left out) and
+          <dir>/manifest.json (every object's Blender name, type, world location and quaternion, light energy
+          and colour, material base colours), then quits without rendering.
+passes    a derived scene's passes (world.json derives_from + pass), run in order on the built parent scene before
+          the edits (each file is exec'd with S = the scene)
+diet      true: the Quest diet (quest.py next to this file) after the passes and edits, before the export: merged
+          groups, triangle and texture budgets, MakeHuman skin. A room script that defines stage_diet() before
+          exec'ing this file gets its own diet instead (it must skip that diet in its build when the job's diet is
+          true, so the passes see whole objects)
+edits     <file>: applies an edits.json written by the editor (Blender world space, Z-up):
+          {"objects": {name: {"location": [x,y,z], "quaternion": [w,x,y,z], "scale": [x,y,z]}},
+           "lights": {name: {"energy": W, "color": [r,g,b]}},
+           "materials": {name: {"base_color": [r,g,b]}}}
+switches  world.json build.switches plus the line's pass_switches ({"VR_DETAIL": "1"}: the detailed export)
+scene, scenes, bridge   the scene's name, the scenes folder, this file
+Without a job (a build run by hand, or before 0.4.3) the same values come from the VR_EXPORT, VR_PASS, VR_DIET,
+VR_EDITS, VR_BRIDGE and VR_DETAIL environment variables, which the export still sets until 0.5 (ledger:M382)."""
 import json
 import os
+import sys
 
 import bpy
+
+_VR_JOB = getattr(sys, 'vr_job', None)
+if not isinstance(_VR_JOB, dict):                  # no job: a build run by hand, or the pre-0.4.3 variables
+    _e = os.environ
+    _VR_JOB = {'export': _e.get('VR_EXPORT'), 'bridge': _e.get('VR_BRIDGE'), 'edits': _e.get('VR_EDITS'),
+           'passes': [p for p in _e.get('VR_PASS', '').split(os.pathsep) if p], 'diet': bool(_e.get('VR_DIET')),
+           'switches': {k: _e[k] for k in ('VR_DETAIL', 'VR_TRI_MAX') if _e.get(k)}}
+_VR_DETAIL = bool((_VR_JOB.get('switches') or {}).get('VR_DETAIL') or os.environ.get('VR_DETAIL'))
 
 
 def _base_color(m):
@@ -68,7 +84,7 @@ def vr_export(out_dir):
         man['materials'][m.name] = {'base_color': col}
     bpy.context.view_layer.update()
     for ob in S_.objects:
-        if os.environ.get('VR_DETAIL') and ob.hide_render:
+        if _VR_DETAIL and ob.hide_render:
             continue                                               # stand-ins a built part replaced (not exported)
         loc, q, sc = ob.matrix_world.decompose()
         man['objects'][ob.name] = {'type': ob.type, 'location': list(loc), 'quaternion': list(q), 'scale': list(sc)}
@@ -100,9 +116,9 @@ def vr_export(out_dir):
     bpy.ops.export_scene.gltf(filepath=os.path.join(out_dir, 'scene.glb'), export_format='GLB', export_apply=True,
                               export_lights=True, export_cameras=True, export_yup=True,
                               export_rest_position_armature=False,   # skinned characters in their posed state, not the T-pose
-                              use_renderable=bool(os.environ.get('VR_DETAIL')),
+                              use_renderable=_VR_DETAIL,
                               # the built club's pictures as WebP, alpha kept (the PNGs were 30 of 43 MB; the Quest stalled)
-                              export_image_format='WEBP' if os.environ.get('VR_DETAIL') else 'AUTO',
+                              export_image_format='WEBP' if _VR_DETAIL else 'AUTO',
                               export_image_quality=80,
                               export_attributes=True)                # only names starting with _ (clock.js growth: _born ...)
     with open(os.path.join(out_dir, 'manifest.json'), 'w', encoding='utf-8') as f:
@@ -160,22 +176,20 @@ def vr_apply(path):
     print('VR EDITS applied from', path)
 
 
-for _pass in [p for p in os.environ.get('VR_PASS', '').split(os.pathsep) if p]:
+for _pass in _VR_JOB.get('passes') or []:
     print('VR PASS', _pass)
     exec(compile(open(_pass, encoding='utf-8').read(), _pass, 'exec'),
          {'__name__': '__vr_pass__', '__file__': _pass, 'bpy': bpy, 'S': bpy.context.scene, 'os': os})
     bpy.context.view_layer.update()
-if os.environ.get('VR_EDITS'):
-    vr_apply(os.environ['VR_EDITS'])
-if os.environ.get('VR_DIET') and os.environ.get('VR_EXPORT'):
-    import sys as _sys
-    _sys.path.insert(0, os.path.dirname(os.environ.get('VR_BRIDGE') or os.path.abspath('.')))
+if _VR_JOB.get('edits'):
+    vr_apply(_VR_JOB['edits'])
+if _VR_JOB.get('diet') and _VR_JOB.get('export'):
+    sys.path.insert(0, os.path.dirname(_VR_JOB.get('bridge') or os.path.abspath('.')))
     if callable(globals().get('stage_diet')):                      # the room's own diet (merges it built for)
         stage_diet()                                                # noqa: F821
     else:
         import quest as _quest                                      # noqa: E402
         _quest.quest_diet()
-if os.environ.get('VR_EXPORT'):
-    vr_export(os.environ['VR_EXPORT'])
-    import sys
+if _VR_JOB.get('export'):
+    vr_export(_VR_JOB['export'])
     sys.exit(0)

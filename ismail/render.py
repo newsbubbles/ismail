@@ -9,6 +9,7 @@ import numpy as np
 import soundfile as sf
 
 from . import dsp, fx as fxmod, instruments, notation, voices
+from . import settings
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
 PRE_ROLL_BEATS = 8  # rendered before a partial window so tails/sidechains settle
@@ -146,20 +147,25 @@ class Renderer:
         self.pre_beats = 0 if self.full else min(PRE_ROLL_BEATS, self.win_b0)
         self.r_b0 = self.win_b0 - self.pre_beats             # beat where rendering starts
         tail = project.get('tail_sec', 2.0)
-        t0 = 0.0 if self.full else self.offset + self.r_b0 * self.spb
+        # a window's buffer starts on a whole song sample: every note then rounds to the sample it has in the whole
+        # song's render (a pre-roll that is a fraction of a sample long moved some notes by one, ledger:M285(a))
+        t0 = 0.0 if self.full else np.floor((self.offset + self.r_b0 * self.spb) * self.sr + 1e-6) / self.sr
         t1 = self.offset + self.win_b1 * self.spb + tail
         self.t0 = t0
+        self.b_t0 = (t0 - self.offset) / self.spb             # the song beat at the buffer's first sample
         self.n = int((t1 - t0) * self.sr)
         # sample index (may be negative) where song beat 0 falls inside the render buffer
         self.offset_samples_in_window = int(round((self.offset - t0) * self.sr))
         self.only = only
         self.post_fx = {}
+        self.pre_master_peak = {}   # each audible track's peak (dB) after its fader, before the master chain
         self.gain_reduction = {}
         self.sounds = {}
         self.use_cache = cache
         self.cache_dir = os.path.join(root, 'cache')
         self.stats = {}
         self.early = {}          # track -> notes nudged before the song's first sample (moved to it)
+        self.notes_report = {}   # track -> summary lines about single notes (a mimic take far over its neighbours)
         instruments.set_resolvers(self.load_sound, self.load_table)
 
     # ------------------------------------------------------------------ sounds
@@ -263,8 +269,9 @@ class Renderer:
 
     # ------------------------------------------------------------------ cache
     def cache_key(self, name, tr, dep_keys):
+        # the cached file holds the track before its fader and pan, so a mix move reuses it
         sounds = sorted(_sounds_used(tr))
-        blob = json.dumps([tr, self.bpm, self.sr, self.offset, self.t0, self.n, self.r_b0, self.win_b1,
+        blob = json.dumps([_dry(tr), self.bpm, self.sr, self.offset, self.t0, self.n, self.r_b0, self.win_b1,
                            [(s, self.sound_mtime(s)) for s in sounds], dep_keys, _CODE_VERSION,
                            voices.fingerprint(tr.get('instrument'), self.root)],
                           sort_keys=True, default=str)
@@ -275,25 +282,26 @@ class Renderer:
         n = self.n
         inst = instruments.normalize(tr['instrument']) if tr.get('instrument') else None
         auto = tr.get('automation', {})
-        inst_auto, fx_auto, mix_auto = {}, {}, {}
+        inst_auto, fx_auto = {}, {}
         for key, pts in auto.items():
-            if not pts:
+            if not pts or key in _MIX_AUTO:     # fader and pan curves: mix_track
                 continue
-            curve = automation_curve(pts, key, self.r_b0 if not self.full else -self.offset / self.spb,
+            curve = automation_curve(pts, key, self.b_t0,
                                      n, self.bpm, self.sr, self.offset)
             if key.startswith('inst.'):
                 inst_auto[key[5:]] = curve
             elif key.startswith('fx.'):
                 _, i, pname = key.split('.', 2)
                 fx_auto[(int(i), pname)] = curve
-            else:
-                mix_auto[key] = curve
         y = np.zeros((2, n))
         if inst is not None:
             notes = self.track_notes_sec(tr, name)
             if notes:
+                rep = []
                 y += instruments.render_instrument(inst, notes, n, inst_auto, self.bpm, self.sr, self.root,
-                                                  self.r_b0 if not self.full else -self.offset / self.spb, self.bpb)
+                                                  self.b_t0, self.bpb, rep)
+                if rep:
+                    self.notes_report[name] = rep
         for clip in tr.get('audio', []):
             snd = self.load_sound(clip['sound'])
             s0 = int(round((self.beat_to_win_sec(clip['at_beat']) + tr.get('offset_ms', 0.0) / 1000.0) * self.sr))
@@ -310,6 +318,13 @@ class Renderer:
         ctx = Ctx(self, name, fx_auto, n)
         for i, f in enumerate(tr.get('fx', [])):
             y = fxmod.apply_fx(y, fxmod.normalize(f), ctx, i)
+        return y
+
+    def mix_track(self, tr, y):
+        """The track's fader and pan, applied after the cached render."""
+        auto = tr.get('automation', {})
+        mix_auto = {k: automation_curve(auto[k], k, self.b_t0, self.n, self.bpm, self.sr, self.offset)
+                    for k in _MIX_AUTO if auto.get(k)}
         # volume automation is an offset on top of the track's volume_db fader (0 = unchanged)
         vol = tr.get('volume_db', 0.0) + mix_auto.get('volume_db', 0.0)
         pan = mix_auto.get('pan', tr.get('pan', 0.0))
@@ -334,18 +349,29 @@ class Renderer:
                               self.deps(self.project.get('master', {})))
         for name in order:
             tr = tracks[name]
-            keys[name] = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
-            path = os.path.join(self.cache_dir, keys[name] + '.npy')
+            dry = self.cache_key(name, tr, [keys[d] for d in sorted(self.deps(tr))])
+            # tracks that read this one (sidechain, vocoder) hear it after the fader, so their key holds the mix
+            keys[name] = hashlib.sha1(json.dumps([dry, _mix_of(tr)], sort_keys=True, default=str)
+                                      .encode()).hexdigest()[:20]
+            path = os.path.join(self.cache_dir, dry + '.npy')
             t0 = time.time()
+            rpath = path[:-4] + '.notes.json'
             if self.use_cache and os.path.exists(path):
                 y = np.load(path).astype(np.float64)
                 cached = True
+                if os.path.exists(rpath):        # a cached track repeats its note lines
+                    with open(rpath, encoding='utf-8') as fh:
+                        self.notes_report[name] = json.load(fh)
             else:
                 y = self.render_track(name, tr)
                 cached = False
                 if self.use_cache:
                     os.makedirs(self.cache_dir, exist_ok=True)
                     np.save(path, y.astype(np.float32))
+                    if self.notes_report.get(name):
+                        with open(rpath, 'w', encoding='utf-8') as fh:
+                            json.dump(self.notes_report[name], fh)
+            y = self.mix_track(tr, y)
             if name in sources:
                 self.post_fx[name] = y
             self.stats[name] = {'sec': round(time.time() - t0, 2), 'cached': cached}
@@ -355,6 +381,7 @@ class Renderer:
             if not audible:
                 continue
             stems[name] = _Stem(y)
+            self.pre_master_peak[name] = float(20 * np.log10(np.max(np.abs(y)) + 1e-12))
             out = tr.get('output', 'master')
             if out != 'master' and out not in buses:
                 raise RenderError(f"track {name!r} outputs to unknown bus {out!r}; buses: {list(buses)}")
@@ -369,7 +396,7 @@ class Renderer:
             for key, pts in (bus.get('automation') or {}).items():
                 if not pts:
                     continue
-                curve = automation_curve(pts, key, self.r_b0 if not self.full else -self.offset / self.spb,
+                curve = automation_curve(pts, key, self.b_t0,
                                          self.n, self.bpm, self.sr, self.offset)
                 if key.startswith('fx.'):
                     _, i, pname = key.split('.', 2)
@@ -401,7 +428,7 @@ class Renderer:
         vol = m.get('volume_db', 0.0)
         pts = (m.get('automation') or {}).get('volume_db')
         if pts:  # master fade: dB offset curve, like track volume automation
-            vol = vol + automation_curve(pts, 'volume_db', self.r_b0 if not self.full else -self.offset / self.spb,
+            vol = vol + automation_curve(pts, 'volume_db', self.b_t0,
                                          self.n, self.bpm, self.sr, self.offset)
         master = master * dsp.undb(vol)
         # stems carry the master gain curve (fades), so they line up with stems separated from a finished master
@@ -422,7 +449,7 @@ def _code_hash():
     # any change to the synthesis/effect code invalidates cached track renders
     h = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py'):
+    for f in ('dsp.py', 'instruments.py', 'fx.py', 'render.py', 'rig.py', 'spatial.py', 'mimic.py'):
         with open(os.path.join(here, f), 'rb') as fh:
             h.update(fh.read())
     return h.hexdigest()[:12]
@@ -431,14 +458,31 @@ def _code_hash():
 _CODE_VERSION = _code_hash()
 
 
+# a track's mix settings: applied after the cached render, so they stay out of its cache key
+_MIX = ('volume_db', 'pan', 'sends', 'output', 'mute', 'solo')
+_MIX_AUTO = ('volume_db', 'pan')
+
+
+def _dry(tr):
+    out = {k: v for k, v in tr.items() if k not in _MIX}
+    auto = {k: v for k, v in (tr.get('automation') or {}).items() if k not in _MIX_AUTO}
+    if 'automation' in tr:
+        out['automation'] = auto
+    return out
+
+
+def _mix_of(tr):
+    return [tr.get('volume_db', 0.0), tr.get('pan', 0.0),
+            {k: v for k, v in (tr.get('automation') or {}).items() if k in _MIX_AUTO}]
+
+
 def _sounds_used(tr):
     out = set()
 
     def walk(inst):
         if not inst:
             return
-        if inst.get('type') == 'sampler' and inst.get('sound'):
-            out.add(inst['sound'])
+        out.update(instruments.sampler_sound_names(inst))
         if inst.get('type') == 'kit':
             for v in inst['map'].values():
                 walk(v)
@@ -467,19 +511,89 @@ def prune_cache(root, max_bytes=1024 ** 3):
 
 
 def write_mp3(wav_path, mp3_path, bitrate='320k'):
-    """Encode a rendered wav to mp3 with ffmpeg (on PATH, or the binary named by $ISMAIL_FFMPEG)."""
-    import shutil
+    """Encode a rendered wav to mp3 with ffmpeg (on PATH, or the program the ffmpeg setting names)."""
     import subprocess
-    exe = os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    exe = settings.get('ffmpeg')
     if not exe:
-        raise RuntimeError("ffmpeg not found; install it or set ISMAIL_FFMPEG to its path")
-    r = subprocess.run([exe, '-y', '-loglevel', 'error', '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', bitrate,
+        raise RuntimeError("ffmpeg not found; install it or config_set('ffmpeg', <its path>)")
+    r = subprocess.run([exe, '-nostdin', '-y', '-loglevel', 'error', '-i', wav_path, '-codec:a', 'libmp3lame', '-b:a', bitrate,
                         mp3_path], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip()[-300:] or f"ffmpeg exited {r.returncode}")
     return mp3_path
 
 
+def _nlinks(path):
+    try:
+        return os.stat(path).st_nlink
+    except OSError:
+        return 0
+
+
+def _replace(tmp, path, tries=20):
+    """os.replace, retried for about two seconds: on Windows a reader holding `path` open makes it fail a moment."""
+    for i in range(tries):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
 def write_wav(path, y, sr):
+    """24-bit WAV. A name that shares its file with another (latest.wav is a hard link to the named render,
+    ledger:M221) is never written through: the new audio goes to `<path>.writing`, which then replaces the name, so
+    the other name keeps its own sound. A file with one name is written in place, as always."""
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    sf.write(path, np.clip(y.T, -1, 1).astype(np.float32), sr, subtype='PCM_24')
+    data = np.clip(y.T, -1, 1).astype(np.float32)
+    if _nlinks(path) <= 1:
+        sf.write(path, data, sr, subtype='PCM_24')
+        return path
+    tmp = path + '.writing'
+    sf.write(tmp, data, sr, subtype='PCM_24', format='WAV')
+    try:
+        _replace(tmp, path)
+    except OSError as e:
+        raise RuntimeError(f"{path} is open in another program, so the new audio is in {tmp}; close it and render "
+                           f"again ({e})")
+    return path
+
+
+def link_wav(src, dst, y, sr):
+    """Make `dst` a second name for `src`, the WAV just written (renders/latest.wav and renders/<out>.wav: one copy
+    on disk, ledger:M221). A later write to either name replaces that name only (write_wav). Where no link can be
+    made (a drive without hard links, `dst` open in another program), `dst` is written as its own file, as before.
+    -> 'linked' or 'written'."""
+    try:
+        if os.path.exists(dst) and os.path.samefile(src, dst):
+            return 'linked'
+    except OSError:
+        pass
+    tmp = dst + '.link'
+    if not os.path.lexists(tmp):       # one left by a failed swap is a second name for an older render: song_compress
+        try:                           # moves it to _reclaim; until then dst is written as its own file
+            os.link(src, tmp)
+        except OSError:
+            pass
+        else:
+            try:
+                _replace(tmp, dst)
+                return 'linked'
+            except OSError:
+                pass
+    write_wav(dst, y, sr)
+    return 'written'
+
+
+def write_renders(rd, y, sr, out=None):
+    """A render's files in renders/: `<out>.wav` when the render is named, with latest.wav a hard link to it (one
+    copy on disk, ledger:M221); latest.wav alone when it is not. -> {name: 'written' | 'linked'}."""
+    latest = os.path.join(rd, 'latest.wav')
+    named = os.path.join(rd, out + '.wav') if out else None
+    if not named or os.path.abspath(named) == os.path.abspath(latest):
+        write_wav(latest, y, sr)
+        return {'latest.wav': 'written'}
+    write_wav(named, y, sr)
+    return {out + '.wav': 'written', 'latest.wav': link_wav(named, latest, y, sr)}

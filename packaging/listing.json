@@ -1,0 +1,55 @@
+{
+  "_about": "One metadata source for every harness store package (hq:D-213, D-214). python -m ismail.release reads it; the version comes from pyproject.toml. Text under openai.listing is Marketing-approved copy (ismail-business 48580b3, drafts/openai-plugin-2026/listing.md): change it only with Marketing.",
+  "name": "ismail",
+  "author": {"name": "Nate Codes", "url": "https://github.com/newsbubbles"},
+  "homepage": "https://newsbubbles.github.io/ismail/",
+  "repository": "https://github.com/newsbubbles/ismail",
+  "license": "MIT",
+  "marketplace_description": "ismail is an open-source (MIT) music studio that an AI model runs through text. The model writes the song as notes, instrument patches and mix settings, renders it on your machine (the plugin starts the ismail server for you, with uv), and reads every render back as numbers: levels, drum lanes, piano rolls, and comparisons against a reference. It does this because it can't hear. Instruments are built from recorded notes of the real thing, and your own ears decide when a piece is done, through short listening checks. No generative audio model makes the sound.",
+  "short_description": "A DAW for AI agents: write music as text, read the audio back as text, and play it live.",
+  "keywords": ["music", "daw", "audio", "synthesizer", "live", "mcp"],
+  "icon": "assets/logo/apple-touch-icon.png",
+  "skill": "skills/ismail",
+  "server": {
+    "name": "ismail",
+    "command": "uvx",
+    "args": ["--python", "3.12", "--from", "ismail=={version}", "ismail", "mcp"]
+  },
+  "claude-code": {
+    "displayName": "ismail",
+    "marketplace": {
+      "name": "ismail",
+      "description": "ismail, a DAW for AI agents",
+      "owner": {"name": "Nate Codes", "url": "https://github.com/newsbubbles"},
+      "category": "creative",
+      "tags": ["music", "audio", "daw", "live"]
+    }
+  },
+  "openai": {
+    "listing": {
+      "displayName": "ismail DAW",
+      "shortDescription": "Make songs, beats and mixes",
+      "developerName": "Measured Instruments LLC",
+      "category": "Creativity",
+      "capabilities": [],
+      "websiteURL": "https://newsbubbles.github.io/ismail/",
+      "description": "ismail is an open-source (MIT) music studio that an AI model runs through text. The model writes the song as notes, instrument patches and mix settings, renders it on your machine, and reads every render back as numbers: levels, drum lanes, piano rolls, and comparisons against a reference. It does this because it can't hear. Instruments are built from recorded notes of the real thing, and your own ears decide when a piece is done, through short listening checks. No generative audio model makes the sound. This plugin is the skill that teaches the model how to work in ismail. The ismail server itself installs separately on your computer (Python), from https://github.com/newsbubbles/ismail.",
+      "longDescription": "Make songs, beats and mixes with your model as the producer. ismail is an open-source (MIT) studio where every note, sound and mix setting is editable text, so you can see and change everything the model did.\n\nThe skill teaches the model to:\n- plan the piece on a one-page Session Sheet before writing notes\n- build instruments from recorded notes of the real thing\n- read each render back as numbers (levels, drums, chords, structure) and fix what the numbers show\n- match a reference recording with scored comparisons, not by feel\n- check with you through short listening checks, so your ears make the final call\n\nNeeds the ismail server running on your own computer. It installs with Python from the GitHub page, and the skill walks the model through it. It could run wherever the model can run local commands on your computer, such as the Codex app and CLI.",
+      "defaultPrompt": [
+        "Make a 16 bar deep house loop in F minor and render an mp3.",
+        "Recreate the drums of this reference clip, then show me how close the match is.",
+        "Play me my guitar recording and your rebuilt one without saying which is which."
+      ]
+    },
+    "keywords": ["music", "daw", "audio", "synthesizer", "live"],
+    "skill_exclude": ["hooks", "evals", "examples"],
+    "codex": {
+      "startup_timeout_sec": 300,
+      "marketplace": {
+        "name": "ismail",
+        "displayName": "ismail DAW",
+        "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}
+      }
+    }
+  }
+}

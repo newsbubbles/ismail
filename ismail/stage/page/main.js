@@ -41,6 +41,9 @@ import { setPickEmit } from './pickcycle.js';
 import { CAPTURE, runCapture } from './capture.js';
 import { initTrails } from './trails.js';
 import { initCamRec } from './camrec.js';
+import { initSurfaces } from './surfaces.js';
+import { initPointer } from './pointer.js';
+import { ONAIR, ONAIR_FPS, initOnAir } from './onair.js';
 import { initPairing, pairFirst } from './pair.js';
 
 await pairFirst();                                   // in enforce, an unpaired page pairs before it asks for anything
@@ -112,6 +115,9 @@ const music = initMusic(ed, live);
 window.VR_music = music;
 actors.setMusicClock(() => music.now());            // takes played on the music (stage_actor_play at_music)
 initStream(ed, live);
+const surfaces = initSurfaces(ed, live, () => (music.now() || {}).t || 0);   // slides, video, text, a live camera on a material
+initPointer(ed, live, actors);                     // a foam finger where a person points, for the cameras only
+initOnAir(ed, desktop, live);                      // ?onair: the stream's picture, the camera on air only (onair.js)
 // a re-exported room comes in without the grown trees (they hang under the old scene's tree_k items): grow them again
 live.onEmit((type) => { if (type === 'scene_reload' && live.handlers.trees_reload) setTimeout(() => live.handlers.trees_reload({}).catch(() => {}), 500); });
 const stageClock = initClock(ed, live, xr, panels);   // the 4D timeline: keyed objects, tree growth
@@ -266,7 +272,13 @@ ed.renderer.xr.addEventListener('sessionstart', () => {
 });
 ed.renderer.xr.addEventListener('sessionend', () => console.log(`[xr] session ended after ${xrFrames} frames`));
 let replay = null;                                 // replay.js: a take drives the head and hands while nobody is in VR
+let onAirLast = 0;
 ed.renderer.setAnimationLoop(() => {
+  if (ONAIR && !ed.renderer.xr.isPresenting) {     // the on-air page draws at the stream's rate, no faster
+    const t = performance.now();
+    if (t - onAirLast < 1000 / ONAIR_FPS - 2) return;
+    onAirLast = t;
+  }
   const dt = Math.min(clock.getDelta(), 0.1);
   guard('xr', () => xr.update(dt));
   const replaying = !!(replay && guard('replay', () => replay.update()));
@@ -289,7 +301,7 @@ ed.renderer.setAnimationLoop(() => {
   const now = performance.now(), cam = desktop.viewCamera();
   const pose = cam.matrixWorld.elements.map((x) => x.toFixed(5)).join(',');
   if (pose !== lastPose) { lastPose = pose; wake(); }
-  if (now < awakeUntil || now - lastDraw > 1000) { lastDraw = now; desktop.render(); }
+  if (ONAIR || now < awakeUntil || now - lastDraw > 1000) { lastDraw = now; desktop.render(); }
 });
 
 window.VR = {
@@ -438,4 +450,4 @@ wake();
 const st0 = ed.selftest();
 console.log('[vr] ready:', ed.items.length, 'objects; selftest on load:', st0.pass ? 'PASS' : 'FAIL');
 live.pageLoaded(st0);
-if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets });   // a frame-locked capture (capture.js)
+if (CAPTURE) runCapture(ed, { music, clock: stageClock, construct, live, actors, sets: loadSets, surfaces });   // a frame-locked capture (capture.js)

@@ -6,6 +6,9 @@ do that part. They decide whether to share, under what name, and press the butto
 
 ## In the conversation where it was made (the studio)
 
+If ismail runs as an installed release (`version` says so), the work still goes through a clone of the repository:
+`development.md`, "Starting from an installed ismail".
+
 1. Run the inclusion review (`development.md`): is it general, does it work, and does every recording it was
    measured from have a licence that allows it (`ref/SOURCES.md`)?
 2. Ask whether they would like to contribute it. Say in one sentence what that means: it becomes public in the

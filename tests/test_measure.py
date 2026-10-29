@@ -138,3 +138,85 @@ def test_ref_retune_and_levels_from_ref(tmp):
     assert new['file'] != ref and os.path.exists(os.path.join(new['stems_dir'], 'bass.wav')), out
     assert abs(A.tuning(A.load(new['file']))[0]) < 5
     assert new['original']['file'] == ref
+
+
+def test_sections_on_a_window_render_say_where_the_file_starts(tmp):
+    """bossa_gilberto_studio 10-21: sections [1, 4] on a bars 69-92 window said only "no section had 400 ms"."""
+    import json
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=96, length_bars=16)
+    rd = os.path.join(p, 'renders')
+    os.makedirs(rd, exist_ok=True)
+    t = np.arange(int(4 * 2.5 * SR)) / SR
+    sf.write(os.path.join(rd, 'w_9_12.wav'), 0.3 * np.sin(2 * np.pi * 220 * t), SR)
+    with open(os.path.join(rd, api.WINDOWS_FILE), 'w', encoding='utf8') as f:
+        json.dump({'w_9_12.wav': {'bars': [9, 12], 'start_sec': 8 * 2.5}}, f)
+    src = os.path.join(rd, 'w_9_12.wav')
+    with pytest.raises(api.OpError, match=r'starts at song bar 9 and holds bars 9-12.*\[9, 12\]'):
+        OPS['analyze_sections'](p, source=src, sections={'a': [1, 4]})
+    out = OPS['analyze_sections'](p, source=src, sections={'a': [9, 10], 'b': [11, 12]})
+    assert '9-10' in out and '11-12' in out, out
+    out = OPS['analyze_sections'](p, source=src, block=2)       # default blocks follow the window
+    assert '9-10' in out and '11-12' in out and ' 1-2 ' not in out, out
+
+
+def test_sections_read_a_relative_path_from_the_working_directory_first(tmp, monkeypatch):
+    """planet_rock_axel_f_remix 10-24 (ledger:M281 a): songs/<slug>/proj/renders/mix_v7.wav, run from the repo root,
+    answered "not found"; only the project was tried."""
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=120, length_bars=4)
+    work = os.path.join(tmp, 'work')
+    os.makedirs(os.path.join(work, 'sub'))
+    t = np.arange(8 * SR) / SR
+    sf.write(os.path.join(work, 'sub', 'mix.wav'), 0.3 * np.sin(2 * np.pi * 220 * t), SR)
+    monkeypatch.chdir(work)
+    out = OPS['analyze_sections'](p, source='sub/mix.wav', block=2)
+    assert out.startswith('sections of sub/mix.wav ') and '1-2' in out and '3-4' in out, out
+    with pytest.raises(api.OpError) as e:
+        OPS['analyze_sections'](p, source='sub/none.wav')
+    msg = str(e.value)
+    assert 'working directory' in msg and os.path.join(work, 'sub', 'none.wav') in msg, msg
+    assert 'in the project' in msg and os.path.join(p, 'sub', 'none.wav') in msg, msg
+
+
+def test_sections_with_stems_name_the_loudest_part(tmp):
+    """planet_rock_axel_f_remix 10-24 (ledger:M281 b): a vox routed to master carried a build the mix bus had pulled
+    down 9.5 dB, and nothing in the section read said so. A track on a bus counts inside the bus."""
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=240, length_bars=4)
+    api.bus_add(p, 'grp')
+    api.track_add(p, 'bass', instrument={"type": "synth", "oscs": [{"wave": "saw"}], "mono": True}, output='grp')
+    api.track_add(p, 'pad', instrument={"type": "synth", "oscs": [{"wave": "sine"}]}, output='grp', volume_db=-6)
+    api.track_add(p, 'lead', instrument={"type": "synth", "oscs": [{"wave": "square"}]}, volume_db=-3)
+    api.notes_write(p, 'bass', 1, "0 E2 1; 1 G2 1; 2 A2 1; 3 D3 1", repeat=4)
+    api.notes_write(p, 'pad', 1, "0 E3 4", repeat=4)
+    api.notes_write(p, 'lead', 3, "0 A4 2; 2 C5 2", repeat=2)
+    api.automation_set(p, 'bus:grp', 'volume_db', [[1, 0], [2.99, 0], [3, -20]])
+    api.render(p, stems=True, cache=False)
+    out = OPS['analyze_sections'](p, sections={'verse': [1, 2], 'build': [3, 4]})
+    lines = out.splitlines()
+    i = lines.index("loudest parts per section (rms dB against the mix's; tracks to the master and buses):")
+    verse, build = lines[i + 1], lines[i + 2]
+    assert verse.split()[:2] == ['verse', 'bus:grp'] and 'lead' not in verse, out
+    assert build.split()[:2] == ['build', 'lead'] and 'bus:grp' in build, out
+    assert 'bass' not in out and 'pad' not in out, out
+    assert lines[0] == 'sections of render (dB; loudest/quietest = 400 ms windows):', out
+
+
+def test_voice_help_gives_the_level_per_velocity(tmp):
+    """bossa_gilberto_studio 10-21: velocity x1.3 / x0.78 moved a balance +2.2 dB, not +4.3; the curve makes a
+    balance change one step."""
+    p = os.path.join(tmp, 'p')
+    api.project_new(p, bpm=120, length_bars=4)
+    os.makedirs(os.path.join(p, 'voices'), exist_ok=True)
+    with open(os.path.join(p, 'voices', 'square_law.py'), 'w', encoding='utf8') as f:
+        f.write('"""A test voice: level goes as velocity squared."""\nimport numpy as np\n\n\n'
+                'def voice(freq, t, vel, gate, sr):\n    return vel ** 2 * np.sin(2 * np.pi * freq * t)\n')
+    out = OPS['voice_help'](p, name='square_law')
+    line = next(l for l in out.splitlines() if l.startswith('level per velocity'))
+    # 40 log10(v): 0.2 -28.0, 0.4 -15.9, 0.6 -8.9, 0.8 -3.9
+    assert '0.2 -28.0 dB, 0.4 -15.9 dB, 0.6 -8.9 dB, 0.8 -3.9 dB, 1.0 +0.0 dB' in line, line
+    assert 'steps of 0.2: +12.0 +7.0 +5.0 +3.9 dB' in line, line
+    n = len(api._VEL_CACHE)
+    OPS['voice_help'](p, name='square_law')
+    assert len(api._VEL_CACHE) == n                             # probed once per voice file

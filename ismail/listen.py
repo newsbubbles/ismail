@@ -22,7 +22,7 @@ return at once. A session folder holds:
   rec.log, read.log, read.json, read.md, stretches/
 
 Where sessions go: <project>/listen/ when listen_start names a project, else the running live set's folder, else
-$ISMAIL_LISTEN_HOME, else <installed songs folder>/_listen (the checkout's drive). Never the system drive by default
+the listen.home setting, else <installed songs folder>/_listen (the checkout's drive). Never the system drive by default
 (2026-10-13: a jam's session filled C:, and the speech server failed with it). A session id resolves across all of
 these and the old home (~/.ismail/listen), through an index in the default home.
 
@@ -50,11 +50,12 @@ import numpy as np
 import soundfile as sf
 
 from .handoffs import SONGS
+from . import settings
 
 DEFAULT_HOME = Path(SONGS) / '_listen'               # the installed songs folder: the checkout's drive
 LEGACY_HOME = Path.home() / '.ismail' / 'listen'     # where sessions went before 2026-10-14: searched, never written
-HOME = Path(os.environ.get('ISMAIL_LISTEN_HOME') or DEFAULT_HOME)
-SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
+HOME = Path(settings.get('listen.home') or DEFAULT_HOME)
+SPEAK = settings.get('speak')
 
 MAX_MIN = 90            # speakers only
 MIC_MAX_MIN = 20        # with a mic: a shorter default, then ask whether to go on (the DJ, 10-13)
@@ -193,10 +194,10 @@ def take_news(out):
 # ------------------------------------------------------------------ where sessions live
 
 def home():
-    """Where a session goes when no project is given and no live set runs: $ISMAIL_LISTEN_HOME (read at each call,
-    so setting it needs no restart), else HOME."""
-    env = os.environ.get('ISMAIL_LISTEN_HOME')
-    return Path(env) if env else HOME
+    """Where a session goes when no project is given and no live set runs: the listen.home setting (read at each
+    call, so a change needs no restart), else HOME."""
+    d = settings.get('listen.home')
+    return Path(d) if d else HOME
 
 
 def free_gb(path):
@@ -222,7 +223,7 @@ def live_engines():
     """The live engines running now, newest first: each one's engine.json record ('project', 'port', 'bpm', ...).
     Every engine leaves a note in the live registry (ismail/live/engine.py registry_path, read here without
     importing the engine)."""
-    reg = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    reg = Path(settings.get('live.registry'))
     try:
         files = list(reg.glob('*.json'))
     except OSError:
@@ -253,8 +254,8 @@ def pick_home(project=None):
         return p / 'listen', (mine or [e['project'] for e in eng] or [None])[0], 'the project folder'
     if eng:
         return Path(eng[0]['project']) / 'listen', eng[0]['project'], "the running live set's folder"
-    if os.environ.get('ISMAIL_LISTEN_HOME'):
-        return home(), None, '$ISMAIL_LISTEN_HOME'
+    if settings.get('listen.home'):
+        return home(), None, 'the listen.home setting'
     return home(), None, 'the listening home'
 
 

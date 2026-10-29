@@ -55,6 +55,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import pairing, perform, presence, takes
+from .. import settings
 
 PAGE = Path(__file__).resolve().parent / 'page'
 SCENES = Path('scenes').resolve()                          # set by configure(): the song's scenes folder
@@ -70,7 +71,7 @@ CAPTURE = None
 
 
 def registry_dir():
-    return Path(os.environ.get('ISMAIL_STAGE_REGISTRY') or Path.home() / '.ismail' / 'stage')
+    return Path(settings.get('stage.registry'))
 
 
 def configure(scenes, footage=None, state=None):
@@ -86,7 +87,7 @@ def configure(scenes, footage=None, state=None):
         CONFIG.update(json.loads((Path.home() / '.ismail' / 'stage.json').read_text(encoding='utf-8')))
     except (OSError, ValueError):
         pass
-    SPEAK = os.environ.get('ISMAIL_SPEAK') or CONFIG.get('speak') or SPEAK
+    SPEAK = (settings.get('speak') if settings.source('speak') != 'default' else None) or CONFIG.get('speak') or SPEAK
 
 
 def scene_names():
@@ -106,8 +107,9 @@ BUNDLE_LOCK = threading.Lock()
 
 
 def esbuild_path():
-    """esbuild for the bundle: ESBUILD, or ~/.ismail/stage.json "esbuild", or none (the page loads its modules)."""
-    p = os.environ.get('ESBUILD') or CONFIG.get('esbuild')
+    """esbuild for the bundle: the esbuild setting, or ~/.ismail/stage.json "esbuild", or none (the page loads its
+    modules)."""
+    p = settings.get('esbuild') or CONFIG.get('esbuild')
     return p if p and Path(p).exists() else None
 
 
@@ -214,7 +216,7 @@ CMD_TYPES = {'cue', 'cue_remove', 'cues_clear', 'cues_list', 'waypoint', 'waypoi
              'light', 'walk', 'look_through', 'snapshot', 'reload', 'undo', 'ask', 'panel', 'panel_close',
              'ack', 'gallery_add', 'drop', 'take_view', 'take_view_clear', 'actor_play', 'actor_stop', 'stream', 'anchor', 'anchor_release', 'prop_pin',
              'take_keep_last', 'take_keep_recent', 'follow_anchor', 'actor_rest', 'music_time', 'load_set', 'load_sets', 'actor_pose', 'actor_part', 'perform', 'batch', 'control_set', 'control_map', 'key_interp',
-             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now', 'embody', 'grab_mode', 'grab_rule', 'material', 'world_reload', 'gestures_reload', 'trail', 'cam_record', 'replay_input', 'follow'}
+             'behaviours', 'behaviour_run', 'behaviour_state', 'face_reload', 'face_now', 'embody', 'grab_mode', 'grab_rule', 'material', 'surface', 'pointer', 'on_air', 'world_reload', 'gestures_reload', 'trail', 'cam_record', 'replay_input', 'follow'}
 COND = threading.Condition()
 LIVE = {}                      # scene -> {'state', 'state_t', 'events': [...], 'ev_id', 'cmds': [...], 'cmd_id'}
 
@@ -428,7 +430,7 @@ def append_lines(f, objs):
 
 def live_engines():
     """The ismail live engines running on this machine (their own registry, one json per process): port -> record."""
-    d = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    d = Path(settings.get('live.registry'))
     out = {}
     for f in d.glob('*.json'):
         try:
@@ -1326,7 +1328,8 @@ def main(argv=None):
         ctx.load_cert_chain(a.cert, a.key)
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = 'https'
-    reg = register(port, scheme, host, start={'host': a.host, 'footage': a.footage, 'esbuild': os.environ.get('ESBUILD'),
+    pinned = settings.get('esbuild') if settings.source('esbuild') == 'env' else None   # a file value is read again
+    reg = register(port, scheme, host, start={'host': a.host, 'footage': a.footage, 'esbuild': pinned,
                                              'tls': bool(a.tls)})
     presence.URL[0] = f'{scheme}://127.0.0.1:{port}'
     print(f'ismail stage on {scheme}://{host}:{port}/  scenes {SCENES}: {scene_names()}', flush=True)

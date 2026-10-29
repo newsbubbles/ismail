@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from .. import settings
 
 BROWSERS = [r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
             r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
@@ -31,8 +32,8 @@ STALL_S = 300                         # no frame for this long: the page is stuc
 
 
 def browser():
-    """A Chromium browser to run headless: $ISMAIL_BROWSER, else Edge or Chrome where they install, else on PATH."""
-    for p in [os.environ.get('ISMAIL_BROWSER'), *BROWSERS]:
+    """A Chromium browser to run headless: the browser setting, else Edge or Chrome where they install, else on PATH."""
+    for p in [settings.get('browser'), *BROWSERS]:
         if p and Path(p).is_file():
             return p
     for n in ('msedge', 'chrome', 'google-chrome', 'chromium'):
@@ -42,7 +43,7 @@ def browser():
 
 
 def ffmpeg():
-    return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    return settings.get('ffmpeg')
 
 
 def write_json(path, obj):
@@ -116,7 +117,7 @@ class Capture:
 def _encoder(job, out):
     ff = ffmpeg()
     if not ff:
-        raise RuntimeError('no ffmpeg (put it on PATH or set ISMAIL_FFMPEG), or capture with video=False and keep_frames')
+        raise RuntimeError("no ffmpeg (on PATH, or config_set('ffmpeg', <path>)); or video=False and keep_frames")
     args = [ff, '-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', str(job['fps']), '-c:v', 'png', '-i', '-']
     if job.get('audio'):
         args += ['-ss', f"{job['t0']:.4f}", '-t', f"{job['t1'] - job['t0']:.4f}", '-i', job['audio']]
@@ -161,7 +162,7 @@ def run(job_path):
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             b = browser()
             if not b:
-                raise RuntimeError('no Edge or Chrome to draw with (set ISMAIL_BROWSER to one)')
+                raise RuntimeError("no Edge or Chrome to draw with (config_set('browser', <path to one>))")
             url = f"http://127.0.0.1:{port}/?scene={job['scene']}&capture=1"
             page = subprocess.Popen([b, '--headless=new', '--mute-audio', f'--window-size={W},{H}',
                                      f'--user-data-dir={tmp / "browser"}', '--no-first-run', '--no-default-browser-check',

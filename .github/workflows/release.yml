@@ -1,0 +1,65 @@
+name: release
+
+# Cut a release by publishing a GitHub release whose tag matches the version in pyproject.toml and server.json,
+# e.g. v0.3.1. Each upload waits for an approval in the pypi environment (Settings, Environments, pypi: required
+# reviewers): one for PyPI, then one for the MCP Registry.
+# One-time setup (done 2026-10-26): on PyPI a trusted publisher for this repo, workflow release.yml. The MCP
+# Registry step signs in with GitHub OIDC, so it needs no secret.
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: versions match the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          grep -q "^version = \"$tag\"" pyproject.toml
+          python -c "import json,sys; d=json.load(open('server.json')); sys.exit(0 if d['version']==d['packages'][0]['version']=='$tag' else 1)"
+      - name: build
+        run: pip install build && python -m build
+      - name: the wheel works like a clone (a clean venv, outside the repository)
+        run: |
+          python -m venv /tmp/v && /tmp/v/bin/pip install dist/*.whl
+          cd /tmp && env -u ISMAIL_SONGS /tmp/v/bin/python $GITHUB_WORKSPACE/.github/scripts/wheel_check.py
+          /tmp/v/bin/python $GITHUB_WORKSPACE/.github/scripts/mcp_handshake.py 80 /tmp/v/bin/ismail mcp
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # release/v1
+
+  registry:
+    needs: pypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: publish to the MCP Registry
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          # PyPI can take a minute to serve a new release; the registry checks it exists
+          for i in 1 2 3 4 5; do ./mcp-publisher publish && exit 0; sleep 30; done; exit 1

@@ -14,7 +14,7 @@ behind the room the phone is.
 
 What the person sends lands in <home>/inbox.jsonl, in the routed inbox (phone_route, else the playing engine's
 <project>/notes/phone_inbox.jsonl), and runs the hooks in <home>/hooks.json. Voice notes are transcribed by the
-speech server ($ISMAIL_SPEAK, speakwright's OpenAI-style /v1/audio/transcriptions), waiting while the CPU is over
+speech server (the speak setting, speakwright's OpenAI-style /v1/audio/transcriptions), waiting while the CPU is over
 the machine governor's limit.
 """
 import argparse
@@ -42,14 +42,37 @@ import numpy as np
 
 try:                                       # a package module in ismail; a plain script when phone_start runs it
     from . import vibe
-    from .. import tags
+    from .. import hook_event, settings, tags
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import vibe
+    import hook_event
+    import settings
     import tags
 
-HOME = Path(os.environ.get('ISMAIL_PHONE_HOME') or Path.home() / '.ismail' / 'phone')
+HOME = Path(settings.get('phone.home'))     # this server's folder, fixed when it starts (phone_restart moves it)
+_HOME_AT_IMPORT = HOME
+_HOMES_SEEN = [HOME]
+
+
+def homes():
+    """The phone folder for the ops of a running ismail, read at each call so config_set('phone.home') reaches them
+    at once, then the folders this process used before (newest first): phone_stop still finds a server started under
+    the old one. A test that sets HOME gets only HOME."""
+    if HOME is not _HOME_AT_IMPORT:
+        return [HOME]
+    now = Path(settings.get('phone.home'))
+    if now not in _HOMES_SEEN:
+        _HOMES_SEEN.append(now)
+    return [now] + [h for h in reversed(_HOMES_SEEN) if h != now]
+
+
+def home():
+    """The phone folder now (see homes)."""
+    return homes()[0]
+
+OFFERS_KEPT = 200                                # downloads the phone can page back through (/api/offers)
 PAGE = Path(__file__).resolve().parent / 'page'
 # The page's sounds (Nate 10-06 14:42: "you make your sounds and then you attach it to this interface ... the same
 # thing applies to everything as like a design philosophy"). An agent makes each one with ismail and attaches it with
@@ -71,14 +94,14 @@ PAUSE_FADE_S = 4.0      # a pause tap fades the set out over this long and stops
 MOVE_SETTLE_BARS = 8   # a scheduled vibe becomes the standing one this many bars after the room passed its bar
 SOUND_EXT = ('.wav', '.ogg', '.mp3', '.m4a', '.webm', '.flac')
 SOUND_MAX_S, SOUND_MAX_BYTES = 5.0, 1 << 20
-SPEAK = os.environ.get('ISMAIL_SPEAK') or 'http://127.0.0.1:8765'
+SPEAK = settings.get('speak')
 SR = 44100
 BLOCK = 2048                       # frames fed per step (46 ms)
 RING_S = 120.0                     # seconds of encoded stream kept for rewind and late joiners
 MASTER_S = 150.0                   # seconds of the streamed master kept raw, for the music under a voice note
 REF_LEAD_S, REF_TAIL_S = 3.0, 2.0  # how much of it before the note begins and after it ends (ledger:M163)
 REF_GUESS_S = 20.0                 # off the stream (the room speaker), the note's start is a guess: this much either side
-KEEP_MASTER = os.environ.get('ISMAIL_PHONE_KEEP_MASTER', '1') != '0'   # take the master while an engine plays, page or not
+KEEP_MASTER = settings.get('phone.keep_master')   # take the master while an engine plays, page or not
 LEAD_S = 1.0                       # a live join starts this far back, so the phone's buffer fills at once
 BOOT = secrets.token_hex(4)        # this server run: a page that sees it change knows the server restarted
 
@@ -107,6 +130,7 @@ MOODS = ('calm', 'steady', 'lift', 'peak')
 # the words still reach the agent as voice_text, and the act carries via='voice' and the note's id
 MARKS = ('loved', 'replay', 'new')   # a piece they loved before, one the DJ plays again, one just made
 PAGE_OPEN_S = 60.0          # a page that asked for its state this recently is open (it long-polls every 20 s)
+LABEL_GRACE_BARS = 2        # a phone_now label also takes the clips that start this soon after it (queued next)
 AGENT_SEEN_S = 90.0         # an agent that called this recently is listening (phone_watch calls every 25 s)
 CLAIM_GRACE_S = 180.0       # an untagged note nobody claimed this long after it came is the lead's by default
 # Who has a phone note (Nate 10-16, n5737 and n5776): untagged notes went to nobody, or to six agents at once, because
@@ -221,11 +245,11 @@ def panel_inputs(inputs):
 
 
 def ffmpeg():
-    return os.environ.get('ISMAIL_FFMPEG') or shutil.which('ffmpeg')
+    return settings.get('ffmpeg')
 
 
 def live_engines():
-    d = Path(os.environ.get('ISMAIL_LIVE_REGISTRY') or Path.home() / '.ismail' / 'live')
+    d = Path(settings.get('live.registry'))
     out = {}
     for f in d.glob('*.json'):
         try:
@@ -263,6 +287,7 @@ def parse_status(text):
             'output': out.group(1) if out else None, 'follow': bool(out and out.group(2)),
             'recording': rec.group(1) if rec else None,
             'playing': [f"{c} ({t})" for t, c in playing[:3]],
+            'clips': [[t, c] for t, c in playing],
             'sounding': bool(playing or re.search(r'^deck \S+: on air', text, re.M)) and 'SILENT ON AIR' not in text,
             'next': f"{nxt.group(1)} at {nxt.group(2)}" if nxt else None}
 
@@ -351,7 +376,8 @@ class Phone:
         try:
             saved = json.loads((HOME / 'state.json').read_text(encoding='utf8'))
             self.view.update({k: saved[k] for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'panels',
-                                                    'shape', 'sounds', 'vibe_moves', 'scenes')
+                                                    'offers', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                    'now_bind_until')
                               if k in saved and saved[k] is not None})
         except (OSError, ValueError):
             pass
@@ -559,6 +585,50 @@ class Phone:
                 'of': (r.get('heard') or {}).get('of') or (r.get('room') or {}).get('of'), 'now': r.get('now'),
                 'into_s': r.get('into_s')}
 
+    @staticmethod
+    def _label_plays(name, clips):
+        """A phone_now label's name still sounds: a clip ('clip (track)', a clip id or a track) or a deck (a deck's
+        tracks are '<deck>.<track>') among the engine's [track, clip] pairs."""
+        return any(name in (c, t, f"{c} ({t})") or t.startswith(name + '.') for t, c in clips)
+
+    def bind_label(self, now_of=None):
+        """Tie the 'now' label to what it describes (ledger:M218): now_of names clips, tracks or decks; None takes
+        the clips playing now and those that start within LABEL_GRACE_BARS (a label put up just before its music is
+        queued); [] or '' leaves it unbound (it stays until replaced or cleared)."""
+        v, e = self.view, self.engine
+        if not v['now'] or now_of in ([], ''):
+            v['now_of'], v['now_bind_until'] = None, None
+            return
+        if now_of is not None:
+            v['now_of'] = [now_of] if isinstance(now_of, str) else [str(x) for x in now_of]
+            v['now_bind_until'] = None
+            return
+        bpm, bpb = (e['bpm'], e.get('bpb') or 4) if e else (120.0, 4)
+        v['now_of'] = [f"{c} ({t})" for t, c in (e.get('clips') or [])] if e else []
+        v['now_bind_until'] = time.time() + LABEL_GRACE_BARS * bpb * 60.0 / bpm
+
+    def track_label(self, e):
+        """Each engine poll: a label still in its grace takes the clips that started; one whose clips, tracks or
+        decks have all stopped expires, so the page shows the engine's own playing list again instead of a stale
+        name. An engine that does not answer changes nothing (a pause or a missed poll keeps the label)."""
+        v = self.view
+        if not v.get('now') or v.get('now_of') is None or e is None:
+            return
+        clips = e.get('clips') or []
+        if v.get('now_bind_until'):
+            if time.time() < v['now_bind_until']:
+                v['now_of'] = list(dict.fromkeys(v['now_of'] + [f"{c} ({t})" for t, c in clips]))
+                return
+            v['now_bind_until'] = None
+            if not v['now_of']:                    # nothing played under it: unbound, as before
+                v['now_of'] = None
+                self.save()
+                return
+        if not any(self._label_plays(n, clips) for n in v['now_of']):
+            v['now'], v['now_of'] = None, None
+            self.save()
+            self.cmd('view')
+
     def now_text(self):
         e = self.engine
         t = self.view['now'] or (', '.join(e['playing']) if e and e['playing'] else None)
@@ -687,12 +757,18 @@ class Phone:
             hooks = json.loads((HOME / 'hooks.json').read_text(encoding='utf8'))
         except (OSError, ValueError):
             return
-        env = {**os.environ, 'PHONE_EVENT': rec.get('kind', ''), 'PHONE_TEXT': rec.get('text') or rec.get('what') or '',
-               'PHONE_INBOX': str(self.routes()[-1]), 'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
-        for cmd in (hooks.get(rec.get('kind')) or []) + (hooks.get('any') or []):
+        cmds = (hooks.get(rec.get('kind')) or []) + (hooks.get('any') or [])
+        ev = {'event': rec.get('kind', ''), 'text': rec.get('text') or rec.get('what') or '',
+              'inbox': str(self.routes()[-1]), 'line': rec}
+        path = hook_event.write(HOME, ev) if hook_event.wants(cmds) else None
+        # the old PHONE_* names, until 0.5 (ledger:M383)
+        env = {**os.environ, 'PHONE_EVENT': ev['event'], 'PHONE_TEXT': ev['text'], 'PHONE_INBOX': ev['inbox'],
+               'PHONE_LINE': json.dumps(rec, ensure_ascii=False)}
+        for cmd in cmds:
+            cmd = hook_event.expand(cmd, path) if path else cmd
             try:
                 with open(HOME / 'hooks.log', 'a', encoding='utf8') as log:
-                    subprocess.Popen(cmd, shell=True, env=env, stdout=log, stderr=log,
+                    subprocess.Popen(cmd, shell=True, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                                      creationflags=0x08000000 if os.name == 'nt' else 0)
             except OSError as e:
                 print(f'[phone] hook {cmd!r}: {e}', flush=True)
@@ -856,7 +932,9 @@ class Phone:
     def save(self):
         try:
             st = {k: self.view.get(k) for k in ('now', 'next', 'rec_why', 'mood', 'buttons', 'pinned', 'marks',
-                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes')}
+                                                'panels', 'vibe', 'shape', 'sounds', 'vibe_moves', 'scenes', 'now_of',
+                                                'now_bind_until')}
+            st['offers'] = self.view['offers'][-OFFERS_KEPT:]
             st['piece'] = list(self.piece)
             st['route'] = str(self.route) if self.route else None
             st['files'] = {k: str(v) for k, v in self.files.items()}
@@ -888,6 +966,7 @@ class Phone:
                 self.engine = got
                 self.cmd('engine', sounding=on)           # wakes the page's long poll: its background stills or moves now
             self.engine = got
+            self.track_label(got)
             if got and got.get('playing') and KEEP_MASTER:  # the music under a note heard from the room speaker too
                 with self.cond:
                     if self.feeder is None or not self.feeder.is_alive():
@@ -912,7 +991,7 @@ class Phone:
             enc = self.encoders.get(kbps)
             if enc is None or enc.proc is None:
                 if not ffmpeg():
-                    raise RuntimeError('ffmpeg is not on PATH (or $ISMAIL_FFMPEG): the phone stream needs it')
+                    raise RuntimeError("ffmpeg is not on PATH (or the ffmpeg setting): the phone stream needs it")
                 enc = self.encoders[kbps] = Encoder(kbps, self.fed / SR)
             if self.feeder is None or not self.feeder.is_alive():
                 self.feeder = threading.Thread(target=self._feed, daemon=True)
@@ -1151,7 +1230,7 @@ class Phone:
             if text is None:
                 text = next((r.get('text') for r in self._voice_texts() if r.get('id') == vid), '')
             if not ffmpeg():
-                raise ValueError('ffmpeg is needed to read a voice note (set ISMAIL_FFMPEG)')
+                raise ValueError("ffmpeg is needed to read a voice note (on PATH, or config_set('ffmpeg', <path>))")
             chk = hum.check(hum.decode(f, ffmpeg()), text)
             try:                                      # capture faults, at full rate (ledger:M172)
                 from .. import capture
@@ -1318,7 +1397,7 @@ class Phone:
                 'asked_mood': moods[-1] if moods else None,
                 'rec': rec, 'mood': self.view['mood'], 'captions': self.view['captions'][-6:],
                 'pinned': self.view['pinned'], 'buttons': self.view['buttons'], 'panels': self.view['panels'],
-                'offers': self.view['offers'][-4:], 'listening': agents, 'devices': devices, 'deaf': deaf,
+                'offers': self.view['offers'][-4:], 'offers_n': len(self.view['offers']), 'listening': agents, 'devices': devices, 'deaf': deaf,
                 'voice': [{'id': k, 'state': v} for k, v in self.voice_state.items()],
                 'heard': self.heard(sid, t) if sid else {}, 'cmd': self.cmd_id,
                 'vibe': self.vibe_now(), 'vibe_moves': self.view.get('vibe_moves') or [], 'room': self.room(),
@@ -1439,11 +1518,15 @@ class Agent:
         return out
 
     def op_now(self, now=None, next=None, recording_why=None, mood=None, now_mark=None, next_mark=None, length=None,
-               sections=None, into=None, who=None):
+               sections=None, into=None, who=None, now_of=None):
         v, ph = self.ph.view, self.ph
         for k, val in (('now', now), ('next', next), ('rec_why', recording_why), ('mood', mood)):
             if val is not None:
                 v[k] = val or None
+        if now is not None:
+            ph.bind_label(now_of)
+        elif now_of is not None and v['now']:
+            ph.bind_label(now_of)
         for text, m in ((ph.now_text(), now_mark), (v['next'], next_mark)):
             if m is None or not text:
                 continue
@@ -1468,8 +1551,13 @@ class Agent:
             v['shape'] = sh
         ph.save()
         ph.cmd('view')
+        tied = ''
+        if v['now'] and v.get('now_of') is not None:
+            what = ', '.join(v['now_of']) or 'nothing yet'
+            tied = f"; the now label stays while {what} plays" + (
+                f" (and what starts in the next {LABEL_GRACE_BARS} bars)" if v.get('now_bind_until') else '')
         return (f"now={v['now']!r} ({ph.mark(ph.now_text()) or 'no mark'}) next={v['next']!r} "
-                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}")
+                f"({ph.mark(v['next']) or 'no mark'}) recording_why={v['rec_why']!r} mood={v['mood']!r}{tied}")
 
     def _wait_answer(self, pid, wait):
         if not wait:
@@ -1578,6 +1666,8 @@ class Agent:
         o = {'url': '/files/' + k, 'name': src.name if src.parent == HOME / 'offers' else nice,
              'label': label or Path(path).name, 'auto': bool(auto), 'ts': now_iso()}
         self.ph.view['offers'].append(o)
+        del self.ph.view['offers'][:-OFFERS_KEPT]
+        self.ph.save()
         self.ph.cmd('offer', offer=o)
         return f"offered {o['name']} on the phone" + (" (starts downloading if the page is open)" if auto else '')
 
@@ -1927,7 +2017,10 @@ class Handler(BaseHTTPRequestHandler):
              '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
              '.png': 'image/png', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
              '.flac': 'audio/flac', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf':
-             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8'}
+             'application/pdf', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mid': 'audio/midi', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8',
+             # a plan or a log linked from a panel opens as text on the phone; unknown types download, and a phone
+             # has nothing to open a .md with (Nate 10-17, "Read the plan" downloaded)
+             '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8'}
 
     def log_message(self, fmt, *a):
         if not any(x in (a[0] if a else '') for x in ('/api/state', '/api/keys')):   # a poll, or a key: no line each
@@ -2085,7 +2178,10 @@ class Handler(BaseHTTPRequestHandler):
                     '/icon-maskable.png', '/apple-touch-icon.png'):
             return self._file(PAGE / path[1:])
         if path == '/health':
-            return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq})
+            now = time.time()                     # devices: when each page last asked for its state (ledger:M247)
+            return self._json(200, {'ok': True, 'engine': bool(self.ph.engine), 'inbox': self.ph.seq,
+                                    'devices': [{'kind': v['kind'], 'last_s': round(now - v['at'])}
+                                                for v in list(self.ph.devices.values())]})
         if path == '/api/state':
             self.ph.seen_page(g('dev'), self.headers.get('User-Agent'), g('sid'))
             since, wait = int(g('since', '0') or 0), min(25.0, float(g('wait', '0') or 0))
@@ -2095,6 +2191,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.ph.cond.wait(min(2.0, end - time.time()))
                 cmds = [c for c in self.ph.cmds if c['id'] > since]
             return self._json(200, {**self.ph.state(g('sid'), g('t')), 'cmds': cmds})
+        if path == '/api/offers':                 # the downloads history, newest first, a page at a time
+            os_, skip, n = self.ph.view['offers'], max(0, int(g('skip', '0') or 0)), min(50, max(1, int(g('n', '10') or 10)))
+            page = os_[::-1][skip:skip + n]
+            return self._json(200, {'offers': page, 'total': len(os_), 'more': skip + len(page) < len(os_)})
         if path.startswith('/files/'):
             p = self.ph.files.get(path[7:])
             return self._file(p, download=g('dl') == '1') if p else self._json(404, {'error': 'not offered'})

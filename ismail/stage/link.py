@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from .. import settings
 
 PAGE_FRESH_S = 120         # a page that posted its state within this long is "showing the scene" (a hidden
                            # tab or a lifted headset posts about once a minute; the command waits in its queue)
@@ -21,7 +22,7 @@ def _op_error(msg):
 
 
 def registry_dir():
-    return Path(os.environ.get('ISMAIL_STAGE_REGISTRY') or Path.home() / '.ismail' / 'stage')
+    return Path(settings.get('stage.registry'))
 
 
 def _pid_alive(pid):
@@ -72,12 +73,12 @@ def server_for(scene=None, port=None):
 
 def agent_headers():
     """An agent's credentials for the stage (pairing.py): the token the server keeps beside the registry, readable by
-    this user only, and the agent's name (ISMAIL_AGENT, else "agent"). Empty when no server has made the token yet."""
+    this user only, and the agent's name (its session name, ISMAIL_SESSION, else "agent"). Empty when no server has made the token yet."""
     try:
         t = (registry_dir() / 'agent_token').read_text(encoding='utf-8').strip()
     except OSError:
         return {}
-    return {'X-Stage-Agent': t, 'X-Stage-Who': os.environ.get('ISMAIL_AGENT') or 'agent'} if t else {}
+    return {'X-Stage-Agent': t, 'X-Stage-Who': os.environ.get('ISMAIL_SESSION') or 'agent'} if t else {}
 
 
 def http(rec, path, body=None, timeout=30):

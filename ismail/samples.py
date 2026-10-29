@@ -1,7 +1,8 @@
 """Sample sets some built-in voices play from: recordings too big for the repo, or under a licence the repo cannot
 carry (a non-commercial one). Nothing downloads by itself: `samples_fetch` fetches a set on the person's word, into
-~/.ismail/samples/<set>/ ($ISMAIL_SAMPLES moves it), and a voice finds its set there, in its own environment
-variable, or in a folder registered with samples_fetch(name, path=...)."""
+~/.ismail/samples/<set>/ (config_set('samples', <folder>) moves it), and a voice finds its set there, in the
+folder of its setting (config_set('samples.<set>', <folder>)), or in a folder registered with
+samples_fetch(name, path=...)."""
 import concurrent.futures
 import io
 import json
@@ -9,6 +10,7 @@ import os
 import shutil
 import urllib.request
 import zipfile
+from . import settings
 
 SETS = {
     'jrhodes3d': {
@@ -63,7 +65,7 @@ class SampleError(RuntimeError):
 
 
 def root():
-    return os.environ.get('ISMAIL_SAMPLES') or os.path.join(os.path.expanduser('~'), '.ismail', 'samples')
+    return settings.get('samples')
 
 
 def _registry():
@@ -83,9 +85,9 @@ def _ok(path, s):
 
 
 def path(name):
-    """The folder a set's voice reads, or None: its environment variable, a registered folder, or the store."""
+    """The folder a set's voice reads, or None: its setting (samples.<set>), a registered folder, or the store."""
     s = SETS[name]
-    for c in (os.environ.get(s['env'], ''), _registry().get(name, ''), os.path.join(root(), name, s['sub'])):
+    for c in (settings.get('samples.' + name) or '', _registry().get(name, ''), os.path.join(root(), name, s['sub'])):
         if _ok(c, s):
             return os.path.abspath(c)
     return None
@@ -95,7 +97,7 @@ def paths(name):
     """Every folder on this machine that passes the set's check, in path()'s order (a voice that needs more of a set
     than the check, such as toms' tom folders, looks through them all: a registered copy may be partial)."""
     s, out = SETS[name], []
-    for c in (os.environ.get(s['env'], ''), _registry().get(name, ''), os.path.join(root(), name, s['sub'])):
+    for c in (settings.get('samples.' + name) or '', _registry().get(name, ''), os.path.join(root(), name, s['sub'])):
         if _ok(c, s) and os.path.abspath(c) not in out:
             out.append(os.path.abspath(c))
     return out
@@ -110,7 +112,8 @@ def need(name):
     raise FileNotFoundError(
         f"{user(s)} plays the {name} samples ({s['what']}), which are not on this machine. Ask the person, "
         f"then samples_fetch('{name}'): about {s['size_mb']} MB, {s['licence']}. A folder they already have: "
-        f"samples_fetch('{name}', path=<its {s['sub']} folder>) or ${s['env']}.")
+        f"samples_fetch('{name}', path=<its {s['sub']} folder>), or config_set('samples.{name}', <that folder>) "
+        f"(the old ${s['env']} still works).")
 
 
 def status():

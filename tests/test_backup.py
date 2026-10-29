@@ -1,6 +1,10 @@
+import glob
+import json
 import os
 
-from ismail import backup
+import pytest
+
+from ismail import backup, reclaim
 
 
 def _proj(path, cache=b'x' * 100):
@@ -54,9 +58,41 @@ def test_trim_moves_old_regen_to_reclaim(tmp_path):
     assert [s for _, s in moved] == [100, 100]
     assert not (b / 'proj_20261008_010000' / 'cache').exists()
     assert (b / 'proj_20261008_010000' / 'project.json').exists()
-    assert (song / '_reclaim' / 'backups' / 'proj_20261008_010000' / 'cache' / 'c.bin').exists()
+    assert not (song / '_reclaim').exists()                  # the one reclaim folder, not the song's (ledger:M229)
+    rec, = glob.glob(os.path.join(reclaim.root(), 'backups_*', 'song'))
+    src = str(b / 'proj_20261008_010000' / 'cache' / 'c.bin')
+    assert os.path.exists(os.path.join(rec, reclaim.kept_path(src, songs=str(song.parent))))
+    with open(os.path.join(os.path.dirname(rec), 'manifest.json'), encoding='utf8') as f:
+        runs = json.load(f)['runs']
+    assert len(runs) == 1 and [r['backup'] for r in runs[0]['moved']] == ['proj_20261008_010000',
+                                                                          'proj_20261008_010500']
     assert (b / 'proj_20261008_011500' / 'cache').exists()
     assert backup.trim(str(b), keep_full=2) == []  # the trimmed ones are no longer full
+
+
+def test_set_aside_moves_nothing_when_proj_is_held(tmp_path, monkeypatch):
+    """A shell inside proj/ refused the move; the copy-then-delete fallback emptied proj/ around it and left the
+    reference stems in a backup the next rebuild would trim. Now nothing moves and the error says why."""
+    proj = tmp_path / 'song' / 'proj'
+    _proj(str(proj))
+
+    def held(src, dst):
+        raise PermissionError(32, 'The process cannot access the file because it is being used by another process')
+    monkeypatch.setattr(backup.os, 'rename', held)
+    with pytest.raises(backup.BackupError, match='Nothing was moved.*cd out of proj'):
+        backup.set_aside(str(proj))
+    assert (proj / 'project.json').exists() and (proj / 'cache' / 'c.bin').exists()
+    assert not os.listdir(tmp_path / 'song' / 'backups')
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='only Windows refuses to move a folder a process is working in')
+def test_set_aside_with_the_working_folder_inside_proj(tmp_path, monkeypatch):
+    proj = tmp_path / 'song' / 'proj'
+    _proj(str(proj))
+    monkeypatch.chdir(proj / 'cache')
+    with pytest.raises(backup.BackupError):
+        backup.set_aside(str(proj))
+    assert (proj / 'project.json').exists() and (proj / 'cache' / 'c.bin').exists()
 
 
 def test_set_aside_trims_older_full_backups(tmp_path):
@@ -76,5 +112,6 @@ def test_cli_dry(tmp_path, capsys):
         _proj(str(b / f'proj_{stamp}'))
     assert backup.main(['trim', str(b), '--keep', '1', '--dry']) == 0
     out = capsys.readouterr().out
-    assert '2 backups trimmed' in out and 'would' in out
+    assert '2 backups trimmed' in out and 'would' in out and reclaim.root() in out
+    assert not os.listdir(reclaim.root())                     # a dry run names the place and makes nothing
     assert (b / 'proj_20261008_010000' / 'cache').exists()

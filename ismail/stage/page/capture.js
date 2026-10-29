@@ -24,13 +24,14 @@
 // The job comes from GET capture/job; frames go to POST capture/frame?n= (PNG) and the end to POST capture/status.
 import * as THREE from 'three';
 import { vec, ease } from './interp.js';
+import { CAM_ONLY } from './editor.js';
 
 export const CAPTURE = new URLSearchParams(location.search).has('capture');
 
 const P = (v) => new THREE.Vector3(v[0], v[2], -v[1]);   // Blender (Z up) to three (Y up)
 const SENSOR_MM = 36;                                     // Blender's default sensor, fitted to the width
 
-export async function runCapture(ed, { music, clock, construct, live, actors, sets }) {
+export async function runCapture(ed, { music, clock, construct, live, actors, sets, surfaces }) {
   const post = (path, body, json) => fetch(path, { method: 'POST', body: json ? JSON.stringify(body) : body,
     headers: json ? { 'Content-Type': 'application/json' } : {} });
   const errors = [];
@@ -43,6 +44,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
     r.setPixelRatio(1);
     r.setSize(W, H, false);
     const cam = new THREE.PerspectiveCamera(50, W / H, 0.05, 2000);   // layer 0 only: no gizmos, panels or markers
+    cam.layers.enable(CAM_ONLY);                    // and what only cameras see (the pointer)
     if (ed.selected) ed.select(null, 'capture');
     const step = () => {
       for (const f of ed.preRender) guard(f.name || 'preRender', f);
@@ -100,6 +102,7 @@ export async function runCapture(ed, { music, clock, construct, live, actors, se
         const c = timed.shift();
         try { await run(c); } catch (e) { throw new Error(`setup ${c.type} at_song ${c.at_song}: ${e.message || e}`); }
       }
+      if (surfaces) await surfaces.sync(songT);     // videos on surfaces at the film's time (surfaces.js)
       place(cam, job, songT, W / H, ed);
       step();
       const blob = await new Promise((res) => r.domElement.toBlob(res, 'image/png'));   // in the task that drew it

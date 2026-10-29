@@ -242,6 +242,10 @@ const talk = { rec: null, stream: null, chunks: [], down: 0, toggle: false, t: n
 // a note said into a text box (its mic): voice id -> {panel, field}; the words go into that box when heard, and
 // wait here when the panel is not on screen (Voice 10-08: an empty note box hid 30 voice notes)
 const fieldNotes = {}, fieldDrafts = {};
+// what he typed, dictated or picked in a panel he left unsent (Later, another tab, a tap outside) comes back when he
+// reopens it (Nate 10-17 10:25, n6203: "I left this panel and I came back to it and my inputs were gone"); kept on
+// this phone across a reload, dropped once the panel is answered or set aside (ledger:M227)
+const panelKept = store.get('panel_kept', {}) || {};
 const MIC_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>';
 const micBox = (field, inner) => `<div class="tawrap">${inner}<button class="tamic" data-field="${esc(field)}" aria-label="Say it instead of typing">${MIC_SVG}</button></div>`;
 // Nate 10-06 14:39: with the mic open, Bluetooth earbuds (his Dime 3) switch to call mode (HFP: mono, narrowband) and
@@ -792,8 +796,8 @@ const rank = (x) => (x && x.priority in PRI ? PRI[x.priority] : 1);
 const byPriority = (a, b) => rank(a.x) - rank(b.x) || b.i - a.i;
 const sortPri = (xs) => xs.map((x, i) => ({ x, i })).sort(byPriority).map((o) => o.x);
 const openPanels = () => sortPri((state.panels || []).filter((x) => !answered.has(x.id)));
-function answeredHere(id) { answered.add(id); if (shown === id) closeSheet(); else renderBadge(); }
-function closeSheet() { $('sheet').classList.remove('show'); stopClip(); $('panel').querySelectorAll('video').forEach((v) => v.pause()); shown = null; renderBadge(); }
+function answeredHere(id) { answered.add(id); forgetPanel(id); if (shown === id) closeSheet(); else renderBadge(); }
+function closeSheet() { keepPanel(); $('sheet').classList.remove('show'); stopClip(); $('panel').querySelectorAll('video').forEach((v) => v.pause()); shown = null; renderBadge(); }
 // notes (the DJ's and the Director's captions) are only a toast and a chime when they land; the corner key keeps
 // count of the ones not looked at yet, so one that came in during a voice note is still one tap away (Nate 10-07
 // 12:20: "I heard a message ... but I was recording")
@@ -810,6 +814,7 @@ function renderBadge() {
     .filter(Boolean).join(' · ') || 'Notes';
 }
 function showNotes() {
+  keepPanel();
   shown = '__notes';
   const caps = (state.captions || []).slice(-12).reverse(), seen = notesSeen();    // newest first
   let h = tabsHtml(openPanels(), '__notes') + '<h2>Notes</h2><div class="notes">';
@@ -952,7 +957,32 @@ function watchVideo(v, id) {
     if (v.isConnected && v.readyState < 1 && !v.error) { say.innerHTML = 'Still loading on this connection.' + open; ev('video_slow', { id }); }
   }, 15000);
 }
+function readBox(box) {                                    // the panel's inputs as they stand on screen
+  const k = { text: {}, voice: {}, toggle: {}, pick: {} };
+  box.querySelectorAll('[data-kind="text"]').forEach((t) => { k.text[t.dataset.in] = t.value; if (t.dataset.voice) k.voice[t.dataset.in] = t.dataset.voice; });
+  box.querySelectorAll('[data-kind="toggle"]').forEach((b) => { k.toggle[b.dataset.in] = b.classList.contains('sel'); });
+  box.querySelectorAll('.chips[data-kind="choice"], .chips[data-kind="check"]').forEach((g) => { k.pick[g.dataset.in] = [...g.querySelectorAll('.sel')].map((s) => s.dataset.opt); });
+  return k;
+}
+function keepPanel() {                                    // before the panel on screen goes away unsent
+  if (!shown || shown === '__notes' || answered.has(shown)) return;
+  const box = $('panel'); if (!box.querySelector('[data-answer]')) return;
+  panelKept[shown] = readBox(box);
+  const open = new Set((state.panels || []).map((x) => x.id));     // drafts of panels the agent has since closed go
+  Object.keys(panelKept).forEach((id) => { if (id !== shown && !open.has(id)) delete panelKept[id]; });
+  store.set('panel_kept', panelKept);
+}
+function forgetPanel(id) { if (id in panelKept) { delete panelKept[id]; store.set('panel_kept', panelKept); } }
+function putBack(box, p, k) {
+  Object.entries(k.text || {}).forEach(([id, v]) => { const t = box.querySelector(`[data-kind="text"][data-in="${CSS.escape(id)}"]`); if (!t) return;
+    t.value = v; if (k.voice && k.voice[id]) t.dataset.voice = k.voice[id]; if (v) t.placeholder = ''; });
+  Object.entries(k.toggle || {}).forEach(([id, on]) => { const b = box.querySelector(`[data-kind="toggle"][data-in="${CSS.escape(id)}"]`); if (!b) return;
+    const x = (p.inputs || []).find((i) => i.id === id); b.classList.toggle('sel', on); b.textContent = `${(x && x.label) || id}: ${on ? 'on' : 'off'}`; });
+  Object.entries(k.pick || {}).forEach(([id, sel]) => { const g = box.querySelector(`.chips[data-in="${CSS.escape(id)}"]`); if (!g) return;
+    g.querySelectorAll('[data-opt]').forEach((o) => o.classList.toggle('sel', sel.includes(o.dataset.opt))); });
+}
 function showPanel(p) {
+  keepPanel();
   shown = p.id; readPanels.add(p.id); ev('panel_open', { id: p.id, title: p.title || '' });
   const box = $('panel');
   let h = tabsHtml(openPanels(), p.id) + `<h2>${esc(p.title)}</h2>` + (p.text ? `<p>${esc(p.text)}</p>` : '') + (p.image ? `<img src="${esc(p.image)}">` : '')
@@ -981,6 +1011,7 @@ function showPanel(p) {
   // record, tap again to send; it reaches the agent that sent the panel, and the panel stays open
   h += `<div class="btns"><button id="panelrec" class="rec">Say more</button></div>`;
   box.innerHTML = h;
+  if (panelKept[p.id] && p.kind !== 'exam') putBack(box, p, panelKept[p.id]);
   (fieldDrafts[p.id] || []).forEach(([field, vid, text]) => putInBox(box, field, vid, text));
   delete fieldDrafts[p.id];
   box.querySelectorAll('.tamic').forEach((b) => { b.onclick = async () => {
@@ -1065,12 +1096,31 @@ async function deviceInfo(pick) {
   } catch (e) {}
   return out;
 }
-function renderOffers() {
-  const os = state.offers || [];
-  $('offerbox').hidden = !os.length;
-  $('offers').innerHTML = os.slice().reverse().map((o) => `<div class="offer"><span>${esc(o.label)}</span><a href="${esc(o.url)}?dl=1" download="${esc(o.name)}">Download</a></div>`).join('');
-  $('offers').querySelectorAll('a[download]').forEach((a) => { a.onclick = () => ev('download', { file: a.getAttribute('download') }); });
+// The last 4 downloads come with the state; older ones page in from api/offers, 10 a tap (Nate 10-23: agents may
+// send 10 downloads and only the last 4 showed).
+const offerHist = { open: false, n: 0, list: [], more: false };
+async function offerPage(n) {
+  try {
+    const r = await fetch(`api/offers?skip=0&n=${n}`, { cache: 'no-store' });
+    const d = await r.json();
+    Object.assign(offerHist, { open: true, n, list: d.offers || [], more: !!d.more });
+  } catch (e) { toast('could not load older downloads'); }
+  renderOffers();
 }
+function renderOffers() {
+  const os = state.offers || [], total = state.offers_n || os.length;
+  $('offerbox').hidden = !os.length;
+  const recent = os.slice().reverse(), seen = new Set(offerHist.list.map((o) => o.url));
+  const shown = offerHist.open ? recent.filter((o) => !seen.has(o.url)).concat(offerHist.list) : recent;   // a new one lands on top
+  $('offers').innerHTML = shown.map((o) => `<div class="offer"><span>${esc(o.label)}</span><a href="${esc(o.url)}?dl=1" download="${esc(o.name)}">Download</a></div>`).join('');
+  $('offers').querySelectorAll('a[download]').forEach((a) => { a.onclick = () => ev('download', { file: a.getAttribute('download') }); });
+  const older = total - shown.length;
+  $('offermore').hidden = !(offerHist.open ? offerHist.more : older > 0);
+  $('offermore').textContent = `Older downloads (${older})`;
+  $('offerless').hidden = !offerHist.open;
+}
+$('offermore').onclick = () => offerPage(Math.max(offerHist.n, 4) + 10);
+$('offerless').onclick = () => { Object.assign(offerHist, { open: false, n: 0, list: [] }); renderOffers(); };
 function render() {
   const e = state.engine || {}, h = state.heard || {}, r = state.rec || {};
   $('top').classList.toggle('live', !!e.playing);

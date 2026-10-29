@@ -274,6 +274,90 @@ def beat_grid(path, bpm_hint=None, beats_per_bar=4):
     return data, txt
 
 
+def harmony_changes(path, bpm, offset, bass=False):
+    """Per beat on the grid (bpm, offset): the bass root and whether the harmony changed on that beat. The root is
+    the strongest pitch class of a constant-Q chroma from C1 (4 octaves on a bass stem, 3 on a mix: its low band),
+    read over the beat's 35-95% (the kick's attack is past). A beat changes when its root differs from the last
+    beat's and both are voiced; on a mix, also when the chroma above C2 turns (cosine under 0.7). Returns
+    (beat times, roots or -1, changed booleans)."""
+    y = load(path)
+    spb = 60 / bpm
+    fps = ASR / HOP
+    b0 = offset % spb
+    bt = b0 + np.arange(int((len(y) / ASR - b0) / spb)) * spb
+    if len(bt) < 8:
+        return bt, np.full(len(bt), -1), np.zeros(len(bt), bool)
+    low = librosa.feature.chroma_cqt(y=y, sr=ASR, hop_length=HOP, fmin=librosa.note_to_hz('C1'),
+                                     n_octaves=4 if bass else 3, bins_per_octave=36, norm=None)
+
+    def per_beat(C):
+        out = []
+        for t in bt:
+            a, b = int((t + 0.35 * spb) * fps), int((t + 0.95 * spb) * fps)
+            out.append(C[:, a:max(b, a + 1)].mean(1) if a < C.shape[1] else np.zeros(12))
+        return np.array(out)
+    v = per_beat(low)
+    e = v.sum(1)
+    root = v.argmax(1)
+    # voiced: some low energy, and one pitch class well over an even spread (1/12 of the sum)
+    voiced = (e > 0.1 * np.percentile(e, 90)) & (v.max(1) > 2.0 * e / 12) if e.max() > 0 else np.zeros(len(e), bool)
+    root = np.where(voiced, root, -1)
+    # a change counts when the new root holds for the next beat too: a glide or a passing note is not one
+    chg = np.r_[False, (root[1:] != root[:-1]) & voiced[1:] & voiced[:-1]] & np.r_[root[1:] == root[:-1], False]
+    if not bass:
+        hi = per_beat(librosa.feature.chroma_cqt(y=y, sr=ASR, hop_length=HOP, fmin=librosa.note_to_hz('C2'),
+                                                 n_octaves=5))
+        n = np.linalg.norm(hi, axis=1) + 1e-9
+        cos = (hi[1:] * hi[:-1]).sum(1) / (n[1:] * n[:-1])
+        chg |= np.r_[False, cos < 0.7]
+    return bt, root, chg
+
+
+def downbeat_by_harmony(path, g, txt, bass_path=None):
+    """Vote between bar 1 as beat_grid chose it and the candidate two beats away, by where the harmony changes. A
+    snare on 2 and 4 reads the same under a two-beat shift; bass and chord changes land on beat 1 far more often
+    than on beat 3 (a four-on-the-floor house track read two beats late: its bass changes fell on beat 3 of the
+    pick). The bass root per beat comes from bass_path (a bass stem) when given, else the low band of path. The
+    other candidate wins with 1.5x the changes on its bar lines and at least max(3, 10% of the bars) more. Returns
+    (g, txt) with offset_sec moved and the text marked when harmony overrides, and one 'downbeat:' line added."""
+    bpb = g.get('beats_per_bar', 4)
+    if bpb != 4 or 'candidate_offsets' not in g:
+        return g, txt
+    bpm, pick = g['bpm'], g['offset_sec']
+    spb, bar = 60 / bpm, 4 * 60 / bpm
+    cands = g['candidate_offsets']
+    q = int(np.argmin([min(abs(c - pick), bar - abs(c - pick)) for c in cands]))
+    alt = cands[(q + 2) % 4]
+    bt, root, chg = harmony_changes(bass_path or path, bpm, pick, bass=bool(bass_path))
+    # beat index within the picked bar (0 = beat 1)
+    pos = np.round((bt - pick) / spb).astype(int) % 4
+    counts = [int(chg[pos == k].sum()) for k in range(4)]
+    m = int((pos[1:] == 0).sum())
+    n1, n3 = counts[0], counts[2]
+    src = 'the bass stem' if bass_path else 'the low band and chroma of the mix'
+    flip = n3 >= 1.5 * n1 and n3 - n1 >= max(3, 0.1 * m)
+    g = dict(g, harmony_changes_per_beat=counts, harmony_offset=alt if flip else pick)
+    per = f"changes per beat of the drums' bar, 1/2/3/4: {'/'.join(map(str, counts))}, from {src}"
+    if sum(counts) < 3:
+        line = (f"downbeat: drums say {pick:.4f} s, harmony did not vote (under 3 bass or chord changes; {per}); "
+                f"using {pick:.4f} s")
+    elif flip:
+        line = (f"downbeat: drums say {pick:.4f} s, harmony says {alt:.4f} s (changes on beat 1 in {n3} of {m} "
+                f"bars, on beat 3 in {n1}); using {alt:.4f} s. {per}")
+        g['offset_sec'] = alt
+        g['bars'] = int((librosa.get_duration(path=path) - alt) / bar)
+        txt = txt.replace(f"bar 1 starts at {pick:.3f}s", f"bar 1 starts at {alt:.3f}s (by harmony, see the downbeat "
+                          f"line; the drums said {pick:.3f}s)", 1)
+        txt = txt.replace('  <- chosen', '  <- the drums')
+        txt = '\n'.join(ln + '  <- chosen (harmony)' if ln.startswith(f"  {alt:.4f}s  ") else ln
+                        for ln in txt.split('\n'))
+    else:
+        says = f"harmony says {pick:.4f} s too" if n1 > n3 else "harmony is not clear"
+        line = (f"downbeat: drums say {pick:.4f} s, {says} (changes on beat 1 in {n1} of {m} bars, {n3} on beat 3, "
+                f"where bar 1 at {alt:.4f} s would put beat 1); using {pick:.4f} s. {per}")
+    return g, txt + '\n' + line
+
+
 # ------------------------------------------------------------------ per-bar features
 
 def _band_db(S, freqs):
@@ -471,6 +555,305 @@ def swing(path, bpm, offset, sr=ASR):
                   f"8ths {show(s8, pos[0.5][1])}. Write swung notes that late (straight = 0); do not guess.")
 
 
+# ------------------------------------------------------------------ thumb and finger bands, a drifting beat line
+
+THUMB_BAND = (55.0, 190.0)       # a guitar's thumb on the low strings, a bass line, a kick
+FINGER_BAND = (1500.0, 6000.0)   # finger plucks and chord strokes (hats and snares on a drum stem)
+_RATIOS = ((1.0, 'the same rate as'), (2.0, '2x'), (0.5, '1/2'), (1.5, '3/2'), (2 / 3, '2/3'), (4 / 3, '4/3'),
+           (0.75, '3/4'), (3.0, '3x'), (1 / 3, '1/3'), (4.0, '4x'), (0.25, '1/4'))
+
+
+def _band_rise(y, sr, lo, hi, hop, n_fft):
+    """Rise of one band's energy in dB over two frames (positive part), one number per frame: a stroke (a 10 to 20 dB
+    jump of the whole band) stands out from the noise of quiet bins."""
+    S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop))
+    f = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    E = 10 * np.log10((S[(f >= lo) & (f < hi)] ** 2).sum(0) + 1e-10)
+    E = np.convolve(E, np.ones(3) / 3, mode='same')
+    return np.r_[0.0, 0.0, np.maximum(0, E[2:] - E[:-2])]
+
+
+def _autocorr(x):
+    x = x - x.mean()
+    n = len(x)
+    F = np.fft.rfft(x, 2 * n)
+    ac = np.fft.irfft(F * np.conj(F))[:n]
+    return ac / (ac[0] + 1e-12)
+
+
+def _unit(x):
+    s = np.percentile(x, 99)
+    return x / (s if s > 0 else (x.max() if x.max() > 0 else 1.0))
+
+
+def _period(env, fps, lo_bpm=55.0, hi_bpm=200.0):
+    """(bpm, strength) of the strongest beat-range period of an onset envelope by autocorrelation, or (None, 0).
+    Every multiple of a pulse peaks too, so among the peaks within 10% of the strongest the shortest lag wins."""
+    if not np.any(env > 0):
+        return None, 0.0
+    ac = _autocorr(env)
+    a, b = int(np.floor(fps * 60 / hi_bpm)), int(np.ceil(fps * 60 / lo_bpm))
+    if b + 2 >= len(ac):
+        return None, 0.0
+    seg = ac[a:b + 1]
+    pk = [i for i in range(1, len(seg) - 1) if seg[i] >= seg[i - 1] and seg[i] > seg[i + 1] and seg[i] > 0]
+    if not pk:
+        return None, 0.0
+    top = max(seg[i] for i in pk)
+    j = a + min(i for i in pk if seg[i] >= 0.9 * top)
+    den = ac[j - 1] - 2 * ac[j] + ac[j + 1]
+    d = 0.5 * (ac[j - 1] - ac[j + 1]) / den if den < 0 else 0.0
+    return float(60 * fps / (j + d)), float(ac[j])
+
+
+def _relation(r):
+    """(simple ratio, its name) within 3% of r, or (None, 'x<r>')."""
+    q = min(_RATIOS, key=lambda x: abs(np.log(x[0] / r)))
+    return q if abs(np.log(q[0] / r)) < 0.03 else (None, f'x{r:.2f}')
+
+
+def band_periods(path, picked_bpm=None):
+    """The beat period of the thumb band (55-190 Hz) and of the finger band (1.5-6 kHz) read apart, by
+    autocorrelation of each band's onsets, and whether they agree. A whole-mix tempo locks onto the strongest gap: on
+    a bossa guitar that is the finger figure's 3 sixteenths (3-3-2), which read 122 BPM for a thumb at 92 (M287).
+    Returns (data, text); the text names the band that is likely the beat when they disagree."""
+    y = load(path)
+    if len(y) < 4 * ASR:
+        return {}, "band periods: under 4 s of audio, not read"
+    hop = 128
+    fps = ASR / hop
+    data = {}
+    for name, (lo, hi) in (('thumb', THUMB_BAND), ('finger', FINGER_BAND)):
+        bpm, s = _period(_band_rise(y, ASR, lo, hi, hop, 1024), fps)
+        data[name] = {'bpm': round(bpm, 2) if bpm and s >= 0.1 else None, 'strength': round(s, 2)}
+    th, fi = data['thumb']['bpm'], data['finger']['bpm']
+
+    def show(label, d):
+        return (f"  {label}: {d['bpm']:.1f} BPM (strength {d['strength']:.2f})" if d['bpm'] else
+                f"  {label}: no clear period (strength {d['strength']:.2f})")
+    L = ["band periods (each band's onsets on their own, by autocorrelation; the tempo above reads the whole mix):",
+         show('thumb/bass band 55-190 Hz', data['thumb']), show('finger band 1.5-6 kHz', data['finger'])]
+    data['agree'] = None
+    if th and fi:
+        r, lab = _relation(fi / th)
+        data['finger_over_thumb'] = round(fi / th, 3)
+        if r == 1.0:
+            data['agree'] = True
+            L.append(f"  bands agree: both read about {th:.1f} BPM")
+        elif r in (2.0, 0.5):
+            data['agree'] = True
+            L.append(f"  bands agree up to an octave: the finger band runs at {lab} the thumb band (8ths over "
+                     f"quarters, or a half-time pulse); not a conflict")
+        else:
+            data['agree'] = False
+            why = {4 / 3: '3-sixteenth gaps, as in a 3-3-2 figure or a clave', 0.75: 'a figure grouped in fours over '
+                   'a pulse in threes', 1.5: 'triplets or dotted 8ths', 2 / 3: 'a figure grouped in threes'}.get(
+                       r, 'a figure that does not divide the pulse evenly')
+            L.append(f"  BANDS DISAGREE: the finger band runs at {lab} of the thumb band ({why}). The thumb/bass band "
+                     f"is likely the beat (on a bossa guitar, or wherever a thumb, a bass or a kick keeps time); the "
+                     f"finger band reads the figure, not the pulse.")
+    if picked_bpm and th:
+        r, lab = _relation(picked_bpm / th)
+        on_finger = bool(fi) and _relation(picked_bpm / fi)[0] == 1.0
+        if r == 1.0:
+            if data['agree'] is False:
+                L.append(f"  the tempo above ({picked_bpm:.2f}) follows the thumb band: keep it")
+        elif on_finger or r not in (2.0, 0.5) or data['agree'] is False:
+            what = ('follows the finger band' if on_finger else f"reads {lab}{'' if lab.endswith('x') else ' of'} the thumb band" if r is not None
+                    else 'follows neither band')
+            L.append(f"  the tempo above ({picked_bpm:.2f}) {what}, not the thumb: if the thumb/bass band is "
+                     f"the beat, rerun with bpm_hint={th:.1f}")
+    return data, '\n'.join(L)
+
+
+def beat_line(y, sr, bpm, hop=64, low_band=THUMB_BAND, high_band=FINGER_BAND):
+    """A beat line that follows a drifting tempo (ported from a bossa reference's prototype, M287). The period comes
+    from the low band's autocorrelation within 8% of bpm; the start phase is where a comb over the first 24 beats
+    collects the most low-band rise (the thumb, bass or kick is on every beat, the figure is not); then a
+    phase-locked follower steps one period at a time, snaps to the strongest rise of both bands within 10% of a
+    period and lets the period follow slowly; the snapped beats are smoothed over 9 beats (a whole-mix beat tracker
+    locked onto a 3+3+2 figure and read 150 BPM for 120). Returns (smoothed beats, snapped beats, low envelope, high
+    envelope, frame times), times in s."""
+    from scipy.ndimage import maximum_filter1d
+    from scipy.signal import savgol_filter
+    n_fft = 1024 if sr > 32000 else 512
+    low = _band_rise(y, sr, *low_band, hop, n_fft)
+    high = _band_rise(y, sr, *high_band, hop, n_fft)
+    hop_s = hop / sr
+    tt = np.arange(len(low)) * hop_s
+    P0 = 60 / bpm
+    if tt[-1] < 12 * P0:
+        raise AnalysisError(f"beat line: under 12 beats of audio at {bpm:.1f} BPM")
+    # the period and the phase come from the first 16 beats: on a drifting record the whole take's mean period
+    # walks a comb off the beats within a few of them
+    ac = _autocorr(low[:int(16 * P0 / hop_s)])
+    lags = np.arange(len(ac)) * hop_s
+    m = (lags > P0 * 0.92) & (lags < P0 * 1.08)
+    P = float(lags[m][np.argmax(ac[m])])
+    nb0 = int(min(8, tt[-1] / P - 1))
+    lowmax = maximum_filter1d(low, 5, mode='nearest')
+    phs = np.arange(0, P, hop_s)
+    idx = np.clip(np.round((phs[:, None] + np.arange(nb0)[None, :] * P) / hop_s).astype(int), 0, len(low) - 1)
+    last = float(phs[int(np.argmax(lowmax[idx].sum(1)))])
+    both = _unit(low) + _unit(high)
+    snapped, strength = [last], [1.0]
+    while last + P < tt[-1] - 0.05:
+        pred = last + P
+        a, b = np.searchsorted(tt, [pred - 0.1 * P, pred + 0.1 * P])
+        if b <= a:
+            break
+        i = a + int(np.argmax(both[a:b]))
+        val = float(both[i])
+        if val > 0.3 * np.median(strength[-16:]):
+            bt = float(tt[i])
+            P = 0.9 * P + 0.1 * (bt - last)
+        else:
+            bt = pred
+        snapped.append(bt)
+        strength.append(val)
+        last = bt
+    snapped = np.array(snapped)
+    if len(snapped) < 12:
+        raise AnalysisError(f"beat line: only {len(snapped)} beats followed (12 needed)")
+    return savgol_filter(snapped, 9, 2), snapped, low, high, tt
+
+
+def tempo_drift(path, bpm, sr=ASR):
+    """Median tempo and the 8-beat rolling min and max on the followed beat line, for a 'this grid drifts' check."""
+    sm = beat_line(load(path, sr=sr), sr, bpm)[0]
+    loc = 60 / np.diff(sm)
+    roll = np.array([np.median(loc[max(0, i - 4):i + 4]) for i in range(len(loc))])
+    return {'bpm': float(np.median(loc)), 'min': float(roll.min()), 'max': float(roll.max()),
+            'spread_pct': float(100 * (roll.max() / roll.min() - 1))}
+
+
+def _stepread(env, tt, sm, frac=0.4):
+    """For every 16th step on a beat line: the peak of env within +-frac of a 16th, and where it is (ms, + late)."""
+    out = []
+    for k in range(len(sm) - 1):
+        span = sm[k + 1] - sm[k]
+        for st in range(4):
+            c = sm[k] + span * st / 4
+            h = span / 4 * frac
+            a, b = np.searchsorted(tt, c - h, 'left'), np.searchsorted(tt, c + h, 'right')
+            if b <= a:
+                out.append((k, st, 0.0, 0.0))
+                continue
+            i = a + int(np.argmax(env[a:b]))
+            out.append((k, st, float(env[i]), float((tt[i] - c) * 1000)))
+    return out
+
+
+def swing_follow(path, bpm, band=None, thr=0.35, sr=ASR):
+    """Per-16th microtiming on a beat line that follows a drifting tempo (analyze_swing(follow=True)): the thumb or
+    kick (55-190 Hz) sets the beat line, the figure is read in `band` (default 1.5-6 kHz, finger plucks; use
+    [6000, 16000] for hats). Every step's peak is read on the line; offsets are against the plucks on the beats.
+    Prints hits and accents per step, the median offset per step, and the most-played 16-step strings with the timing
+    inside them. Ported from a bossa reference's prototype (M287): a planted +20 / -15 ms read +18 / -22 ms there."""
+    from collections import Counter
+    y = load(path, sr=sr)
+    lo, hi = band or FINGER_BAND
+    sm, snapped, low, high, tt = beat_line(y, sr, bpm, high_band=(float(lo), float(hi)))
+    ibi = np.diff(sm)
+    loc = 60 / ibi
+    roll = np.array([np.median(loc[max(0, i - 4):i + 4]) for i in range(len(loc))])
+    th_dev = (snapped - sm) * 1000
+    L = [f"swing on a followed beat line in {os.path.basename(path)} (thumb/kick band 55-190 Hz sets the beat, the "
+         f"figure is read in {lo:.0f}-{hi:.0f} Hz):",
+         f"beats {len(sm)} from {sm[0]:.1f}s to {sm[-1]:.1f}s; median tempo {np.median(loc):.2f} BPM (16th = "
+         f"{np.median(ibi) / 4 * 1000:.0f} ms); 8-beat rolling min {roll.min():.1f} max {roll.max():.1f} BPM",
+         f"beats against their smoothed line: sd {th_dev[4:-4].std():.1f} ms, 90% within "
+         f"{np.percentile(np.abs(th_dev[4:-4]), 90):.1f} ms"]
+    T, F = _stepread(low, tt, sm), _stepread(high, tt, sm)
+
+    def fold(R, r):
+        acc, off = [[] for _ in range(16)], [[] for _ in range(16)]
+        for (k, st, val, ms) in R:
+            p = ((k + r) % 4) * 4 + st
+            acc[p].append(val)
+            off[p].append(ms)
+        return acc, off
+    # rotation: step 1 is the beat whose figure accent stands out most against the other beats
+    best = None
+    for r in range(4):
+        acc, _ = fold(F, r)
+        s = np.mean(acc[0]) - np.mean([np.mean(acc[i]) for i in (4, 8, 12)])
+        if best is None or s > best[0]:
+            best = (s, r)
+    r = best[1]
+    Ta, To = fold(T, r)
+    Fa, Fo = fold(F, r)
+    fthr = thr * np.percentile([x[2] for x in F], 95)       # a step counts as a pluck when its peak is over this
+    tthr = 0.35 * np.percentile([x[2] for x in T], 95)
+
+    def digits(acc):
+        m = np.array([np.mean(a) for a in acc])
+        db = 20 * np.log10(m / (m.max() + 1e-12) + 1e-9)
+        return ''.join(str(max(0, min(9, int(round(9 + d / 2))))) for d in db), db   # 2 dB per digit
+
+    def hits(share):
+        return ''.join('X' if s >= 0.6 else ('x' if s >= 0.3 else '.') for s in share)
+    fd, fdb = digits(Fa)
+    td, _ = digits(Ta)
+    share = np.array([np.mean(np.array(a) > fthr) for a in Fa])
+    tshare = np.array([np.mean(np.array(a) > tthr) for a in Ta])
+    L += [f"{(len(sm) - 1) / 4:.1f} cycles of 4 beats (rotation {r}); a pluck = a step peak over {thr:.0%} of the "
+          f"95th percentile",
+          "step         1...2...3...4...",
+          f"thumb hits   {hits(tshare)}   accent {td}  (9 = loudest step, 2 dB per digit)",
+          f"finger hits  {hits(share)}   accent {fd}"]
+    onb = [ms for i in (0, 4, 8, 12) for ms, val in zip(Fo[i], Fa[i]) if val > fthr]
+    bias = float(np.median(onb)) if onb else 0.0
+    L.append(f"offsets are against the plucks on the beats (the beat line read them at {bias:+.1f} ms); "
+             f"per step: share of cycles with a pluck, accent dB, median offset ms (+ late), IQR")
+    rows = {}
+    for i in range(16):
+        o = np.array([ms - bias for ms, val in zip(Fo[i], Fa[i]) if val > fthr])
+        if len(o) >= 3:
+            q1, q3 = np.percentile(o, [25, 75])
+            rows[i + 1] = {'share': round(float(share[i]), 2), 'accent_db': round(float(fdb[i]), 1),
+                           'off_ms': round(float(np.median(o)), 1), 'iqr': [round(float(q1), 1), round(float(q3), 1)]}
+            L.append(f"  step {i + 1:2d}: {share[i]:4.0%}  {fdb[i]:+5.1f} dB  {np.median(o):+6.1f} ms  "
+                     f"[{q1:+.0f}, {q3:+.0f}]")
+    acc8 = [[] for _ in range(32)]
+    for (k, st, val, ms) in F:
+        acc8[((k + r) % 8) * 4 + st].append(val)
+    s8 = hits([np.mean(np.array(a) > fthr) if a else 0.0 for a in acc8])
+    L.append(f"8-beat fold  {s8[:16]} {s8[16:]}")
+    plb = [ms - bias for i in range(16) if i % 4 for ms, val in zip(Fo[i], Fa[i]) if val > fthr]
+    if plb:
+        L.append(f"plucks between the beats: median {np.median(plb):+.1f} ms against an even 16th")
+    # the strings actually played: one 16-step string per full 4-beat cycle, counted
+    cyc, cofs = {}, {}
+    for (k, st, val, ms) in F:
+        c, pos = divmod(k + r, 4)
+        cyc.setdefault(c, ['.'] * 16)[pos * 4 + st] = 'X' if val > fthr else '.'
+        cofs.setdefault(c, {})[pos * 4 + st] = ms
+    last_c = max(cyc)
+    full = [''.join(x) for c, x in cyc.items() if 0 < c < last_c]
+    cnt = Counter(full)
+    L.append(f"most played 16-step strings ({len(full)} full cycles, {len(cnt)} distinct):")
+    for pat, nn in cnt.most_common(6):
+        L.append(f"  {pat}  {nn:3d}  {100 * nn / max(1, len(full)):.0f}%")
+    timing = {}
+    for pat, nn in cnt.most_common(3):
+        if nn < 3:
+            break
+        cs = [c for c, x in cyc.items() if ''.join(x) == pat and 0 < c < last_c]
+        hit = [i for i, ch in enumerate(pat) if ch == 'X']
+        med = [float(np.median([cofs[c][i] for c in cs if i in cofs[c]])) for i in hit]
+        on = [m for i, m in zip(hit, med) if i % 4 == 0]
+        b0 = float(np.median(on)) if on else 0.0
+        timing[pat] = {i + 1: round(m - b0, 1) for i, m in zip(hit, med)}
+        L.append(f"  timing in the {nn} cycles of {pat}: " +
+                 ', '.join(f"step {i + 1} {m - b0:+.0f} ms" for i, m in zip(hit, med)))
+    data = {'bpm': round(float(np.median(loc)), 2), 'bpm_roll': [round(float(roll.min()), 1), round(float(roll.max()), 1)],
+            'rotation': r, 'bias_ms': round(bias, 1), 'steps': rows, 'fingers8': s8,
+            'top_patterns': [[p, n] for p, n in cnt.most_common(10)], 'timing': timing,
+            'beats': [round(float(b), 3) for b in sm]}
+    return data, '\n'.join(L)
+
+
 def key_estimate(path, t0=None, t1=None):
     y = load(path)
     if t0 is not None:
@@ -519,9 +902,11 @@ def chords(path, grid, bars=None, per_bar=2, max_bars=32):
 
 # ------------------------------------------------------------------ melody / notes
 
-def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16, min_conf=0.0):
+def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16, min_conf=0.0, vibrato_ms=None):
     """Monophonic line -> quantized notes (notes_write format). Notes are segmented at onsets (and at pitch changes
-    inside legato phrases); each segment's pitch is the median pYIN f0 of its voiced frames."""
+    inside legato phrases); each segment's pitch is the median pYIN f0 of its voiced frames. vibrato_ms: the pitch
+    is averaged over this window (one vibrato cycle) before the legato split is rounded, so a wide vibrato near a
+    half step stays one note (ledger:M342); it also merges trills faster than the window."""
     y = load(path)
     b0, b1, _ = _range(y, ASR, grid, bars, max_bars)
     _, t0, t1 = _span(y, ASR, grid, b0, b1)
@@ -538,11 +923,22 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     rdb = 20 * np.log10(rms + 1e-9)
     floor = rdb.max() - 30
     midi = np.where(voiced & (prob > min_conf), librosa.hz_to_midi(np.nan_to_num(f0, nan=1.0)), np.nan)
+    # the pitch the splits are judged on: with vibrato_ms, averaged over one vibrato cycle
+    sm = midi
+    if vibrato_ms:
+        from scipy.ndimage import uniform_filter1d
+        w = max(1, int(vibrato_ms / 1000 * ASR / hop))
+        ok = ~np.isnan(midi)
+        den = uniform_filter1d(ok.astype(float), w, mode='nearest')
+        sm = np.where(ok, uniform_filter1d(np.where(ok, midi, 0.0), w, mode='nearest') / np.maximum(den, 1e-9),
+                      np.nan)
     oenv = librosa.onset.onset_strength(y=seg, sr=ASR, hop_length=hop)
     ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=ASR, hop_length=hop, backtrack=True).tolist()
+    ldb = 20 * np.log10(librosa.feature.rms(y=seg, hop_length=hop, frame_length=512)[0] + 1e-9)
+    ons = [o for o, nx in zip(ons, ons[1:] + [nfr]) if not _same_note(sm, ldb, oenv, o, nx, hop)]
     # split legato phrases where the rounded pitch changes and stays changed for >= 100 ms
     # (shorter changes are glides or pYIN window smear at note boundaries)
-    r = np.where(np.isnan(midi), -1, np.round(midi)).astype(int)
+    r = np.where(np.isnan(sm), -1, np.round(sm)).astype(int)
     hold = int(0.1 * ASR / hop)
     runs = []  # stable runs: (start_frame, pitch) lasting >= hold frames
     i = 0
@@ -575,7 +971,11 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
         vm = vm[~np.isnan(vm)]
         if len(vm) < max(3, 0.25 * (e - a)):
             continue
-        p = _refine_pitch(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, float(np.median(vm)))
+        if vibrato_ms:     # the centre of the swing; one long FFT of a vibrato note peaks on a sideband
+            p = float(np.mean(vm))
+        else:
+            p = _refine_pitch(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, float(np.median(vm)))
+        p = _octave_up(seg, times[a] - ts, times[min(e, nfr - 1)] - ts, p, librosa.note_to_midi(fmax))
         sb = grid.time_to_beat(times[a]) - base_beat
         eb = grid.time_to_beat(times[min(e, nfr - 1)]) - base_beat
         qs = round(sb / quant) * quant
@@ -597,6 +997,34 @@ def melody(path, grid, bars=None, fmin='C1', fmax='C7', quant=0.25, max_bars=16,
     else:
         lines += _melody_confidence(seg, ts, merged, grid, base_beat, prob, times, fmin, fmax)
     return merged, '\n'.join(lines)
+
+
+def _same_note(midi, db, oenv, o, nxt, hop):
+    """True when the onset at frame o is not a new note: the pitch is the same on both sides (within 50 cents) and
+    nothing re-attacks. Onsets also fire on a note-off click and inside a steady held tone, and the tail past such a
+    split keeps pYIN's smeared pitch, so it read as a second note (ledger:M226). A re-attack is a level rise of 3 dB
+    or more out of a dip between the onset and the next one (nxt; within 150 ms), as after a gap or on a decaying
+    note struck again, or a hard restart: with the level held after it, an onset of strength 0.3 or more that stands
+    15 times over the onset strength around it (median over 200 ms each side), a click as a legato retrigger of a flat
+    synth note makes. A filter sweep or wah inside a held note fires onsets too, but they stand only a few times over
+    their own sweep. db is the level per frame from a 512-sample window, short enough to see the dip at a re-attack;
+    the rise is looked for up to 3 frames short of the next onset, so the next note's attack does not count."""
+    w = int(0.05 * ASR / hop)
+    a, b = midi[max(o - w, 0):o], midi[o:o + w]
+    a, b = a[~np.isnan(a)], b[~np.isnan(b)]
+    if len(a) < 3 or len(b) < 3 or abs(np.median(a) - np.median(b)) >= 0.5:
+        return False
+    lo = max(o - 4, 0)
+    end = max(min(nxt - 3, o + 3 * w), o + 4)
+    m = lo + int(np.argmin(db[lo:end]))                    # the deepest dip before the next onset
+    if db[m:end].max() - db[m] >= 3:
+        return False
+    held = o + 4 < min(o + w, len(db)) and np.median(db[o + 4:o + w]) >= db[lo] - 6
+    r, g = 4 * w, int(0.03 * ASR / hop)
+    around = np.concatenate([oenv[max(o - r, 0):max(o - g, 0)], oenv[o + g:o + r]])
+    peak = oenv[o:o + 4].max()
+    click = peak >= 0.3 and (len(around) == 0 or peak >= 15 * np.median(around))
+    return not (held and click)
 
 
 def _melody_confidence(seg, ts, notes, grid, base_beat, prob, times, fmin, fmax):
@@ -753,6 +1181,319 @@ def _refine_pitch(y, ta, tb, est_midi):
         if sc > best:
             best, bm = sc, m
     return bm
+
+
+def _octave_up(y, ta, tb, est_midi, max_midi):
+    """Undo a sub-octave reading. pYIN's smoothing can hold the previous pitch through a quick jump an octave up
+    (the lower note's period is also a period of the higher one), so a note read at f is checked against its own
+    spectrum: if its odd partials (f, 3f, 5f) are near silent while its even ones (2f, 4f, 6f) carry the sound,
+    the note is at 2f. Any real tone at f has energy at f or 3f, so a true low note keeps its octave."""
+    d = tb - ta
+    a, b = int((ta + d * 0.2) * ASR), int((tb - d * 0.2) * ASR)
+    x = y[max(a, 0):b]
+    if len(x) < 1024:
+        return est_midi
+    n = 1 << 16
+    S = np.abs(np.fft.rfft(x * np.hanning(len(x)), n=n))
+
+    def part(f):                                           # strongest bin within 30 cents of f
+        if f >= ASR / 2 * 0.95:
+            return 0.0
+        lo, hi = int(f * 2 ** (-0.3 / 12) * n / ASR), int(np.ceil(f * 2 ** (0.3 / 12) * n / ASR)) + 1
+        return float(S[lo:hi].max())
+
+    m = est_midi
+    while m + 12 <= max_midi + 0.5:
+        f = 440 * 2 ** ((m - 69) / 12)
+        odd = sum(part(f * h) for h in (1, 3, 5))
+        even = sum(part(f * h) for h in (2, 4, 6))
+        if even <= 0 or odd >= 0.1 * even:                 # odd partials within 20 dB: the read octave holds
+            break
+        m += 12
+    return m
+
+
+# ------------------------------------------------------------------ pitch in cents (maqam steps, intonation)
+
+def melody_cents_text(notes, text):
+    """melody()'s reading with each note's pitch as numbers (ledger:M225): the note lines become tab-separated rows
+    start, note, dur, vel, midi (float), hz, cents. The header and the confidence lines are kept as they are."""
+    lines = text.splitlines()
+    rows = [lines[0], "# start\tnote\tdur\tvel\tmidi\thz\tcents   (the first four columns are notes_write format; midi is "
+                      "the measured pitch as a float = note + cents/100; hz from it at A440; cents from the named "
+                      "equal-tempered note, -50..+50, so a quarter tone reads near +-50 and sits on either neighbour)"]
+    for st, p, d, v, c in notes:
+        m = p + c / 100.0
+        rows.append(f"{fmt_num(st)}\t{midi_to_name(p)}\t{fmt_num(d)}\t{v}\t{m:.2f}\t{440 * 2 ** ((m - 69) / 12):.2f}"
+                    f"\t{int(round(c)):+d}")
+    return '\n'.join(rows + [ln for ln in lines[1:] if ln.startswith('#')])
+
+
+CONTOUR_MAX_ROWS = 1000
+
+
+def pitch_contour(path, grid, bars=None, hop_ms=10.0, fmin='C1', fmax='C7', start=0, max_rows=200, max_bars=64):
+    """f0 per frame over bars, one window of at most max_rows frames from frame `start` (ledger:M225). pYIN gives the
+    voicing and the coarse pitch (10-cent bins, octave-safe); YIN's interpolated pitch replaces it on frames where the
+    two agree within 60 cents, so steady pitches read to a cent or two. Only the window (plus 0.25 s each side) is
+    analysed, so paging through long ranges stays cheap. Returns (rows, text)."""
+    if not 1.0 <= hop_ms <= 100.0:
+        raise AnalysisError(f"hop_ms={hop_ms} is outside 1-100 ms; 10 ms reads note shapes and vibrato, 5 ms "
+                            f"ornaments, 25-50 ms a long phrase in few rows")
+    if not 1 <= max_rows <= CONTOUR_MAX_ROWS:
+        raise AnalysisError(f"max_rows={max_rows} is outside 1-{CONTOUR_MAX_ROWS}; read a long range window by window "
+                            f"with start=, or raise hop_ms for fewer rows")
+    lo, hi = librosa.note_to_hz(fmin), librosa.note_to_hz(fmax)
+    if hi <= lo * 1.5:
+        raise AnalysisError(f"fmin {fmin} .. fmax {fmax} is too narrow (or reversed); give at least half an octave")
+    y = load(path)
+    b0, b1, _ = _range(y, ASR, grid, bars, max_bars)
+    t0 = max(0.0, grid.bar_time(b0))
+    t1 = min(len(y) / ASR, grid.bar_time(b1))
+    hop = int(round(hop_ms * ASR / 1000))
+    nfr = int(np.floor((t1 - t0) * ASR / hop))
+    if nfr <= 0:
+        raise AnalysisError(f"bars {b0}-{b1 - 1} hold no audio in this source (it is {len(y) / ASR:.1f} s long)")
+    if not 0 <= start < nfr:
+        raise AnalysisError(f"start={start} is past the end: bars {b0}-{b1 - 1} have {nfr} frames at {hop_ms:g} ms "
+                            f"(start=0 .. {nfr - 1})")
+    k1 = min(nfr, start + max_rows)
+    ctx = int(np.ceil(0.25 * ASR / hop))
+    ka, kb = start - ctx, k1 + ctx
+    s0 = int(round(t0 * ASR))
+    a, b = s0 + ka * hop, s0 + kb * hop + 1
+    seg = np.zeros(b - a, dtype=np.float32)
+    ia, ib = max(a, 0), min(b, len(y))
+    if ib > ia:
+        seg[ia - a:ib - a] = y[ia:ib]
+    f0, voiced, prob = librosa.pyin(seg, fmin=lo, fmax=hi, sr=ASR, hop_length=hop, frame_length=2048, center=True)
+    fy = librosa.yin(seg, fmin=lo, fmax=hi, sr=ASR, hop_length=hop, frame_length=2048, center=True)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        agree = voiced & (np.abs(1200 * np.log2(fy / f0)) < 60)
+    f0 = np.where(agree, fy, f0)
+    rows = []
+    for k in range(start, k1):
+        i = k - ka
+        t = (s0 + k * hop) / ASR
+        fb = grid.time_to_bar(t)
+        bar = int(np.floor(fb + 1e-9))
+        beat = (fb - bar) * grid.bpb + 1
+        hz = float(f0[i]) if voiced[i] and np.isfinite(f0[i]) else None
+        rows.append({'t': round(t, 4), 'bar': bar, 'beat': round(beat, 3), 'hz': hz,
+                     'midi': float(librosa.hz_to_midi(hz)) if hz else None, 'p': float(prob[i])})
+    L = [f"# pitch contour bars {b0}-{b1 - 1}, frames {start}-{k1 - 1} of {nfr} at {hop_ms:g} ms "
+         f"({rows[0]['t']:.3f}-{rows[-1]['t']:.3f} s)",
+         "# t_s\tbar\tbeat\thz\tmidi\tnote\tcents\tp   (midi is the pitch as a float; cents from the named "
+         "equal-tempered note, -50..+50; p = pYIN voicing probability; '-' = unvoiced)"]
+    for r in rows:
+        if r['hz'] is None:
+            L.append(f"{r['t']:.3f}\t{r['bar']}\t{r['beat']:.2f}\t-\t-\t-\t-\t{r['p']:.2f}")
+        else:
+            n = int(round(r['midi']))
+            L.append(f"{r['t']:.3f}\t{r['bar']}\t{r['beat']:.2f}\t{r['hz']:.2f}\t{r['midi']:.2f}\t{midi_to_name(n)}"
+                     f"\t{int(round((r['midi'] - n) * 100)):+d}\t{r['p']:.2f}")
+    vm = [r['midi'] for r in rows if r['midi'] is not None]
+    L.append(f"# voiced {len(vm)} of {len(rows)} frames" +
+             (f"; median {np.median(vm):.2f} ({midi_to_name(np.median(vm))}), range {min(vm):.2f}-{max(vm):.2f}"
+              if vm else " (unpitched, silent, or the pitch is outside fmin/fmax)"))
+    L.append(f"# more: start={k1} for the next window ({nfr - k1} frames left)" if k1 < nfr else
+             f"# end of bars {b0}-{b1 - 1}")
+    return rows, '\n'.join(L)
+
+
+# ------------------------------------------------------------------ steady pitches (a part against the tuning grid)
+
+STEADY_BAND = (30.0, 5000.0)    # Hz searched for partials
+
+
+def _fundamentals(x, sr, range_db=15.0, max_notes=6):
+    """The notes sounding in one chunk of a part, as [(midi float at A440, level dB)], and the share of the chunk's
+    energy that sits on spectral lines (a struck or bowed tone ~0.8+, noise ~0.1). One zero-padded Hann FFT; a peak
+    counts when it stands 12 dB over the median of the spectrum around it (noise peaks stand ~6). Peaks within 30 c
+    of a whole multiple (1-12x) of a lower peak no more than 25 dB under them are its partials, and a note's pitch is
+    read from its strongest partial divided by its number, so a soft fundamental under a loud octave (a tumba's
+    second mode) still reads true. Notes more than range_db under the loudest are dropped."""
+    n = 1 << 15
+    X = np.abs(np.fft.rfft(x * np.hanning(len(x)), n=n))
+    L = 20 * np.log10(X + 1e-12)
+    lo, hi = int(STEADY_BAND[0] * n / sr), int(STEADY_BAND[1] * n / sr)
+    hb = max(2.0 * n / len(x), 2.0)                     # Hann main-lobe half width, in bins
+    top = L[lo:hi].max()
+    c = L[lo:hi]
+    pk = np.where((c[1:-1] > c[:-2]) & (c[1:-1] >= c[2:]) & (c[1:-1] > top - 30))[0] + 1 + lo
+    peaks = []
+    for k in pk:
+        r = int(4 * hb)
+        if X[k] < X[max(k - int(hb), 0):k + int(hb) + 1].max():        # a side lobe of a bigger peak
+            continue
+        if L[k] - 20 * np.log10(np.median(X[max(k - r, 1):k + r]) + 1e-12) < 12:
+            continue
+        a, b, g = L[k - 1], L[k], L[k + 1]
+        peaks.append(((k + 0.5 * (a - g) / (a - 2 * b + g - 1e-12)) * sr / n, float(b), k))
+    tot = float((X[lo:hi] ** 2).sum()) + 1e-20
+    on = sum(float((X[max(k - int(hb), 0):k + int(hb) + 1] ** 2).sum()) for _, _, k in peaks)
+    notes = []                                          # [f0, own level, [(partial number, Hz, level)]]
+    for fr, lv, _ in sorted(peaks):
+        for nt in notes:
+            h = fr / nt[0]
+            k = int(round(h))
+            if 1 <= k <= 12 and abs(1200 * np.log2(h / k)) < 30 and nt[1] >= lv - 25:
+                nt[2].append((k, fr, lv))
+                break
+        else:
+            notes.append([fr, lv, [(1, fr, lv)]])
+    out = []
+    for _, _, parts in notes:
+        k, fr, lv = max(parts, key=lambda p: p[2])
+        out.append((float(69 + 12 * np.log2(fr / k / 440.0)), lv))
+    if out:
+        best = max(lv for _, lv in out)
+        out = sorted([o for o in out if o[1] >= best - range_db], key=lambda o: -o[1])[:max_notes]
+    return out, min(on / tot, 1.0)
+
+
+def steady_pitches(y, sr=ASR, skip_ms=100.0, chunk_ms=200.0, max_chunks=4, min_ms=60.0, floor_db=45.0,
+                   max_events=400, min_tonal=0.5, glide_cents=25.0, floor_ms=25.0, min_cycles=4.0):
+    """The steady pitched notes of one part (ledger:M231), and their attacks. A note lasts from its onset to the
+    next onset or until its level falls 30 dB, whichever is first. Its steady pitch is read from the skip after the
+    onset (a pluck starts sharp for ~90 ms; a drum's strike is noise) to that end, at most max_chunks chunks of
+    chunk_ms. skip_ms is the longest skip: a note shorter than skip_ms / 0.3 (a fast run: a 16th at 104 bpm is
+    ~144 ms) is read from 0.3 of its length, and needs min(min_ms, 0.4 of its length) of steady part, at least
+    floor_ms. Its attack is read too, from 0.3 of its skip to the skip, capped at 0.8 of skip_ms (30-80 ms on a long
+    note). Every reading needs min_cycles periods of its pitch in its window (_fundamentals resolves ~4: a 25 ms
+    window reads down to ~170 Hz, 60 ms to ~70 Hz). A short note with no steady part that resolves is read once
+    from its attack to its end and marked attack_only; one that still resolves nothing is counted short.
+    Each chunk is read by _fundamentals; a note whose chunks disagree by more than glide_cents is gliding (a
+    pitch-dropping kick, a slide) and is counted, not read. Chords give one reading per note. The skip and the
+    attack are timed from the attack itself (the steepest rise in level near the onset), as onsets backtrack up to
+    ~70 ms early, into the note before, or land a few ms late; a note's read ends where the next note's attack
+    starts, and a short note with no attack of its own (the tail of the note before) is counted 'unstruck'.
+    Returns (readings [{'t', 'midi', 'db', 'attack', 'attack_only'}], counts {'events', 'pitched', 'noisy',
+    'gliding', 'short', 'sampled', 'fast', 'attack_only', 'unstruck'}); t is the onset in seconds from the start of
+    y, midi a float at A440, attack the attack's midi float (None when its window does not resolve it, or for an
+    attack_only reading); 'fast' counts the notes read with a shortened skip."""
+    pad = int(0.3 * sr)
+    z = np.concatenate([np.zeros(pad, dtype=np.float32), np.asarray(y, dtype=np.float32)])
+    hop = 256
+    oenv = librosa.onset.onset_strength(y=z, sr=sr, hop_length=hop)
+    ons = librosa.onset.onset_detect(onset_envelope=oenv, sr=sr, hop_length=hop, backtrack=True, units='samples')
+    rdb = 20 * np.log10(librosa.feature.rms(y=z, frame_length=1024, hop_length=hop)[0] + 1e-9)
+    loud = rdb.max()
+    counts = {'events': 0, 'pitched': 0, 'noisy': 0, 'gliding': 0, 'short': 0, 'sampled': 0, 'fast': 0,
+              'attack_only': 0, 'unstruck': 0}
+    if loud < -90:
+        return [], counts
+    ons = [int(o) for o in ons if rdb[min(int(o) // hop + 2, len(rdb) - 1)] > loud - floor_db] or [pad]
+    if len(ons) > max_events:                           # a long busy part: an even sample of its hits
+        counts['sampled'] = len(ons)
+        ons = [ons[i] for i in np.linspace(0, len(ons) - 1, max_events).astype(int)]
+    ms = sr / 1000
+    skip, chunk, mn, flo = int(skip_ms * ms), int(chunk_ms * ms), int(min_ms * ms), int(floor_ms * ms)
+
+    def read(i, j):                                     # one window: the notes with min_cycles periods in it
+        notes, share = _fundamentals(z[i:j], sr)
+        return [(m, lv) for m, lv in notes if 440 * 2 ** ((m - 69) / 12) * (j - i) / sr >= min_cycles], share
+
+    w6, h6 = 128, 16                                    # 6 ms frames, 0.7 ms apart
+
+    def rises(i, j, w=w6):                              # the level's jump (dB) from each w-sample frame to the next
+        seg = z[max(i, 0):j]
+        if len(seg) < 3 * w:
+            return np.zeros(0)
+        e = 10 * np.log10((librosa.util.frame(np.ascontiguousarray(seg), frame_length=w, hop_length=h6) ** 2)
+                          .mean(0) + 1e-10)
+        return e[w // h6:] - e[:-(w // h6)]
+
+    def struck(s0, s1):                                 # the attack itself: (where, dB) of the steepest rise, from
+        b0 = max(s0 - int(20 * ms), 0)                  # 20 ms before the onset to 100 after it (an onset
+        d = rises(b0, min(s1, s0 + int(100 * ms) + w6))     # backtracks up to ~70 ms early, or lands a few ms
+        if not len(d):                                  # late), never past the next onset
+            return s0, 0.0
+        i = int(np.argmax(d))
+        return min(b0 + i * h6 + w6, s1 - 1), float(d[i])
+
+    bounds = ons[1:] + [len(z)]
+    hits = [struck(s0, s1) for s0, s1 in zip(ons, bounds)]
+    nexts = [st - int(3 * ms) if rise >= 3 else len(z) for st, rise in hits[1:]] + [len(z)]
+    out = []
+    for s0, s1, (st, rise), nx in zip(ons, bounds, hits, nexts):
+        s1 = max(min(s1, nx), s0 + 1)                   # a note ends where the next one's attack starts
+        f0, f1 = s0 // hop, min(s1 // hop, len(rdb))
+        if f1 <= f0:
+            continue
+        pf = f0 + int(np.argmax(rdb[f0:f1]))
+        pk = rdb[pf]
+        fall = np.nonzero(rdb[pf:f1] <= pk - 30)[0]
+        end = min(s1, (pf + int(fall[0])) * hop if len(fall) else s1, len(z))
+        ln = end - st
+        sk = max(0, min(skip, int(0.3 * ln)))           # the skip, shortened on a short note
+        fast = sk < skip
+        if fast and rise < 3:                           # no attack of its own: the tail of the note before
+            counts['unstruck'] += 1
+            continue
+        if fast:                                        # a second attack inside it (an onset missed): end there
+            c0 = st + int(20 * ms) - 2 * w6             # in 12 ms frames, so a low note's ripple is not one
+            d = np.nonzero(rises(c0, end, 2 * w6) >= 6)[0]
+            if len(d):
+                end = c0 + int(d[0]) * h6 + 2 * w6 - int(3 * ms)
+                ln = end - st
+                sk = max(0, min(skip, int(0.3 * ln)))
+        a = st + sk
+        e = min(end, a + max_chunks * chunk)
+        need = min(mn, max(flo, int(0.4 * ln)))
+        a0, a1 = st + int(0.3 * sk), st + min(int(0.8 * skip), sk)     # the attack window
+        reads, tonal, only = [], 0.0, False
+        if e - a >= need:
+            k = max(1, min(max_chunks, (e - a) // chunk))
+            step = (e - a) // k
+            for j in range(k):
+                notes, share = read(a + j * step, a + (j + 1) * step)
+                tonal += share / k
+                reads.append(notes)
+        if fast and not any(reads) and e - a0 >= need:     # no steady part resolves: read it whole, from the attack
+            notes, tonal = read(a0, e)
+            reads, k, only = [notes], 1, True
+        if not any(reads):
+            if fast or e - a < need:                    # too short to have, or to resolve, a steady part
+                counts['short'] += 1
+            else:
+                counts['events'] += 1
+                counts['noisy'] += 1
+            continue
+        counts['events'] += 1
+        counts['fast'] += fast
+        if tonal < min_tonal:
+            counts['noisy'] += 1
+            continue
+        att = []
+        if not only and a1 - a0 >= int(15 * ms):
+            att, share = read(a0, a1)
+            att = att if share >= min_tonal else []
+        groups = []                                     # one per note, across the chunks
+        for notes in reads:
+            for m, lv in notes:
+                for gr in groups:
+                    if abs(np.median(gr[0]) - m) < 0.5:
+                        gr[0].append(m)
+                        gr[1] = max(gr[1], lv)
+                        break
+                else:
+                    groups.append([[m], lv])
+        got = False
+        for ms_, lv in groups:
+            if len(ms_) < max(1, (k + 1) // 2):         # heard in under half the chunks: a passing partial
+                continue
+            if 100 * (max(ms_) - min(ms_)) > glide_cents:
+                counts['gliding'] += 1
+                continue
+            m = float(np.median(ms_))
+            near = min(att, key=lambda x: abs(x[0] - m), default=None)
+            out.append({'t': (s0 - pad) / sr, 'midi': m, 'db': float(lv), 'attack_only': only,
+                        'attack': float(near[0]) if near and abs(near[0] - m) < 0.75 else None})
+            got = True
+        counts['pitched'] += got
+        counts['attack_only'] += got and only
+    return out, counts
 
 
 def transcribe(path, grid, bars=None, quant=0.25, max_bars=16, fmin='C1', n_octaves=7, threshold=0.35,
