@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### The arpeggiator, live and in the studio (MIDI parity step 7)
+
+- One arp core (`ismail/arp.py`: pure, deterministic) for both sides, with the same settings and names, so a part
+  arped live and the same part rendered give the same steps.
+- `live_arp(project, source, ...)`: the keys of a patched input (`live_midi`: a keyboard, a loopMIDI port, `'screen
+  keys'`) stop sounding as keys and drive steps on the set's beat, placed sample exact on the beat the person
+  hears. `latch=True`, the sustain pedal holds keys, `at=` a bar line (default `'next_bar'`) for a start, a change
+  or `off=True`. Any subset of settings changes only those. `live_status` shows each arp: its settings, the keys
+  it holds, steps played, changes queued.
+- `track_arp(project, track, ...)`: a track's held chords (its notes) play through the arp at render, or a step
+  list over `bars=[a, b]`. The notes stay as written; the renderer, decks (`live_load`) and `midi_write` /
+  `midi_play` all play the steps. `write=True` writes the steps into the track as plain notes (the cutoff and pan
+  as automation) and turns the arp off; `undo` brings the chords back.
+- Note sources: `pattern` (`'up'`, `'down'`, `'updown'`, `'downup'`, `'order'`, `'random'`, `'chord'`, or held-key
+  numbers like `[1, 3, 2, 4]`), `degrees` (scale steps above the lowest held key, with `key` + `scale`), or `notes`
+  (an exact step list, `'A3 C4 E4 A4 | F3 A3 C4 F4'`, one bar per group, switching on bar lines). With key + scale
+  held keys snap onto the scale; `key=` moves a step list to another key with each note on its scale degree;
+  `transpose=` by semitones. `rate`, `octaves`, `swing`, `restart` (`'key'`, `'bar'`, `'off'`).
+- Per step, each list cycling on its own length: `gate`, `velocity`, `accent`, `slide`, `octave`, `cutoff`, `pan`.
+  Studio: cutoff moves the instrument's filter (a synth, a sampler with a filter) or the track's first filter
+  effect, pan is the track's pan; live: a low-pass and an equal-power pan on each step's note, any patch.
+- Not yet: slide glides only in the studio (a mono synth with glide); live, a slid step is a legato tie that
+  re-attacks. Live cutoff is a filter after the note, not the voice's own filter. Decks leave the per-step pan out
+  (decks do not take pan automation). An arped input's pitch bend, pressure and mod wheel (step 6's lanes) do
+  not move the arp's steps yet. Other MIDI effects (chord, scale, note length, velocity, random) follow.
+
 ### Lanes as MIDI: bend, pressure, CCs and MPE in files and from played keys (MIDI parity step 6)
 
 - `midi_write` writes a track's expression lanes (automation `inst.lane.<name>`) on its channel: `bend` as pitch

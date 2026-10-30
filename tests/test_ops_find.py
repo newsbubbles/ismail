@@ -50,6 +50,8 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('record what I played on my keyboard into a track', 'live_played'),
     ('the knobs on my midi controller move the filter cutoff', 'live_map'),
     ('write the bend lane out as midi pitch bend', 'midi_write'),
+    ('arpeggiator on the keys I play live', 'live_arp'),
+    ('arpeggiate the chords of a track at render', 'track_arp'),
     ('the lead line when the stem also has a backing part', 'melody_consensus'),
     ('my draft sounds MIDI, mechanical against the reference', 'analyze_feel'),
     ('write the reference timing and velocity into my notes', 'feel_from_ref'),

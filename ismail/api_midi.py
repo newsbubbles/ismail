@@ -13,6 +13,7 @@ from . import midilanes as ML
 from . import midisend as MS
 from .api import op, OpError, _load, _clear
 from .notation import midi_to_name, pitch_to_midi, placed, fmt_num
+from .arp import expand_project
 
 DRUM_CH = 9                    # channel 10, where every DAW and GM synth looks for drums
 
@@ -42,6 +43,7 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     track names written as MPE: channel 1 the master, each note on its own member channel 2 to 16 with the track's
     lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth."""
     P = _load(project)
+    P.d = expand_project(P.d)                    # a track's arp goes out as its steps
     names = tracks or [n for n, t in P.d['tracks'].items() if t.get('notes')]
     if not names:
         raise OpError("no track has notes; write some (notes_write) or name tracks=[...]")
@@ -405,6 +407,7 @@ def midi_play(project: str, port: str, tracks: list = None, bars: list = None, c
     pulses before Start, Stop at the end) so a drum machine or a DAW on external sync plays along. max_s: refuses a
     longer span (choose bars). The reply says how late the messages went out."""
     P = _load(project)
+    P.d = expand_project(P.d)                    # a track's arp goes out as its steps
     names = tracks or [n for n, t in P.d['tracks'].items() if t.get('notes') and not t.get('mute')]
     if not names:
         raise OpError("no unmuted track has notes; write some (notes_write) or name tracks=[...]")

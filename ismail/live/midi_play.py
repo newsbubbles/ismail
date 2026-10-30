@@ -487,7 +487,12 @@ class MidiPlay:
         lat = getattr(self.e.stream, 'latency', 0) if self.e.stream is not None else 0
         return int(float(lat or 0) * SR)
 
+    def _arp(self):
+        return getattr(self.e, 'arp', None)        # live_arp (live/arp.py): it takes the keys of an arped input
+
     def note_on(self, p, note, vel, ch=1):
+        if self._arp() is not None and self._arp().key(p, note, vel):
+            return                                 # an arp step has no channel expression yet (live/arp.py)
         m = note + p['transpose']
         if p['oneshot'] and len(p['want']) == 1:
             m = p['want'][0]
@@ -512,6 +517,8 @@ class MidiPlay:
         p['played'] += 1
 
     def note_off(self, p, note):
+        if self._arp() is not None and self._arp().key(p, note, 0):
+            return
         with self.lock:
             v = p['held'].pop(note, None)
             if v is None:
@@ -522,18 +529,21 @@ class MidiPlay:
                 v.release(int(p['rel_s'] * SR))
 
     def release_all(self, p):
+        if self._arp() is not None:
+            self._arp().clear(p)
         with self.lock:
             for v in list(p['held'].values()) + p['sustained']:
                 v.release(int(0.05 * SR))
             p['held'], p['sustained'] = {}, []
 
     # ------------------------------------------------------------------ audio (the device's thread)
-    def mix(self, out):
-        """Adds the sounding keys to out (frames, 2) in place; returns what was added, or None."""
-        if not self.voices:
+    def mix(self, out, extra=None):
+        """Adds the sounding keys to out (frames, 2) in place; returns what was added, or None. extra: more to add
+        under the same soft clip (the arps' steps, live/arp.py)."""
+        if not self.voices and extra is None:
             return None
         n = out.shape[0]
-        acc = np.zeros((n, 2), dtype=np.float32)
+        acc = np.zeros((n, 2), dtype=np.float32) if extra is None else extra
         with self.lock:
             keep = []
             for v in self.voices:

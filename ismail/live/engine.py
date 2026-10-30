@@ -38,6 +38,7 @@ from .safety import BAD_ABS, Safety
 from . import outputs as O
 from .midi_out import MidiOut
 from .midi_play import MidiPlay
+from .arp import LiveArps
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 from .. import settings
 
@@ -273,6 +274,7 @@ class Engine:
         self._head = 0
         self.midi = MidiPlay(self)      # played keys: MIDI inputs patched to instruments (live_midi)
         self.mout = MidiOut(self)       # tracks' notes and clock to MIDI outputs (live_midi_out, live_midi_clock)
+        self.arp = LiveArps(self)       # arpeggiators on played keys (live_arp)
         if self.n_workers > 0:
             import multiprocessing as mp
             ctx = mp.get_context('spawn')
@@ -948,7 +950,7 @@ class Engine:
             if self._primed and self.fade is None:
                 left = self._fifo_n if got == frames else 0
                 self.head_min = left if self.head_min is None else min(self.head_min, left)
-        keys = self.midi.mix(out)
+        keys = self.midi.mix(out, self.arp.mix(frames, self.played))
         if keys is not None:            # live_listen hears the keys where the device played them
             i = (self.played - self.safety.la - G.LAT_BUDGET) % self.air.shape[1]
             j = min(i + frames, self.air.shape[1])
@@ -2781,6 +2783,12 @@ class Engine:
         except ValueError as e:
             raise LiveError(str(e))
 
+    def cmd_arp(self, source=None, at=None, off=False, latch=None, **settings):
+        try:
+            return self.arp.cmd(source, at, off, latch, **settings)
+        except (ValueError, OSError) as e:
+            raise LiveError(str(e))
+
     def cmd_played(self, source=None, bars=8, fit=False, from_bar=None):
         try:
             return self.midi.played(source, bars, fit, from_bar)
@@ -2814,6 +2822,7 @@ class Engine:
                 lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
             if self.midi.patches:
                 lines += [self.midi.line(p) for p in self.midi.patches.values()]
+            lines += self.arp.lines()
             lines += self.mout.status_lines()
             if self.controls.maps:
                 lines.append("controls: " + '; '.join(f"{c} -> {O.describe(m)}" for c, m in self.controls.maps.items()))
@@ -3124,7 +3133,7 @@ def serve(engine, port=0, idle_min=None):
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
            'midi': engine.cmd_midi, 'played': engine.cmd_played, 'take': engine.cmd_take,
-           'keys': engine.cmd_keys,
+           'keys': engine.cmd_keys, 'arp': engine.cmd_arp,
            'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
            'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo}
     keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')

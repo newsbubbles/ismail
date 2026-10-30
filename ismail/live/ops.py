@@ -772,6 +772,38 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
 
 
 @op()
+def live_arp(project: str, source: str = None, pattern=None, degrees: list = None, notes: str = None, rate=None,
+             octaves: int = None, gate=None, velocity=None, accent: list = None, slide: list = None,
+             octave: list = None, cutoff=None, pan=None, transpose: int = None, key: str = None, scale=None,
+             restart: str = None, swing: float = None, latch: bool = None, at: str = 'next_bar',
+             off: bool = False) -> str:
+    """An arpeggiator on a patched input (live_midi: a keyboard, a loopMIDI port or 'screen keys'): its keys stop
+    sounding as they are pressed and drive steps on the set's beat instead, landing on the beat the person hears.
+    The same core as the studio's track_arp: same settings, same notes. Any subset of settings changes only those;
+    the first call starts it with the defaults for the rest. with no source: says which arps are on.
+    Note source (one of): pattern 'up' (default), 'down', 'updown', 'downup', 'order' (as pressed), 'random',
+    'chord', or a list of held-key numbers ([1, 3, 2, 4]; 1 = the lowest held key, past the last goes up an octave,
+    0 = a rest); degrees: scale steps above the lowest held key ([0, 2, 4, 7], None = a rest; needs key and scale);
+    notes: an exact step list 'A3 C4 E4 A4 | F3 A3 C4 F4', one bar per '|' group, switching on bar lines, each
+    group cycling inside its bar ('.' a rest, 'C4,E4' two at once); it plays with no keys held.
+    rate: beats per step (0.25 = 16ths, 1/3 = 8th triplets). octaves: 1 to 4. key ('A', 'F#') + scale ('minor',
+    'major', 'dorian' ... or semitones [0, 2, 3, ...]): held keys snap onto the scale; on a step list, key= moves
+    it from the key it was given with, each note kept on its scale degree. transpose: semitones.
+    Per step (a number, or a list cycling on its own length; [] clears): gate (fraction of a step, 0.5),
+    velocity (1-127; default the key's own), accent (0/1: velocity 127), slide (0/1: the step ties into the next;
+    live it re-attacks, the studio's mono synths glide), octave (-3 to 3), cutoff (Hz: a low-pass on that step's
+    note), pan (-1 to 1). restart: 'key' (default: a key pressed starts the pattern again at the next step),
+    'bar', 'off'. swing: 0 to 0.5 of a step, every second step. latch=True: keys keep playing after release until
+    a new chord is pressed. at: when it starts or changes ('next_bar' default, 'now', 'next_4', 'bar:17').
+    off=True stops it (at= a bar line too). live_status shows its state. live_played still logs the keys pressed,
+    not the steps."""
+    return _call(project, 'arp', source=source, pattern=pattern, degrees=degrees, notes=notes, rate=rate,
+                 octaves=octaves, gate=gate, velocity=velocity, accent=accent, slide=slide, octave=octave,
+                 cutoff=cutoff, pan=pan, transpose=transpose, key=key, scale=scale, restart=restart, swing=swing,
+                 latch=latch, at=at, off=off)
+
+
+@op()
 def live_midi_out(project: str, track: str = None, port: str = None, channel: int = None, audio: bool = None,
                   offset_ms: float = None, at: str = 'now', remove: bool = False) -> str:
     """Send a live track's notes out as MIDI to a port: a hardware synth, or a loopMIDI port (Windows) or the IAC

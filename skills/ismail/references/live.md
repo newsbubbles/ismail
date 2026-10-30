@@ -662,6 +662,36 @@ straight to the speakers.
   port (name it, e.g. "ismail keys"); whatever sends MIDI to that port plays through `live_midi` like a real
   keyboard.
 
+### The arpeggiator, live and in the studio
+
+The person holds a chord and it plays as steps on the beat; or a track's chords render as an arp. One core does
+both (`live_arp` live, `track_arp` in the studio): same settings, same names, same notes, so a part found in a jam
+renders the same.
+
+- **Live:** patch the input first (`live_midi(source=..., track=...)`), then
+  `live_arp(source='keys', pattern='up', rate=0.25, octaves=2)`. The keys stop sounding as keys and drive the
+  steps; each step lands on the beat the person hears. `latch=True` keeps the chord playing after they let go
+  (a new chord replaces it); the sustain pedal holds keys too. `at=` is a bar line by default (`'next_bar'`;
+  `'now'`, `'bar:17'`), for a start, a change and `off=True`. Any subset of settings changes only those: call
+  again with `cutoff=[...]` alone and the rest stays. `live_status` shows the arp, the keys it holds and any change
+  queued. `live_played` still logs the keys pressed, not the steps.
+- **Studio:** write the chords to hold (`notes_write(..., '0 A3,C4,E4 4; 4 F3,A3,C4 4')`), then
+  `track_arp(track='arp', pattern='updown', rate=0.25)`. The chords stay as written and the render plays the steps;
+  the reply prints the first two bars of steps. `write=True` turns them into plain notes to edit (and the cutoff and
+  pan into automation); `undo()` brings the chords back. `bars=[a, b]` limits where it plays.
+- **Note sources** (one at a time): `pattern` by name (`up`, `down`, `updown`, `downup`, `order`, `random`, `chord`)
+  or held-key numbers (`[1, 3, 2, 4]`, 1 = the lowest held key, 0 = a rest); `degrees=[0, 2, 4, 7]` (scale steps
+  above the lowest held key, with `key` and `scale`); `notes='A3 C4 E4 A4 | F3 A3 C4 F4'`, an exact step list, one
+  bar per group, switching on bar lines, plays with no keys held. Any key: give `key` + `scale` and held keys snap
+  onto it; on a step list, give the key with the notes once, then `key='C', scale='major'` moves the progression
+  with each note on its scale degree; `transpose=` moves by semitones.
+- **The swirl.** Per step, each a list cycling on its own length: `velocity`, `accent` (0/1, velocity 127), `gate`
+  (fraction of a step), `slide` (0/1, ties into the next step), `octave`, `cutoff` (Hz), `pan`. Lists of different
+  lengths against the pattern (a 3-step cutoff over a 4-note pattern) make the moving trance arp; `live_fx` (a beat
+  delay, a filter sweep) goes on top. Studio cutoff moves the synth's own filter (or a sampler's, or the track's
+  first filter effect; the reply says when the voice has none); live it is a low-pass on each step's note.
+- Not yet: live slide re-attacks (the studio's mono synths with glide glide), decks leave the per-step pan out.
+
 ## MIDI out: synths and other apps play with the set
 
 When the person wants a part played by their own synth, or by a plugin in their DAW, or wants Ableton, FL Studio or
