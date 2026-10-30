@@ -33,6 +33,7 @@ from .. import midisend as MS
 from ..dsp import SR
 from ..notation import fmt_num
 from . import graph as G
+from .clock_in import same_port
 from .timeline import EPS, fmt_bar
 
 LOOK_S = 0.3                # messages are handed to the sender this long before their time
@@ -226,6 +227,12 @@ class MidiOut:
             if port is None and self.clock is None:
                 return self.describe()
             name = self.find(port) if port is not None else self.clock['port']
+            cin = getattr(e, 'cin', None)
+            if cin is not None and cin.source is not None and same_port(cin.source, name):
+                raise ValueError(f"clock in already follows {cin.source!r}: clock out to the same port would send the "
+                                 f"set's clock back to itself and it would chase its own tempo. Send clock out to "
+                                 f"another port (a second loopMIDI port), or turn clock in off first: "
+                                 f"live_midi_clock_in(on=False)")
             if self.clock is not None:
                 if name == self.clock['port'] and bool(position) == self.clock['position']:
                     if offset_ms is not None:
@@ -318,12 +325,16 @@ class MidiOut:
                     if self.ending is not None and t_on >= self.ending:
                         continue
                     tok = next(self._tok)
-                    self.sched.at(t_on, self._on(notes, ch, pitch, v, tok, track, r), tag=('track', track))
+                    self.sched.at(t_on, self._on(notes, ch, pitch, v, tok, track, r, e.sample(on) + self._lag()),
+                                  tag=('track', track))
                     self.sched.at(t_off, lambda n=notes, c_=ch, p_=pitch, t_=tok: n.off(c_, p_, t_),
                                   tag=('track', track))
 
-    def _on(self, notes, ch, pitch, vel, tok, track, r):
+    def _on(self, notes, ch, pitch, vel, tok, track, r, played=None):
         def act():
+            cin = getattr(self.e, 'cin', None)
+            if cin is not None and played is not None and not cin.is_open(played):
+                return                             # clock in: the other app is stopped, the set is silent
             notes.on(ch, pitch, vel, tok, track)
             r['sent'] += 1
             self.e.sounded = self.e.pos             # the synth sounds in the room: not SILENT ON AIR

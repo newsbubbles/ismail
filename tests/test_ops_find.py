@@ -47,6 +47,8 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('what instruments exist', 'kit'),
     ('send the notes to my hardware synth', 'live_midi_out'),
     ('ableton follows the tempo of the set with midi clock', 'live_midi_clock'),
+    ('sync the set to an external midi clock, my drum machine leads', 'live_midi_clock_in'),
+    ('ismail plays in time with my drum machine, which leads', 'live_midi_clock_in'),
     ('record what I played on my keyboard into a track', 'live_played'),
     ('the knobs on my midi controller move the filter cutoff', 'live_map'),
     ('write the bend lane out as midi pitch bend', 'midi_write'),

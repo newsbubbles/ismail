@@ -232,8 +232,9 @@ its declared server for an MCP handshake.
   voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
 - One tempo per project. MIDI files go in and out (`midi_write`, `midi_read`), and a live set takes MIDI from a
   keyboard, maps a controller's knobs and pads to its params (`live_map`), arpeggiates held keys or a track's chords (`live_arp`, `track_arp`), and sends its notes and MIDI clock out to synths and other apps (`live_midi_out`, `live_midi_clock`),
+  follows another app's MIDI clock, tempo and Start/Stop (`live_midi_clock_in`),
   and a performer's lanes go in and out as pitch bend, pressure, CCs and MPE (in files, and from a played keyboard),
-  but no clock in or Ableton Link yet, no plugin hosting.
+  but no Ableton Link or MIDI Time Code yet, no plugin hosting.
 - The agent's own changes to a live set land between its turns, 5 to 30 seconds apart (your taps on the phone or
   the stage act at once).
 - The VR stage is tested on one headset (Quest 3) with one person.

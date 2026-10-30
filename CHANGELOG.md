@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### MIDI clock in: the set follows another app (MIDI parity step 8, part 1)
+
+- `live_midi_clock_in(project, source, ...)`: a running set follows the MIDI clock of another app (Ableton, FL
+  Studio, a DAW through a loopMIDI port) or a drum machine, from a named input. The tempo comes from the 24 ticks per
+  beat through a second-order delay-locked loop (`bandwidth_hz`, default 0.5 Hz: a steady tempo ramp is followed
+  430 ms late, a step settles within 0.1 BPM in 1.9 s, 1 ms of jitter reads within 0.25 BPM; measured in the tests).
+  The set changes tempo as `live_tempo` does, at the first beat its renders reach, at most once per `step_beats`,
+  only past `tempo_tol_bpm` or `phase_tol_ms`, bending at most `max_bend_pct` so ismail's beats land on theirs;
+  `offset_ms` for an app whose sound is late. On a synthetic 126 BPM clock with 1 ms jitter the beats stay within
+  4.3 ms, with 4 to 6 tempo changes in 15 s.
+- `transport='follow'` (default): their Stop silences the set on the speakers (a 5 ms fade; MIDI out notes held
+  back too), Start or Continue (from their Song Position Pointer) bring it in on the first of their bar lines its
+  render lead can reach, with its own bar line locked there; a Song Position while running relocks. `'tempo'`:
+  tempo and beats only. A dropout holds the last tempo and says so; lost ticks are counted from the time.
+- Clock out and the arp follow the followed tempo. Clock in and clock out on one port is refused both ways (the set
+  would chase its own clock). `live_tempo` is refused while clock in is on. `live_status` shows the follow.
+- `live_tempo`'s change is now one engine method shared with clock in (no change in behavior).
+- Not yet: Ableton Link (it needs a new dependency), MIDI Time Code, their meter, their Start and Stop passed on to
+  clock out, and the stopped silence in `live_listen`, `live_record` and the streams.
+
 ### The arpeggiator, live and in the studio (MIDI parity step 7)
 
 - One arp core (`ismail/arp.py`: pure, deterministic) for both sides, with the same settings and names, so a part

@@ -377,7 +377,7 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
 def midi_ports() -> str:
     """The MIDI ports this computer has now, by name: inputs (keyboards, pads, virtual ports that send to ismail)
     and outputs (synths, sound modules, loopMIDI or IAC ports into a DAW, that ismail sends to). Inputs play through
-    a live set with live_midi; outputs take a live track's notes (live_midi_out), the set's clock (live_midi_clock),
+    a live set with live_midi, or lead its tempo with their clock (live_midi_clock_in); outputs take a live track's notes (live_midi_out), the set's clock (live_midi_clock),
     or a song's notes from here (midi_play). On Windows, loopMIDI makes a virtual port that is both: ismail sends to
     it, and the DAW takes it as an input."""
     ins, outs = M.sources(), M.outputs()

@@ -222,6 +222,14 @@ Find any tool by what you need or by role with `ops_find`.
   DAW or a drum machine follows the set. `midi_play` plays a song's notes (or some bars) to a port from the command
   line, with clock if asked, no live set needed. Messages go out from their own thread (a sleep, then a short spin);
   no new dependency on Windows (winmm), mido with python-rtmidi elsewhere.
+- **MIDI clock in.** `live_midi_clock_in` makes a running set follow another app's or a drum machine's clock from
+  an input: the tempo from the 24 ticks per beat through a delay-locked loop (`bandwidth_hz`, 0.5 by default: a
+  steady tempo change shows about 430 ms late), applied as tempo changes at the first beat the renders reach, with
+  ismail's beats kept on theirs (`phase_tol_ms`, `max_bend_pct`, `step_beats`, `offset_ms`). `transport='follow'`:
+  their Stop silences the set, Start or Continue (from their Song Position) bring it in on the first of their bar
+  lines it can reach. `transport='tempo'` ignores their transport. A dropout holds the last tempo. Clock out and the
+  arp follow the followed tempo; clock in and clock out on one port is refused; `live_tempo` is refused while it
+  follows.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a

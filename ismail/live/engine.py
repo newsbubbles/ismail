@@ -39,6 +39,7 @@ from . import outputs as O
 from .midi_out import MidiOut
 from .midi_play import MidiPlay
 from .arp import LiveArps
+from .clock_in import ClockIn
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 from .. import settings
 
@@ -275,6 +276,7 @@ class Engine:
         self.midi = MidiPlay(self)      # played keys: MIDI inputs patched to instruments (live_midi)
         self.mout = MidiOut(self)       # tracks' notes and clock to MIDI outputs (live_midi_out, live_midi_clock)
         self.arp = LiveArps(self)       # arpeggiators on played keys (live_arp)
+        self.cin = ClockIn(self)        # the set follows another app's MIDI clock (live_midi_clock_in)
         if self.n_workers > 0:
             import multiprocessing as mp
             ctx = mp.get_context('spawn')
@@ -617,6 +619,12 @@ class Engine:
                 if dk.held:
                     self._release(dn, dk, now)
             try:
+                self.cin.plan()               # clock in first: MIDI out and clock out plan on the tempo it sets
+            except Exception as ex:
+                if self.stats['clock_in_errors'] < 3:
+                    self.news.append(f"clock in: following failed ({type(ex).__name__}: {ex}); tell Main Dev")
+                self.stats['clock_in_errors'] += 1
+            try:
                 self.mout.plan()
             except Exception as ex:           # MIDI out must never stop the set's own scheduling
                 if self.stats['midi_out_errors'] < 3:
@@ -950,7 +958,13 @@ class Engine:
             if self._primed and self.fade is None:
                 left = self._fifo_n if got == frames else 0
                 self.head_min = left if self.head_min is None else min(self.head_min, left)
-        keys = self.midi.mix(out, self.arp.mix(frames, self.played))
+        gate = self.cin.gain(self.played, frames)       # clock in, transport follow: their Stop silences the set
+        steps = self.arp.mix(frames, self.played)
+        if gate is not None:
+            out *= gate[:, None]
+            if steps is not None:
+                steps *= gate[:, None]
+        keys = self.midi.mix(out, steps)
         if keys is not None:            # live_listen hears the keys where the device played them
             i = (self.played - self.safety.la - G.LAT_BUDGET) % self.air.shape[1]
             j = min(i + frames, self.air.shape[1])
@@ -2331,6 +2345,59 @@ class Engine:
             lead = max(lead, MARGIN_S + (1.0 if tr['warming'] else 0.0) + acc / w - rel * 60.0 / bpm)
         return lead
 
+    def _tempo_change(self, beat, bpm):
+        """The tempo `bpm` from song `beat` on (under the lock; live_tempo and clock in): the map, the moves due after
+        it, the renders from it, the beat-synced effects at it. Returns (the tempo it replaces, the changes it
+        drops, notes to render again per track)."""
+        old = self.tmap
+        was = old.at_beat(beat)[2]
+        new = old.changed(beat, bpm)
+        S = new.segs[-1][0]
+        dropped = [x for x in old.segs if x[1] >= beat - EPS]
+
+        def remap(x):       # a mix position after the change, moved to where its beat now falls
+            return new.sample(old.beat(x)) if x > S else x
+        self.swaps = [(remap(x[0] - x[3]) + x[3],) + tuple(x[1:]) for x in self.swaps]
+        heapq.heapify(self.swaps)
+        for node in list(self.tracks.values()) + list(self.buses.values()):
+            if node.get('pending'):
+                node['pending'] = [(remap(p[0]), p[1]) for p in node['pending']]
+        for sch in self.ramps.values():
+            for r in sch.r:
+                r.p0, r.p1 = remap(r.p0), remap(r.p1)
+                r.p1 = max(r.p1, r.p0 + 1)
+        if self.rec is not None and self.rec_start > S:
+            self.rec_start = remap(self.rec_start)
+        self.tmap = new
+        # the notes from the change on render again at the new tempo; the ones before it keep their renders and
+        # play to the bar line, so nothing stops while the new ones render
+        placed = collections.Counter()
+        for _, _, sg in self.pending:
+            if not sg.dead and sg.on >= beat - EPS:
+                sg.dead = True
+                placed[sg.track] += 1
+        for key in list(self.waiting):
+            c = self.tl.clips.get(key[0])
+            keep = [o for o in self.waiting[key] if o < beat - EPS]
+            if c is not None:
+                placed[c.track] += len(self.waiting[key]) - len(keep)
+            self.waiting[key] = keep
+        for c in self.tl.clips.values():
+            m = self.meta.get(c.id)
+            if m is not None and m['placed'] is not None:
+                m['placed'] = min(m['placed'], max(beat, c.start))
+
+        def retime(seg=new.segs[-1]):
+            if seg not in self.tmap.segs:            # replaced by a later live_tempo
+                return
+            for ch in self._chains():
+                ch.retime(*self._grid_origin(seg))
+        retime.tempo = True
+        self._swap_at(S, retime)
+        if self.rec is not None:
+            self._write_rec_meta()
+        return was, dropped, placed
+
     def cmd_tempo(self, bpm, at='next_bar', ramp_beats=0):
         try:
             bpm = float(bpm)
@@ -2342,6 +2409,10 @@ class Engine:
                             f"render again and beat-synced delays would jump each beat). Use a step change, or a few "
                             f"at successive bars: live_tempo(bpm=124, at='bar:9'), then live_tempo(bpm=128, "
                             f"at='bar:10')")
+        if self.cin.source is not None:
+            raise LiveError(f"the set follows MIDI clock in from {self.cin.source!r}, so its tempo is that app's: "
+                            f"change it there, or turn clock in off first (live_midi_clock_in(on=False)), then "
+                            f"live_tempo. The tempo did not change.")
         with self.lock:
             now = self.beat(self.pos)
             try:
@@ -2350,51 +2421,7 @@ class Engine:
                 beat, note = self.tl.resolve_at(at, now, ready)
             except QueueError as e:
                 raise LiveError(f"{e}. The tempo did not change.")
-            old = self.tmap
-            was = old.at_beat(beat)[2]
-            new = old.changed(beat, bpm)
-            S = new.segs[-1][0]
-            dropped = [x for x in old.segs if x[1] >= beat - EPS]
-
-            def remap(x):       # a mix position after the change, moved to where its beat now falls
-                return new.sample(old.beat(x)) if x > S else x
-            self.swaps = [(remap(x[0] - x[3]) + x[3],) + tuple(x[1:]) for x in self.swaps]
-            heapq.heapify(self.swaps)
-            for node in list(self.tracks.values()) + list(self.buses.values()):
-                if node.get('pending'):
-                    node['pending'] = [(remap(p[0]), p[1]) for p in node['pending']]
-            for sch in self.ramps.values():
-                for r in sch.r:
-                    r.p0, r.p1 = remap(r.p0), remap(r.p1)
-                    r.p1 = max(r.p1, r.p0 + 1)
-            if self.rec is not None and self.rec_start > S:
-                self.rec_start = remap(self.rec_start)
-            self.tmap = new
-            # the notes from the change on render again at the new tempo; the ones before it keep their renders and
-            # play to the bar line, so nothing stops while the new ones render
-            placed = collections.Counter()
-            for _, _, sg in self.pending:
-                if not sg.dead and sg.on >= beat - EPS:
-                    sg.dead = True
-                    placed[sg.track] += 1
-            for key in list(self.waiting):
-                c = self.tl.clips.get(key[0])
-                keep = [o for o in self.waiting[key] if o < beat - EPS]
-                if c is not None:
-                    placed[c.track] += len(self.waiting[key]) - len(keep)
-                self.waiting[key] = keep
-            for c in self.tl.clips.values():
-                m = self.meta.get(c.id)
-                if m is not None and m['placed'] is not None:
-                    m['placed'] = min(m['placed'], max(beat, c.start))
-
-            def retime(seg=new.segs[-1]):
-                if seg not in self.tmap.segs:            # replaced by a later live_tempo
-                    return
-                for ch in self._chains():
-                    ch.retime(*self._grid_origin(seg))
-            retime.tempo = True
-            self._swap_at(S, retime)
+            was, dropped, placed = self._tempo_change(beat, bpm)
             parts = sorted({c.track for c in self.tl.clips.values() if c.end is None or c.end > beat + EPS})
             lines = [f"tempo {fmt_num(was)} -> {fmt_num(bpm)} BPM at {fmt_bar(beat, self.bpb)} ({at})"
                      + (f"; replaces the change queued at " + ', '.join(f"{fmt_bar(b, self.bpb)} ({fmt_num(t)} BPM)"
@@ -2413,7 +2440,6 @@ class Engine:
             if self.midi.patches:
                 lines.append("  played keys keep their sounds (rendered in seconds, nothing re-renders)")
             if self.rec is not None:
-                self._write_rec_meta()
                 lines.append(f"  recording: {os.path.basename(self.rec_path[:-4])}.json lists the change")
             if note:
                 lines.append(f"  note: {note}")
@@ -2776,6 +2802,16 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
+    def cmd_midi_clock_in(self, source=None, on=True, transport=None, bandwidth_hz=None, tempo_tol_bpm=None,
+                          phase_tol_ms=None, max_bend_pct=None, step_beats=None, dropout_ms=None, offset_ms=None):
+        try:
+            with self.lock:
+                return self.cin.cmd(source, on, transport, bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm,
+                                    phase_tol_ms=phase_tol_ms, max_bend_pct=max_bend_pct, step_beats=step_beats,
+                                    dropout_ms=dropout_ms, offset_ms=offset_ms)
+        except (ValueError, OSError, RuntimeError) as e:
+            raise LiveError(str(e))
+
     def cmd_keys(self, events=None, sid=None):
         """The on-screen keys page (live_keys_page): its key messages in, what the page shows out."""
         try:
@@ -2824,6 +2860,7 @@ class Engine:
                 lines += [self.midi.line(p) for p in self.midi.patches.values()]
             lines += self.arp.lines()
             lines += self.mout.status_lines()
+            lines += self.cin.status_lines()
             if self.controls.maps:
                 lines.append("controls: " + '; '.join(f"{c} -> {O.describe(m)}" for c, m in self.controls.maps.items()))
             stall = self._stalled()
@@ -3135,6 +3172,7 @@ def serve(engine, port=0, idle_min=None):
            'midi': engine.cmd_midi, 'played': engine.cmd_played, 'take': engine.cmd_take,
            'keys': engine.cmd_keys, 'arp': engine.cmd_arp,
            'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
+           'midi_clock_in': engine.cmd_midi_clock_in,
            'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo}
     keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')
 

@@ -727,6 +727,39 @@ sound.
   time, `clock=True` for clock with it: to try a synth or a channel before a set. It blocks until the last note
   ends.
 
+### Clock in: the set follows another app
+
+When another app or a drum machine leads (its tempo, its play and stop), the set follows its MIDI clock.
+
+- The person sends clock from their app to a port ismail reads: in Ableton, the port's Sync on as an output
+  (Preferences, Link/Tempo/MIDI); in FL Studio, the port as an output with its clock sent; a drum machine's MIDI
+  out over USB. `midi_sources()` lists the inputs.
+- `live_midi_clock_in(source='ismail in')`. The tempo comes from their 24 ticks per beat through a loop filter
+  (`bandwidth_hz`, default 0.5: a steady tempo change shows about 430 ms late; 1 Hz about 205 ms, wobblier on a
+  jittery clock). The set changes tempo the way `live_tempo` does (its notes render again from the change), at the
+  first beat its renders can reach, at most once per `step_beats` (default a bar), and only when the tempo is off by
+  more than `tempo_tol_bpm` (0.25) or the beat by more than `phase_tol_ms` (4). Each step bends the tempo by at most
+  `max_bend_pct` (3) to land ismail's beats on theirs, so a large offset closes over a few bars.
+- `transport='follow'` (default): their Stop silences the set on the speakers at once (its time and queue run on),
+  and Start or Continue bring it back in on the first of their bar lines it can reach. ismail mixes ahead, so it
+  cannot land on their very first beat: the news says "locked, their bar 2 = ismail bar 5". Start counts from their
+  bar 1, Continue from their Song Position. Turning clock in on never silences the set; their Stop does.
+  `transport='tempo'`: tempo and beats only, their transport ignored, bar lines need not line up.
+- **Lining up by ear.** `offset_ms` (-500 to 2000) lands ismail later for an app whose sound comes out late. Ask
+  whether ismail's kick sits on theirs, and change it in steps of 5 to 10 ms.
+- A dropout (no tick for `dropout_ms`, 300) holds the last tempo; the set plays on and the news says so. When the
+  ticks come back the follow goes on.
+- `live_status` shows their tempo and jitter, the set's tempo, the transport ("their bar 3 = ismail bar 17"), the
+  phase error and the tempo changes made. `live_tempo` is refused while clock in is on; `on=False` lets go and the
+  tempo holds.
+- Clock out (`live_midi_clock`) and the arp follow the followed tempo. Clock in and clock out on the same port is
+  refused (the set would chase its own clock): use two loopMIDI ports.
+- Measured on synthetic clocks (`tests/test_midi_clock_in.py`): a steady clock with 1 ms jitter keeps the beats
+  within 4.3 ms; a ramp of 10 BPM over 16 s trails by up to 31 ms while it ramps.
+- Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed), their Start and Stop
+  passed on to clock out, and the silence while they are stopped reaching `live_listen`, `live_record` and the
+  streams (only the speakers go silent).
+
 ## Playing for a screen recording
 
 When the session itself is the show (the viewer sees your turns and hears the set):
@@ -763,7 +796,8 @@ from earlier bars are not played).
 Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
 `loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
 deck's song has it; otherwise use fx params, or expr lanes on a performer), gradual tempo
-ramps (`live_tempo` steps at a bar), and placed audio clips on a deck.
+ramps (`live_tempo` steps at a bar), Ableton Link and MIDI Time Code (MIDI clock in works: `live_midi_clock_in`), and
+placed audio clips on a deck.
 
 ### Sung takes, tuned
 

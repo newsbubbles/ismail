@@ -838,6 +838,38 @@ def live_midi_clock(project: str, port: str = None, on: bool = True, position: b
     return _call(project, 'midi_clock', port=port, on=on, position=position, offset_ms=offset_ms)
 
 
+@op()
+def live_midi_clock_in(project: str, source: str = None, on: bool = True, transport: str = None,
+                       offset_ms: float = None, bandwidth_hz: float = None, tempo_tol_bpm: float = None,
+                       phase_tol_ms: float = None, max_bend_pct: float = None, step_beats: int = None,
+                       dropout_ms: float = None) -> str:
+    """The set follows another app's MIDI clock in: Ableton, FL Studio, a DAW through a loopMIDI port, or a drum
+    machine sets the set's tempo and beat, and with transport='follow' its Start, Stop and Continue. Reach for it
+    when the set should follow, sync to or slave to an external clock, the tempo of my drum machine or my DAW, when
+    something else leads and ismail plays in time with it (the other way round, the set leading: live_midi_clock).
+    source: an input's name or a unique part of it (midi_sources). The tempo comes from the 24 ticks per beat
+    through a loop filter (bandwidth_hz, default 0.5: a steady tempo change shows about 0.215 / bandwidth_hz s
+    late, 430 ms by default; higher follows sooner and wobbles more on a jittery clock). The set changes tempo the way
+    live_tempo does (its notes render again from the change), at the first beat its renders can reach, at most once
+    every step_beats (default one bar), and only when the tempo is off by more than tempo_tol_bpm (default 0.25) or
+    the beat by more than phase_tol_ms (default 4); each step bends the tempo by at most max_bend_pct (default 3)
+    to land ismail's beats on theirs. offset_ms: positive lands ismail later, for an app whose sound comes out late
+    (-500 to 2000; set it by ear against their kick).
+    transport: 'follow' (default): their Stop silences the set at once (its time and queue run on), Start or Continue
+    bring it back in on the first of their bar lines it can reach (ismail mixes ahead, so not their very first
+    beat): it runs through the silent stretch at the tempo that lands its own bar line there, and the reply's news
+    says "their bar 3 = ismail bar 17". Start counts from their bar 1, Continue from their Song Position. 'tempo':
+    tempo and beats only; their transport is ignored. A dropout (no tick for dropout_ms, default 300) holds the last
+    tempo and says so; the set plays on. Clock out (live_midi_clock) and the arp follow the followed tempo. Clock in
+    and clock out on one port is refused (the set would chase its own clock). While it is on, live_tempo is refused.
+    Call again to change a setting; on=False lets go (the tempo holds). With no source: the inputs and the follow;
+    live_status shows it too. Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed),
+    forwarding their Start/Stop to clock out."""
+    return _call(project, 'midi_clock_in', source=source, on=on, transport=transport, offset_ms=offset_ms,
+                 bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
+                 max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)
+
+
 @op(mutates=True)
 def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None, into: str = None,
                 bar: int = 1, mode: str = 'replace', placement: str = 'A') -> str:

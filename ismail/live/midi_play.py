@@ -186,7 +186,9 @@ class MidiPlay:
                 pass
 
     def _wanted(self, name):
-        return name in self.patches or name in self.listening or bool(self.e.controls.bound(name))
+        cin = getattr(self.e, 'cin', None)
+        return (name in self.patches or name in self.listening or bool(self.e.controls.bound(name))
+                or (cin is not None and cin.source == name))
 
     def release(self, name):
         """Close an input nothing uses any more (no patch, no control map, not listening)."""
@@ -435,6 +437,11 @@ class MidiPlay:
     # ------------------------------------------------------------------ keys (the driver's thread)
     def _on(self, name):
         def on(t, st, d1, d2):
+            if st >= 0xF0:                                  # clock, transport, song position: never keys or controls
+                cin = getattr(self.e, 'cin', None)
+                if cin is not None and cin.source == name:
+                    cin.msg(t, st, d1, d2)
+                return
             if self.e.midi_control(name, st, d1, d2):        # bound by live_map: a control move, not a key
                 return
             p = self.patches.get(name)
