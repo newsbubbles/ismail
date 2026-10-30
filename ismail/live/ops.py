@@ -743,7 +743,8 @@ def midi_sources() -> str:
 
 @op()
 def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
-              transpose: int = None, channel: int = None, remove: bool = False) -> str:
+              transpose: int = None, channel: int = None, remove: bool = False, lanes: dict = None,
+              mpe: bool = None) -> str:
     """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
     same speakers. source: the input's name or a unique part of it (midi_sources), or 'screen keys' (the on-screen
     keys page, live_keys_page); with no source, says what is plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
@@ -755,11 +756,19 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     instrument). transpose: semitones; channel: 1 to 16 (0 = every channel, the
     default). Every key is logged with the beat it sounded against to <project>/live/midi/<source>.jsonl
     (live_played reads it back as notes). remove=True unpatches.
+    Expression: when the sound is a performer voice with lanes (voice_help lists them), pitch bend drives its bend
+    lane (+-2 semitones), the mod wheel (cc:1) its vib lane (0..50 cents) and channel pressure (and poly pressure,
+    per key) its level lane (0..+6 dB), on the notes of that channel. lanes: the map as data, as midi_write takes it,
+    {lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}} or {lane: None} to turn one off; a lane
+    named here is driven even when the sound does not have it (e.g. {'bend': {'midi': 'bend', 'range': 12}} on a
+    synth). Live, a key plays a note rendered ahead, so lanes move it only as pitch and gain: bend, vib and level.
+    mpe=True: an MPE controller (lower zone): channel 1 the master, whose values add to every note, and each note's
+    own channel 2-16 its own bend (+-48) and pressure. A message bound with live_map stays that map's control.
     Tell the person before their keys first sound."""
     if instrument is not None:
         instrument = _check_instrument(project, instrument)
     return _call(project, 'midi', source=source, track=track, instrument=instrument, volume_db=volume_db,
-                 transpose=transpose, channel=channel, remove=remove)
+                 transpose=transpose, channel=channel, remove=remove, lanes=lanes, mpe=mpe)
 
 
 @op()

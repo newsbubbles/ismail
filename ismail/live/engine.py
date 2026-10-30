@@ -2755,9 +2755,10 @@ class Engine:
         return {'wall': time.time(), 'beat': round(beat, 4), 'bpm': self.tmap.at_beat(beat)[2], 'bpb': self.bpb}
 
     def cmd_midi(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
-                 remove=False):
+                 remove=False, lanes=None, mpe=None):
         try:
-            return self.midi.cmd(source, track, instrument, volume_db, transpose, channel, remove)
+            return self.midi.cmd(source, track, instrument, volume_db, transpose, channel, remove, lanes=lanes,
+                                 mpe=mpe)
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 

@@ -590,6 +590,21 @@ straight to the speakers.
   swap; the old sound plays until the new notes are ready. The notes render once on the workers (C2 to C7, a kit's
   pads, or one hit for a drum), then a key sounds one output buffer after the press. Velocity, note-offs, the
   sustain pedal, `transpose` and `channel` are followed. Tell the person before their keys first sound.
+- **Expression: the bend wheel, pressure, the mod wheel, MPE.** When the patched sound is a performer voice with
+  lanes (`voice_help` lists them), the player's pitch bend drives its `bend` lane (+-2 semitones), the mod wheel
+  (cc:1) its `vib` lane (0..50 cents) and channel pressure its `level` lane (0..+6 dB, so a keyboard's pressure at
+  rest changes nothing), for the notes on that channel; poly pressure is one key's own. The map is data:
+  `live_midi(source='keys', lanes={'bend': {'midi': 'bend', 'range': 12}, 'level': None})` changes a range or a
+  message, turns a lane off, or drives a lane the sound does not have (a synth bends that way too). The patch's
+  status line says what drives what. `mpe=True` for an MPE controller (lower zone): channel 1 is the master, whose
+  values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure.
+  - A key plays a note rendered ahead, so lanes move it as pitch and gain only: `bend` and `vib` as a resampled read
+    (a note bent up also ends sooner), `level` as gain, each ramped over one output buffer. Lanes that change the
+    sound itself (mute, slide, breath, tongue ...) are refused here, with the clip's `expr` named instead.
+  - A message bound with `live_map` stays that map's control and drives no lane. A message no lane takes is listed
+    by `live_controls`, as before. Expression messages are in the key log too.
+  - Not yet: the played bend and pressure written into the song as lanes by `live_played(into=...)` (the log keeps
+    them), MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release velocity.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
 - **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
