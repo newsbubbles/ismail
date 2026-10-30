@@ -456,6 +456,32 @@ def _stepped(st, lo, hi):
     return pts
 
 
+def _value_at(pts, b, log):
+    """An automation lane's value at beat b, as the renderer reads it: linear between points (log for Hz), held
+    before the first and after the last."""
+    import numpy as np
+    pts = sorted(pts)
+    xs = np.array([p[0] for p in pts], dtype=float)
+    vs = np.array([p[1] for p in pts], dtype=float)
+    if log and np.all(vs > 0):
+        return float(np.exp(np.interp(b, xs, np.log(vs))))
+    return float(np.interp(b, xs, vs))
+
+
+def _static(tr, key):
+    """What `key` is on this track with no automation: the track's pan, the instrument's filter cutoff, or the
+    filter effect's cutoff."""
+    if key == 'pan':
+        return float(tr.get('pan', 0.0) or 0.0)
+    if key == 'inst.filter.cutoff':
+        from . import instruments
+        inst = instruments.normalize(tr['instrument'])
+        return float((inst.get('filter') or {}).get('cutoff', 20000.0))
+    from . import fx as fxmod
+    i = int(key.split('.')[1])
+    return float(fxmod.normalize(tr['fx'][i]).get('cutoff', 20000.0))
+
+
 def expand(tr, bpb):
     """The track as the renderer plays it: the arp's notes in place of the held chords in its span (notes outside it
     stay), the per-step cutoff and pan as automation over the span. A track with no arp comes back as it is."""
@@ -476,7 +502,14 @@ def expand(tr, bpb):
             continue
         pts = _stepped([(s[0], s[idx]) for s in st], lo, hi)
         if pts:
-            auto[key] = sorted([p for p in auto.get(key, []) if not lo - EPS <= p[0] < hi] + pts)
+            # outside the arp's bars the lane is what it was: the track's own automation there, else its static
+            # value (the renderer holds a lane's first and last points out to the song's ends)
+            own = auto.get(key) or []
+            log = 'cutoff' in key
+            edge = (lambda b: _value_at(own, b, log)) if own else (lambda b: _static(tr, key))
+            outside = [p for p in own if not lo - EPS <= p[0] <= hi + EPS]
+            ends = ([[round(lo - 1e-4, 6), edge(lo)]] if lo > 1e-4 else []) + [[round(hi, 6), edge(hi)]]
+            auto[key] = sorted(outside + ends + pts)
     out['automation'] = auto
     return out
 

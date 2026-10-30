@@ -118,10 +118,11 @@ class LiveArps:
                 with self.lock:
                     del self.arps[name]
                 return f"arp {name}: off ({a['steps']} steps played); its keys play as keys again"
-            a['stop'] = when
+            with self.lock:
+                a['stop'] = when
             return f"arp {name}: off at {_bar(when, bpb)}"
-        new_cfg, changed = A.configure(a['cfg'] if a else None, settings)
         if a is None:
+            new_cfg, _ = A.configure(None, settings)
             start = when if when is not None else self.e.midi.sound_beat()
             a = {'source': name, 'cfg': new_cfg, 'latch': bool(latch), 'down': collections.OrderedDict(),
                  'pedal': {}, 'latched': [], 'restart': False, 'origin': (start // bpb) * bpb, 'anchor': start,
@@ -135,22 +136,56 @@ class LiveArps:
                     f": {A.describe(new_cfg)}" + (" | latch" if a['latch'] else '') +
                     "\nkeys pressed now drive it" + ('' if new_cfg['notes'] is None else
                                                      " (a step list plays with no keys held)"))
-        if latch is not None:
-            a['latch'] = bool(latch)
-            if not latch:
-                a['latched'] = []
-            changed.append('latch')
-        if not changed:
-            return f"arp {name}: nothing changed: {A.describe(a['cfg'])}"
-        moved = any(k in changed for k in ('pattern', 'degrees', 'notes', 'rate'))
+        delta = {k: v for k, v in settings.items() if v is not None}
         with self.lock:
+            # what plays at `when`: the settings now, then each change queued at or before it. A change is kept as
+            # the settings it gives (a delta), so a later one never reverts an earlier one, and one at the same beat
+            # merges into it.
+            pend = [list(x) for x in a['pending']]
+            base = a['cfg']
+            if when is not None:
+                for b, d in pend:
+                    if b <= when + A.EPS:
+                        base = A.configure(base, d)[0]
+            new_cfg, changed = A.configure(base, delta)
             if when is None:
-                self._apply(a, new_cfg, None, moved)
+                now_cfg = new_cfg
             else:
-                a['pending'] = sorted([x for x in a['pending'] if x[0] < when - A.EPS] + [(when, new_cfg, moved)],
-                                      key=lambda x: x[0])
+                now_cfg = a['cfg']
+                same = next((x for x in pend if abs(x[0] - when) <= A.EPS), None)
+                if same is not None:
+                    same[1] = dict(same[1], **delta)
+                elif delta:
+                    pend.append([when, delta])
+                pend.sort(key=lambda x: x[0])
+            chain = now_cfg
+            for b, d in pend:                   # every queued change still holds on top of this one
+                try:
+                    chain = A.configure(chain, d)[0]
+                except A.ArpError as ex:
+                    raise A.ArpError(f"{ex} (with the change queued at {_bar(b, bpb)} on top; live_status lists "
+                                     f"the queued changes)")
+            if latch is not None:
+                a['latch'] = bool(latch)
+                if not latch:
+                    a['latched'] = []
+                changed.append('latch')
+            if not changed:
+                return f"arp {name}: nothing changed: {A.describe(new_cfg)}"
+            if when is None:
+                self._apply(a, new_cfg, None, any(k in changed for k in ('pattern', 'degrees', 'notes', 'rate')))
+            a['pending'] = [tuple(x) for x in pend]
         return (f"arp {name}: {', '.join(changed)} changed " + ("now" if when is None else f"at {_bar(when, bpb)}")
                 + f": {A.describe(new_cfg)}" + (" | latch" if a['latch'] else ''))
+
+    def _land(self, a, beat, delta):
+        """A queued change reaches its beat (the device's thread, under the lock)."""
+        try:
+            cfg, changed = A.configure(a['cfg'], delta)
+        except A.ArpError as ex:
+            self.e.news.append(f"arp {a['source']}: the change queued at {_bar(beat, self.e.bpb)} did not apply: {ex}")
+            return
+        self._apply(a, cfg, beat, any(k in changed for k in ('pattern', 'degrees', 'notes', 'rate')))
 
     def _apply(self, a, cfg, beat, moved):
         old = a['cfg']
@@ -167,7 +202,7 @@ class LiveArps:
         a = self.arps.get(p['source'])
         if a is None:
             return False
-        m = note + p['transpose']
+        m = note                                  # by the key itself: a transpose change never strands a key
         with self.lock:
             if vel:
                 if a['latch'] and not a['down'] and not (p['sustain'] and a['pedal']):
@@ -193,11 +228,16 @@ class LiveArps:
                 a['latched'] = []
 
     def _held(self, a, p):
+        """The keys the arp holds now, [(midi, vel)] in the order pressed, with the patch's transpose (as its keys
+        sound). Called under the lock."""
         if not p['sustain']:
             a['pedal'].clear()
         if a['latch']:
-            return list(a['latched'])
-        return list(a['down'].items()) + [x for x in a['pedal'].items() if x[0] not in a['down']]
+            keys = list(a['latched'])
+        else:
+            keys = list(a['down'].items()) + [x for x in a['pedal'].items() if x[0] not in a['down']]
+        t = p['transpose']
+        return [(m + t, v) for m, v in keys]
 
     # ------------------------------------------------------------------ audio (the device's thread)
     def mix(self, frames, played):
@@ -240,8 +280,8 @@ class LiveArps:
         cuts = [lo] + [x[0] for x in a['pending'] if lo < x[0] < hi] + [hi]
         for s, t in zip(cuts, cuts[1:]):
             while a['pending'] and a['pending'][0][0] <= s + A.EPS:
-                beat, cfg, moved = a['pending'].pop(0)
-                self._apply(a, cfg, beat, moved)
+                beat, delta = a['pending'].pop(0)
+                self._land(a, beat, delta)
             if a['restart']:
                 a['restart'] = False
                 if a['cfg']['restart'] == 'key' and a['cfg']['notes'] is None:
@@ -272,16 +312,21 @@ class LiveArps:
             g = 10 ** (p['vol'] / 20) * (v / 100.0) ** 1.3
             self.voices.append(ArpVoice(y, wait, g, pan, gate, rel, cut))
         a['steps'] += 1
-        a['recent'].append((round(beat, 6), [m for m, _ in ns]))
+        a['recent'].append((round(beat, 6), [m for m, _ in ns], [v for _, v in ns], round(dur, 6)))
 
     # ------------------------------------------------------------------ what it says
     def lines(self):
         bpb, out = self.e.bpb, []
-        for name, a in self.arps.items():
-            p = self.e.midi.patches.get(name)
-            held = self._held(a, p) if p is not None else []
+        now = self.e.midi.sound_beat()
+        with self.lock:                         # a copy: the device's thread changes the arps as it plays
+            snap = []
+            for name, a in self.arps.items():
+                p = self.e.midi.patches.get(name)
+                snap.append((name, dict(a, cfg=dict(a['cfg']), pending=list(a['pending'])), p,
+                             self._held(a, p) if p is not None else []))
+        for name, a, p, held in snap:
             bits = [f"arp {name}: " + (f"starts {_bar(a['start'], bpb)}" if a['done'] <= a['start'] + A.EPS
-                                       and a['steps'] == 0 and a['start'] > self.e.midi.sound_beat() else "on"),
+                                       and a['steps'] == 0 and a['start'] > now else "on"),
                     A.describe(a['cfg']) + (' | latch' if a['latch'] else '')]
             if a['cfg']['notes'] is None:
                 bits.append("holding " + (' '.join(A.midi_to_name(m) for m, _ in sorted(held)) if held else

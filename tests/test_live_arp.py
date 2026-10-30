@@ -50,8 +50,10 @@ def pulls(e, seconds):
     return np.concatenate(out)
 
 
-def recent(e):
-    return list(e.arp.arps['test keys']['recent'])
+def recent(e, full=False):
+    """The steps played lately: (beat, pitches), or with full (beat, pitches, velocities, length in beats)."""
+    st = list(e.arp.arps['test keys']['recent'])
+    return st if full else [(r[0], r[1]) for r in st]
 
 
 def test_held_keys_drive_steps_on_the_beat_heard_not_as_keys(eng):
@@ -173,17 +175,74 @@ def test_latch_the_pedal_and_off(eng):
 
 
 def test_live_and_the_studio_give_the_same_steps(eng):
-    eng.cmd_arp(source='test keys', at='bar:2', pattern='updown', octaves=2, velocity=[90, 60], rate=0.25)
+    """Pitches, velocities (the keys' own, accents), lengths (a gate list), swing and a restart on a new chord."""
+    ch = {'pattern': 'updown', 'octaves': 2, 'accent': [0, 0, 1], 'gate': [0.5, 0.9], 'swing': 0.2, 'rate': 0.25}
+    eng.cmd_arp(source='test keys', at='bar:2', **ch)
+    for m, v in ((57, 100), (60, 80), (64, 60)):
+        key(0x90, m, v)
+    pulls(eng, 2.4)                                                 # into bar 2
     for m in (57, 60, 64):
-        key(0x90, m, 100)
-    pulls(eng, 4.5)                                                 # into bar 3
-    live = [(b, n) for b, n in recent(eng) if 4 <= b < 8]
-    tr = {'notes': [[4.0, 57, 4, 100], [4.0, 60, 4, 100], [4.0, 64, 4, 100]],
-          'arp': dict(A.configure(None, {'pattern': 'updown', 'octaves': 2, 'velocity': [90, 60],
-                                         'rate': 0.25})[0])}
+        key(0x80, m, 0)
+    for m, v in ((55, 90), (59, 70), (62, 50)):                     # a new chord, off the grid: a restart
+        key(0x90, m, v)
+    pulls(eng, 0.05)
+    s = eng.arp.arps['test keys']['anchor']
+    assert 4.5 < s < 5.5 and abs(s * 4 - round(s * 4)) > 1e-3       # it restarted at the key, not on a line
+    pulls(eng, 3.6)
+    live = [r for r in recent(eng, full=True) if 4 <= r[0] < 11]
+    tr = {'notes': [[4.0, 57, s - 4, 100], [4.0, 60, s - 4, 80], [4.0, 64, s - 4, 60],
+                    [s, 55, 11 - s, 90], [s, 59, 11 - s, 70], [s, 62, 11 - s, 50]],
+          'arp': A.configure(None, ch)[0]}
     st, _ = A.track_steps(tr, dict(A.DEFAULTS, **tr['arp']), 4)
-    studio = [(round(b, 6), [m for m, _ in ns]) for b, ns, *_ in st]
-    assert live == studio and len(live) == 16
+    studio = [(round(b, 6), [m for m, _ in ns], [v for _, v in ns], round(d, 6)) for b, ns, d, *_ in st if b < 11]
+    assert live == studio and len(live) == 28
+    assert {r[3] for r in live} == {0.125, 0.225} and 127 in {r[2][0] for r in live}
+    assert any(abs(r[0] % 0.5 - 0.3) < 1e-6 for r in live)          # swung
+    first_b = next(r for r in live if r[0] >= s)
+    assert first_b[1] == [55]                                       # the pattern starts again on the new chord
+
+
+def test_queued_changes_stack_merge_and_keep_a_change_made_now(eng):
+    eng.cmd_arp(source='test keys', at='now', rate=0.25)
+    eng.cmd_arp(source='test keys', rate=0.5, at='bar:3')
+    eng.cmd_arp(source='test keys', gate=0.8, at='bar:4')           # built on the rate queued before it
+    eng.cmd_arp(source='test keys', octaves=2, at='bar:4')          # the same bar: merged, not replaced
+    eng.cmd_arp(source='test keys', cutoff=[500, 900], at='now')    # now, under the queued ones
+    a = eng.arp.arps['test keys']
+    assert [b for b, _ in a['pending']] == [8.0, 12.0] and a['pending'][1][1] == {'gate': 0.8, 'octaves': 2}
+    assert a['cfg']['cutoff'] == [500, 900]
+    pulls(eng, 7.0)
+    c = a['cfg']
+    assert (c['rate'], c['gate'], c['octaves'], c['cutoff']) == (0.5, 0.8, 2, [500, 900]) and not a['pending']
+    with pytest.raises(LiveError, match="degrees are scale steps"):
+        eng.cmd_arp(source='test keys', degrees=[0, 2], at='bar:9')
+
+
+def test_a_transpose_change_while_a_key_is_held_never_strands_it(eng):
+    eng.cmd_arp(source='test keys', at='now')
+    key(0x90, 60, 100)
+    a = eng.arp.arps['test keys']
+    p = eng.midi.patches['test keys']
+    assert eng.arp._held(a, p) == [(60, 100)]
+    eng.cmd_midi(source='test keys', transpose=12)
+    assert eng.arp._held(a, p) == [(72, 100)]                       # held keys sound with the patch's transpose
+    key(0x80, 60, 0)
+    assert dict(a['down']) == {} and eng.arp._held(a, p) == []
+
+
+def test_status_reads_the_arps_under_the_lock(eng):
+    eng.cmd_arp(source='test keys', at='now')
+
+    class Counting:
+        n = 0
+
+        def __enter__(self):
+            Counting.n += 1
+
+        def __exit__(self, *x):
+            return False
+    eng.arp.lock = Counting()
+    assert 'arp test keys' in eng.cmd_status() and Counting.n == 1
 
 
 def test_what_it_says_when_asked_wrong(eng):

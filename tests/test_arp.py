@@ -189,6 +189,28 @@ def test_a_step_list_on_an_empty_track_and_what_it_says_when_asked_wrong(proj):
     assert 'exposes no filter cutoff' in api.track_arp(proj, 'drum', cutoff=[300, 900])
 
 
+def test_per_step_movement_stays_inside_the_arps_bars(proj):
+    """The renderer holds a lane's edge points out to the song's ends: outside the arp's bars the pan and cutoff are
+    the track's own again (its static value, or its automation there)."""
+    api.notes_write(proj, 'lead', 3, '0 C4 4')                       # a note in bar 3, outside bars=[2, 2]
+    api.track_set(proj, 'lead', pan=0.25)
+    api.track_arp(proj, 'lead', pan=[-1, 1], cutoff=[300, 5000], bars=[2, 2])
+    t = A.expand(_tr(proj), 4)
+    pan, cut = t['automation']['pan'], t['automation']['inst.filter.cutoff']
+    for b in (0.0, 3.99, 8.0, 10.0, 15.0):
+        assert A._value_at(pan, b, False) == pytest.approx(0.25)
+        assert A._value_at(cut, b, True) == pytest.approx(8000)       # the synth's own filter
+    assert A._value_at(pan, 4.0, False) == -1 and A._value_at(cut, 4.3, True) == pytest.approx(5000)
+    api.automation_set(proj, 'lead', 'pan', [[1, -0.5], [4, 0.5]])  # automation of its own outside the arp
+    t = A.expand(_tr(proj), 4)
+    assert A._value_at(t['automation']['pan'], 12.0, False) == pytest.approx(0.5)
+    assert A._value_at(t['automation']['pan'], 0.0, False) == pytest.approx(-0.5)
+    api.track_arp(proj, 'lead', write=True)                          # written out, the same lanes
+    w = _tr(proj)['automation']
+    assert A._value_at(w['inst.filter.cutoff'], 10.0, True) == pytest.approx(8000)
+    assert A._value_at(w['pan'], 12.0, False) == pytest.approx(0.5)
+
+
 def test_midi_export_carries_the_steps(proj, tmp_path):
     api.track_arp(proj, 'lead', pattern='up', rate=1)
     out = str(tmp_path / 'arp.mid')
