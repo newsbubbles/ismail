@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### MIDI controllers drive live params (MIDI parity step 5)
+
+- `live_map(..., midi=, source=, channel=, mode=)`: a MIDI controller's control is the source of a live map, set as
+  text: `'cc:<n>'` (7-bit), `'cc14:<n>'` (a 14-bit MSB/LSB pair, n and n+32; 7 bits until an LSB arrives),
+  `'bend'` (centre = 0.5), `'pressure'` (channel aftertouch) or `'note:<n>'` (a pad: held 1, released 0). The map
+  keeps its range, curve (linear, log, switch; raw is refused for MIDI, the error says what to give), timing
+  (`at='now'` or `'next_bar'`) and its log: every move is in `live_controls` with `via` naming the MIDI control.
+- Modes: `'absolute'` (default), `'pickup'` (takeover: the knob moves the param only once it reaches or crosses the
+  param's value, and lets go when the stage, the agent or another map moves the param), `'relative'` (two's
+  complement encoders) and `'relative64'` (64 = still), 1/128 of the range per step from the param's value now,
+  and `'toggle'` (a pad or button flips between the range's ends). `channel` 1 to 16, default every channel.
+- One MIDI control may drive several maps (one knob, several params; a reversed range moves one the other way).
+- The map opens its input even when no keys are patched; an input is opened once and shared by `live_midi` and the
+  maps, closed when neither uses it, and reopened with its maps when it is plugged back in. A bound message is a
+  control: it no longer plays or logs as a key.
+- `live_controls` lists what the open inputs sent that no map takes (input, `cc:74`, channel, last value), and
+  `live_controls(source=<input>)` opens an input only to listen, to find a knob's number before mapping it.
+- Not yet: notes as triggers for actions, program change, polyphonic aftertouch and MPE as controls, encoder
+  step size or acceleration per map.
+
 ## 0.4.3 (2026-10-28)
 
 ### what ismail hands its own Blender scripts and hooks is a file you can open (ledger:M382, M383)

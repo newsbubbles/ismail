@@ -1,0 +1,241 @@
+"""MIDI as a control source for live_map (MIDI parity step 5): a controller's CC, 14-bit CC pair, pitch bend,
+channel pressure or a pad's note drives a live param with the map's range, curve and timing, in modes absolute,
+pickup (takeover), relative (two encoder codings) and toggle; one control drives several maps; a bound message is a
+control and never a key; every move is logged for live_controls. All silent: device='none', no render workers, and
+a stand-in for the MIDI driver fed synthetic messages."""
+import json
+import os
+
+import pytest
+
+from ismail.dsp import SR
+from ismail.live import outputs as O
+from ismail.live.engine import BLOCK, Engine, LiveError
+from ismail.live.midi_play import MidiPlay
+
+
+class FakeInput:
+    opened = {}
+
+    def __init__(self, name, on_msg):
+        self.name, self.on = name, on_msg
+        FakeInput.opened[name] = self
+
+    def close(self):
+        FakeInput.opened.pop(self.name, None)
+
+
+@pytest.fixture
+def eng(tmp_path):
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    e.inputs = ['knob box', 'pad grid']
+    e.midi = MidiPlay(e, sources=lambda: list(e.inputs), opener=FakeInput)
+    FakeInput.opened.clear()
+    e.cmd_track('lead', instrument={'type': 'kick'}, fx=[{'type': 'filter', 'mode': 'lp', 'cutoff': 8000},
+                                                       {'type': 'delay', 'mix': 0.2}], at='now')
+    e.cmd_track('pad', instrument={'type': 'kick'})
+    e.cmd_bus('room')
+    return e
+
+
+def send(name, st, d1, d2):
+    FakeInput.opened[name].on(0.0, st, d1, d2)
+
+
+def cutoff(e):
+    return e.tracks['lead']['path'].chain.fx[0]['cutoff']
+
+
+def run(e, seconds):
+    for _ in range(int(seconds * SR / BLOCK)):
+        e.tick()
+        e.mix_block()
+
+
+def test_a_cc_drives_an_effect_param_through_its_range_and_curve_and_is_logged(eng):
+    r = eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log',
+                    midi='cc:74', source='knob', channel=1)
+    assert "tone -> lead fx:filter.cutoff (log 200..8000) <- MIDI cc:74 ch1, on 'knob box', absolute" in r
+    assert 'knob box' in FakeInput.opened                      # opened by the map, with no keys patched
+    send('knob box', 0xB0, 74, 127)
+    assert cutoff(eng) == pytest.approx(8000)
+    send('knob box', 0xB0, 74, 0)
+    assert cutoff(eng) == pytest.approx(200)
+    send('knob box', 0xB1, 74, 127)                            # channel 2: not this map's
+    assert cutoff(eng) == pytest.approx(200)
+    run(eng, 1.0)
+    send('knob box', 0xB0, 74, 64)
+    assert cutoff(eng) == pytest.approx(200 * 40 ** (64 / 127))
+    recs = [json.loads(x) for x in open(os.path.join(eng.root, 'live', 'controls.jsonl'))]
+    assert [r['via'] for r in recs] == ['midi cc:74 ch1'] * 3 and recs[0]['value'] == 1.0
+    back = eng.cmd_controls('tone')
+    assert 'tone -> lead fx:filter.cutoff: 3 moves' in back
+    pts = json.loads(back.split('automation points [bar, value]: ')[1])
+    assert [round(p[1]) for p in pts] == [8000, 200, round(200 * 40 ** (64 / 127))] and pts[2][0] > pts[0][0] >= 1
+    assert '<- MIDI cc:74' in eng.cmd_status()
+
+
+def test_one_cc_drives_several_params_and_a_reversed_range_moves_the_other_way(eng):
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:1', source='knob')
+    r = eng.cmd_map('wet', target='lead', param='fx:delay.mix', range=[0.6, 0.0], midi='cc:1', source='knob')
+    assert 'the same MIDI control also drives tone' in r
+    eng.cmd_map('level', target='bus:room', param='volume_db', range=[-40, 0], midi='cc:1', source='knob')
+    send('knob box', 0xB0, 1, 127)
+    fx = eng.tracks['lead']['path'].chain.fx
+    assert fx[0]['cutoff'] == pytest.approx(8000) and fx[1]['mix'] == pytest.approx(0.0)
+    assert eng.buses['room']['volume_db'] == 0
+    send('knob box', 0xB0, 1, 0)
+    assert fx[1]['mix'] == pytest.approx(0.6) and eng.buses['room']['volume_db'] == -40
+
+
+def test_14_bit_pairs_bend_and_pressure(eng):
+    eng.cmd_map('fine', target='lead', param='pan', range=[-1, 1], midi='cc14:7', source='knob')
+    send('knob box', 0xB0, 7, 64)                              # MSB alone: 7 bits until an LSB is seen
+    assert eng.tracks['lead']['pan'] == pytest.approx(-1 + 2 * 64 / 127)
+    send('knob box', 0xB0, 39, 0)                              # LSB (7 + 32): now 14 bits
+    assert eng.tracks['lead']['pan'] == pytest.approx(-1 + 2 * 8192 / 16383)
+    send('knob box', 0xB0, 7, 127)
+    send('knob box', 0xB0, 39, 127)
+    assert eng.tracks['lead']['pan'] == pytest.approx(1.0)
+    eng.cmd_map('wheel', target='pad', param='pan', range=[-1, 1], midi='bend', source='knob')
+    send('knob box', 0xE0, 0, 64)                              # centre (8192)
+    assert eng.tracks['pad']['pan'] == pytest.approx(0.0)
+    send('knob box', 0xE0, 127, 127)
+    assert eng.tracks['pad']['pan'] == pytest.approx(1.0)
+    send('knob box', 0xE0, 0, 0)
+    assert eng.tracks['pad']['pan'] == pytest.approx(-1.0)
+    eng.cmd_map('press', target='bus:room', param='volume_db', range=[-30, 0], midi='pressure', source='knob')
+    send('knob box', 0xD0, 127, 0)
+    assert eng.buses['room']['volume_db'] == 0
+
+
+def test_pickup_waits_for_the_knob_to_reach_the_param_and_lets_go_when_something_else_moves_it(eng):
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[0, 10000], midi='cc:74', source='knob',
+                mode='pickup')
+    eng.cmd_fx('lead', 'filter', {'cutoff': 5000})             # the agent set it: the knob is elsewhere
+    send('knob box', 0xB0, 74, 10)
+    send('knob box', 0xB0, 74, 30)
+    assert cutoff(eng) == 5000
+    assert 'waiting: the knob is at 0.24, the param at 0.50' in eng.cmd_status()
+    send('knob box', 0xB0, 74, 70)                             # crossed 0.5 on the way: it takes over
+    assert cutoff(eng) == pytest.approx(10000 * 70 / 127)
+    send('knob box', 0xB0, 74, 90)
+    assert cutoff(eng) == pytest.approx(10000 * 90 / 127)
+    eng.cmd_control('tone', 0.1)                               # the stage moved it: the knob lets go
+    send('knob box', 0xB0, 74, 95)
+    assert cutoff(eng) == pytest.approx(1000)
+    send('knob box', 0xB0, 74, 13)                             # within 2/127 of the param: caught
+    assert cutoff(eng) == pytest.approx(10000 * 13 / 127)
+    eng.cmd_map('fresh', target='pad', param='volume_db', range=[-40, 0], midi='cc:75', source='knob', mode='pickup')
+    eng.cmd_track('pad', volume_db=-40)
+    send('knob box', 0xB0, 75, 127)                            # far off, no crossing yet
+    assert eng.tracks['pad']['volume_db'] == -40
+
+
+def test_relative_encoders_toggles_and_pads(eng):
+    eng.cmd_map('enc', target='lead', param='pan', range=[-1, 1], midi='cc:20', source='knob', mode='relative')
+    eng.cmd_track('lead', pan=0.0)
+    send('knob box', 0xB0, 20, 1)                              # one step up from where the param is
+    assert eng.tracks['lead']['pan'] == pytest.approx(2 / 128)
+    send('knob box', 0xB0, 20, 127)                            # two's complement: 127 = one step down
+    send('knob box', 0xB0, 20, 126)                            # 126 = two steps down
+    assert eng.tracks['lead']['pan'] == pytest.approx(-4 / 128)  # a step is 1/128 of the range: 2/128 of pan
+    eng.cmd_map('enc64', target='pad', param='pan', range=[-1, 1], midi='cc:21', source='knob', mode='relative64')
+    eng.cmd_track('pad', pan=0.0)
+    send('knob box', 0xB0, 21, 67)
+    send('knob box', 0xB0, 21, 64)                             # 64 = no step: nothing moves, nothing logged
+    assert eng.tracks['pad']['pan'] == pytest.approx(6 / 128)
+    send('knob box', 0xB0, 21, 0)                              # 64 steps down, twice: clamps at the end
+    send('knob box', 0xB0, 21, 0)
+    assert eng.tracks['pad']['pan'] == -1.0
+    eng.cmd_map('mute', target='bus:room', param='volume_db', range=[0, -120], curve='switch', midi='cc:30',
+                source='knob', mode='toggle')
+    send('knob box', 0xB0, 30, 127)
+    send('knob box', 0xB0, 30, 0)                              # the release does not flip it back
+    assert eng.buses['room']['volume_db'] == -120
+    send('knob box', 0xB0, 30, 127)
+    assert eng.buses['room']['volume_db'] == 0
+    eng.cmd_map('hold', target='lead', param='fx:delay.mix', range=[0, 1], midi='note:C2', source='pad grid')
+    send('pad grid', 0x99, 36, 100)
+    assert eng.tracks['lead']['path'].chain.fx[1]['mix'] == 1.0
+    send('pad grid', 0x89, 36, 0)
+    assert eng.tracks['lead']['path'].chain.fx[1]['mix'] == 0.0
+    eng.cmd_map('flip', target='pad', param='volume_db', range=[-120, 0], curve='switch', midi='note:37',
+                source='pad grid', mode='toggle')
+    eng.cmd_track('pad', volume_db=0)
+    send('pad grid', 0x99, 37, 100)
+    send('pad grid', 0x89, 37, 0)
+    assert eng.tracks['pad']['volume_db'] == -120
+
+
+def test_next_bar_timing_schedules_the_move_on_the_bar_line(eng):
+    run(eng, 0.6)
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], at='next_bar', midi='cc:74',
+                source='knob')
+    send('knob box', 0xB0, 74, 127)
+    ramp = eng.ramps[('track:lead', 0, 'cutoff')].r[-1]
+    assert ramp.p0 == eng.sample(4.0) and ramp.v1 == pytest.approx(8000)
+
+
+def test_a_bound_note_is_a_control_not_a_key_and_unmapped_messages_are_listed(eng, tmp_path):
+    eng.cmd_midi(source='pad grid', track='pad')
+    eng.cmd_map('hold', target='lead', param='fx:delay.mix', range=[0, 1], midi='note:36', source='pad grid')
+    played = eng.midi.patches['pad grid']['played']
+    send('pad grid', 0x90, 36, 100)                            # the bound pad: a control move
+    send('pad grid', 0x90, 38, 100)                            # another pad: a key
+    assert eng.midi.patches['pad grid']['played'] == played + 1
+    eng.midi.flush()
+    keys = [json.loads(x) for x in open(os.path.join(str(tmp_path), 'live', 'midi', 'pad_grid.jsonl'))]
+    assert [k['d1'] for k in keys] == [38]
+    send('pad grid', 0xB2, 22, 99)                             # a knob nothing maps
+    assert "'pad grid' cc:22 ch3: last 99, 1 messages" in eng.cmd_controls()
+    r = eng.cmd_controls(source='knob')                        # listen to a controller with nothing mapped
+    assert "listening on 'knob box'" in r and 'knob box' in FakeInput.opened
+    send('knob box', 0xE1, 0, 96)
+    assert "'knob box' bend ch2: last 4096" in eng.cmd_controls()
+
+
+def test_inputs_open_once_close_when_unused_and_come_back_with_their_maps(eng):
+    eng.midi.poll()
+    eng.cmd_midi(source='knob', track='pad')
+    first = FakeInput.opened['knob box']
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob')
+    assert FakeInput.opened['knob box'] is first               # one handle, shared by the keys and the map
+    eng.cmd_midi(source='knob', remove=True)
+    assert 'knob box' in FakeInput.opened                      # the map still uses it
+    eng.inputs.remove('knob box')
+    eng.midi.poll()
+    assert any('controls on knob box: unplugged' in n for n in eng.drain_news()) and 'knob box' not in FakeInput.opened
+    eng.inputs.append('knob box')
+    eng.midi.poll()
+    assert any('controls on knob box: plugged back in' in n for n in eng.drain_news())
+    send('knob box', 0xB0, 74, 127)
+    assert cutoff(eng) == pytest.approx(8000)
+    assert 'unmapped' in eng.cmd_map('tone', remove=True) and 'knob box' not in FakeInput.opened
+
+
+def test_what_it_says_when_asked_wrong(eng):
+    with pytest.raises(LiveError, match=r"source: which MIDI input .*'knob box', 'pad grid'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:1')
+    with pytest.raises(LiveError, match=r"one of 'cc:<0-127>'.*live_controls\(source=<the input>\) listens"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='knob 1', source='knob')
+    with pytest.raises(LiveError, match=r'cc14:<0-31>'):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc14:40', source='knob')
+    with pytest.raises(LiveError, match="endless encoder's steps on a 'cc:<n>'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='bend', source='knob', mode='relative')
+    with pytest.raises(LiveError, match="sends positions, not the param's units"):
+        eng.cmd_map('x', target='lead', param='pan', curve='raw', midi='cc:1', source='knob')
+    with pytest.raises(LiveError, match="add midi='cc:<n>'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], source='knob')
+    with pytest.raises(LiveError, match="no live track 'nope'"):
+        eng.cmd_map('x', target='nope', param='pan', range=[-1, 1], midi='cc:1', source='knob')
+    assert 'x' not in eng.controls.maps and 'knob box' not in FakeInput.opened
+    eng.inputs = ['knob box']
+    assert "on 'knob box'" in eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:1')
+
+
+def test_unscale_inverts_scale():
+    for rng, curve in (([-40, 0], 'linear'), ([200, 8000], 'log'), ([0.6, 0.0], 'linear')):
+        for v in (0.0, 0.3, 1.0):
+            assert O.unscale(O.scale(v, rng, curve), rng, curve) == pytest.approx(v)
+    assert O.unscale(-120, [-120, 0], 'switch') == 0.0 and O.unscale(3.0, None, 'raw') is None

@@ -673,16 +673,28 @@ def live_stream(project: str, name: str = 'master') -> str:
 
 @op()
 def live_map(project: str, control: str, target: str = None, param: str = 'volume_db', range: list = None,
-             curve: str = 'linear', at: str = 'now', remove: bool = False) -> str:
-    """Map a named control (a knob, slider or switch on the VR stage, or any client) to a live parameter, so its
-    moves apply in the engine at once with no agent in the loop. target: a track, 'bus:<name>' or 'deck:<name>'.
-    param: 'volume_db', 'pan' (tracks), a deck's 'low_db'/'mid_db'/'high_db'/'filter'/'volume_db', or an effect
-    param 'fx:<index or type>.<param>' ('fx:filter.cutoff', 'fx:delay.mix'). The control sends 0..1; range=[value
-    at 0, value at 1]; curve 'linear', 'log' (Hz, ratios), 'switch' (below 0.5 = the first value), or 'raw' (the
-    value passes in the param's own units). at: when a move lands for effect and deck params ('now', 'next_bar').
-    Every move is logged by bar: live_controls reads them back as automation. remove=True unmaps."""
+             curve: str = 'linear', at: str = 'now', remove: bool = False, midi: str = None, source: str = None,
+             channel: int = None, mode: str = 'absolute') -> str:
+    """Map a named control (a knob, slider or switch on the VR stage, any client, or a MIDI controller's knob, fader,
+    pad or bend wheel) to a live parameter, so its moves apply in the engine at once with no agent in the loop.
+    target: a track, 'bus:<name>' or 'deck:<name>'. param: 'volume_db', 'pan' (tracks), a deck's
+    'low_db'/'mid_db'/'high_db'/'filter'/'volume_db', or an effect param 'fx:<index or type>.<param>'
+    ('fx:filter.cutoff', 'fx:delay.mix'). The control sends 0..1; range=[value at 0, value at 1]; curve 'linear',
+    'log' (Hz, ratios), 'switch' (below 0.5 = the first value), or 'raw' (the value passes in the param's own units;
+    not for MIDI). at: when a move lands for effect and deck params ('now', 'next_bar'). Every move is logged by bar:
+    live_controls reads them back as automation. remove=True unmaps.
+    MIDI as the source: midi='cc:<0-127>' (a knob or fader, 0..127 as 0..1), 'cc14:<0-31>' (a 14-bit pair, MSB n
+    and LSB n+32), 'bend' (the wheel; centre = 0.5), 'pressure' (channel aftertouch) or 'note:<36 or C2>' (a pad:
+    held = 1, released = 0). source: the MIDI input (midi_sources; optional when there is one), opened by the map
+    even when no keys are patched; channel: 1 to 16 (default every channel). mode: 'absolute' (the param jumps to the
+    knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
+    stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
+    'relative64' (64 = still, 65 up, 63 down), each step 1/128 of the range, from the param's value now; 'toggle'
+    (a pad or a button flips between the range's ends on each press). Several maps may share one MIDI control (one
+    knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
+    is not played or logged by live_midi. Not sure what a knob sends? live_controls(source=<input>) listens."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
-                 remove=remove)
+                 remove=remove, midi=midi, source=source, channel=channel, mode=mode)
 
 
 @op()
@@ -694,10 +706,13 @@ def live_control(project: str, control: str, value: float) -> str:
 
 
 @op()
-def live_controls(project: str, control: str = None, last: int = 20) -> str:
+def live_controls(project: str, control: str = None, last: int = 20, source: str = None) -> str:
     """The control moves of this set as automation: for each control, its target and [bar, value] points in this
-    engine's bars (the last `last` of them), ready to become automation_set points in a studio project."""
-    return _call(project, 'controls', control=control, last=last)
+    engine's bars (the last `last` of them), ready to become automation_set points in a studio project. MIDI moves
+    are logged the same way. It also lists what the open MIDI inputs sent that no map takes (input, 'cc:74' or
+    'note:36' or 'bend', channel, last value): the numbers live_map(midi=...) needs. source=<input> opens that input
+    to listen (a controller with nothing mapped yet): ask the person to move the knob, then call again."""
+    return _call(project, 'controls', control=control, last=last, source=source)
 
 
 def _check_instrument(project, instrument):

@@ -555,6 +555,25 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
 - **Recording controls.** Every move is logged by bar. `live_controls` reads them back as `[bar, value]` points,
   ready to become `automation_set` lanes in a studio project: a take's knob moves land in the score, on the song's
   clock, and replay the same way in a render and a video.
+- **A MIDI controller's knobs.** The same map takes a MIDI control as its source, set as text:
+  `live_map(control='tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log', midi='cc:74',
+  source='knob box', channel=1)`. Sources: `'cc:<n>'` (a knob or fader, 0..127), `'cc14:<n>'` (a 14-bit pair, MSB
+  n 0..31 and LSB n+32), `'bend'` (centre = the middle of the range), `'pressure'` (channel aftertouch),
+  `'note:<n>'` (a pad: held = the range's top, released = its bottom). `source` is optional when one input is
+  plugged in; `channel` defaults to every channel. The range, curve and `at` work as for any control, and every
+  move is logged for `live_controls` (its `via` says which MIDI control moved it).
+  - **Modes.** `'absolute'` (default: the param jumps to the knob). `'pickup'`: the knob takes over only once it
+    reaches the param's value or passes it, so nothing jumps after you or the stage moved the param; `live_status`
+    says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
+    complement, or 64 = still), 1/128 of the range per step, from the param's value now. `'toggle'`: a pad or a
+    button flips between the range's ends (with `curve='switch'`, a mute: `range=[0, -120]`).
+  - **One knob, several params:** map each param with the same `midi=`; reverse a range to move one the other way.
+  - **Bound means control:** a bound note or CC no longer plays or logs as a key on that input.
+  - **Finding the numbers.** Ask the person what the controller is, or listen: `live_controls(source='knob box')`
+    opens the input; ask them to move the knob, then call it again. It lists what came in that no map takes
+    (`'knob box' cc:74 ch1: last 93`). Then map it. There is no "learn" mode: you set the map from that line.
+  - Not yet: notes as triggers for actions (queue a clip, a section), program change, polyphonic aftertouch and MPE
+    as controls, a per-map step size or acceleration for encoders, and a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 

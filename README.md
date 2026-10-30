@@ -231,7 +231,7 @@ its declared server for an MCP handshake.
 - Mimic needs more notes for instruments whose colour changes from note to note, like the piano (the `grand_piano`
   voice is the better piano today). Bowed strings miss a last crispness, and notes don't glide into each other yet.
 - One tempo per project. MIDI files go in and out (`midi_write`, `midi_read`), and a live set takes MIDI from a
-  keyboard and sends its notes and MIDI clock out to synths and other apps (`live_midi_out`, `live_midi_clock`),
+  keyboard, maps a controller's knobs and pads to its params (`live_map`), and sends its notes and MIDI clock out to synths and other apps (`live_midi_out`, `live_midi_clock`),
   but no clock in or Ableton Link yet, no CC or pitch bend out, no plugin hosting.
 - The agent's own changes to a live set land between its turns, 5 to 30 seconds apart (your taps on the phone or
   the stage act at once).

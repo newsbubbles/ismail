@@ -2547,32 +2547,65 @@ class Engine:
         self._stream_ok(name)
         return {'path': f"/stream?name={name}", 'rate': SR, **O.FORMAT, 'listening': self.hub.names().get(name, 0)}
 
-    def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False):
+    def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False,
+                midi=None, source=None, channel=None, mode='absolute'):
+        old = (self.controls.maps.get(control) or {}).get('midi')
         if remove:
             if self.controls.maps.pop(control, None) is None:
                 raise LiveError(f"no control {control!r}; mapped: {sorted(self.controls.maps) or 'none'}")
+            if old:
+                self.midi.release(old['source'])
             return f"{control}: unmapped"
         if not target:
             raise LiveError("target: the track, 'bus:<name>' or 'deck:<name>' the control drives")
+        if midi is None and (source is not None or channel is not None or mode != 'absolute'):
+            raise LiveError("source, channel and mode bind a MIDI controller: add midi='cc:<n>' (or 'cc14:<n>', "
+                            "'bend', 'pressure', 'note:<n>'); live_controls(source=<input>) shows what a knob sends")
         try:
             kind, name, _, _ = O.parse_param(target, param)
-            m = self.controls.set(control, target, param, range, curve, at)
+            binding = None
+            if midi is not None:
+                binding = O.parse_midi(midi, channel, mode)
+                binding['source'] = self.midi.input_for(source)
+            m = self.controls.set(control, target, param, range, curve, at, midi=binding)
         except ValueError as e:
             raise LiveError(str(e))
         with self.lock:
-            if kind == 'track':
-                self._target(name)
-            elif kind == 'bus' and name not in self.buses:
-                raise LiveError(f"no bus {name!r}; buses: {list(self.buses) or 'none'}")
-            elif kind == 'deck':
-                self._deck(name)
-        return f"{control} -> {O.describe(m)}: its moves apply in the engine at once and are logged by bar"
+            try:
+                if kind == 'track':
+                    self._target(name)
+                elif kind == 'bus' and name not in self.buses:
+                    raise LiveError(f"no bus {name!r}; buses: {list(self.buses) or 'none'}")
+                elif kind == 'deck':
+                    self._deck(name)
+            except LiveError:
+                self.controls.maps.pop(control, None)
+                raise
+        if binding is not None:
+            try:
+                self.midi.open_for_controls(binding['source'])
+            except (ValueError, OSError, RuntimeError) as e:
+                self.controls.maps.pop(control, None)
+                raise LiveError(f"{e}; the map is not set")
+        if old and old['source'] != (binding or {}).get('source'):
+            self.midi.release(old['source'])
+        if binding is None:
+            return f"{control} -> {O.describe(m)}: its moves apply in the engine at once and are logged by bar"
+        same = [c for c, x in self.controls.bound(binding['source']) if c != control and
+                x['midi']['text'] == binding['text'] and x['midi']['channel'] == binding['channel']]
+        return (f"{control} -> {O.describe(m)}: each move applies in the engine at once and is logged by bar "
+                f"(live_controls)" + (f"; the same MIDI control also drives {', '.join(same)}" if same else '')
+                + ". A bound message is a control, not a key: it no longer plays or logs as a note")
 
     def cmd_control(self, control, value):
         """A control moved (a knob turned on the stage): apply its mapping now and log it by bar."""
-        m = self.controls.maps.get(control)
-        if m is None:
+        if control not in self.controls.maps:
             raise LiveError(f"no control {control!r}; live_map it first. Mapped: {sorted(self.controls.maps) or 'none'}")
+        return self._apply(control, value)
+
+    def _apply(self, control, value, via=None):
+        """Apply a control's move (value 0..1, or the param's units for a raw map) and log it with its bar."""
+        m = self.controls.maps[control]
         x = O.scale(value, m['range'], m['curve'])
         kind, name, what, detail = m['spec']
         if what == 'volume_db':
@@ -2587,16 +2620,64 @@ class Engine:
             self.cmd_track(name, **{what: x})
         # the bar being heard; an engine with no output running (tests, a harness) has only its mixed position
         beat = self.beat(self.played if (self.stream is not None or self._null_on) else self.pos)
-        self.controls.log({'t': round(time.time(), 3), 'beat': round(beat, 4), 'control': control,
-                           'value': float(value), 'target': m['target'], 'param': m['param'], 'applied': x})
+        rec = {'t': round(time.time(), 3), 'beat': round(beat, 4), 'control': control, 'value': float(value),
+               'target': m['target'], 'param': m['param'], 'applied': x}
+        if via:
+            rec['via'] = via
+        self.controls.log(rec)
         return {'applied': x, 'bar': fmt_bar(beat, self.bpb)}
 
-    def cmd_controls(self, control=None, last=20):
-        """What the controls did, as automation: per control and target, [bar, value] points in this engine's bars."""
+    def _map_now(self, m):
+        """Where a map's param is now, as the control position 0..1 that would put it there; None if unreadable."""
+        kind, name, what, detail = m['spec']
+        try:
+            if kind == 'deck':
+                x = self.decks[name].values[what]
+            elif what == 'fx':
+                node = self.tracks[name] if kind == 'track' else self.buses[name]
+                fxs = node['path'].chain.fx
+                idx = detail[0]
+                if isinstance(idx, str):
+                    typ, _, nth = idx.partition(':')
+                    idx = [i for i, f in enumerate(fxs) if f['type'] == typ][int(nth) - 1 if nth.isdigit() else 0]
+                f = fxs[idx]
+                x = f.get(detail[1], F.FX_DEFAULTS.get(f['type'], {}).get(detail[1]))
+            else:
+                x = (self.tracks[name] if kind == 'track' else self.buses[name])[what]
+            return O.unscale(x, m['range'], m['curve'])
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            return None
+
+    def midi_control(self, source, st, d1, d2):
+        """A message from a MIDI input (the driver's thread): applies the moves of every map bound to it. True when a
+        map is bound to it (then it is a control, not a key)."""
+        moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now)
+        for control, v, via in moves:
+            try:
+                self._apply(control, v, via)
+                self.controls.maps.get(control, {}).pop('err', None)
+            except (LiveError, KeyError) as e:
+                m = self.controls.maps.get(control)
+                if m is not None and not m.get('err'):
+                    m['err'] = str(e)
+                    self.news.append(f"control {control} ({via}): {e}. live_map it again, or remove=True")
+        return hit
+
+    def cmd_controls(self, control=None, last=20, source=None):
+        """What the controls did, as automation: per control and target, [bar, value] points in this engine's bars.
+        source: a MIDI input to listen to; what it sends that no map takes is listed (to find a knob's number)."""
+        if source is not None:
+            try:
+                source = self.midi.input_for(source)
+                self.midi.listen(source)
+            except (ValueError, OSError, RuntimeError) as e:
+                raise LiveError(str(e))
         rec = self.controls.read(control)
+        heard = self.midi.heard_lines(source) if control is None or source is not None else []
         if not rec:
-            return "no control moves logged" + (f" for {control!r}" if control else '') + \
+            out = "no control moves logged" + (f" for {control!r}" if control else '') + \
                 (f"; mapped: {sorted(self.controls.maps)}" if self.controls.maps else '; live_map one first')
+            return '\n'.join([out] + heard)
         out = collections.OrderedDict()
         for r in rec:
             out.setdefault((r['control'], r['target'], r['param']), []).append(
@@ -2605,7 +2686,7 @@ class Engine:
         for (c, t, p), pts in out.items():
             L.append(f"{c} -> {t} {p}: {len(pts)} moves, bars {pts[0][0]:g}-{pts[-1][0]:g}")
             L.append(f"  automation points [bar, value]: {json.dumps(pts[-int(last):])}")
-        return '\n'.join(L)
+        return '\n'.join(L + heard)
 
     def cmd_onsets(self, ahead_s=12.0, behind_s=2.0, limit=400):
         """The events placed to sound from behind_s ago to ahead_s ahead, one per rendered note group: {'t': track,

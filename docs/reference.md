@@ -219,7 +219,9 @@ Find any tool by what you need or by role with `ops_find`.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
-  DJ kit for whole cycles of moves (`ismail.live.djkit`).
+  DJ kit for whole cycles of moves (`ismail.live.djkit`). A MIDI controller's knobs, faders, pads, bend wheel and
+  pressure drive the same maps (`live_map(midi='cc:74', source=..., channel=, mode=)`: 7-bit and 14-bit CC,
+  absolute, pickup, relative encoders, toggles, one control on several params), every move logged as automation.
 - **What a deck costs.** `deck_cost(song, bars=, bpm=)` renders the deck's first bar offline the way the live engine
   does and times it, without starting or touching an engine: each track's render seconds and real-time factor, the
   wait for the first bar with the engine's render workers, and the mixer's load per block. It says which deck

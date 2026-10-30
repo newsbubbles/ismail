@@ -16,6 +16,10 @@ watches for inputs plugged in or removed and says so in its news.
 One input needs no driver: 'screen keys', the on-screen keyboard page (live_keys_page), for someone with no MIDI
 instrument. Its keys arrive as small HTTP messages (the engine's /api/keys, or the phone server's, which relays them)
 and are fed to the patch here exactly as a driver's would be.
+
+An input is opened once and shared: by its patch (keys) and by the control maps bound to it (live_map(midi=...)).
+Each message goes to the maps first (the engine's midi_control); a message a map is bound to is a control move,
+never a key. What an open input sends that nothing takes is kept (heard_lines), so an agent can find a knob's number.
 """
 import collections
 import json
@@ -27,6 +31,7 @@ import time
 import numpy as np
 
 from .. import midi as M
+from . import outputs as O
 from ..dsp import SR
 
 LO, HI = 36, 96             # the notes rendered for a melodic instrument: C2 to C7
@@ -134,6 +139,77 @@ class MidiPlay:
         self._log = []
         self.feeds = {}                     # an open screen input -> its message handler
         self.seqs = collections.OrderedDict()   # page id -> {key: (last seq, was a note-off)}
+        self.ins = {}                       # input name -> its open handle, shared by a patch and control maps
+        self.lost = set()                   # inputs in use that were unplugged (they reopen when they come back)
+        self.listening = set()              # inputs opened by live_controls(source=) to hear what they send
+        self.heard = collections.OrderedDict()  # (input, 'cc:74', channel) -> [last value, count], not mapped
+
+    # ------------------------------------------------------------------ inputs: one handle per input
+    def _open(self, name):
+        if name not in self.ins and name not in self.lost:
+            self.ins[name] = (self._screen if name == SCREEN else self.opener)(name, self._on(name))
+        return self.ins.get(name)
+
+    def _shut(self, name):
+        inp = self.ins.pop(name, None)
+        if inp is not None:
+            try:
+                inp.close()
+            except Exception:
+                pass
+
+    def _wanted(self, name):
+        return name in self.patches or name in self.listening or bool(self.e.controls.bound(name))
+
+    def release(self, name):
+        """Close an input nothing uses any more (no patch, no control map, not listening)."""
+        if not self._wanted(name):
+            self._shut(name)
+            self.lost.discard(name)
+
+    def input_for(self, source=None):
+        """The input a control map or a listen names: an input's name or a unique part of it; with none, the one
+        input there is."""
+        if source is None:
+            names = self.sources()
+            if len(names) == 1:
+                return names[0]
+            raise ValueError("source: which MIDI input the controller is, by name or a unique part of it; inputs: "
+                             f"{names or 'none (plug the controller in; midi_sources lists them)'}")
+        if source in self.ins or source in self.lost:
+            return source
+        return self.find(source)
+
+    def open_for_controls(self, name):
+        self._open(name)
+
+    def listen(self, name):
+        """Open an input only to hear what it sends (live_controls(source=)): its unmapped messages are listed."""
+        self.listening.add(name)
+        self._open(name)
+
+    def _hear(self, name, st, d1, d2):
+        what = O.midi_text(st, d1)
+        if what is None or (st & 0xF0) == 0x80 or ((st & 0xF0) == 0x90 and not d2):
+            return
+        k = (name, what, (st & 0x0F) + 1)
+        h = self.heard.pop(k, [0, 0])
+        val = ((d2 << 7) | d1) - 8192 if (st & 0xF0) == 0xE0 else d1 if (st & 0xF0) == 0xD0 else d2
+        self.heard[k] = [val, h[1] + 1]
+        while len(self.heard) > 32:
+            self.heard.popitem(last=False)
+
+    def heard_lines(self, source=None):
+        """What the open inputs sent that no map takes, newest last: the numbers live_map(midi=...) needs."""
+        rows = [(k, v) for k, v in self.heard.items() if source is None or k[0] == source]
+        L = []
+        if source is not None and not rows:
+            L.append(f"listening on {source!r}: nothing heard yet that no map takes. Move a knob or press a pad, then "
+                     f"call live_controls(source={source!r}) again")
+        elif rows:
+            L.append("MIDI heard, not mapped (live_map(control=..., midi=..., source=..., channel=...) binds one):")
+            L += [f"  {src!r} {what} ch{ch}: last {val}, {n} messages" for (src, what, ch), (val, n) in rows]
+        return L
 
     # ------------------------------------------------------------------ the command
     def find(self, source):
@@ -161,9 +237,9 @@ class MidiPlay:
         if remove:
             if p is None:
                 raise ValueError(f"{name!r} is not patched; patched: {list(self.patches) or 'none'}")
-            self._close(p)
             self.release_all(p)
             del self.patches[name]
+            self.release(name)
             return f"{name}: unpatched ({p['played']} keys played)"
         if p is None and track is None and instrument is None:
             raise ValueError(f"{name!r} is not patched yet: say what it plays, track='<live track>' (that track's "
@@ -174,7 +250,7 @@ class MidiPlay:
             raise ValueError("channel: 1 to 16, or 0 for every channel")
         new = p is None
         if new:
-            p = {'source': name, 'input': None, 'what': None, 'gen': 0, 'bank': {}, 'prev': {}, 'want': [],
+            p = {'source': name, 'what': None, 'gen': 0, 'bank': {}, 'prev': {}, 'want': [],
                  'oneshot': False, 'vol': -6.0, 'transpose': 0, 'channel': None, 'held': {}, 'sustain': False,
                  'sustained': [], 'played': 0, 'missed': 0, 'errors': [], 'lost': False, 'rel_s': 0.1,
                  'log': os.path.join(e.root, 'live', 'midi', _slug(name) + '.jsonl')}
@@ -186,7 +262,8 @@ class MidiPlay:
             p['channel'] = int(channel) or None
         msg = []
         if new:
-            p['input'] = (self._screen if name == SCREEN else self.opener)(name, self._on(name))
+            self._open(name)
+            p['lost'] = name in self.lost
             self.patches[name] = p
             msg.append(f"{name}: patched")
         if track is not None or instrument is not None:
@@ -196,8 +273,8 @@ class MidiPlay:
                     p['vol'] = float(e.tracks[track]['volume_db'])
             except Exception:
                 if new:
-                    self._close(p)
                     del self.patches[name]
+                    self.release(name)
                 raise
         return '\n'.join(msg + [self.line(p)])
 
@@ -294,11 +371,15 @@ class MidiPlay:
     # ------------------------------------------------------------------ keys (the driver's thread)
     def _on(self, name):
         def on(t, st, d1, d2):
+            if self.e.midi_control(name, st, d1, d2):        # bound by live_map: a control move, not a key
+                return
             p = self.patches.get(name)
             if p is None:
+                self._hear(name, st, d1, d2)
                 return
             kind, ch = st & 0xF0, (st & 0x0F) + 1
             if p['channel'] is not None and ch != p['channel']:
+                self._hear(name, st, d1, d2)
                 return
             if kind == 0x90 and d2:
                 self.note_on(p, d1, d2)
@@ -314,6 +395,7 @@ class MidiPlay:
             elif kind == 0xB0 and d1 in (120, 123):
                 self.release_all(p)
             else:
+                self._hear(name, st, d1, d2)
                 return
             self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
                                          'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}))
@@ -419,24 +501,34 @@ class MidiPlay:
         if self.known is not None:
             for n in sorted(names - self.known):
                 p = self.patches.get(n)
-                if p is not None and p['lost']:
+                if n in self.lost:
+                    self.lost.discard(n)
                     try:
-                        p['input'] = self.opener(n, self._on(n))
-                        p['lost'] = False
-                        self.e.news.append(f"keys {n}: plugged back in, playing {p['what']} again")
+                        self._open(n)
+                        if p is not None:
+                            p['lost'] = False
+                        self.e.news.append(f"keys {n}: plugged back in, playing {p['what']} again" if p is not None
+                                           else f"controls on {n}: plugged back in, its maps work again")
                     except Exception as ex:
-                        self.e.news.append(f"keys {n}: back, but it did not open: {ex}")
-                elif p is None:
+                        self.lost.add(n)
+                        self.e.news.append(f"{'keys' if p is not None else 'controls on'} {n}: back, but it did "
+                                           f"not open: {ex}")
+                elif p is None and not self._wanted(n):
                     self.e.news.append(f"MIDI input plugged in: {n!r}. live_midi(source={n!r}, instrument=... or "
-                                       f"track=...) plays it through the set")
+                                       f"track=...) plays it through the set; live_map(..., midi=..., source={n!r}) "
+                                       f"maps its knobs")
             for n in sorted(self.known - names):
                 p = self.patches.get(n)
-                if p is not None and not p['lost']:
-                    self._close(p)
-                    self.release_all(p)
-                    p['lost'] = True
-                    self.e.news.append(f"keys {n}: unplugged; it plays again when it comes back")
-                else:
+                if n in self.ins:
+                    self._shut(n)
+                    self.lost.add(n)
+                    if p is not None:
+                        self.release_all(p)
+                        p['lost'] = True
+                        self.e.news.append(f"keys {n}: unplugged; it plays again when it comes back")
+                    else:
+                        self.e.news.append(f"controls on {n}: unplugged; its maps work again when it comes back")
+                elif n not in self.lost:
                     self.e.news.append(f"MIDI input removed: {n!r}")
         self.known = names
         self.flush()
@@ -718,17 +810,9 @@ class MidiPlay:
             self.poll()
             time.sleep(POLL_S)
 
-    def _close(self, p):
-        if p['input'] is not None:
-            try:
-                p['input'].close()
-            except Exception:
-                pass
-            p['input'] = None
-
     def close(self):
-        for p in self.patches.values():
-            self._close(p)
+        for n in list(self.ins):
+            self._shut(n)
         self.flush()
 
     # ------------------------------------------------------------------ what it says

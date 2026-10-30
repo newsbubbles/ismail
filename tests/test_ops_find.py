@@ -48,6 +48,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('send the notes to my hardware synth', 'live_midi_out'),
     ('ableton follows the tempo of the set with midi clock', 'live_midi_clock'),
     ('record what I played on my keyboard into a track', 'live_played'),
+    ('the knobs on my midi controller move the filter cutoff', 'live_map'),
     ('the lead line when the stem also has a backing part', 'melody_consensus'),
     ('my draft sounds MIDI, mechanical against the reference', 'analyze_feel'),
     ('write the reference timing and velocity into my notes', 'feel_from_ref'),
