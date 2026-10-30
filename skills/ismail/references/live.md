@@ -690,7 +690,8 @@ renders the same.
   lengths against the pattern (a 3-step cutoff over a 4-note pattern) make the moving trance arp; `live_fx` (a beat
   delay, a filter sweep) goes on top. Studio cutoff moves the synth's own filter (or a sampler's, or the track's
   first filter effect; the reply says when the voice has none); live it is a low-pass on each step's note.
-- Not yet: live slide re-attacks (the studio's mono synths with glide glide), decks leave the per-step pan out.
+- Not yet: live slide re-attacks (the studio's mono synths with glide glide), decks leave the per-step pan out, and
+  an arped input's pitch bend, pressure and mod wheel (its `live_midi(lanes=)` expression) do not move the steps.
 
 ## MIDI out: synths and other apps play with the set
 

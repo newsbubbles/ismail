@@ -245,6 +245,20 @@ def test_status_reads_the_arps_under_the_lock(eng):
     assert 'arp test keys' in eng.cmd_status() and Counting.n == 1
 
 
+def test_an_arped_input_with_expression_lanes_still_steps(eng):
+    """Step 6's lanes on the same input: the keys go to the arp (no expression voice is made for them), bend moves
+    nothing yet, and the arp still plays its steps."""
+    eng.cmd_midi(source='test keys', lanes={'bend': {'midi': 'bend', 'range': 2}})
+    eng.cmd_arp(source='test keys', at='now', rate=0.5)
+    key(0x90, 60, 100)
+    key(0xE0, 0, 127)                                               # bend up
+    pulls(eng, 1.5)
+    assert eng.midi.voices == [] and eng.midi.xv == {}
+    assert {n[0] for _, n in recent(eng)} == {60}
+    key(0x80, 60, 0)
+    assert dict(eng.arp.arps['test keys']['down']) == {}
+
+
 def test_what_it_says_when_asked_wrong(eng):
     with pytest.raises(LiveError, match="is not patched, and the arp plays a patched input's sound: live_midi"):
         eng.cmd_arp(source='other', pattern='up')

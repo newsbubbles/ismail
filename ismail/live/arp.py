@@ -10,7 +10,8 @@ do. A key pressed now changes the steps from the next device buffer on.
 Each step plays the patch's rendered note (its bank: C2 to C7, or a kit's pads) for the step's gate, then fades
 with the patch's release. Per-step movement the sound follows: pan (equal power, as the studio pans) and cutoff
 (a 12 dB/octave low-pass on that step's note, any patch). Not yet: slide glides only in the studio (a mono synth
-with glide); live, a slid step is a legato tie with a fresh attack.
+with glide); live, a slid step is a legato tie with a fresh attack. The input's expression (live_midi lanes: bend,
+pressure, the mod wheel) does not reach the steps yet: a step plays its rendered note as it is.
 """
 import collections
 import threading

@@ -796,7 +796,7 @@ def live_arp(project: str, source: str = None, pattern=None, degrees: list = Non
     'bar', 'off'. swing: 0 to 0.5 of a step, every second step. latch=True: keys keep playing after release until
     a new chord is pressed. at: when it starts or changes ('next_bar' default, 'now', 'next_4', 'bar:17').
     off=True stops it (at= a bar line too). live_status shows its state. live_played still logs the keys pressed,
-    not the steps."""
+    not the steps. Not yet: the input's bend, pressure and mod wheel (live_midi lanes) do not move the steps."""
     return _call(project, 'arp', source=source, pattern=pattern, degrees=degrees, notes=notes, rate=rate,
                  octaves=octaves, gate=gate, velocity=velocity, accent=accent, slide=slide, octave=octave,
                  cutoff=cutoff, pan=pan, transpose=transpose, key=key, scale=scale, restart=restart, swing=swing,
