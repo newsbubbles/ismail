@@ -16,9 +16,14 @@
 - One MIDI control may drive several maps (one knob, several params; a reversed range moves one the other way).
 - The map opens its input even when no keys are patched; an input is opened once and shared by `live_midi` and the
   maps, closed when neither uses it, and reopened with its maps when it is plugged back in. A bound message is a
-  control: it no longer plays or logs as a key.
+  control: it no longer plays or logs as a key. Binding lets go of that input's held keys and pedal.
+- MIDI moves are queued off the driver's thread to the engine's control thread, the latest per control (a fast
+  knob never delays the keys on the same input), and the control log is written in batches. A move made for a map
+  that was replaced meanwhile is dropped. A remap that fails (a bad target, an input that will not open) keeps the
+  old map working and says so.
 - `live_controls` lists what the open inputs sent that no map takes (input, `cc:74`, channel, last value), and
-  `live_controls(source=<input>)` opens an input only to listen, to find a knob's number before mapping it.
+  `live_controls(source=<input>)` opens an input only to listen (for 120 s, restarted by each call), to find a
+  knob's number before mapping it.
 - Not yet: notes as triggers for actions, program change, polyphonic aftertouch and MPE as controls, encoder
   step size or acceleration per map.
 

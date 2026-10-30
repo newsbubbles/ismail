@@ -219,10 +219,18 @@ class Controls:
         self.log_path = log_path
         self.last = {}
         self._lock = threading.Lock()
+        self._buf = []              # log lines not yet written (flush): no file work on a MIDI driver's thread
 
     def set(self, control, target, param, rng=None, curve='linear', at='now', midi=None):
-        """midi: a binding from parse_midi plus 'source' (the input's name), or None for a control the stage or an
-        agent moves."""
+        """Store a map (build checks it); returns it."""
+        m = self.build(target, param, rng, curve, at, midi)
+        self.maps[control] = m
+        return m
+
+    @staticmethod
+    def build(target, param, rng=None, curve='linear', at='now', midi=None):
+        """A checked map, not stored. midi: a binding from parse_midi plus 'source' (the input's name), or None for
+        a control the stage or an agent moves."""
         if curve not in CURVES:
             raise ValueError(f"curve {curve!r}: one of {', '.join(CURVES)}")
         if curve != 'raw':
@@ -240,7 +248,6 @@ class Controls:
             m['midi'] = dict(midi)
             m['st'] = {'caught': False, 'last_in': None, 'applied': None, 'msb': None, 'lsb_seen': False,
                        'down': False}
-        self.maps[control] = m
         return m
 
     def bound(self, source):
@@ -248,7 +255,7 @@ class Controls:
         return [(c, m) for c, m in list(self.maps.items()) if (m.get('midi') or {}).get('source') == source]
 
     def midi_in(self, source, st, d1, d2, now):
-        """A message from input `source` -> (the moves it makes [(control, position 0..1, via)], whether a map is
+        """A message from input `source` -> (the moves it makes [(control, map, position 0..1, via)], whether a map is
         bound to it: a bound message is a control, never a key). now(m): the map's param now as a position 0..1, or
         None when it cannot be read."""
         kind, ch = st & 0xF0, (st & 0x0F) + 1
@@ -298,7 +305,7 @@ class Controls:
             if v is None or (b['mode'] == 'pickup' and not self._caught(m, v, now)):
                 continue
             s['applied'] = v
-            moves.append((control, v, f"midi {b['text']} ch{ch}"))
+            moves.append((control, m, v, f"midi {b['text']} ch{ch}"))
         return moves, hit
 
     @staticmethod
@@ -327,14 +334,24 @@ class Controls:
         return s['caught']
 
     def log(self, rec):
-        try:
-            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
-            with self._lock, open(self.log_path, 'a', encoding='utf8') as f:
-                f.write(json.dumps(rec) + '\n')
-        except OSError:
-            pass
+        """Kept in memory; flush() writes it (the engine's control thread, a read, the end of the set)."""
+        with self._lock:
+            self._buf.append(json.dumps(rec) + '\n')
+
+    def flush(self):
+        with self._lock:
+            buf, self._buf = self._buf, []
+            if not buf:
+                return
+            try:
+                os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+                with open(self.log_path, 'a', encoding='utf8') as f:
+                    f.write(''.join(buf))
+            except OSError:
+                pass
 
     def read(self, control=None):
+        self.flush()
         if not os.path.exists(self.log_path):
             return []
         out = []

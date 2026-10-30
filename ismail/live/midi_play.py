@@ -44,6 +44,7 @@ SCREEN = 'screen keys'      # the on-screen keys page, an input that is always t
 MAX_EVENTS = 64             # messages in one request from the page
 HIT = 0.15                  # live_played(fit=True): onsets this close (two hands, a rolled chord) are one hit, beats
 STEP = 0.25                 # the grid it fits: 16ths
+LISTEN_S = 120              # live_controls(source=) keeps an input open this long to hear what it sends
 
 
 class Voice:
@@ -141,8 +142,9 @@ class MidiPlay:
         self.seqs = collections.OrderedDict()   # page id -> {key: (last seq, was a note-off)}
         self.ins = {}                       # input name -> its open handle, shared by a patch and control maps
         self.lost = set()                   # inputs in use that were unplugged (they reopen when they come back)
-        self.listening = set()              # inputs opened by live_controls(source=) to hear what they send
+        self.listening = {}                 # inputs opened by live_controls(source=) -> when they close (wall time)
         self.heard = collections.OrderedDict()  # (input, 'cc:74', channel) -> [last value, count], not mapped
+        self.heard_lock = threading.Lock()  # the driver's thread writes `heard`, a command reads it
 
     # ------------------------------------------------------------------ inputs: one handle per input
     def _open(self, name):
@@ -184,28 +186,55 @@ class MidiPlay:
         self._open(name)
 
     def listen(self, name):
-        """Open an input only to hear what it sends (live_controls(source=)): its unmapped messages are listed."""
-        self.listening.add(name)
+        """Open an input only to hear what it sends (live_controls(source=)) for LISTEN_S: its unmapped messages are
+        listed. An input a map or a patch already holds needs no listening."""
+        if name in self.ins or name in self.lost:
+            if not self._wanted(name) or name in self.listening:
+                self.listening[name] = time.time() + LISTEN_S
+            return
         self._open(name)
+        self.listening[name] = time.time() + LISTEN_S
+
+    def bound_now(self, name):
+        """A map was just bound to input `name`: it stops being a listen-only input, and the keys it holds are let
+        go (a note or the pedal now bound would never send the release that frees them)."""
+        self.listening.pop(name, None)
+        p = self.patches.get(name)
+        if p is not None:
+            p['sustain'] = False
+            self.release_all(p)
+
+    def _listen_expired(self):
+        now = time.time()
+        for n in [n for n, until in self.listening.items() if until <= now]:
+            del self.listening[n]
+            self.release(n)
 
     def _hear(self, name, st, d1, d2):
         what = O.midi_text(st, d1)
         if what is None or (st & 0xF0) == 0x80 or ((st & 0xF0) == 0x90 and not d2):
             return
         k = (name, what, (st & 0x0F) + 1)
-        h = self.heard.pop(k, [0, 0])
         val = ((d2 << 7) | d1) - 8192 if (st & 0xF0) == 0xE0 else d1 if (st & 0xF0) == 0xD0 else d2
-        self.heard[k] = [val, h[1] + 1]
-        while len(self.heard) > 32:
-            self.heard.popitem(last=False)
+        with self.heard_lock:
+            h = self.heard.pop(k, [0, 0])
+            self.heard[k] = [val, h[1] + 1]
+            while len(self.heard) > 32:
+                self.heard.popitem(last=False)
 
     def heard_lines(self, source=None):
         """What the open inputs sent that no map takes, newest last: the numbers live_map(midi=...) needs."""
-        rows = [(k, v) for k, v in self.heard.items() if source is None or k[0] == source]
+        with self.heard_lock:
+            rows = [(k, list(v)) for k, v in self.heard.items() if source is None or k[0] == source]
         L = []
-        if source is not None and not rows:
-            L.append(f"listening on {source!r}: nothing heard yet that no map takes. Move a knob or press a pad, then "
-                     f"call live_controls(source={source!r}) again")
+        if source is not None and source in self.listening:
+            left = max(0, round(self.listening[source] - time.time()))
+            L.append(f"listening on {source!r} for {left} s more (each live_controls(source=) restarts the "
+                     f"{LISTEN_S} s; a map on it keeps it open)" + ('' if rows else ": nothing heard yet that no map "
+                     f"takes. Move a knob or press a pad, then call live_controls(source={source!r}) again"))
+        elif source is not None and not rows:
+            L.append(f"{source!r}: nothing heard yet that no map takes. Move a knob or press a pad, then call "
+                     f"live_controls(source={source!r}) again")
         elif rows:
             L.append("MIDI heard, not mapped (live_map(control=..., midi=..., source=..., channel=...) binds one):")
             L += [f"  {src!r} {what} ch{ch}: last {val}, {n} messages" for (src, what, ch), (val, n) in rows]
@@ -530,6 +559,7 @@ class MidiPlay:
                         self.e.news.append(f"controls on {n}: unplugged; its maps work again when it comes back")
                 elif n not in self.lost:
                     self.e.news.append(f"MIDI input removed: {n!r}")
+        self._listen_expired()
         self.known = names
         self.flush()
 

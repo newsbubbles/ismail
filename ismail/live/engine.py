@@ -209,6 +209,10 @@ class Engine:
         self._out_tried = 0.0
         self.hub = O.StreamHub(SR)
         self.controls = O.Controls(os.path.join(self.root, 'live', 'controls.jsonl'))
+        self._ctl_q = collections.OrderedDict()   # MIDI moves for the control thread: control -> (map, value, via)
+        self._ctl_lock = threading.Lock()
+        self._ctl_wake = threading.Event()
+        self._ctl_thread = False
         self.lock = threading.RLock()
         self.tl = Timeline(self.bpb)
         self.tracks = {}
@@ -989,7 +993,8 @@ class Engine:
             self._on_board.enter_context(machine.slot('live', f"live engine {os.path.basename(self.root)}", threads=None))
         except Exception:                      # the board is advice for others; the set plays regardless
             pass
-        threads = [self._schedule_loop, self._mix_loop, self.midi.loop]
+        threads = [self._schedule_loop, self._mix_loop, self.midi.loop, self._control_loop]
+        self._ctl_thread = True
         if self.n_workers:
             threads.append(self._collect)
         for fn in threads:
@@ -1112,6 +1117,7 @@ class Engine:
     def shutdown(self):
         self.running = False
         self.midi.close()
+        self.drain_controls()
         self.mout.close()
         if getattr(self, '_on_board', None) is not None:
             self._on_board.close()
@@ -2549,7 +2555,8 @@ class Engine:
 
     def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False,
                 midi=None, source=None, channel=None, mode='absolute'):
-        old = (self.controls.maps.get(control) or {}).get('midi')
+        old_map = self.controls.maps.get(control)
+        old = (old_map or {}).get('midi')
         if remove:
             if self.controls.maps.pop(control, None) is None:
                 raise LiveError(f"no control {control!r}; mapped: {sorted(self.controls.maps) or 'none'}")
@@ -2561,36 +2568,40 @@ class Engine:
         if midi is None and (source is not None or channel is not None or mode != 'absolute'):
             raise LiveError("source, channel and mode bind a MIDI controller: add midi='cc:<n>' (or 'cc14:<n>', "
                             "'bend', 'pressure', 'note:<n>'); live_controls(source=<input>) shows what a knob sends")
+        kept = (f"; {control} keeps its old map ({O.describe(old_map)})" if old_map else
+                f"; {control} is not mapped")
+        # every check before anything changes: a failed remap leaves the old map working
         try:
             kind, name, _, _ = O.parse_param(target, param)
             binding = None
             if midi is not None:
                 binding = O.parse_midi(midi, channel, mode)
                 binding['source'] = self.midi.input_for(source)
-            m = self.controls.set(control, target, param, range, curve, at, midi=binding)
+            m = self.controls.build(target, param, range, curve, at, midi=binding)
         except ValueError as e:
-            raise LiveError(str(e))
+            raise LiveError(f"{e}{kept}")
         with self.lock:
             try:
                 if kind == 'track':
                     self._target(name)
                 elif kind == 'bus' and name not in self.buses:
-                    raise LiveError(f"no bus {name!r}; buses: {list(self.buses) or 'none'}")
+                    raise LiveError(f"no bus {name!r}; buses: {list(self.buses) or 'none'} (live_bus adds one)")
                 elif kind == 'deck':
                     self._deck(name)
-            except LiveError:
-                self.controls.maps.pop(control, None)
-                raise
+            except LiveError as e:
+                raise LiveError(f"{e}{kept}")
         if binding is not None:
             try:
                 self.midi.open_for_controls(binding['source'])
             except (ValueError, OSError, RuntimeError) as e:
-                self.controls.maps.pop(control, None)
-                raise LiveError(f"{e}; the map is not set")
+                raise LiveError(f"{e}{kept}. midi_sources lists the inputs; close the input in the other program "
+                                f"and call live_map again")
+        self.controls.maps[control] = m
         if old and old['source'] != (binding or {}).get('source'):
             self.midi.release(old['source'])
         if binding is None:
             return f"{control} -> {O.describe(m)}: its moves apply in the engine at once and are logged by bar"
+        self.midi.bound_now(binding['source'])
         same = [c for c, x in self.controls.bound(binding['source']) if c != control and
                 x['midi']['text'] == binding['text'] and x['midi']['channel'] == binding['channel']]
         return (f"{control} -> {O.describe(m)}: each move applies in the engine at once and is logged by bar "
@@ -2599,13 +2610,14 @@ class Engine:
 
     def cmd_control(self, control, value):
         """A control moved (a knob turned on the stage): apply its mapping now and log it by bar."""
-        if control not in self.controls.maps:
+        m = self.controls.maps.get(control)
+        if m is None:
             raise LiveError(f"no control {control!r}; live_map it first. Mapped: {sorted(self.controls.maps) or 'none'}")
-        return self._apply(control, value)
+        return self._apply(control, m, value)
 
-    def _apply(self, control, value, via=None):
-        """Apply a control's move (value 0..1, or the param's units for a raw map) and log it with its bar."""
-        m = self.controls.maps[control]
+    def _apply(self, control, m, value, via=None):
+        """Apply a move of map m (value 0..1, or the param's units for a raw map) and log it with its bar. m is the
+        map the move was made for, so a move in flight never lands on the target of a map that replaced it."""
         x = O.scale(value, m['range'], m['curve'])
         kind, name, what, detail = m['spec']
         if what == 'volume_db':
@@ -2649,19 +2661,46 @@ class Engine:
             return None
 
     def midi_control(self, source, st, d1, d2):
-        """A message from a MIDI input (the driver's thread): applies the moves of every map bound to it. True when a
-        map is bound to it (then it is a control, not a key)."""
+        """A message from a MIDI input, on the driver's thread: the moves of every map bound to it are queued for
+        the control thread (the latest per control wins; nothing here touches a file or rebuilds an effect). True
+        when a map is bound to it (then it is a control, not a key). With no control thread running (a test, a
+        harness), the moves apply here."""
         moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now)
-        for control, v, via in moves:
+        if moves:
+            with self._ctl_lock:
+                for control, m, v, via in moves:
+                    self._ctl_q.pop(control, None)
+                    self._ctl_q[control] = (m, v, via)
+            if self._ctl_thread:
+                self._ctl_wake.set()
+            else:
+                self.drain_controls()
+        return hit
+
+    def drain_controls(self):
+        """Apply the queued MIDI moves (one per control, its latest), then write the control log."""
+        with self._ctl_lock:
+            q, self._ctl_q = self._ctl_q, collections.OrderedDict()
+        for control, (m, v, via) in q.items():
+            if self.controls.maps.get(control) is not m:        # remapped or removed since: the move is dropped
+                continue
             try:
-                self._apply(control, v, via)
-                self.controls.maps.get(control, {}).pop('err', None)
-            except (LiveError, KeyError) as e:
-                m = self.controls.maps.get(control)
-                if m is not None and not m.get('err'):
+                self._apply(control, m, v, via)
+                m.pop('err', None)
+            except (LiveError, KeyError, ValueError) as e:
+                if not m.get('err'):
                     m['err'] = str(e)
                     self.news.append(f"control {control} ({via}): {e}. live_map it again, or remove=True")
-        return hit
+        self.controls.flush()
+
+    def _control_loop(self):
+        while self.running:
+            self._ctl_wake.wait(1.0)
+            self._ctl_wake.clear()
+            try:
+                self.drain_controls()
+            except Exception as e:                      # a control must never stop the set
+                self.news.append(f"controls: {e}")
 
     def cmd_controls(self, control=None, last=20, source=None):
         """What the controls did, as automation: per control and target, [bar, value] points in this engine's bars.

@@ -5,6 +5,7 @@ control and never a key; every move is logged for live_controls. All silent: dev
 a stand-in for the MIDI driver fed synthetic messages."""
 import json
 import os
+import threading
 
 import pytest
 
@@ -66,6 +67,7 @@ def test_a_cc_drives_an_effect_param_through_its_range_and_curve_and_is_logged(e
     run(eng, 1.0)
     send('knob box', 0xB0, 74, 64)
     assert cutoff(eng) == pytest.approx(200 * 40 ** (64 / 127))
+    eng.controls.flush()
     recs = [json.loads(x) for x in open(os.path.join(eng.root, 'live', 'controls.jsonl'))]
     assert [r['via'] for r in recs] == ['midi cc:74 ch1'] * 3 and recs[0]['value'] == 1.0
     back = eng.cmd_controls('tone')
@@ -143,8 +145,9 @@ def test_relative_encoders_toggles_and_pads(eng):
     eng.cmd_map('enc64', target='pad', param='pan', range=[-1, 1], midi='cc:21', source='knob', mode='relative64')
     eng.cmd_track('pad', pan=0.0)
     send('knob box', 0xB0, 21, 67)
+    n = len(eng.controls.read('enc64'))
     send('knob box', 0xB0, 21, 64)                             # 64 = no step: nothing moves, nothing logged
-    assert eng.tracks['pad']['pan'] == pytest.approx(6 / 128)
+    assert eng.tracks['pad']['pan'] == pytest.approx(6 / 128) and len(eng.controls.read('enc64')) == n == 1
     send('knob box', 0xB0, 21, 0)                              # 64 steps down, twice: clamps at the end
     send('knob box', 0xB0, 21, 0)
     assert eng.tracks['pad']['pan'] == -1.0
@@ -184,6 +187,7 @@ def test_a_bound_note_is_a_control_not_a_key_and_unmapped_messages_are_listed(en
     send('pad grid', 0x90, 36, 100)                            # the bound pad: a control move
     send('pad grid', 0x90, 38, 100)                            # another pad: a key
     assert eng.midi.patches['pad grid']['played'] == played + 1
+    assert eng.tracks['lead']['path'].chain.fx[1]['mix'] == 1.0
     eng.midi.flush()
     keys = [json.loads(x) for x in open(os.path.join(str(tmp_path), 'live', 'midi', 'pad_grid.jsonl'))]
     assert [k['d1'] for k in keys] == [38]
@@ -239,3 +243,97 @@ def test_unscale_inverts_scale():
         for v in (0.0, 0.3, 1.0):
             assert O.unscale(O.scale(v, rng, curve), rng, curve) == pytest.approx(v)
     assert O.unscale(-120, [-120, 0], 'switch') == 0.0 and O.unscale(3.0, None, 'raw') is None
+
+
+def test_binding_a_held_note_or_the_pedal_lets_go_of_them(eng, monkeypatch):
+    from ismail.live import midi_play as MP
+    monkeypatch.setattr(MP, 'LO', 58)                          # a few notes render fast
+    monkeypatch.setattr(MP, 'HI', 62)
+    eng.cmd_midi(source='pad grid', instrument='preset:pluck')
+    p = eng.midi.patches['pad grid']
+    send('pad grid', 0x90, 60, 100)
+    send('pad grid', 0xB0, 64, 127)                            # pedal down
+    assert p['held'] and p['sustain']
+    eng.cmd_map('hit', target='lead', param='fx:delay.mix', range=[0, 1], midi='note:60', source='pad grid')
+    assert not p['held'] and not p['sustain'] and all(v.rel is not None for v in eng.midi.voices)
+    send('pad grid', 0x80, 60, 0)                              # its release is now the control's
+    send('pad grid', 0x90, 61, 100)
+    send('pad grid', 0xB0, 64, 127)
+    eng.cmd_map('ped', target='pad', param='pan', range=[-1, 1], midi='cc:64', source='pad grid')
+    assert not p['held'] and not p['sustain']
+    send('pad grid', 0xB0, 64, 0)                              # a control now: the keys never wait for it
+    assert eng.tracks['pad']['pan'] == -1
+
+
+def test_a_failed_remap_keeps_the_old_map_and_its_input(eng):
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob')
+    with pytest.raises(LiveError, match=r"no live track 'nope'.*tone keeps its old map \(lead fx:filter.cutoff"):
+        eng.cmd_map('tone', target='nope', param='pan', range=[-1, 1], midi='cc:74', source='pad')
+    with pytest.raises(LiveError, match="mode 'sideways'.*tone keeps its old map"):
+        eng.cmd_map('tone', target='lead', param='pan', range=[-1, 1], midi='cc:74', source='knob', mode='sideways')
+
+    def refuse(name, on_msg):
+        raise OSError(f"could not open MIDI input {name!r}")
+    eng.midi.opener = refuse
+    with pytest.raises(LiveError, match="could not open.*tone keeps its old map.*call live_map again"):
+        eng.cmd_map('tone', target='pad', param='pan', range=[-1, 1], midi='cc:74', source='pad')
+    assert 'knob box' in FakeInput.opened and 'pad grid' not in eng.midi.ins
+    send('knob box', 0xB0, 74, 127)
+    assert cutoff(eng) == pytest.approx(8000)
+
+
+def test_a_move_in_flight_never_lands_on_a_new_target_and_moves_coalesce(eng):
+    eng._ctl_thread = True                                     # as in a running set: moves wait for the control thread
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob')
+    for v in (10, 60, 127):
+        send('knob box', 0xB0, 74, v)
+    assert list(eng._ctl_q) == ['tone'] and cutoff(eng) == 8000   # queued: nothing applied on the driver's thread
+    eng.drain_controls()
+    assert cutoff(eng) == pytest.approx(8000) and len(eng.controls.read('tone')) == 1   # the latest value only
+    send('knob box', 0xB0, 74, 0)
+    eng.cmd_map('tone', target='pad', param='pan', range=[-1, 1], midi='cc:74', source='knob')
+    eng.drain_controls()                                       # the old map's move is dropped, not put on pad's pan
+    assert cutoff(eng) == pytest.approx(8000) and eng.tracks['pad']['pan'] == 0
+
+
+def test_the_unmapped_list_reads_safely_while_a_knob_streams(eng):
+    errors, stop = [], threading.Event()
+
+    def stream():
+        i = 0
+        while not stop.is_set():
+            eng.midi._hear('knob box', 0xB0 | (i % 16), i % 120, i % 128)   # new keys churn the list
+            i += 1
+    t = threading.Thread(target=stream)
+    t.start()
+    try:
+        for _ in range(3000):
+            try:
+                eng.midi.heard_lines()
+            except RuntimeError as e:
+                errors.append(e)
+                break
+    finally:
+        stop.set()
+        t.join()
+    assert errors == []
+
+
+def test_listening_closes_the_input_after_a_while_and_a_map_takes_it_over(eng, monkeypatch):
+    from ismail.live import midi_play as MP
+    assert 'for 120 s more' in eng.cmd_controls(source='knob')
+    assert 'knob box' in FakeInput.opened
+    eng.midi.listening['knob box'] = 0                         # its time is up
+    eng.midi.poll()
+    eng.midi.poll()
+    assert 'knob box' not in FakeInput.opened and not eng.midi.listening
+    eng.cmd_controls(source='knob')
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob')
+    assert 'knob box' not in eng.midi.listening and 'knob box' in FakeInput.opened
+
+    def refuse(name, on_msg):
+        raise OSError(f"could not open MIDI input {name!r}")
+    monkeypatch.setattr(eng.midi, 'opener', refuse)
+    with pytest.raises(LiveError, match='could not open'):
+        eng.cmd_controls(source='pad')
+    assert 'pad grid' not in eng.midi.listening and MP.LISTEN_S == 120

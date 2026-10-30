@@ -711,7 +711,8 @@ def live_controls(project: str, control: str = None, last: int = 20, source: str
     engine's bars (the last `last` of them), ready to become automation_set points in a studio project. MIDI moves
     are logged the same way. It also lists what the open MIDI inputs sent that no map takes (input, 'cc:74' or
     'note:36' or 'bend', channel, last value): the numbers live_map(midi=...) needs. source=<input> opens that input
-    to listen (a controller with nothing mapped yet): ask the person to move the knob, then call again."""
+    to listen for 120 s (a controller with nothing mapped yet; each call restarts it, a map on it keeps it open): ask
+    the person to move the knob, then call again."""
     return _call(project, 'controls', control=control, last=last, source=source)
 
 

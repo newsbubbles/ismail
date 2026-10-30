@@ -568,9 +568,11 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
     complement, or 64 = still), 1/128 of the range per step, from the param's value now. `'toggle'`: a pad or a
     button flips between the range's ends (with `curve='switch'`, a mute: `range=[0, -120]`).
   - **One knob, several params:** map each param with the same `midi=`; reverse a range to move one the other way.
-  - **Bound means control:** a bound note or CC no longer plays or logs as a key on that input.
+  - **Bound means control:** a bound note or CC no longer plays or logs as a key on that input. Binding one lets go
+    of the keys held and the pedal on that input, so nothing hangs waiting for a release that is now a control.
   - **Finding the numbers.** Ask the person what the controller is, or listen: `live_controls(source='knob box')`
-    opens the input; ask them to move the knob, then call it again. It lists what came in that no map takes
+    opens the input for 2 minutes (each call restarts it; a map on it keeps it open); ask them to move the knob,
+    then call it again. It lists what came in that no map takes
     (`'knob box' cc:74 ch1: last 93`). Then map it. There is no "learn" mode: you set the map from that line.
   - Not yet: notes as triggers for actions (queue a clip, a section), program change, polyphonic aftertouch and MPE
     as controls, a per-map step size or acceleration for encoders, and a curve beyond linear, log and switch.
