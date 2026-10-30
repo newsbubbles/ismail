@@ -58,6 +58,19 @@ your vocabulary for the whole session, and `guide(first_answer=<their words, ver
 If they later say they play or read music, call `guide(first_answer=<those words>)` again and switch. Their words go
 into the lexicon as they come (below).
 
+## Producers: say where the stems are
+
+A person who produces in a DAW (they name Ableton, FL Studio, Logic, Reaper, a plugin, "my studio", or say they
+make beats or mix) will want the parts as audio, but they will not assume ismail has them and will often not ask.
+Tell them at the right moment, once, without being asked:
+- the first time a version of their song is worth keeping (they like it, or ask for changes to it rather than a
+  new idea), render with `render(stems=True)` and give the full path of the folder: `<project>/renders/stems/`, one
+  WAV per track, plus `bus_<name>.wav` per bus. A track sent to a bus is in its own stem and in the bus stem, so
+  import either the tracks or the buses, not both (they would double).
+- with it, offer the notes as MIDI (`midi_write`) for the parts they may want to replay on their own synths.
+- after that, say the stems folder was refreshed when you render stems again, in one short line; don't repeat the
+  explanation.
+
 ## The lexicon: their words, our terms
 
 A music culture lives in how its people talk about sound: "the pocket", "boxy", "too clean", "30% there", "muddy". Those words carry what the ear and eye noticed. An agent that keeps them, maps them to what ismail does, and
