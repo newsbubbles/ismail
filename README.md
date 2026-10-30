@@ -4,7 +4,7 @@
 > Set me up with ismail: https://github.com/newsbubbles/ismail
 > ```
 >
-> It installs everything, asks what you want to make, and plays you a first idea. If you have a VR headset, it can put you on a stage inside your music later. You don't need to know what a "skill", "MCP" or "plugin" is: your agent handles that.
+> It installs everything, asks what you want to make, and plays you a first idea. You don't need to know what a "skill", "MCP" or "plugin" is: your agent handles that.
 
 <p align="center">
   <picture>
@@ -31,13 +31,6 @@ Made by Measured Instruments: https://measuredinstruments.com (for agents: https
 > [setup.md](skills/ismail/references/setup.md) (one command with uv:
 > `uvx --python 3.12 ismail mcp`). Your first tool call is
 > `guide`. Find any tool by what you need with `ops_find`. Every render comes back to you as text.
-
-<!-- MEDIA: a short silent mp4 loop of a person in VR driving a character's dance (Marketing cuts it; an mp4
-uploaded to GitHub plays inline here). Until it exists, the juke joint video below leads. -->
-
-[![My agent built a 1958 blues club. Then I walked in.](https://i.ytimg.com/vi/fKGkaf2WYWw/hqdefault.jpg)](https://youtu.be/fKGkaf2WYWw)
-
-*Agents built a 1958 juke joint for the Crossroads Rewired music video; Nate walked in with a Quest 3 and directed them from inside: voice notes, and dance takes they play on the characters (4:43).*
 
 ## What it looks like
 
@@ -90,8 +83,8 @@ B   bars  49-56  ( 8)  level   12.6 dB  low XxxXX.XxXxxXxxXx  snare .......x....
 
 **5. A VR stage: stand inside the song and say what to change.**
 
-The video at the top shows one: agents built a 1958 juke joint, then a person walked in with a headset and
-directed them from inside ([watch it](https://youtu.be/fKGkaf2WYWw)).
+Here is one: agents built a 1958 juke joint, then a person walked in with a headset and directed them from
+inside ([watch it](https://youtu.be/fKGkaf2WYWw)).
 
 **6. Video code gets every note's frame, so the picture lands on the beat.**
 
