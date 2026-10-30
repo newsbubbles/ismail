@@ -111,7 +111,7 @@ def test_the_mod_wheel_is_vibrato_and_neutral_expression_is_the_plain_note(eng, 
     v = eng.midi.voices[0]
     plain = v.y[:, :BLOCK * 4].T * v.g
     got = play(eng, BLOCK * 4 / SR)
-    assert np.allclose(got, plain, atol=1e-6)           # bend 0, no wheel, no pressure: the same samples
+    assert np.array_equal(got, plain)                    # bend 0, no wheel, no pressure: the same samples
     msg(0xB0, 1, 127)                                   # mod wheel up: 50 cents of vibrato at 5.5 Hz
     play(eng, 0.05)
     x = eng.midi.xv[v]
@@ -193,3 +193,23 @@ def test_lanes_say_what_to_do_when_asked_wrong(eng, lanes_voice):
     msg(0x90, 60, 100)
     msg(0xB0, 1, 127)                                   # the wheel is nobody's now: heard, listed
     assert "'keys in' cc:1 ch1" in '\n'.join(eng.midi.heard_lines())
+
+
+def test_a_key_has_its_expression_from_its_first_buffer_and_an_mpe_tail_keeps_its_own(eng, lanes_voice):
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, mpe=True)
+    bend(12, rng=48, ch=2)
+    p = eng.midi.patches['keys in']
+    eng.midi.note_on(p, 60, 100, 2)                    # as any caller of note_on would: no step after it
+    v = eng.midi.voices[0]
+    assert v in eng.midi.xv                            # attached inside note_on, before a buffer can mix it
+    eng._pull(BLOCK)
+    assert eng.midi.xv[v].pos == pytest.approx(BLOCK * 2.0, rel=1e-3)   # the first buffer is already an octave up
+    msg(0x81, 60, 0)                                   # let go: the tail rings on channel 2's values of now
+    bend(0, rng=48, ch=2)                              # the controller hands channel 2 to the next note
+    msg(0x91, 64, 100)
+    eng._pull(BLOCK)
+    w = eng.midi.voices[1]
+    assert eng.midi.xv[v].rate == pytest.approx(2.0, abs=1e-3) and eng.midi.xv[w].rate == 1.0
+    bend(2, rng=2, ch=1)                               # the master still moves the tail
+    eng._pull(BLOCK)
+    assert eng.midi.xv[v].rate == pytest.approx(2 ** (14 / 12), abs=1e-3)

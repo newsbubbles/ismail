@@ -44,7 +44,8 @@ def _text(s):
 def write(path, tracks, bpm, beats_per_bar=4, markers=None, name=None):
     """tracks: [{'name': str, 'channel': 0-15, 'notes': [(start_beat, pitch, dur_beats, vel[, channel])],
     'events': [(beat, bytes)]}]: a note's own channel (MPE) wins over the track's; events are channel messages
-    (controllers, bend, pressure, RPNs), written in their order before the notes that start on the same tick.
+    (controllers, bend, pressure, RPNs), written in their order after the note-offs and before the note-ons of
+    their tick.
     markers: [(beat, text)]. Same-pitch notes on one channel that overlap are cut where the next one starts, so
     every note-off belongs to its own note. Returns the number of notes written."""
     tempo = round(60_000_000 / float(bpm))
@@ -58,7 +59,9 @@ def write(path, tracks, bpm, beats_per_bar=4, markers=None, name=None):
         ev = [(0, 0, _meta(0x03, _text(tr.get('name', ''))))]
         if tr.get('program') is not None:
             ev.append((0, 1, bytes([0xC0 | ch, int(tr['program']) & 0x7F])))
-        ev += [(round(b * PPQ), 1, bytes(data)) for b, data in tr.get('events') or ()]
+        # after the note-offs of their tick (a reused MPE channel's old note ends before the new note's bend) and
+        # before its note-ons
+        ev += [(round(b * PPQ), 2.5, bytes(data)) for b, data in tr.get('events') or ()]
         notes = sorted((round(n[0] * PPQ), int(n[1]), max(1, round(n[2] * PPQ)), n[3],
                         (int(n[4]) & 0x0F) if len(n) > 4 else ch) for n in tr['notes'])
         nxt = {}

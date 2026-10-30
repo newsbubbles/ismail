@@ -241,8 +241,9 @@ def voice_lanes(inst, root=None):
 
 def mpe_merge(notes, ctl, what, master=MPE_MASTER):
     """MPE: each note's own channel stream of one message ('bend', 'pressure', 'cc:<n>') joined into one lane by
-    last-note priority. notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)]. Each note owns the time
-    from its start to the next note's start (or its own end, when nothing follows at once); in it the lane takes the
+    last-note priority. notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)]. At any time the lane
+    belongs to the newest-started note still sounding; when that note ends it goes back to the newest older note
+    still held, and while nothing sounds the last owner keeps it. In each owner's stretch the lane takes that
     note's channel's value. Returns (events [(beat, raw)], notes overlapped by a newer one, master-channel messages
     left out)."""
     by_ch = {}
@@ -255,17 +256,26 @@ def mpe_merge(notes, ctl, what, master=MPE_MASTER):
             continue
         by_ch.setdefault(ch, []).append((b, raw))
     ns = sorted(n for n in notes if n[4] != master)
-    out, overlapped = [], 0
-    for i, (s, _, d, _, ch) in enumerate(ns):
-        nxt = ns[i + 1][0] if i + 1 < len(ns) else math.inf
-        if nxt < s + d - 1e-9:
-            overlapped += 1
-        end = min(nxt, s + d) if nxt < s + d else nxt
+    overlapped = sum(1 for i, n in enumerate(ns) if any(m[0] < n[0] + n[2] - 1e-9 for m in ns[i + 1:]))
+    cuts = sorted({n[0] for n in ns} | {n[0] + n[2] for n in ns})
+    stretches, owner = [], None                        # [(from, to, channel)]
+    for a, z in zip(cuts, cuts[1:] + [math.inf]):
+        sounding = [n for n in ns if n[0] <= a + 1e-9 and a < n[0] + n[2] - 1e-9]
+        if sounding:
+            owner = max(sounding, key=lambda n: n[0])[4]
+        if owner is None:
+            continue
+        if stretches and stretches[-1][2] == owner:
+            stretches[-1] = (stretches[-1][0], z, owner)
+        else:
+            stretches.append((a, z, owner))
+    out = []
+    for a, z, ch in stretches:
         evs = by_ch.get(ch, [])
-        before = [r for b, r in evs if b <= s + 1e-9]
+        before = [r for b, r in evs if b <= a + 1e-9]
         if before:
-            out.append((s, before[-1]))
-        out += [(b, r) for b, r in evs if s + 1e-9 < b < end - 1e-9]
+            out.append((a, before[-1]))
+        out += [(b, r) for b, r in evs if a + 1e-9 < b < z - 1e-9]
     out.sort(key=lambda e: e[0])
     dedup = []
     for b, r in out:

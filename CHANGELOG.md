@@ -12,10 +12,13 @@
   clamped to a range.
 - `midi_write(mpe=True or [tracks])`: an MPE part, channel 1 the master (the MPE configuration, RPN 6), each note
   on its own member channel 2-16 (a free one, else the one held longest) with the track's lanes over its own span;
-  bend +-48 and `level` as per-note channel pressure by default.
+  bend +-48 and `level` as per-note channel pressure by default. On a tick where a reused channel's old note ends,
+  the note-off goes before the new note's bend. A map that clashes only with the MPE defaults works without `mpe`.
 - `midi_read` reads pitch bend and controllers onto the target's lanes (the same map, `lanes=` to change it), at
   the file's RPN 0 bend range when it has one. A held value comes back as a step, a ramp as a few points. An MPE
-  part is read per note by last-note priority (ismail's lanes are per track, the reply counts the overlaps). The
+  part (the file configures MPE with RPN 6, or `mpe=True`; a multi-channel GM file stays at +-2) is read per note
+  by last-note priority: the newest note still sounding, back to an older held note when a newer one ends
+  (ismail's lanes are per track, the reply counts the overlaps). The
   listing shows each track's expression messages, the bend range and MPE; the reply names messages no lane took
   and warns when the target's sound has no such lane. `midifile.read` gives each track's controller messages,
   bend ranges and MPE configuration; `midifile.write` takes channel events and a channel per note.
@@ -23,10 +26,12 @@
   wheel `vib` (0..50 cents) and channel pressure `level` (0..+6 dB, a boost: pressure at rest changes nothing) on
   the notes of that channel; poly pressure drives one key's `level`. `lanes=` changes the map, turns lanes off, or
   drives a lane the sound lacks; `mpe=True` reads an MPE controller (channel 1 the master, adding to every note;
-  2-16 a note each, bend +-48). The keys' notes are rendered ahead, so lanes act as a resampled read (bend, vib at
-  the voice's `vib_rate` or 5.5 Hz) and as gain (level), ramped over one buffer; other lanes are refused live with
-  the clip's `expr` named. A key with all lanes at rest plays the same samples as before. Reset all controllers
-  (cc:121) clears them. A message bound with `live_map` stays a control (step 5).
+  2-16 a note each, bend +-48; a released key's tail keeps its channel's values, so the next note on that channel
+  does not bend it). A key's expression is set inside `note_on`, before its first buffer. The keys' notes are
+  rendered ahead, so lanes act as a resampled read (bend, vib at the voice's `vib_rate` or 5.5 Hz) and as gain
+  (level), ramped over one buffer; other lanes are refused live with the clip's `expr` named. A key with all lanes
+  at rest plays the same samples as before. Reset all controllers (cc:121) clears them. A message bound with
+  `live_map` stays a control (step 5).
 - Not yet: lanes from a played take written into the song (`live_played(into=)` writes notes; the log keeps the
   expression), live lanes beyond bend, vib and level, MPE's upper zone, poly pressure in files, per-note lanes in
   ismail itself (an MPE file's chord shares one lane), track automation other than lanes (volume, pan) as MIDI.

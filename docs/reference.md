@@ -201,9 +201,9 @@ Find any tool by what you need or by role with `ops_find`.
   as MIDI: `bend` as pitch bend (+-2 semitones, said with RPN 0; a file's own RPN range is read), `vib` as cc:1,
   `level` as cc:11, `breath` as cc:2, any other lane by a map the agent gives
   (`lanes={'mute': {'midi': 'cc:20', 'range': [0, 1]}}`). `midi_write(mpe=True)` puts each note on its own channel
-  for an MPE synth; `midi_read` reads an MPE part per note (bend +-48, pressure as level), and since lanes are per
-  track the lane follows the newest note. Live MIDI from a keyboard: `live_midi` (Playing live; its bend, pressure,
-  mod wheel and MPE drive the playing voice's lanes);
+  for an MPE synth; `midi_read` reads an MPE part (RPN 6 in the file, or `mpe=True`) per note (bend +-48, pressure
+  as level), and since lanes are per track the lane follows the newest note still sounding. Live MIDI from a
+  keyboard: `live_midi` (Playing live; its bend, pressure, mod wheel and MPE drive the playing voice's lanes);
   `live_played(into='<track>', bar=...)` records what was played into a song track, as it sounded or snapped to 16ths
   (`fit=True`), and `undo()` takes it back.
 - **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,

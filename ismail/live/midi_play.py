@@ -446,9 +446,9 @@ class MidiPlay:
                 self._hear(name, st, d1, d2)
                 return
             if kind == 0x90 and d2:
-                self.note_on(p, d1, d2)
-                self._expr_attach(p, d1, ch)
+                self.note_on(p, d1, d2, ch)
             elif kind == 0x80 or kind == 0x90:
+                self._expr_off(p, p['held'].get(d1))
                 self.note_off(p, d1)
             elif kind == 0xB0 and d1 == 64:
                 p['sustain'] = d2 >= 64
@@ -487,7 +487,7 @@ class MidiPlay:
         lat = getattr(self.e.stream, 'latency', 0) if self.e.stream is not None else 0
         return int(float(lat or 0) * SR)
 
-    def note_on(self, p, note, vel):
+    def note_on(self, p, note, vel, ch=1):
         m = note + p['transpose']
         if p['oneshot'] and len(p['want']) == 1:
             m = p['want'][0]
@@ -502,8 +502,10 @@ class MidiPlay:
             old = p['held'].pop(note, None)
             if old is not None:
                 old.release(int(0.02 * SR))
+                self._expr_off(p, old)
             if len(self.voices) >= MAX_VOICES:
                 self.voices[0].release(int(0.02 * SR))
+            self._expr_new(p, v, ch)             # before any buffer mixes it
             self.voices.append(v)
             if not p['oneshot']:
                 p['held'][note] = v
@@ -927,18 +929,22 @@ class MidiPlay:
         p['xs'].setdefault(ch, {})[lane] = ML.from_raw(k, lo, hi, raw)
         return True
 
-    def _expr_attach(self, p, note, ch):
-        """The key just pressed follows its channel's lanes (and, with MPE, the master channel's)."""
+    def _expr_new(self, p, v, ch):
+        """The key being pressed follows its channel's lanes (and, with MPE, the master channel's). Called inside
+        note_on's lock, before the voice joins the mix, so its first buffer already has its expression."""
         if not p['xmap'] or p['oneshot']:
             return
-        v = p['held'].get(note)
-        if v is None:
-            return
         master = p['xs'].setdefault(1, {}) if p['mpe'] and ch != 1 else None
-        with self.lock:
-            live = set(self.voices)
-            self.xv = {u: x for u, x in self.xv.items() if u in live}
-            self.xv[v] = _X(p['xs'].setdefault(ch, {}), master, p['xhz'])
+        live = set(self.voices)
+        self.xv = {u: x for u, x in self.xv.items() if u in live}
+        self.xv[v] = _X(p['xs'].setdefault(ch, {}), master, p['xhz'])
+
+    def _expr_off(self, p, v):
+        """A key let go with MPE: its release tail keeps the values its channel had then, since the controller hands
+        that channel to the next note, whose bend must not move this tail. The master channel still applies."""
+        x = self.xv.get(v) if v is not None else None
+        if x is not None and p['mpe']:
+            x.chan = dict(x.chan)
 
     def _expr_mix(self, v, x, acc, n):
         """Adds a voice with expression to acc: its note read at 2^(bend/12) times its speed (a vib in cents as a

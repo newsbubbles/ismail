@@ -48,7 +48,9 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     for n in names:
         P.track(n)
     try:
-        lmaps = {False: ML.resolve(lanes, ML.FILE), True: ML.resolve(lanes, ML.FILE_MPE)}
+        lmaps = {False: ML.resolve(lanes, ML.FILE)}
+        if mpe:                                  # a map that only clashes with the MPE defaults is fine without
+            lmaps[True] = ML.resolve(lanes, ML.FILE_MPE)
     except ML.LaneMapError as e:
         raise OpError(str(e))
     if mpe not in (None, False, True) and not (isinstance(mpe, (list, tuple)) and all(m in names for m in mpe)):
@@ -197,12 +199,10 @@ def _key(spec, f):
     return t['notes'], t['ctl'], {**ranges, **t['bend_range']}, t['mpe'] is not None
 
 
-def _is_mpe(notes, ctl, configured):
-    """An MPE part: the file configures MPE (RPN 6), or its notes spread over channels that carry their own bend
-    or pressure."""
-    chs = {n[4] for n in notes}
-    per = {c[1] for c in ctl if c[2] in ('bend', 'pressure') and c[1] in chs}
-    return configured or (len(chs) >= 2 and len(per) >= 2)
+def _is_mpe(configured, asked=None):
+    """An MPE part: the file configures MPE (RPN 6), or the caller says so (mpe=True; mpe=False overrides the
+    file). A multi-channel part with bend on several channels is not enough: a type 0 GM file looks the same."""
+    return bool(asked) if asked is not None else bool(configured)
 
 
 def _ctl_counts(ctl):
@@ -213,10 +213,10 @@ def _ctl_counts(ctl):
     return out
 
 
-def _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base):
+def _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base, asked=None):
     """The lanes a part's controller messages carry, written into tr's automation (inst.lane.<name>, beats from
     base): (lines for the reply, warnings)."""
-    mpe = _is_mpe(notes, ctl, configured)
+    mpe = _is_mpe(configured, asked)
     try:
         lmap = ML.resolve(lanes, ML.FILE_MPE if mpe else ML.FILE)
     except ML.LaneMapError as e:
@@ -273,7 +273,7 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base):
 
 @op(mutates=True)
 def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: str = 'replace',
-              quantize: float = None, lanes: dict = None) -> str:
+              quantize: float = None, lanes: dict = None, mpe: bool = None) -> str:
     """Read a Standard MIDI File (.mid, from a DAW, a score program or the web). Without `into`, it lists what the
     file holds: tempo and meter (and any changes), markers, and every track and channel with its note count, range
     and bars. With into={<file track>: <ismail track>} it writes those notes into existing tracks (track_add first),
@@ -286,10 +286,11 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     which a performer voice plays): pitch bend -> bend (semitones, at the file's RPN 0 bend range, else +-2), cc:1
     -> vib (0..50 cents), cc:11 -> level (-40..0 dB), cc:2 -> breath (0..1); the reply names the messages no lane
     took. lanes: the map as data, as midi_write takes it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range':
-    [lo, hi]}}, {lane: None} skips one), e.g. {'mute': {'midi': 'cc:20', 'range': [0, 1]}}. An MPE part (notes on
-    their own channels with their own bend and pressure) is read per note: bend at +-48 unless the file says, and
-    per-note pressure -> level; a lane follows the newest sounding note, since ismail's lanes are per track. Lanes
-    replace the target's points over the span they cover; quantize moves notes only."""
+    [lo, hi]}}, {lane: None} skips one), e.g. {'mute': {'midi': 'cc:20', 'range': [0, 1]}}. An MPE part (the file
+    configures MPE with RPN 6, or mpe=True; mpe=False reads such a part per channel) is read per note: bend at +-48
+    unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
+    ismail's lanes are per track. Lanes replace the target's points over the span they cover; quantize moves notes
+    only."""
     path = os.path.abspath(file)
     if not os.path.exists(path):
         raise OpError(f"no file {path}")
@@ -313,7 +314,7 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         for t in f['tracks']:
             ns = t['notes']
             cc = _ctl_counts(t['ctl'])
-            ctl_txt = (("; MPE, " if _is_mpe(ns, t['ctl'], t['mpe'] is not None) else "; ")
+            ctl_txt = (("; MPE, " if _is_mpe(t['mpe'] is not None) else "; ")
                        + "expression: " + ', '.join(f"{w} {c}" for w, c in sorted(cc.items()))
                        + (f" (bend range +-{'/'.join(sorted({fmt_num(r) for r in t['bend_range'].values()}))})"
                           if t['bend_range'] else '')) if cc else ''
@@ -347,7 +348,7 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         tr['notes'] = sorted(tr['notes'] + rows)
         out.append(f"  {spec} -> {target}: {len(rows)} notes, bars {bar + int(min(r[0] for r in rows) - base) // bpb}"
                    f"-{bar + int(max(r[0] for r in rows) - base) // bpb}")
-        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base)
+        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base, mpe)
         out += lt
         warn += lw
         if _is_kit(tr):

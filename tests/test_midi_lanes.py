@@ -165,3 +165,49 @@ def test_held_values_come_back_as_steps_not_ramps():
     evs, clamped = ML.lane_events([[0, 0], [1, 1]], 'cc', 0, 1, 0, 2)
     assert evs[0] == (0, 0) and evs[-1] == (1.0, 127) and clamped == 0 and len(evs) <= 65
     assert ML.lane_points(evs, 'cc', 0, 1) == [[0.0, 0.0], [1.0, 1.0]]
+
+
+def test_mpe_priority_goes_back_to_an_older_note_still_held():
+    a, b = (0.0, 60, 4.0, 100, 1), (1.0, 64, 0.5, 100, 2)            # A held 0-4, B tapped 1-1.5
+    ctl = [(0.0, 1, 'bend', 8192), (1.0, 2, 'bend', 12000), (2.0, 1, 'bend', 10000), (3.0, 1, 'bend', 11000)]
+    evs, over, _ = ML.mpe_merge([a, b], ctl, 'bend')
+    assert evs == [(0.0, 8192), (1.0, 12000), (1.5, 8192), (2.0, 10000), (3.0, 11000)] and over == 1
+    c = (2.5, 67, 0.25, 100, 3)                                       # staggered: C inside A, after B
+    evs, over, _ = ML.mpe_merge([a, b, c], ctl + [(2.5, 3, 'bend', 9000)], 'bend')
+    assert evs == [(0.0, 8192), (1.0, 12000), (1.5, 8192), (2.0, 10000), (2.5, 9000), (2.75, 10000),
+                   (3.0, 11000)] and over == 1
+
+
+def test_a_map_that_only_clashes_with_the_mpe_defaults_works_without_mpe(tmp_path):
+    p = _lead(str(tmp_path / 'song'))
+    api.automation_set(p, 'lead', 'inst.lane.breath', [[1, 0], [2, 1]])
+    out = OPS['midi_write'](p, out=str(tmp_path / 'b.mid'), lanes={'breath': {'midi': 'pressure', 'range': [0, 1]}})
+    assert 'breath -> pressure 0..1' in out
+    with pytest.raises(api.OpError, match='both use pressure'):
+        OPS['midi_write'](p, out=str(tmp_path / 'b.mid'), lanes={'breath': {'midi': 'pressure', 'range': [0, 1]}},
+                          mpe=True)
+
+
+def test_a_reused_channel_ends_its_old_note_before_the_new_notes_bend(tmp_path):
+    path = str(tmp_path / 'r.mid')
+    MF.write(path, [{'name': 'x', 'channel': 1, 'notes': [(0, 60, 1, 100, 1), (1, 64, 1, 100, 1)],
+                     'events': [(1.0, ML.message('bend', None, 1, 12000))]}], bpm=120)
+    data = open(path, 'rb').read()
+    assert data.index(bytes([0x81, 60, 0])) < data.index(bytes([0xE1, 12000 & 0x7F, 12000 >> 7])) < \
+        data.index(bytes([0x91, 64, 100]))
+
+
+def test_a_multichannel_gm_file_is_not_mpe_unless_it_says_so_or_the_caller_does(tmp_path):
+    path = str(tmp_path / 'gm.mid')                                   # no RPN at all: GM's +-2 holds
+    top = ML.message('bend', None, 0, 16383), ML.message('bend', None, 1, 16383)
+    MF.write(path, [{'name': 'band', 'channel': 0, 'notes': [(0, 60, 2, 100, 0), (0, 48, 2, 100, 1)],
+                     'events': [(0.0, top[0]), (0.0, top[1])]}], bpm=120)
+    q = str(tmp_path / 'q')
+    api.project_new(q, bpm=120, length_bars=2)
+    api.track_add(q, 'solo', instrument={'type': 'code', 'voice': 'flute', 'tail': 0.5})
+    assert 'MPE' not in OPS['midi_read'](q, path)
+    out = OPS['midi_read'](q, path, into={'band': 'solo'})
+    assert '(bend range +-2)' in out and 'MPE' not in out and _lane(q, 'solo', 'bend')[0][1] == pytest.approx(2)
+    out = OPS['midi_read'](q, path, into={'band': 'solo'}, mpe=True)
+    assert 'per note (MPE)' in out and '(bend range +-48)' in out and _lane(q, 'solo', 'bend')[0][1] == \
+        pytest.approx(48)
