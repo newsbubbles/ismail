@@ -673,16 +673,29 @@ def live_stream(project: str, name: str = 'master') -> str:
 
 @op()
 def live_map(project: str, control: str, target: str = None, param: str = 'volume_db', range: list = None,
-             curve: str = 'linear', at: str = 'now', remove: bool = False) -> str:
-    """Map a named control (a knob, slider or switch on the VR stage, or any client) to a live parameter, so its
-    moves apply in the engine at once with no agent in the loop. target: a track, 'bus:<name>' or 'deck:<name>'.
-    param: 'volume_db', 'pan' (tracks), a deck's 'low_db'/'mid_db'/'high_db'/'filter'/'volume_db', or an effect
-    param 'fx:<index or type>.<param>' ('fx:filter.cutoff', 'fx:delay.mix'). The control sends 0..1; range=[value
-    at 0, value at 1]; curve 'linear', 'log' (Hz, ratios), 'switch' (below 0.5 = the first value), or 'raw' (the
-    value passes in the param's own units). at: when a move lands for effect and deck params ('now', 'next_bar').
-    Every move is logged by bar: live_controls reads them back as automation. remove=True unmaps."""
+             curve: str = 'linear', at: str = 'now', remove: bool = False, midi: str = None, source: str = None,
+             channel: int = None, mode: str = 'absolute') -> str:
+    """Map a named control (a knob, slider or switch on the VR stage, any client, or a MIDI controller's knob, fader,
+    pad or bend wheel) to a live parameter, so its moves apply in the engine at once with no agent in the loop.
+    target: a track, 'bus:<name>' or 'deck:<name>'. param: 'volume_db', 'pan' (tracks), a deck's
+    'low_db'/'mid_db'/'high_db'/'filter'/'volume_db', or an effect param 'fx:<index or type>.<param>'
+    ('fx:filter.cutoff', 'fx:delay.mix'). The control sends 0..1; range=[value at 0, value at 1]; curve 'linear',
+    'log' (Hz, ratios), 'switch' (below 0.5 = the first value), or 'raw' (the value passes in the param's own units;
+    not for MIDI). at: when a move lands for effect and deck params ('now', 'next_bar'). Every move is logged by bar:
+    live_controls reads them back as automation. remove=True unmaps.
+    MIDI as the source: midi='cc:<0-127>' (a knob or fader, 0..127 as 0..1), 'cc14:<0-31>' (a 14-bit pair, MSB n
+    and LSB n+32), 'bend' (the wheel; centre = 0.5), 'pressure' (channel aftertouch) or 'note:<36 or C2>' (a pad:
+    held = 1, released = 0). source: the MIDI input (midi_sources; optional when there is one), opened by the map
+    even when no keys are patched; channel: 1 to 16 (default every channel). mode: 'absolute' (the param jumps to the
+    knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
+    stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
+    'relative64' (64 = still, 65 up, 63 down), each step 1/128 of the range, from the param's value now (fast steps add up); 'toggle'
+    (a pad or a button flips between the range's ends on each press: 64 or more after a release, or a repeat 0.1 s
+    or more after the last with no release). Several maps may share one MIDI control (one
+    knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
+    is not played or logged by live_midi. Not sure what a knob sends? live_controls(source=<input>) listens."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
-                 remove=remove)
+                 remove=remove, midi=midi, source=source, channel=channel, mode=mode)
 
 
 @op()
@@ -694,10 +707,15 @@ def live_control(project: str, control: str, value: float) -> str:
 
 
 @op()
-def live_controls(project: str, control: str = None, last: int = 20) -> str:
+def live_controls(project: str, control: str = None, last: int = 20, source: str = None) -> str:
     """The control moves of this set as automation: for each control, its target and [bar, value] points in this
-    engine's bars (the last `last` of them), ready to become automation_set points in a studio project."""
-    return _call(project, 'controls', control=control, last=last)
+    engine's bars (the last `last` of them), ready to become automation_set points in a studio project. MIDI moves
+    are logged the same way. It also lists what the open MIDI inputs sent that no map takes (input, 'cc:74' or
+    'note:36' or 'bend', channel, last value): the numbers live_map(midi=...) needs. source=<input> opens that input
+    to listen for 120 s (a controller with nothing mapped yet; each call restarts it, a map on it keeps it open): ask
+    the person to move the knob, then call again. Reach for it when you need to know what a knob or pad on the
+    person's controller sends (its cc or note number and channel) before live_map."""
+    return _call(project, 'controls', control=control, last=last, source=source)
 
 
 def _check_instrument(project, instrument):
@@ -727,7 +745,8 @@ def midi_sources() -> str:
 
 @op()
 def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
-              transpose: int = None, channel: int = None, remove: bool = False) -> str:
+              transpose: int = None, channel: int = None, remove: bool = False, lanes: dict = None,
+              mpe: bool = None) -> str:
     """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
     same speakers. source: the input's name or a unique part of it (midi_sources), or 'screen keys' (the on-screen
     keys page, live_keys_page); with no source, says what is plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
@@ -739,11 +758,53 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     instrument). transpose: semitones; channel: 1 to 16 (0 = every channel, the
     default). Every key is logged with the beat it sounded against to <project>/live/midi/<source>.jsonl
     (live_played reads it back as notes). remove=True unpatches.
-    Tell the person before their keys first sound."""
+    Expression: when the sound is a performer voice with lanes (voice_help lists them), pitch bend drives its bend
+    lane (+-2 semitones), the mod wheel (cc:1) its vib lane (0..50 cents) and channel pressure (and poly pressure,
+    per key) its level lane (0..+6 dB), on the notes of that channel. lanes: the map as data, as midi_write takes it,
+    {lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}} or {lane: None} to turn one off; a lane
+    named here is driven even when the sound does not have it (e.g. {'bend': {'midi': 'bend', 'range': 12}} on a
+    synth). Live, a key plays a note rendered ahead, so lanes move it only as pitch and gain: bend, vib and level.
+    mpe=True: an MPE controller (lower zone): channel 1 the master, whose values add to every note, and each note's
+    own channel 2-16 its own bend (+-48) and pressure. A message bound with live_map stays that map's control.
+    Tell the person before their keys first sound. Reach for it when the person wants to play their MIDI keyboard,
+    pads or MPE keyboard through the set, its pitch bend wheel, pressure and mod wheel included."""
     if instrument is not None:
         instrument = _check_instrument(project, instrument)
     return _call(project, 'midi', source=source, track=track, instrument=instrument, volume_db=volume_db,
-                 transpose=transpose, channel=channel, remove=remove)
+                 transpose=transpose, channel=channel, remove=remove, lanes=lanes, mpe=mpe)
+
+
+@op()
+def live_arp(project: str, source: str = None, pattern=None, degrees: list = None, notes: str = None, rate=None,
+             octaves: int = None, gate=None, velocity=None, accent: list = None, slide: list = None,
+             octave: list = None, cutoff=None, pan=None, transpose: int = None, key: str = None, scale=None,
+             restart: str = None, swing: float = None, latch: bool = None, at: str = 'next_bar',
+             off: bool = False) -> str:
+    """An arpeggiator on a patched input (live_midi: a keyboard, a loopMIDI port or 'screen keys'): its keys stop
+    sounding as they are pressed and drive steps on the set's beat instead, landing on the beat the person hears.
+    The same core as the studio's track_arp: same settings, same notes. Any subset of settings changes only those;
+    the first call starts it with the defaults for the rest. with no source: says which arps are on.
+    Note source (one of): pattern 'up' (default), 'down', 'updown', 'downup', 'order' (as pressed), 'random',
+    'chord', or a list of held-key numbers ([1, 3, 2, 4]; 1 = the lowest held key, past the last goes up an octave,
+    0 = a rest); degrees: scale steps above the lowest held key ([0, 2, 4, 7], None = a rest; needs key and scale);
+    notes: an exact step list 'A3 C4 E4 A4 | F3 A3 C4 F4', one bar per '|' group, switching on bar lines, each
+    group cycling inside its bar ('.' a rest, 'C4,E4' two at once); it plays with no keys held.
+    rate: beats per step (default 0.25 = 16ths, 1/3 = 8th triplets; 1/64 to 4). octaves: 1 to 4 (default 1).
+    key ('A', 'F#') + scale ('minor',
+    'major', 'dorian' ... or semitones [0, 2, 3, ...]): held keys snap onto the scale; on a step list, key= moves
+    it from the key it was given with, each note kept on its scale degree. transpose: semitones.
+    Per step (a number, or a list cycling on its own length; [] clears): gate (fraction of a step, 0.5),
+    velocity (1-127; default the key's own), accent (0/1: velocity 127), slide (0/1: the step ties into the next;
+    live it re-attacks, the studio's mono synths glide), octave (-3 to 3), cutoff (Hz: a low-pass on that step's
+    note), pan (-1 to 1). restart: 'key' (default: a key pressed starts the pattern again at the next step),
+    'bar', 'off'. swing: 0 to 0.5 of a step, every second step. latch=True: keys keep playing after release until
+    a new chord is pressed. at: when it starts or changes ('next_bar' default, 'now', 'next_4', 'bar:17').
+    off=True stops it (at= a bar line too). live_status shows its state. live_played still logs the keys pressed,
+    not the steps. Not yet: the input's bend, pressure and mod wheel (live_midi lanes) do not move the steps."""
+    return _call(project, 'arp', source=source, pattern=pattern, degrees=degrees, notes=notes, rate=rate,
+                 octaves=octaves, gate=gate, velocity=velocity, accent=accent, slide=slide, octave=octave,
+                 cutoff=cutoff, pan=pan, transpose=transpose, key=key, scale=scale, restart=restart, swing=swing,
+                 latch=latch, at=at, off=off)
 
 
 @op()
@@ -769,8 +830,9 @@ def live_midi_out(project: str, track: str = None, port: str = None, channel: in
 @op()
 def live_midi_clock(project: str, port: str = None, on: bool = True, position: bool = False,
                     offset_ms: float = None) -> str:
-    """Send MIDI clock from the live set to a port, so Ableton, FL Studio or a drum machine follows the set's tempo
-    and starts on its bar line. Reach for it when another app or a hardware box should play in time with the set.
+    """Send MIDI clock from the live set to a port, so Ableton, FL Studio or a drum machine plays at the set's
+    tempo and starts on its bar line. Reach for it when another app or a hardware box should play in time with the
+    set.
     24 pulses per quarter note at the set's tempo (one tempo per set) start at once, so the receiver can lock to it;
     Start goes out right before the first pulse of the next bar line, which becomes the other app's bar 1.
     position=True sends that bar's Song Position Pointer first and Continue instead of Start, for a DAW that follows
@@ -779,6 +841,40 @@ def live_midi_clock(project: str, port: str = None, on: bool = True, position: b
     port's Sync on (Preferences, Link/Tempo/MIDI), then EXT; in FL Studio, the port enabled as an input in MIDI
     settings with its sync on, then external sync. With no port: what is sending (live_status says it too)."""
     return _call(project, 'midi_clock', port=port, on=on, position=position, offset_ms=offset_ms)
+
+
+@op()
+def live_midi_clock_in(project: str, source: str = None, on: bool = True, transport: str = None,
+                       offset_ms: float = None, bandwidth_hz: float = None, tempo_tol_bpm: float = None,
+                       phase_tol_ms: float = None, max_bend_pct: float = None, step_beats: int = None,
+                       dropout_ms: float = None) -> str:
+    """The set follows another app's MIDI clock in: a DAW or a drum machine sets the set's tempo and beat, and
+    with transport='follow' its Start, Stop and Continue. Reach for it
+    when the set should follow, sync to or slave to an external clock, the tempo of my drum machine or my DAW, when
+    something else leads and ismail plays in time with it (the other way round, the set leading: live_midi_clock).
+    source: an input's name or a unique part of it (midi_sources; Ableton or FL Studio send it through a loopMIDI
+    port). The tempo comes from the 24 ticks per beat
+    through a loop filter (bandwidth_hz, default 0.5: a steady tempo change shows about 0.215 / bandwidth_hz s
+    late, 430 ms by default; higher follows sooner and wobbles more on a jittery clock). The set changes tempo the way
+    live_tempo does (its notes render again from the change), at the first beat its renders can reach, at most once
+    every step_beats (default one bar), and only when the tempo is off by more than tempo_tol_bpm (default 0.25) or
+    the beat by more than phase_tol_ms (default 4); each step bends the tempo by at most max_bend_pct (default 3)
+    to land ismail's beats on theirs. offset_ms: positive lands ismail later, for an app whose sound comes out late
+    (-500 to 2000; set it by ear against their kick).
+    transport: 'follow' (default): their Stop silences the set at once (its time and queue run on), Start or Continue
+    bring it back in on the first of their bar lines it can reach (ismail mixes ahead, so not their very first
+    beat): it runs through the silent stretch at the tempo that lands its own bar line there, and the reply's news
+    says "their bar 3 = ismail bar 17". Start counts from their bar 1, Continue from their Song Position. A Start
+    while the set plays silences it until that bar (one to two bars). 'tempo': tempo and beats only; their
+    transport is ignored. A dropout (no tick for dropout_ms, default 300) holds the last
+    tempo and says so; the set plays on. Clock out (live_midi_clock) and the arp follow the followed tempo. Clock in
+    and clock out on one port is refused (the set would chase its own clock). While it is on, live_tempo is refused.
+    Call again to change a setting; on=False lets go (the tempo holds). With no source: the inputs and the follow;
+    live_status shows it too. Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed),
+    forwarding their Start/Stop to clock out."""
+    return _call(project, 'midi_clock_in', source=source, on=on, transport=transport, offset_ms=offset_ms,
+                 bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
+                 max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)
 
 
 @op(mutates=True)

@@ -15,6 +15,7 @@ from scipy import signal
 
 from . import dsp_blocks as dsp, fx_blocks as F
 from ..dsp import SR
+from ..arp import expand_project
 from ..notation import placed
 
 KILL_DB = -40.0              # an isolator band at or below this is off
@@ -193,6 +194,7 @@ def read_song(path, deck, bars, house_bpb, performers=()):
         raise DeckError(f"no ismail project at {root} (a song folder holds project.json; songs/<name>/proj is common)")
     with open(fn, encoding='utf8') as f:
         d = json.load(f)
+    d = expand_project(d)            # a track's arp (track_arp) plays as its steps, as in the studio
     bpb = d.get('beats_per_bar', 4)
     if bpb != house_bpb:
         raise DeckError(f"the song is in {bpb}/4 and the live set in {house_bpb}/4; decks share the house meter")

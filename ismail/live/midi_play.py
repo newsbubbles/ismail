@@ -16,6 +16,17 @@ watches for inputs plugged in or removed and says so in its news.
 One input needs no driver: 'screen keys', the on-screen keyboard page (live_keys_page), for someone with no MIDI
 instrument. Its keys arrive as small HTTP messages (the engine's /api/keys, or the phone server's, which relays them)
 and are fed to the patch here exactly as a driver's would be.
+
+An input is opened once and shared: by its patch (keys) and by the control maps bound to it (live_map(midi=...)).
+Each message goes to the maps first (the engine's midi_control); a message a map is bound to is a control move,
+never a key. What an open input sends that nothing takes is kept (heard_lines), so an agent can find a knob's number.
+
+Expression (MIDI parity step 6): pitch bend, channel pressure, the mod wheel, poly pressure and MPE's per-note bend
+and pressure drive the playing note's lanes (bend, vib, level) when the patch's sound has them, or when the agent
+maps them (live_midi(lanes=...)). A key's note was rendered ahead, so a lane moves it as pitch (a resampled read:
+bend, and vib as a sine on the pitch) and as gain (level); lanes that change the sound itself need a new render and
+are not taken live. The channel's values apply to the notes on that channel; with mpe=True channel 1 is the master
+(its values add to every note) and each note's own channel (2-16) is its own bend and pressure.
 """
 import collections
 import json
@@ -27,6 +38,8 @@ import time
 import numpy as np
 
 from .. import midi as M
+from .. import midilanes as ML
+from . import outputs as O
 from ..dsp import SR
 
 LO, HI = 36, 96             # the notes rendered for a melodic instrument: C2 to C7
@@ -39,6 +52,23 @@ SCREEN = 'screen keys'      # the on-screen keys page, an input that is always t
 MAX_EVENTS = 64             # messages in one request from the page
 HIT = 0.15                  # live_played(fit=True): onsets this close (two hands, a rolled chord) are one hit, beats
 STEP = 0.25                 # the grid it fits: 16ths
+LISTEN_S = 120              # live_controls(source=) keeps an input open this long to hear what it sends
+VIB_HZ = 5.5                # a live vib lane's rate when the sound names none (its params' vib_rate)
+
+
+class _X:
+    """A key's expression: its channel's lane values (shared by the keys on that channel), the MPE master's, its own
+    poly pressure, and where its resampled read is."""
+    __slots__ = ('chan', 'master', 'poly', 'pos', 'rate', 'ph', 'g', 'hz')
+
+    def __init__(self, chan, master, hz):
+        self.chan, self.master, self.poly, self.hz = chan, master, {}, hz
+        self.pos, self.ph = 0.0, 0.0
+        self.rate, self.g = 2.0 ** (self.val('bend') / 12.0), 10.0 ** (self.val('level') / 20.0)   # no glide in
+
+    def val(self, lane):
+        return (self.chan.get(lane, 0.0) + (self.master.get(lane, 0.0) if self.master is not None else 0.0)
+                + self.poly.get(lane, 0.0))
 
 
 class Voice:
@@ -134,6 +164,141 @@ class MidiPlay:
         self._log = []
         self.feeds = {}                     # an open screen input -> its message handler
         self.seqs = collections.OrderedDict()   # page id -> {key: (last seq, was a note-off)}
+        self.ins = {}                       # input name -> its open handle, shared by a patch and control maps
+        self.lost = set()                   # inputs in use that were unplugged (they reopen when they come back)
+        self.listening = {}                 # inputs opened by live_controls(source=) -> when they close (wall time)
+        self.heard = collections.OrderedDict()  # (input, 'cc:74', channel) -> [last value, count], not mapped
+        self.retrying = set()               # lost inputs that are back but did not open (said once)
+        self.heard_lock = threading.Lock()  # the driver's thread writes `heard`, a command reads it
+        self.xv = {}                        # a sounding voice -> its expression (_X), for patches with lanes
+
+    # ------------------------------------------------------------------ inputs: one handle per input
+    def _open(self, name):
+        if name not in self.ins and name not in self.lost:
+            self.ins[name] = (self._screen if name == SCREEN else self.opener)(name, self._on(name))
+        return self.ins.get(name)
+
+    def _shut(self, name):
+        inp = self.ins.pop(name, None)
+        if inp is not None:
+            try:
+                inp.close()
+            except Exception:
+                pass
+
+    def _wanted(self, name):
+        cin = getattr(self.e, 'cin', None)
+        return (name in self.patches or name in self.listening or bool(self.e.controls.bound(name))
+                or (cin is not None and cin.source == name))
+
+    def release(self, name):
+        """Close an input nothing uses any more (no patch, no control map, not listening)."""
+        if not self._wanted(name):
+            self._shut(name)
+            self.lost.discard(name)
+
+    def input_for(self, source=None):
+        """The input a control map or a listen names: an input's name or a unique part of it; with none, the one
+        input there is."""
+        if source is None:
+            names = self.sources()
+            if len(names) == 1:
+                return names[0]
+            raise ValueError("source: which MIDI input the controller is, by name or a unique part of it; inputs: "
+                             f"{names or 'none (plug the controller in; midi_sources lists them)'}")
+        if source in self.ins or source in self.lost:
+            return source
+        return self.find(source)
+
+    def open_for_controls(self, name):
+        """Open an input for a control map now; one that failed to reopen is tried again here, and a failure says
+        what to do."""
+        if name in self.lost:
+            self.lost.discard(name)
+            try:
+                self._open(name)
+            except Exception as ex:
+                self.lost.add(name)
+                raise ValueError(f"MIDI input {name!r} did not open: {ex}. Plug it in, or close it in the program "
+                                 f"that holds it, then call again (midi_sources lists the inputs)")
+            p = self.patches.get(name)
+            if p is not None:
+                p['lost'] = False
+            return
+        self._open(name)
+
+    def listen(self, name):
+        """Open an input only to hear what it sends (live_controls(source=)) for LISTEN_S: its unmapped messages are
+        listed. An input a map or a patch already holds needs no listening."""
+        if name in self.lost:
+            self.open_for_controls(name)
+        if name in self.ins:
+            if not self._wanted(name) or name in self.listening:
+                self.listening[name] = time.time() + LISTEN_S
+            return
+        self._open(name)
+        self.listening[name] = time.time() + LISTEN_S
+
+    def bound_now(self, name, binding=None):
+        """A map was just bound to input `name`: it stops being a listen-only input, what it heard of that control
+        leaves the unmapped list, and the keys it holds are let go (a note or the pedal now bound would never send
+        the release that frees them)."""
+        self.listening.pop(name, None)
+        if binding is not None:
+            with self.heard_lock:
+                for k in [k for k in self.heard if k[0] == name and self._takes(binding, k[1], k[2])]:
+                    del self.heard[k]
+        p = self.patches.get(name)
+        if p is not None:
+            p['sustain'] = False
+            self.release_all(p)
+
+    def _listen_expired(self):
+        now = time.time()
+        for n in [n for n, until in self.listening.items() if until <= now]:
+            del self.listening[n]
+            self.release(n)
+
+    @staticmethod
+    def _takes(b, what, ch):
+        """Does binding b take a message heard as `what` ('cc:74', 'note:36', 'bend', 'pressure') on channel ch?"""
+        if b['channel'] is not None and ch != b['channel']:
+            return False
+        if b['kind'] == 'cc14':
+            return what in (f"cc:{b['num']}", f"cc:{b['lsb']}")
+        return what == b['text']
+
+    def _hear(self, name, st, d1, d2):
+        what = O.midi_text(st, d1)
+        if what is None or (st & 0xF0) == 0x80 or ((st & 0xF0) == 0x90 and not d2):
+            return
+        k = (name, what, (st & 0x0F) + 1)
+        val = ((d2 << 7) | d1) - 8192 if (st & 0xF0) == 0xE0 else d1 if (st & 0xF0) == 0xD0 else d2
+        with self.heard_lock:
+            h = self.heard.pop(k, [0, 0])
+            self.heard[k] = [val, h[1] + 1]
+            while len(self.heard) > 32:
+                self.heard.popitem(last=False)
+
+    def heard_lines(self, source=None):
+        """What the open inputs sent that no map takes, newest last: the numbers live_map(midi=...) needs."""
+        with self.heard_lock:
+            rows = [(k, list(v)) for k, v in self.heard.items() if source is None or k[0] == source]
+        maps = [m['midi'] for _, m in list(self.e.controls.maps.items()) if m.get('midi')]
+        rows = [(k, v) for k, v in rows if not any(b['source'] == k[0] and self._takes(b, k[1], k[2]) for b in maps)]
+        L = []
+        if source is not None and source in self.listening:
+            left = max(0, round(self.listening[source] - time.time()))
+            L.append(f"listening on {source!r} for {left} s more (each live_controls(source=) restarts the "
+                     f"{LISTEN_S} s; a map on it keeps it open)" + ('' if rows else ": nothing heard yet that no map "
+                     f"takes. Move a knob or press a pad, then call live_controls(source={source!r}) again"))
+        elif source is not None and not rows:
+            L.append(f"{source!r}: nothing heard yet that no map takes. Move a knob or press a pad, then call "
+                     f"live_controls(source={source!r}) again")
+        elif rows:
+            L.append("MIDI heard, not mapped (live_map(control=..., midi=..., source=..., channel=...) binds one):")
+            L += [f"  {src!r} {what} ch{ch}: last {val}, {n} messages" for (src, what, ch), (val, n) in rows]
+        return L
 
     # ------------------------------------------------------------------ the command
     def find(self, source):
@@ -148,7 +313,7 @@ class MidiPlay:
                          f"and {SCREEN!r} (the on-screen keys page, live_keys_page)"))
 
     def cmd(self, source=None, track=None, instrument=None, volume_db=None, transpose=None, channel=None,
-            remove=False):
+            remove=False, lanes=None, mpe=None):
         e = self.e
         if source is None:
             return self.describe()
@@ -161,9 +326,9 @@ class MidiPlay:
         if remove:
             if p is None:
                 raise ValueError(f"{name!r} is not patched; patched: {list(self.patches) or 'none'}")
-            self._close(p)
             self.release_all(p)
             del self.patches[name]
+            self.release(name)
             return f"{name}: unpatched ({p['played']} keys played)"
         if p is None and track is None and instrument is None:
             raise ValueError(f"{name!r} is not patched yet: say what it plays, track='<live track>' (that track's "
@@ -172,12 +337,15 @@ class MidiPlay:
             raise ValueError("volume_db <= +6")
         if channel is not None and not 0 <= int(channel) <= 16:
             raise ValueError("channel: 1 to 16, or 0 for every channel")
+        self._expr_check(p, lanes, mpe, channel)
         new = p is None
         if new:
-            p = {'source': name, 'input': None, 'what': None, 'gen': 0, 'bank': {}, 'prev': {}, 'want': [],
+            p = {'source': name, 'what': None, 'gen': 0, 'bank': {}, 'prev': {}, 'want': [],
                  'oneshot': False, 'vol': -6.0, 'transpose': 0, 'channel': None, 'held': {}, 'sustain': False,
                  'sustained': [], 'played': 0, 'missed': 0, 'errors': [], 'lost': False, 'rel_s': 0.1,
-                 'log': os.path.join(e.root, 'live', 'midi', _slug(name) + '.jsonl')}
+                 'log': os.path.join(e.root, 'live', 'midi', _slug(name) + '.jsonl'),
+                 'lanes': None, 'mpe': False, 'xlanes': set(), 'xhz': VIB_HZ, 'xs': {}, 'xmap': {}, 'xmsg': {},
+                 'xmaster': None}
         if volume_db is not None:
             p['vol'] = float(volume_db)
         if transpose is not None:
@@ -186,7 +354,8 @@ class MidiPlay:
             p['channel'] = int(channel) or None
         msg = []
         if new:
-            p['input'] = (self._screen if name == SCREEN else self.opener)(name, self._on(name))
+            self._open(name)
+            p['lost'] = name in self.lost
             self.patches[name] = p
             msg.append(f"{name}: patched")
         if track is not None or instrument is not None:
@@ -196,9 +365,15 @@ class MidiPlay:
                     p['vol'] = float(e.tracks[track]['volume_db'])
             except Exception:
                 if new:
-                    self._close(p)
                     del self.patches[name]
+                    self.release(name)
                 raise
+        if lanes is not None:
+            p['lanes'] = lanes or None
+        if mpe is not None and bool(mpe) != p['mpe']:
+            self.release_all(p)                  # held keys are named per channel with MPE: let go of them first
+            p['mpe'] = bool(mpe)
+        self._expr_setup(p)
         return '\n'.join(msg + [self.line(p)])
 
     def _render(self, p, track, instrument):
@@ -225,7 +400,9 @@ class MidiPlay:
         p['prev'] = {**p['prev'], **p['bank']} if p['bank'] else p['prev']
         p['gen'] += 1
         p.update(bank={}, want=want, oneshot=oneshot, what=what, errors=[],
-                 rel_s=min(0.5, max(0.06, float((inst.get('amp_env') or {}).get('r', 0.1)))))
+                 rel_s=min(0.5, max(0.06, float((inst.get('amp_env') or {}).get('r', 0.1)))),
+                 xlanes=set() if oneshot else ML.voice_lanes(inst, root),
+                 xhz=float((inst.get('params') or {}).get('vib_rate') or VIB_HZ))
         with e.lock:
             for m in want:
                 e._submit_midi(('midi', p['source'], p['gen'], m), [(0.0, m, gate, 100)], inst, root)
@@ -294,16 +471,26 @@ class MidiPlay:
     # ------------------------------------------------------------------ keys (the driver's thread)
     def _on(self, name):
         def on(t, st, d1, d2):
+            if st >= 0xF0:                                  # clock, transport, song position: never keys or controls
+                cin = getattr(self.e, 'cin', None)
+                if cin is not None and cin.source == name:
+                    cin.msg(t, st, d1, d2)
+                return
+            if self.e.midi_control(name, st, d1, d2):        # bound by live_map: a control move, not a key
+                return
             p = self.patches.get(name)
             if p is None:
+                self._hear(name, st, d1, d2)
                 return
             kind, ch = st & 0xF0, (st & 0x0F) + 1
             if p['channel'] is not None and ch != p['channel']:
+                self._hear(name, st, d1, d2)
                 return
             if kind == 0x90 and d2:
-                self.note_on(p, d1, d2)
+                self.note_on(p, d1, d2, ch)
             elif kind == 0x80 or kind == 0x90:
-                self.note_off(p, d1)
+                self._expr_off(p, p['held'].get(self._hk(p, d1, ch)), ch)
+                self.note_off(p, d1, ch)
             elif kind == 0xB0 and d1 == 64:
                 p['sustain'] = d2 >= 64
                 if not p['sustain']:
@@ -313,7 +500,10 @@ class MidiPlay:
                     p['sustained'] = []
             elif kind == 0xB0 and d1 in (120, 123):
                 self.release_all(p)
+            elif self._expr_in(p, kind, ch, d1, d2):
+                pass
             else:
+                self._hear(name, st, d1, d2)
                 return
             self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
                                          'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}))
@@ -338,7 +528,12 @@ class MidiPlay:
         lat = getattr(self.e.stream, 'latency', 0) if self.e.stream is not None else 0
         return int(float(lat or 0) * SR)
 
-    def note_on(self, p, note, vel):
+    def _arp(self):
+        return getattr(self.e, 'arp', None)        # live_arp (live/arp.py): it takes the keys of an arped input
+
+    def note_on(self, p, note, vel, ch=1):
+        if self._arp() is not None and self._arp().key(p, note, vel):
+            return                                 # an arp step has no channel expression yet (live/arp.py)
         m = note + p['transpose']
         if p['oneshot'] and len(p['want']) == 1:
             m = p['want'][0]
@@ -350,19 +545,29 @@ class MidiPlay:
             return
         v = Voice(y, 10 ** (p['vol'] / 20) * (vel / 100.0) ** 1.3)
         with self.lock:
-            old = p['held'].pop(note, None)
+            old = p['held'].pop(self._hk(p, note, ch), None)
             if old is not None:
                 old.release(int(0.02 * SR))
+                self._expr_off(p, old, ch)
             if len(self.voices) >= MAX_VOICES:
                 self.voices[0].release(int(0.02 * SR))
+            self._expr_new(p, v, ch)             # before any buffer mixes it
             self.voices.append(v)
             if not p['oneshot']:
-                p['held'][note] = v
+                p['held'][self._hk(p, note, ch)] = v
         p['played'] += 1
 
-    def note_off(self, p, note):
+    @staticmethod
+    def _hk(p, note, ch):
+        """A held key's name: its note, or with MPE (channel, note), since two fingers may hold one pitch on two
+        channels."""
+        return (ch, note) if p.get('mpe') else note
+
+    def note_off(self, p, note, ch=1):
+        if self._arp() is not None and self._arp().key(p, note, 0):
+            return
         with self.lock:
-            v = p['held'].pop(note, None)
+            v = p['held'].pop(self._hk(p, note, ch), None)
             if v is None:
                 return
             if p['sustain']:
@@ -371,21 +576,29 @@ class MidiPlay:
                 v.release(int(p['rel_s'] * SR))
 
     def release_all(self, p):
+        if self._arp() is not None:
+            self._arp().clear(p)
         with self.lock:
             for v in list(p['held'].values()) + p['sustained']:
                 v.release(int(0.05 * SR))
             p['held'], p['sustained'] = {}, []
 
     # ------------------------------------------------------------------ audio (the device's thread)
-    def mix(self, out):
-        """Adds the sounding keys to out (frames, 2) in place; returns what was added, or None."""
-        if not self.voices:
+    def mix(self, out, extra=None):
+        """Adds the sounding keys to out (frames, 2) in place; returns what was added, or None. extra: more to add
+        under the same soft clip (the arps' steps, live/arp.py)."""
+        if not self.voices and extra is None:
             return None
         n = out.shape[0]
-        acc = np.zeros((n, 2), dtype=np.float32)
+        acc = np.zeros((n, 2), dtype=np.float32) if extra is None else extra
         with self.lock:
             keep = []
             for v in self.voices:
+                x = self.xv.get(v) if self.xv else None
+                if x is not None:               # a key with expression: read resampled, with its gain
+                    if self._expr_mix(v, x, acc, n):
+                        keep.append(v)
+                    continue
                 k = min(n, v.y.shape[1] - v.i)
                 if v.left is not None:
                     k = min(k, v.left)
@@ -417,27 +630,43 @@ class MidiPlay:
         except Exception:
             names = set()
         if self.known is not None:
-            for n in sorted(names - self.known):
+            for n in sorted(names - self.known | (self.lost & names)):
                 p = self.patches.get(n)
-                if p is not None and p['lost']:
+                if n in self.lost:
+                    self.lost.discard(n)
                     try:
-                        p['input'] = self.opener(n, self._on(n))
-                        p['lost'] = False
-                        self.e.news.append(f"keys {n}: plugged back in, playing {p['what']} again")
+                        self._open(n)
+                        if p is not None:
+                            p['lost'] = False
+                        self.e.news.append(f"keys {n}: plugged back in, playing {p['what']} again" if p is not None
+                                           else f"controls on {n}: plugged back in, its maps work again")
                     except Exception as ex:
-                        self.e.news.append(f"keys {n}: back, but it did not open: {ex}")
-                elif p is None:
+                        self.lost.add(n)
+                        if n not in self.retrying:          # said once; tried again on every poll
+                            self.retrying.add(n)
+                            self.e.news.append(f"{'keys' if p is not None else 'controls on'} {n}: back, but it did "
+                                               f"not open: {ex}. Tried again every {POLL_S:g} s; close it in the "
+                                               f"program that holds it")
+                        continue
+                    self.retrying.discard(n)
+                elif p is None and not self._wanted(n):
                     self.e.news.append(f"MIDI input plugged in: {n!r}. live_midi(source={n!r}, instrument=... or "
-                                       f"track=...) plays it through the set")
+                                       f"track=...) plays it through the set; live_map(..., midi=..., source={n!r}) "
+                                       f"maps its knobs")
             for n in sorted(self.known - names):
                 p = self.patches.get(n)
-                if p is not None and not p['lost']:
-                    self._close(p)
-                    self.release_all(p)
-                    p['lost'] = True
-                    self.e.news.append(f"keys {n}: unplugged; it plays again when it comes back")
-                else:
+                if n in self.ins:
+                    self._shut(n)
+                    self.lost.add(n)
+                    if p is not None:
+                        self.release_all(p)
+                        p['lost'] = True
+                        self.e.news.append(f"keys {n}: unplugged; it plays again when it comes back")
+                    else:
+                        self.e.news.append(f"controls on {n}: unplugged; its maps work again when it comes back")
+                elif n not in self.lost:
                     self.e.news.append(f"MIDI input removed: {n!r}")
+        self._listen_expired()
         self.known = names
         self.flush()
 
@@ -713,22 +942,142 @@ class MidiPlay:
             L += ['; '.join(by_bar[b]) for b in sorted(by_bar)]
         return '\n'.join(L)
 
+    # ------------------------------------------------------------------ expression: lanes from bend, pressure, CCs
+    def _expr_check(self, p, lanes, mpe, channel):
+        """The lane map and MPE asked for, checked before anything changes (a ValueError says what to write)."""
+        on = bool(mpe) if mpe is not None else bool(p and p['mpe'])
+        if on and channel not in (None, 0) or (mpe and channel is None and p and p['channel']):
+            raise ValueError("mpe=True takes every channel (1 the master, 2-16 one note each): leave channel out, "
+                             "or channel=0")
+        if lanes is not None or mpe is not None:
+            ML.resolve(lanes if lanes is not None else (p or {}).get('lanes'), ML.LIVE_MPE if on else ML.LIVE,
+                       allowed=ML.LIVE_LANES)
+
+    def _expr_setup(self, p):
+        """Which messages drive which lanes for this patch: the defaults for the lanes its sound has (bend <- pitch
+        bend +-2, or +-48 per note with MPE; vib <- cc:1 0..50 cents; level <- pressure 0..+6 dB), and every lane the
+        agent mapped (live_midi(lanes=...)) whether the sound has it or not."""
+        given = p['lanes'] or {}
+        named = {str(k)[10:] if str(k).startswith('inst.lane.') else str(k) for k, v in given.items()
+                 if v is not None}
+        full = ML.resolve(given, ML.LIVE_MPE if p['mpe'] else ML.LIVE, allowed=ML.LIVE_LANES)
+        act = {} if p['oneshot'] else {k: v for k, v in full.items() if k in p['xlanes'] or k in named}
+        p['xmap'], p['xmsg'] = act, ML.by_message(act)
+        p['xmaster'] = ML.by_message({k: v for k, v in ML.resolve(given, ML.LIVE, allowed=ML.LIVE_LANES).items()
+                                      if k in act}) if p['mpe'] else None
+
+    def _expr_in(self, p, kind, ch, d1, d2):
+        """A bend, pressure or controller message a lane takes (on the driver's thread): True when it was one."""
+        if not p['xmap']:
+            return False
+        if kind == 0xB0 and d1 == 121:                       # reset all controllers
+            hit = [vals for c, vals in p['xs'].items() if c == ch or (p['mpe'] and ch == 1)]
+            for vals in hit:                                 # in place: the keys hold these dicts
+                vals.clear()
+            for x in list(self.xv.values()):                 # and the keys' own poly pressure
+                if any(x.chan is vals for vals in hit):
+                    x.poly.clear()
+            return True
+        if kind == 0xA0:                                     # poly pressure: one key's own
+            b = p['xmsg'].get('pressure')
+            v = p['held'].get(self._hk(p, d1, ch))
+            x = self.xv.get(v) if v is not None else None
+            if b is not None and x is not None:
+                x.poly[b[0]] = ML.from_raw(b[1], b[2], b[3], d2)
+            return b is not None
+        what, raw = ('bend', (d2 << 7) | d1) if kind == 0xE0 else ('pressure', d1) if kind == 0xD0 else \
+            (f"cc:{d1}", d2) if kind == 0xB0 else (None, 0)
+        b = (p['xmaster'] if p['mpe'] and ch == 1 else p['xmsg']).get(what)
+        if b is None:
+            return False
+        lane, k, lo, hi = b
+        p['xs'].setdefault(ch, {})[lane] = ML.from_raw(k, lo, hi, raw)
+        p.setdefault('xstale', {}).get(ch, set()).discard(lane)    # sent since the last key let go: this note's
+        return True
+
+    def _expr_new(self, p, v, ch):
+        """The key being pressed follows its channel's lanes (and, with MPE, the master channel's). Called inside
+        note_on's lock, before the voice joins the mix, so its first buffer already has its expression."""
+        if not p['xmap'] or p['oneshot']:
+            return
+        master = p['xs'].setdefault(1, {}) if p['mpe'] and ch != 1 else None
+        chan = p['xs'].setdefault(ch, {})
+        for lane in p.setdefault('xstale', {}).pop(ch, ()):  # MPE: a reused channel drops the last note's pressure
+            chan.pop(lane, None)                              # and mod; a value sent since (the bend) stays
+        live = set(self.voices)
+        self.xv = {u: x for u, x in self.xv.items() if u in live}
+        self.xv[v] = _X(chan, master, p['xhz'])
+
+    def _expr_off(self, p, v, ch=1):
+        """A key let go with MPE: its release tail keeps the values its channel had then, since the controller hands
+        that channel to the next note, whose bend must not move this tail. The master channel still applies. The
+        channel's pressure and mod become stale: the next note on it starts without them unless they are sent
+        again (its bend, sent just before its note-on as MPE controllers do, is kept)."""
+        x = self.xv.get(v) if v is not None else None
+        if x is not None and p['mpe']:
+            x.chan = dict(x.chan)
+            if ch != 1:
+                bend = {b[0] for w, b in p['xmsg'].items() if w == 'bend'}
+                p.setdefault('xstale', {})[ch] = {lane for lane in p['xs'].get(ch, {}) if lane not in bend}
+
+    def _expr_mix(self, v, x, acc, n):
+        """Adds a voice with expression to acc: its note read at 2^(bend/12) times its speed (a vib in cents as a
+        sine on it), at the level lane's gain, both ramped over the buffer. False when it has ended."""
+        y = v.y
+        last = y.shape[1] - 1
+        ramp = np.arange(1, n + 1, dtype=np.float64) / n
+        r1, g1 = 2.0 ** (x.val('bend') / 12.0), 10.0 ** (x.val('level') / 20.0)
+        r = x.rate + (r1 - x.rate) * ramp
+        cents = x.val('vib')
+        if cents:
+            ph = x.ph + 2 * np.pi * x.hz * np.arange(n) / SR
+            r = r * 2.0 ** (cents * np.sin(ph) / 1200.0)
+            x.ph = float((ph[-1] + 2 * np.pi * x.hz / SR) % (2 * np.pi))
+        pos = x.pos + np.concatenate(([0.0], np.cumsum(r[:-1])))
+        k = int(np.searchsorted(pos, last, side='right'))
+        if v.left is not None:
+            k = min(k, v.left)
+        gain = x.g + (g1 - x.g) * ramp
+        x.rate, x.g = r1, g1
+        if k > 0:
+            i0 = pos[:k].astype(np.int64)
+            fr = (pos[:k] - i0).astype(np.float32)
+            seg = (y[:, i0] * (1 - fr) + y[:, np.minimum(i0 + 1, last)] * fr).T
+            seg = seg * (v.g * gain[:k, None]).astype(np.float32)
+            if v.left is not None:
+                seg = seg * (np.arange(v.left, v.left - k, -1, dtype=np.float32) / v.rel)[:, None]
+                v.left -= k
+            acc[:k] += seg
+            x.pos = float(pos[k - 1] + r[k - 1])
+        v.i = min(int(x.pos), last + 1)
+        alive = x.pos <= last and (v.left is None or v.left > 0)
+        if not alive:
+            self.xv.pop(v, None)
+        return alive
+
+    def _expr_extra(self, p):
+        """The patch's expression, for its status line."""
+        if p['oneshot']:
+            return []
+        if not p['xmap']:
+            with self.heard_lock:
+                tried = any(k[0] == p['source'] and k[1] in ('bend', 'pressure', 'cc:1') for k in self.heard)
+            if not tried or p['lanes'] is not None:
+                return []
+            return ["bend, pressure and the mod wheel do nothing: the sound has no expression lanes; "
+                    "lanes={'bend': {'midi': 'bend', 'range': 2}} bends it anyway"]
+        txt = ', '.join(f"{lane} <- {ML.midi_name(k, num)} {lo:g}..{hi:g}" for lane, (k, num, lo, hi) in
+                        p['xmap'].items())
+        return [f"expression {txt}" + (" (MPE: channel 1 the master, 2-16 a note each)" if p['mpe'] else '')]
+
     def loop(self):
         while self.e.running:
             self.poll()
             time.sleep(POLL_S)
 
-    def _close(self, p):
-        if p['input'] is not None:
-            try:
-                p['input'].close()
-            except Exception:
-                pass
-            p['input'] = None
-
     def close(self):
-        for p in self.patches.values():
-            self._close(p)
+        for n in list(self.ins):
+            self._shut(n)
         self.flush()
 
     # ------------------------------------------------------------------ what it says
@@ -743,6 +1092,7 @@ class MidiPlay:
             extra.append(f"{p['missed']} keys came before their note was ready")
         if p['errors']:
             extra.append("render errors: " + '; '.join(p['errors']))
+        extra += self._expr_extra(p)
         lat = self.out_latency() * 1000 // SR
         return (f"keys {p['source']}" + (" (UNPLUGGED)" if p['lost'] else '') + f": plays {p['what']} | {ready} | "
                 f"{p['played']} played" + (f" | {', '.join(extra)}" if extra else '')

@@ -71,6 +71,44 @@ Tell them at the right moment, once, without being asked:
 - after that, say the stems folder was refreshed when you render stems again, in one short line; don't repeat the
   explanation.
 
+### MIDI files: out to their DAW, in from it
+
+- **Out:** `midi_write(project)` writes a type 1 .mid to `<project>/exports/<project name>.mid` (`out=` another
+  path): a MIDI track per ismail track with notes, the tempo, the meter, `markers={'drop': 17}` as locators, kits
+  on channel 10 (the reply lists which pitch is which pad), other tracks on channels 1 to 16 in order.
+  `tracks=[...]` picks parts, `bars=[a, b]` a window (bar a becomes the file's bar 1). The file holds notes, not
+  sounds: tell them to put an instrument on each track, and point to the stems for ismail's own sound.
+- **A performer's lanes go out as MIDI** (automation `inst.lane.<name>`): `bend` as pitch bend (+-2 semitones,
+  said in the file with RPN 0), `vib` as cc:1 (0..50 cents), `level` as cc:11 (-40..0 dB, 127 = the fader),
+  `breath` as cc:2 (0..1). Any other lane needs a map: `lanes={'mute': {'midi': 'cc:20', 'range': [0, 1]}}`;
+  `{lane: None}` leaves one out; `{'bend': {'range': 12}}` changes a range. The reply names the lanes no message
+  carries and the values clamped to a range.
+- **MPE:** `mpe=True` (every melodic track) or `mpe=['lead']`: channel 1 the master, each note on its own channel
+  2 to 16, bend +-48, `level` as per-note pressure. Tell them to set their synth's MPE bend range to 48.
+- **In:** `midi_read(project, file)` without `into` only lists the file (tempo, meter, markers, each track with its
+  channel, notes, range, bars and expression messages). Ask which parts they want, `track_add` each target with
+  the sound to keep, then `midi_read(project, file, into={'#1': 'lead', 'ch10': 'drums'})` (a file track by name,
+  `'#<index>'` or `'ch<1-16>'`). `bar=` (default 1) is where the file's bar 1 lands; `mode='replace'` (default)
+  clears the span first, `'add'` merges; `quantize=0.25` snaps starts to 16ths (default: as played). Positions are
+  read in beats, so a file at another tempo keeps its bars at the song's tempo. Its pitch bend, cc:1, cc:11 and
+  cc:2 become the target's lanes by the same map (`lanes=` changes it); an MPE file (RPN 6, or `mpe=True`) is read
+  per note.
+- **Example, out.** The person says "can I have the flute line with its bends in my DAW? I play it on an MPE
+  synth." `midi_write(project, tracks=['lead'], mpe=True)`. The reply:
+  `wrote <project>/exports/<name>.mid: 2 notes on 1 tracks, 128 BPM, 4/4, bars 1-8`, then
+  `lead: 2 notes, MPE (channel 1 the master, a channel of 2-16 per note)`, `lanes: bend -> pitch bend +-48 (171
+  messages)`, and any lane left out (`lanes not written (no MIDI message for them): mute; lanes={'mute': ...}
+  writes one`). Tell them the full path, and: "Drag it into your DAW, put your MPE synth on the track and set its
+  bend range to 48. It is the notes and bends only; the flute sound is in the stems."
+- **Example, in.** They send a .mid from their DAW. `midi_read(project, file)`; the reply lists
+  `#1 lead: 2 notes, channel 2/3, A4-C5, bars 1-1; MPE, expression: bend 171 (bend range +-48)`. Ask which tracks
+  to bring in, then `midi_read(project, file, into={'#1': 'lead'})`:
+  `#1 -> lead: 2 notes, bars 1-1` and `lane bend: 86 points from 171 bend messages (bend range +-48), per note
+  (MPE)`. Tell them what landed where, then render and say before it plays.
+- Not yet: per-note lanes inside ismail (an MPE file's chord shares one lane per track, the newest note still
+  sounding wins, and the reply counts the overlaps), poly pressure read from a file, MPE's upper zone, and track
+  volume or pan automation written as MIDI.
+
 ## The lexicon: their words, our terms
 
 A music culture lives in how its people talk about sound: "the pocket", "boxy", "too clean", "30% there", "muddy". Those words carry what the ear and eye noticed. An agent that keeps them, maps them to what ismail does, and

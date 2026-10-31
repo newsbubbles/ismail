@@ -197,7 +197,13 @@ Find any tool by what you need or by role with `ops_find`.
 - **MIDI files in and out.** `midi_write` puts the song (or some tracks, or a window of bars) into a type 1 .mid
   that Ableton, FL Studio, Logic, Reaper or MuseScore opens: a track per part, tempo, meter, markers, nudges to the
   tick, kits on channel 10. `midi_read` lists a .mid (tempo, meter, markers, every track and channel) and writes the
-  parts you pick into tracks, at any bar, optionally quantized. Live MIDI from a keyboard: `live_midi` (Playing live);
+  parts you pick into tracks, at any bar, optionally quantized. A performer's expression lanes go out and come back
+  as MIDI: `bend` as pitch bend (+-2 semitones, said with RPN 0; a file's own RPN range is read), `vib` as cc:1,
+  `level` as cc:11, `breath` as cc:2, any other lane by a map the agent gives
+  (`lanes={'mute': {'midi': 'cc:20', 'range': [0, 1]}}`). `midi_write(mpe=True)` puts each note on its own channel
+  for an MPE synth; `midi_read` reads an MPE part (RPN 6 in the file, or `mpe=True`) per note (bend +-48, pressure
+  as level), and since lanes are per track the lane follows the newest note still sounding. Live MIDI from a
+  keyboard: `live_midi` (Playing live; its bend, pressure, mod wheel and MPE drive the playing voice's lanes);
   `live_played(into='<track>', bar=...)` records what was played into a song track, as it sounded or snapped to 16ths
   (`fit=True`), and `undo()` takes it back.
 - **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
@@ -216,10 +222,23 @@ Find any tool by what you need or by role with `ops_find`.
   DAW or a drum machine follows the set. `midi_play` plays a song's notes (or some bars) to a port from the command
   line, with clock if asked, no live set needed. Messages go out from their own thread (a sleep, then a short spin);
   no new dependency on Windows (winmm), mido with python-rtmidi elsewhere.
+- **MIDI clock in.** `live_midi_clock_in` makes a running set follow another app's or a drum machine's clock from
+  an input: the tempo from the 24 ticks per beat through a delay-locked loop (`bandwidth_hz`, 0.5 by default: a
+  steady tempo change shows about 430 ms late), applied as tempo changes at the first beat the renders reach, with
+  ismail's beats kept on theirs (`phase_tol_ms`, `max_bend_pct`, `step_beats`, `offset_ms`). `transport='follow'`:
+  their Stop silences the set, Start or Continue (from their Song Position) bring it in on the first of their bar
+  lines it can reach. `transport='tempo'` ignores their transport. A dropout holds the last tempo. Clock out and the
+  arp follow the followed tempo; clock in and clock out on one port is refused; `live_tempo` is refused while it
+  follows.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
-  DJ kit for whole cycles of moves (`ismail.live.djkit`).
+  DJ kit for whole cycles of moves (`ismail.live.djkit`). A MIDI controller's knobs, faders, pads, bend wheel and
+  pressure drive the same maps (`live_map(midi='cc:74', source=..., channel=, mode=)`: 7-bit and 14-bit CC,
+  absolute, pickup, relative encoders, toggles, one control on several params), every move logged as automation.
+  An arpeggiator steps the keys a person holds on the set's beat (`live_arp`: patterns, scale degrees, exact step
+  lists switching on bar lines, per-step velocity, gate, accent, slide, octave, cutoff and pan), and the same core
+  arps a track's chords at render (`track_arp`, `write=True` for plain notes).
 - **What a deck costs.** `deck_cost(song, bars=, bpm=)` renders the deck's first bar offline the way the live engine
   does and times it, without starting or touching an engine: each track's render seconds and real-time factor, the
   wait for the first bar with the engine's render workers, and the mixer's load per block. It says which deck
