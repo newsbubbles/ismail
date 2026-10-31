@@ -67,7 +67,7 @@ second; it never touches the mixer. You set what it draws with numbers, and it c
 - `stream_scene(layers=[...], background=['#07080c', '#1a1030'], trails=0.35)` replaces the layers;
   `replace=False` adds to them. Kinds: `bars`, `ring`, `line` (bands), `pulse`, `particles`, `hits` (a light per
   track), `text`, `grid`. Positions and sizes are fractions of the frame, and so is a `thickness` (0 to 1),
-  ring's 0.02 is a thin line), never pixels. `drive` picks what moves a layer: `level`,
+  never pixels. `drive` picks what moves a layer: `level`,
   `beat`, `band:<i>`, `bands:<lo>-<hi>`, or `track:<name>` (a flash on that track's notes). A wrong field comes back
   with the fields that layer takes.
 - `stream_page()` gives the page's address, the layers, and what the page sees now (beat, level, bands, the notes
