@@ -555,6 +555,50 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
 - **Recording controls.** Every move is logged by bar. `live_controls` reads them back as `[bar, value]` points,
   ready to become `automation_set` lanes in a studio project: a take's knob moves land in the score, on the song's
   clock, and replay the same way in a render and a video.
+- **A MIDI controller's knobs.** The same map takes a MIDI control as its source, set as text:
+  `live_map(control='tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log', midi='cc:74',
+  source='knob box', channel=1)`. Sources: `'cc:<n>'` (a knob or fader, 0..127), `'cc14:<n>'` (a 14-bit pair, MSB
+  n 0..31 and LSB n+32), `'bend'` (centre = the middle of the range), `'pressure'` (channel aftertouch),
+  `'note:<n>'` (a pad: held = the range's top, released = its bottom). `source` is optional when one input is
+  plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
+  give `[value at 0, value at the top]`; the curve is `'linear'` (default), `'log'` (Hz, ratios: both ends above 0)
+  or `'switch'` (`'raw'` is refused for MIDI). The range, curve and `at` work as for any control, and every move is
+  logged for `live_controls` (its `via` says which MIDI control moved it).
+  - **Modes.** `'absolute'` (default: the param jumps to the knob). `'pickup'`: the knob takes over only once it
+    reaches the param's value or passes it, so nothing jumps after you or the stage moved the param; `live_status`
+    says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
+    complement, or 64 = still), 1/128 of the range per step, from the param's value now (steps that arrive
+    faster than the engine applies them add up). `'toggle'`: a pad or a button flips between the range's ends
+    (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
+    0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
+    which source: `relative` and `relative64` only on `'cc:<n>'`; `toggle` on `'cc:<n>'` or `'note:<n>'`; a
+    `'note:<n>'` pad only `absolute` or `toggle`; `bend`, `pressure` and `'cc14:<n>'` are `absolute` or `pickup`.
+    A wrong pair is refused and the old map stays.
+  - **One knob, several params:** map each param with the same `midi=`; reverse a range to move one the other way.
+  - **Bound means control:** a bound note or CC no longer plays or logs as a key on that input. Binding one lets go
+    of the keys held and the pedal on that input, so nothing hangs waiting for a release that is now a control.
+  - **Finding the numbers.** Ask the person what the controller is, or listen: `live_controls(source='knob box')`
+    opens the input for 2 minutes (each call restarts it; a map on it keeps it open); ask them to move the knob,
+    then call it again. It lists what came in that no map takes
+    (`'knob box' cc:74 ch1: last 93`). Then map it. There is no "learn" mode: you set the map from that line.
+  - **Example.** A set plays; the person says "I want the big knob on my controller to open the filter on the
+    lead."
+    1. `midi_sources()` names the input (here `'knob box'`). `live_controls(source='knob box')`; the reply:
+       `listening on 'knob box' for 120 s more (...): nothing heard yet that no map takes`. Tell them: "Turn the
+       knob you want to use from one end to the other, then tell me."
+    2. When they say they did, `live_controls()` again. The reply lists
+       `'knob box' cc:74 ch1: last 93, 1 messages`: that knob is cc:74.
+    3. `live_map(control='tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log',
+       midi='cc:74', source='knob box', mode='pickup')`. The reply:
+       `tone -> lead fx:filter.cutoff (log 200..8000) <- MIDI cc:74, any channel, on 'knob box', pickup: each move
+       applies in the engine at once and is logged by bar (live_controls)`. No new sound starts: the knob changes
+       what already plays.
+    4. Tell them: "The knob now opens and closes the lead's filter, from dark (200 Hz) to bright (8 kHz). It takes
+       over once you turn it past where the filter is now, so nothing jumps." When they say it does nothing,
+       `live_status` says `(waiting: the knob is at 0.16, the param at 1.00; it takes over there)`: ask them to
+       turn it all the way up once.
+  - Not yet: notes as triggers for actions (queue a clip, a section), program change, polyphonic aftertouch and MPE
+    as controls, a per-map step size or acceleration for encoders, and a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 
@@ -569,6 +613,42 @@ straight to the speakers.
   swap; the old sound plays until the new notes are ready. The notes render once on the workers (C2 to C7, a kit's
   pads, or one hit for a drum), then a key sounds one output buffer after the press. Velocity, note-offs, the
   sustain pedal, `transpose` and `channel` are followed. Tell the person before their keys first sound.
+- **Expression: the bend wheel, pressure, the mod wheel, MPE.** When the patched sound is a performer voice with
+  lanes (`voice_help` lists them), the player's pitch bend drives its `bend` lane (+-2 semitones), the mod wheel
+  (cc:1) its `vib` lane (0..50 cents) and channel pressure its `level` lane (0..+6 dB, so a keyboard's pressure at
+  rest changes nothing), for the notes on that channel; poly pressure is one key's own. The map is data:
+  `live_midi(source='keys', lanes={'bend': {'midi': 'bend', 'range': 12}, 'level': None})` changes a range or a
+  message, turns a lane off, or drives a lane the sound does not have (a synth bends that way too). The patch's
+  status line says what drives what. `mpe=True` for an MPE controller (lower zone): channel 1 is the master, whose
+  values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure. Two fingers on one
+  pitch are two keys. When the controller hands a channel to a new note, the old note's tail keeps its own bend,
+  and the new note starts without the old note's pressure and mod (a bend sent just before its note-on is kept).
+  - A key plays a note rendered ahead, so lanes move it as pitch and gain only: `bend` and `vib` as a resampled read
+    (a note bent up also ends sooner), `level` as gain, each ramped over one output buffer. Lanes that change the
+    sound itself (mute, slide, breath, tongue ...) are refused here, with the clip's `expr` named instead.
+  - A message bound with `live_map` stays that map's control and drives no lane. A message no lane takes is listed
+    by `live_controls`, as before. Expression messages are in the key log too.
+  - **A sound with no lanes** (a preset synth such as `preset:pluck`) bends only for the lanes you name:
+    `mpe=True` alone moves nothing there, and the status line has no `expression` part. Name them:
+    `lanes={'bend': {'midi': 'bend', 'range': 48}, 'level': {'midi': 'pressure', 'range': [0, 6]}}`.
+  - **The bend range must match the controller's.** MPE keyboards send +-48 by default; some are set to +-24 or
+    +-12. When a slide of one key lands off the next key, ask what range their keyboard sends and set it:
+    `lanes={'bend': {'midi': 'bend', 'range': 24}}`. Call `live_midi` again with only `lanes=` or `mpe=`: the sound
+    stays.
+  - **Example.** The person says "I have an MPE keyboard, can I play the flute with it?" A live track `flute`
+    plays the kit's flute voice (a performer with `bend`, `vib` and `level` lanes).
+    1. `midi_sources()` names the input (here `'mpe keys'`).
+    2. Tell them first: "Your keyboard will play the flute through the speakers in a few seconds. Slide a finger
+       to bend a note, press harder to make it louder."
+    3. `live_midi(source='mpe keys', track='flute', mpe=True)`. The reply ends with the patch's line:
+       `keys mpe keys: plays flute | 5/5 notes ready | 0 played | volume -6 dB, expression bend <- bend -48..48,
+       vib <- cc:1 0..50, level <- pressure 0..6 (MPE: channel 1 the master, 2-16 a note each)`. Until
+       `notes ready` is full, the keys still loading are silent.
+    4. Tell them: "Ready: each finger bends its own note, up to 4 octaves, and pressure adds up to 6 dB." Without
+       `mpe=True`, each note's channel still bends its note, but at +-2 and with no master channel: a slide
+       across a few keys bends far too little.
+  - Not yet: the played bend and pressure written into the song as lanes by `live_played(into=...)` (the log keeps
+    them), MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release velocity.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
 - **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
@@ -626,6 +706,59 @@ straight to the speakers.
   port (name it, e.g. "ismail keys"); whatever sends MIDI to that port plays through `live_midi` like a real
   keyboard.
 
+### The arpeggiator, live and in the studio
+
+The person holds a chord and it plays as steps on the beat; or a track's chords render as an arp. One core does
+both (`live_arp` live, `track_arp` in the studio): same settings, same names, same notes, so a part found in a jam
+renders the same.
+
+- **Live:** patch the input first (`live_midi(source=..., track=...)`), then
+  `live_arp(source='keys', pattern='up', rate=0.25, octaves=2)`. The keys stop sounding as keys and drive the
+  steps; each step lands on the beat the person hears. `latch=True` keeps the chord playing after they let go
+  (a new chord replaces it); the sustain pedal holds keys too. `at=` is a bar line by default (`'next_bar'`;
+  `'now'`, `'bar:17'`), for a start, a change and `off=True`. Any subset of settings changes only those: call
+  again with `cutoff=[...]` alone and the rest stays. `live_status` shows the arp, the keys it holds and any change
+  queued. `live_played` still logs the keys pressed, not the steps.
+- **Studio:** write the chords to hold (`notes_write(..., '0 A3,C4,E4 4; 4 F3,A3,C4 4')`), then
+  `track_arp(track='arp', pattern='updown', rate=0.25)`. The chords stay as written and the render plays the steps;
+  the reply prints the first two bars of steps. `write=True` turns them into plain notes to edit (and the cutoff and
+  pan into automation); `undo()` brings the chords back. `bars=[a, b]` limits where it plays.
+- **Note sources** (one at a time): `pattern` by name (`up`, `down`, `updown`, `downup`, `order`, `random`, `chord`)
+  or held-key numbers (`[1, 3, 2, 4]`, 1 = the lowest held key, 0 = a rest); `degrees=[0, 2, 4, 7]` (scale steps
+  above the lowest held key, with `key` and `scale`); `notes='A3 C4 E4 A4 | F3 A3 C4 F4'`, an exact step list, one
+  bar per group, switching on bar lines, plays with no keys held. Any key: give `key` + `scale` and held keys snap
+  onto it; on a step list, give the key with the notes once, then `key='C', scale='major'` moves the progression
+  with each note on its scale degree; `transpose=` moves by semitones.
+- **The swirl.** Per step, each a list cycling on its own length: `velocity`, `accent` (0/1, velocity 127), `gate`
+  (fraction of a step), `slide` (0/1, ties into the next step), `octave`, `cutoff` (Hz), `pan`. Lists of different
+  lengths against the pattern (a 3-step cutoff over a 4-note pattern) make the moving trance arp; `live_fx` (a beat
+  delay, a filter sweep) goes on top. Studio cutoff moves the synth's own filter (or a sampler's, or the track's
+  first filter effect; the reply says when the voice has none); live it is a low-pass on each step's note.
+- **Defaults and ranges** (the same for both ops): `pattern='up'`, `rate=0.25` (beats per step, 1/64 to 4; 0.5 =
+  8ths, 1/3 = 8th triplets), `octaves=1` (1 to 4), `gate=0.5` (0.05 to 4), `velocity` the key's or note's own
+  (1 to 127), `octave` -3 to 3, `cutoff` 20 to 20000 Hz, `pan` -1 to 1, `transpose=0` (-48 to 48),
+  `swing=0` (0 to 0.5 of a step, every second step late), `restart='key'` (each new key or chord starts the
+  pattern again; `'bar'` every bar line, `'off'` one count from the start). A per-step list holds up to 64 steps;
+  `[]` clears it. `at` live: `'next_bar'` (default), `'now'`, `'next_4'`, `'bar:17'`.
+- **Example, live.** A set plays and their keys are patched to the lead (`live_midi(source='keys', track='lead')`).
+  The person says "arpeggiate what I play, fast, over two octaves."
+  1. Tell them first: "From the next bar, the chord you hold plays as 16th notes climbing two octaves, on the lead
+     sound. Your keys stop sounding on their own while it is on."
+  2. `live_arp(source='keys', pattern='up', rate=0.25, octaves=2)`. The reply:
+     `arp keys: on from bar 33: pattern up, rate 0.25, octaves 2` and `keys pressed now drive it`.
+  3. They ask for movement: `live_arp(source='keys', cutoff=[800, 2000, 5000])` (only the cutoff changes, at the
+     next bar): `arp keys: cutoff changed at bar 34: pattern up, rate 0.25, octaves 2, cutoff [800, 2000, 5000]`.
+     Tell them: "Each step now opens a little more, in a cycle of three over your four notes."
+  4. "Stop the arp": `live_arp(source='keys', off=True)`; their keys play as keys again from that bar line.
+- **Example, studio.** The person says "make the pad chords in bars 1-2 an arp, up and down." `track_arp(track='arp',
+  pattern='updown', rate=0.25)`. The reply: `arp: arp on: pattern updown, rate 0.25 | bars 1-2, 32 steps`, then a
+  line per bar (`bar 1: A3 C4 E4 C4 A3 ...`) and `the notes stay as written; render plays the arp`. Nothing plays
+  yet: tell them "The chords in bars 1-2 now play as up-and-down 16ths. I'll render it so you can hear it" and
+  render. When they want to edit single steps, `track_arp(track='arp', write=True)`: the steps become plain notes
+  (`undo()` brings the chords back).
+- Not yet: live slide re-attacks (the studio's mono synths with glide glide), decks leave the per-step pan out, and
+  an arped input's pitch bend, pressure and mod wheel (its `live_midi(lanes=)` expression) do not move the steps.
+
 ## MIDI out: synths and other apps play with the set
 
 When the person wants a part played by their own synth, or by a plugin in their DAW, or wants Ableton, FL Studio or
@@ -659,6 +792,66 @@ sound.
 - **Without a set.** `midi_play(project, port=..., bars=[a, b])` plays a song's notes to a port from here, in real
   time, `clock=True` for clock with it: to try a synth or a channel before a set. It blocks until the last note
   ends.
+
+### Clock in: the set follows another app
+
+When another app or a drum machine leads (its tempo, its play and stop), the set follows its MIDI clock.
+
+- The person sends clock from their app to a port ismail reads: in Ableton, the port's Sync on as an output
+  (Preferences, Link/Tempo/MIDI); in FL Studio, the port as an output with its clock sent; a drum machine's MIDI
+  out over USB. `midi_sources()` lists the inputs.
+- `live_midi_clock_in(source='ismail in')`. The tempo comes from their 24 ticks per beat through a loop filter
+  (`bandwidth_hz`, default 0.5: a steady tempo change shows about 430 ms late; 1 Hz about 205 ms, wobblier on a
+  jittery clock). The set changes tempo the way `live_tempo` does (its notes render again from the change), at the
+  first beat its renders can reach, at most once per `step_beats` (default a bar), and only when the tempo is off by
+  more than `tempo_tol_bpm` (0.25) or the beat by more than `phase_tol_ms` (4). Each step bends the tempo by at most
+  `max_bend_pct` (3) to land ismail's beats on theirs, so a large offset closes over a few bars.
+- `transport='follow'` (default): their Stop silences the set on the speakers at once (its time and queue run on),
+  and Start or Continue bring it back in on the first of their bar lines it can reach. ismail mixes ahead, so it
+  cannot land on their very first beat: the news says "locked, their bar 2 = ismail bar 5". Start counts from their
+  bar 1, Continue from their Song Position. Turning clock in on does not silence the set, but their Start (or
+  Continue, or a Song Position jump) does, from that moment to the lock bar: one to two bars of silence, then the
+  set comes in on their bar line. Tell them before they press Start.
+  `transport='tempo'`: tempo and beats only, their transport ignored, bar lines need not line up.
+- **Lining up by ear.** `offset_ms` (-500 to 2000) lands ismail later for an app whose sound comes out late. Ask
+  whether ismail's kick sits on theirs, and change it in steps of 5 to 10 ms.
+- A dropout (no tick for `dropout_ms`, 300) holds the last tempo; the set plays on and the news says so. When the
+  ticks come back the follow goes on.
+- `live_status` shows their tempo and jitter, the set's tempo, the transport ("their bar 3 = ismail bar 17"), the
+  phase error and the tempo changes made. `live_tempo` is refused while clock in is on; `on=False` lets go and the
+  tempo holds.
+- Clock out (`live_midi_clock`) and the arp follow the followed tempo. Clock in and clock out on the same port is
+  refused (the set would chase its own clock): use two loopMIDI ports.
+- **Settings and their ranges:** `transport` `'follow'` (default) or `'tempo'`; `bandwidth_hz` 0.05 to 5 (0.5);
+  `tempo_tol_bpm` 0.01 to 5 (0.25); `phase_tol_ms` 0.5 to 50 (4); `max_bend_pct` 0.5 to 25 (3); `step_beats` 1 to
+  64 (default one bar); `dropout_ms` 50 to 5000 (300); `offset_ms` -500 to 2000 (0). Call again with only the
+  setting to change. `source='screen keys'` is refused: the on-screen keys send no clock.
+- **Example.** A set plays; the person says "my drum machine leads: follow its tempo."
+  1. `midi_sources()` names the input (here `'drum machine'`, its USB MIDI). Tell them: "Turn on MIDI clock out
+     on your drum machine. The set keeps playing as it is until you press Start on the machine. Then it goes quiet
+     for one or two bars and comes in on one of your bar lines, at your tempo. Your Stop silences it."
+  2. `live_midi_clock_in(source='drum machine')`. The reply: `clock in <- 'drum machine'`, `follows its tempo: a
+     0.5 Hz loop filter (a steady tempo change shows about 430 ms late), a tempo change at most every 4 beats, ...`,
+     the transport line, and `clock in <- 'drum machine': waiting for clock (nothing heard yet)`. Still waiting
+     after they say it sends clock: the clock setting on their machine is off, or it sends on another output.
+  3. After their Start, the news in the next reply: `clock in: locked, their bar 2 = ismail bar 33; the set comes
+     in there at 126 BPM`. `live_status`: `theirs 126 BPM (0.4 ms jitter) | set 126 BPM | running, their bar 2 =
+     ismail bar 33 | phase +0.3 ms (+: ismail late) | 2 tempo changes`.
+  4. Tell them: "Locked: the set follows your machine at 126 BPM, from your bar 2. Change the tempo on the machine
+     and you hear the set change about 1.5 seconds later; it is on your tempo and your beat in about 3.5 seconds.
+     Does our kick sit on yours?" When they hear it early or late, `live_midi_clock_in(offset_ms=10)` (positive =
+     ismail later), in steps of 5 to 10 ms.
+  5. They ask you for a faster tempo while it follows: `live_tempo` is refused (the error says so). Tell them to
+     turn it up on the machine, or `live_midi_clock_in(on=False)` first (the reply: `clock in off: 'drum machine'
+     let go; the set holds 126 BPM ...; live_tempo works again`).
+- Measured on synthetic clocks (`tests/test_midi_clock_in.py`): a steady clock with 1 ms jitter keeps the beats
+  within 4.1 ms with 0 to 2 tempo changes a minute; a ramp of 10 BPM over 16 s trails by up to 32 ms while it ramps;
+  after a step of their tempo (120 to 100, 90, 80, 150 or 200, and 140 to 70) every tick is counted and the beats
+  are back within `phase_tol_ms` in 2 to 4.6 s with `transport='tempo'`, 2.9 to 7.9 s with `'follow'` (which keeps
+  their bar lines), and 13 s for a halving (140 to 70) in `'follow'`.
+- Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed), their Start and Stop
+  passed on to clock out, and the silence while they are stopped reaching `live_listen`, `live_record` and the
+  streams (only the speakers go silent).
 
 ## Playing for a screen recording
 
@@ -696,7 +889,8 @@ from earlier bars are not played).
 Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
 `loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
 deck's song has it; otherwise use fx params, or expr lanes on a performer), gradual tempo
-ramps (`live_tempo` steps at a bar), and placed audio clips on a deck.
+ramps (`live_tempo` steps at a bar), Ableton Link and MIDI Time Code (MIDI clock in works: `live_midi_clock_in`), and
+placed audio clips on a deck.
 
 ### Sung takes, tuned
 

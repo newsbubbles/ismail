@@ -1,5 +1,140 @@
 # Changelog
 
+## Unreleased
+
+### MIDI clock in: the set follows another app (MIDI parity step 8, part 1)
+
+- `live_midi_clock_in(project, source, ...)`: a running set follows the MIDI clock of another app (Ableton, FL
+  Studio, a DAW through a loopMIDI port) or a drum machine, from a named input. The tempo comes from the 24 ticks
+  per beat through a second-order delay-locked loop (`bandwidth_hz`, default 0.5 Hz: a steady tempo ramp is followed
+  430 ms late, a step of 4 percent or more is told by a half-beat line and settles within 0.1 BPM in 0.2 to 0.5 s
+  with no overshoot, 1 ms of jitter reads within 0.25 BPM; measured in the tests). After their step the set first
+  sounds the new tempo about 1.5 s later and is on their tempo and beat in about 3.5 s (120 to 126 BPM); steps
+  from 120 to 80 to 200 and 140 to 70 land again in 2 to 4.6 s (`'tempo'`) or 2.9 to 7.9 s (`'follow'`, 13 s for the
+  halving). The set
+  changes tempo as `live_tempo` does, at the first beat its renders reach, at most once per `step_beats`, only past
+  `tempo_tol_bpm` or `phase_tol_ms`, bending at most `max_bend_pct` so ismail's beats land on theirs; `offset_ms`
+  for an app whose sound is late. Once the tempo holds, a straight line through the last 2 to 16 s of ticks replaces
+  the loop (steadier on jitter): on a synthetic 126 BPM clock with 1 ms jitter the beats stay within 4.1 ms, with 0
+  to 2 tempo changes in 60 s over four seeds. The loop's w is held at 0.5 (stable at any bandwidth), and lost ticks
+  are counted by the measured interval (more than 2.5 periods), not the loop's prediction, so a tempo step counts
+  every tick; a duplicate tick is ignored. The real-change test reads the last second's ticks, so bandwidths up to 5
+  Hz keep the steady line.
+- `transport='follow'` (default): their Stop silences the set on the speakers (a 5 ms fade; MIDI out notes held back
+  too), Start or Continue (from their Song Position Pointer) bring it in on the first of their bar lines its render
+  lead can reach, with its own bar line locked there; a Song Position while running relocks. `'tempo'`: tempo and
+  beats only. Their Start, Continue or a Song Position jump while the set plays silences it until the lock bar (one
+  to two bars). Their Stop also sends note-offs for the notes held on MIDI out. A dropout holds the last tempo and
+  says so (`dropout_ms` is at least 3 tick periods); lost ticks are counted from the time.
+- Clock out and the arp follow the followed tempo. Clock in and clock out on one port is refused both ways (the set
+  would chase its own clock). `live_tempo` is refused while clock in is on. `live_status` shows the follow.
+- `live_tempo`'s change is now one engine method shared with clock in (no change in behavior).
+- Not yet: Ableton Link (it needs a new dependency), MIDI Time Code, their meter, their Start and Stop passed on to
+  clock out, and the stopped silence in `live_listen`, `live_record` and the streams.
+
+### The arpeggiator, live and in the studio (MIDI parity step 7)
+
+- One arp core (`ismail/arp.py`: pure, deterministic) for both sides, with the same settings and names, so a part
+  arped live and the same part rendered give the same steps.
+- `live_arp(project, source, ...)`: the keys of a patched input (`live_midi`: a keyboard, a loopMIDI port, `'screen
+  keys'`) stop sounding as keys and drive steps on the set's beat, placed sample exact on the beat the person
+  hears. `latch=True`, the sustain pedal holds keys, `at=` a bar line (default `'next_bar'`) for a start, a change
+  or `off=True`. Any subset of settings changes only those. `live_status` shows each arp: its settings, the keys
+  it holds, steps played, changes queued.
+- `track_arp(project, track, ...)`: a track's held chords (its notes) play through the arp at render, or a step
+  list over `bars=[a, b]`. The notes stay as written; the renderer, decks (`live_load`) and `midi_write` /
+  `midi_play` all play the steps. `write=True` writes the steps into the track as plain notes (the cutoff and pan
+  as automation) and turns the arp off; `undo` brings the chords back. Outside the arp's bars a written lane holds
+  the track's value at the write (the reply names it and how to change it). A chord held into the arp's bars is
+  arped from their start and plays as written outside them. Any key spelling works (`'Cb'`, `'E#'`). Swing counts
+  within each bar (every downbeat lands, in any meter); octaves over a wide chord walk in pitch order, each note once.
+- Live: at most 32 arp voices (the oldest fades over 20 ms), the pedal keeps keys in the order pressed, `latch=True`
+  over a held chord keeps it, and a new note source queued at a bar replaces the one queued there.
+- Note sources: `pattern` (`'up'`, `'down'`, `'updown'`, `'downup'`, `'order'`, `'random'`, `'chord'`, or held-key
+  numbers like `[1, 3, 2, 4]`), `degrees` (scale steps above the lowest held key, with `key` + `scale`), or `notes`
+  (an exact step list, `'A3 C4 E4 A4 | F3 A3 C4 F4'`, one bar per group, switching on bar lines). With key + scale
+  held keys snap onto the scale; `key=` moves a step list to another key with each note on its scale degree;
+  `transpose=` by semitones. `rate`, `octaves`, `swing`, `restart` (`'key'`, `'bar'`, `'off'`).
+- Per step, each list cycling on its own length: `gate`, `velocity`, `accent`, `slide`, `octave`, `cutoff`, `pan`.
+  Studio: cutoff moves the instrument's filter (a synth, a sampler with a filter) or the track's first filter
+  effect, pan is the track's pan; live: a low-pass and an equal-power pan on each step's note, any patch.
+- Not yet: slide glides only in the studio (a mono synth with glide); live, a slid step is a legato tie that
+  re-attacks. Live cutoff is a filter after the note, not the voice's own filter. Decks leave the per-step pan out
+  (decks do not take pan automation). An arped input's pitch bend, pressure and mod wheel (step 6's lanes) do
+  not move the arp's steps yet. Other MIDI effects (chord, scale, note length, velocity, random) follow.
+
+### Lanes as MIDI: bend, pressure, CCs and MPE in files and from played keys (MIDI parity step 6)
+
+- `midi_write` writes a track's expression lanes (automation `inst.lane.<name>`) on its channel: `bend` as pitch
+  bend (+-2 semitones, with RPN 0 so the receiver knows the range), `vib` as cc:1 (0..50 cents), `level` as cc:11
+  (-40..0 dB, 127 the fader), `breath` as cc:2 (0..1). Ramps go out as a message per value change, at most one per
+  1/64 beat. `lanes=` overrides the map as data: `{lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo,
+  hi]}}`, `{lane: None}` leaves one out. The reply names lanes no message carries (and how to map one) and values
+  clamped to a range.
+- `midi_write(mpe=True or [tracks])`: an MPE part, channel 1 the master (the MPE configuration, RPN 6), each note
+  on its own member channel 2-16 (a free one, else the one whose note ends soonest) with the track's lanes over
+  its own span; bend +-48 and `level` as per-note channel pressure by default. On a tick where a reused channel's
+  old note ends, the note-off goes before the new note's bend. A map that clashes only with the MPE defaults works
+  without `mpe`.
+- `midi_read` reads pitch bend and controllers onto the target's lanes (the same map, `lanes=` to change it), at
+  the file's RPN 0 bend range when it has one; each bend is read at the range in force on its channel when it was
+  sent (a range changed mid-file applies from there on). Messages on one tick keep their file order. A held value
+  comes back as a step, a ramp as a few points. An MPE part (the file configures MPE with RPN 6 in any track,
+  conductor included, lower zone or upper zone with channel 16 the master; or `mpe=True`; an MPE configuration with
+  0 members is MPE off; a multi-channel GM file stays at +-2; `mpe=False` reads it as one plain part) is read per
+  note by last-note priority: the newest note still sounding, back to an older held note when a newer one ends
+  (ismail's lanes are per track, the reply counts the overlaps). A bend range must be [-r, r] with r > 0 (a
+  controller's range may run the other way). The
+  listing shows each track's expression messages, the bend range and MPE; the reply names messages no lane took
+  and warns when the target's sound has no such lane. `midifile.read` gives each track's controller messages,
+  bend ranges and MPE configuration; `midifile.write` takes channel events and a channel per note.
+- `live_midi`: when the patched sound is a performer voice with lanes, pitch bend drives `bend` (+-2), the mod
+  wheel `vib` (0..50 cents) and channel pressure `level` (0..+6 dB, a boost: pressure at rest changes nothing) on
+  the notes of that channel; poly pressure drives one key's `level`. `lanes=` changes the map, turns lanes off, or
+  drives a lane the sound lacks; `mpe=True` reads an MPE controller (channel 1 the master, adding to every note;
+  2-16 a note each, bend +-48; a released key's tail keeps its channel's values, so the next note on that channel
+  does not bend it; the next note on a reused channel starts without the old note's pressure and mod unless they
+  are sent again, and keeps a bend sent before its note-on; two fingers on one pitch on two channels are two keys).
+  A key's expression is set inside `note_on`, before its first buffer. The keys' notes are
+  rendered ahead, so lanes act as a resampled read (bend, vib at the voice's `vib_rate` or 5.5 Hz) and as gain
+  (level), ramped over one buffer; other lanes are refused live with the clip's `expr` named. A key with all lanes
+  at rest plays the same samples as before. Reset all controllers (cc:121) clears them, the keys' poly pressure
+  included. A message bound with
+  `live_map` stays a control (step 5).
+- Not yet: lanes from a played take written into the song (`live_played(into=)` writes notes; the log keeps the
+  expression), live lanes beyond bend, vib and level, MPE's upper zone live, poly pressure in files, per-note lanes in
+  ismail itself (an MPE file's chord shares one lane), track automation other than lanes (volume, pan) as MIDI.
+
+### MIDI controllers drive live params (MIDI parity step 5)
+
+- `live_map(..., midi=, source=, channel=, mode=)`: a MIDI controller's control is the source of a live map, set as
+  text: `'cc:<n>'` (7-bit), `'cc14:<n>'` (a 14-bit MSB/LSB pair, n and n+32; 7 bits until an LSB arrives),
+  `'bend'` (centre = 0.5), `'pressure'` (channel aftertouch) or `'note:<n>'` (a pad: held 1, released 0). The map
+  keeps its range, curve (linear, log, switch; raw is refused for MIDI, the error says what to give), timing
+  (`at='now'` or `'next_bar'`) and its log: every move is in `live_controls` with `via` naming the MIDI control.
+- Modes: `'absolute'` (default), `'pickup'` (takeover: the knob moves the param only once it reaches or crosses the
+  param's value, and lets go when the stage, the agent or another map moves the param), `'relative'` (two's
+  complement encoders) and `'relative64'` (64 = still), 1/128 of the range per step from the param's value now,
+  and `'toggle'` (a pad or button flips between the range's ends; a repeat of 64 or more 0.1 s after the last,
+  with no release, is a new press). `channel` 1 to 16, default every channel. Relative steps, toggles and pickup
+  count from the last position the map sent while its moves wait for the engine, so fast moves add up and pickup
+  holds on. A 14-bit pair keeps its MSB and LSB per channel and moves on either half once an LSB has been seen.
+  An input that fails to reopen after a replug is tried again on every poll, and on the next `live_map` or
+  `live_controls(source=)`, which say what to do when it still fails.
+- One MIDI control may drive several maps (one knob, several params; a reversed range moves one the other way).
+- The map opens its input even when no keys are patched; an input is opened once and shared by `live_midi` and the
+  maps, closed when neither uses it, and reopened with its maps when it is plugged back in. A bound message is a
+  control: it no longer plays or logs as a key. Binding lets go of that input's held keys and pedal.
+- MIDI moves are queued off the driver's thread to the engine's control thread, the latest per control (a fast
+  knob never delays the keys on the same input), and the control log is written in batches. A move made for a map
+  that was replaced meanwhile is dropped. A remap that fails (a bad target, an input that will not open) keeps the
+  old map working and says so.
+- `live_controls` lists what the open inputs sent that no map takes (input, `cc:74`, channel, last value), and
+  `live_controls(source=<input>)` opens an input only to listen (for 120 s, restarted by each call), to find a
+  knob's number before mapping it.
+- Not yet: notes as triggers for actions, program change, polyphonic aftertouch and MPE as controls, encoder
+  step size or acceleration per map.
+
 ## 0.4.3 (2026-10-28)
 
 ### what ismail hands its own Blender scripts and hooks is a file you can open (ledger:M382, M383)
