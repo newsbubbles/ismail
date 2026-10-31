@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Callouts and panels on the stream's visual page (stream page plan, step 1)
+
+- `stream_callout(text, style, anchor or x/y, enter, exit, duration_s, priority, who)`: a timed line on the visual
+  page, live, with no encoder restart. Fonts from a checked list or a font file under the ismail folder or the
+  stream home; size, colour, weight, background and its opacity, outline, shadow, align. Callouts in one slot take
+  turns back to back (higher priority first, then first asked), so they never overlap; `clear=True` takes down
+  all, one by `id`, or a `slot`. Replies say what shows and what waits, with ids. The privacy guard checks the text.
+- `stream_panel(kind)`: panels bound to the stream's data that update themselves about once a second: `now` (the
+  request playing and who asked), `requests` (the line with places), `chat` (the newest lines, names and site)
+  and `credits`. Kept in panels.json, apart from the scene, so the DJ's `stream_scene` never removes the MC's panels.
+- The page reports what it drew; `stream_page()` says it. The request queue's replay moved to
+  `stream/request_log.py` so the stream server reads it without loading every op.
+
 ### MIDI clock in: the set follows another app (MIDI parity step 8, part 1)
 
 - `live_midi_clock_in(project, source, ...)`: a running set follows the MIDI clock of another app (Ableton, FL

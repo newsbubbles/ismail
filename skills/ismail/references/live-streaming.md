@@ -118,6 +118,51 @@ The MC and the DJ share one queue of requests, kept on disk, so it works across 
 The MC never touches the mixer: chat, the picture and helper renders share the machine, so they stay off the
 mixer's cores.
 
+## Callouts and panels: what viewers see of the set
+
+The visual page carries text over its picture, live, with no blip: callouts for a moment, and panels that keep
+themselves up to date from the stream's own data. They draw on the page, so the stream shows them in
+`mode='page'`. Both take raw numbers: positions and sizes are fractions of the frame, colours `'#rrggbb'`.
+
+- **A callout** is one timed line: `stream_callout(text='drop in 8 bars', anchor='center', duration_s=4,
+  enter='pop', who='DJ')`. It comes in, stays `duration_s` (its animations included) and goes. Place it with
+  `anchor` (top, top-left, top-right, left, center, right, lower-third, bottom, bottom-left, bottom-right) or `x`,
+  `y` (the point the box is pinned to); `w` is its widest. `style={font, size, color, weight, italic, background,
+  background_opacity, outline, outline_color, shadow, shadow_color, align, padding, radius, opacity}`: `font` is a
+  name (sans, serif, mono, condensed, display, rounded, or arial, impact, georgia, consolas and a few more) or a
+  .ttf/.otf/.woff/.woff2 file under the ismail folder or the stream home; `size` is the font's height as a
+  fraction of the frame (0.06). `enter` and `exit`: none, fade, pop, slide-left, slide-right, slide-up, slide-down
+  (in from that side and back out to it).
+- **Callouts take turns.** One shows at a time in each slot (the anchor's name, or `slot='<your own>'`), so two
+  never overlap: a new one waits, higher `priority` (0-9) first, then first asked, and starts the moment the one
+  before ends. Nothing cuts the one showing; take it down with `stream_callout(clear=True, id=<n>)`.
+  `clear=True` alone takes down all of them, `clear=True, slot='top'` one slot. Every reply says what shows and
+  what waits, with ids; `stream_callout()` with nothing asks just that. The same words twice in one slot are
+  refused.
+- **A panel** is bound to data: `stream_panel('now')` (the request playing and "requested by @name", or the
+  stream's `now` line when no request plays), `('requests')` (the waiting line in play order, with places),
+  `('chat')` (the newest chat lines, names, text and site; `venues=[...]` for some), `('credits')` (the viewers
+  whose requests played). One of each kind; `rows`, `title` ('' for none), `empty` (a line for when there is
+  nothing: "type !request <style> in chat"; without it an empty panel hides), placement and `style` as callouts,
+  plus `accent` for the title and names. Fields you leave out keep their value. `on=False` takes one down. Panels
+  are kept across a server restart; callouts are not.
+- **Did it land?** `stream_page()` ends with what an open page last drew ("the page draws: callouts #3; panels
+  requests, chat"). Open `http://127.0.0.1:8875/visual?debug=1` to look; the readout counts them.
+
+Who calls them:
+- **The MC**: the panels (put them up before going live: `now`, `requests` with an `empty` line, and `chat` if the
+  room is friendly) and callouts for people: a welcome to raiders, "thanks Ana for the sub", "requests open". Use
+  `who='MC'`.
+- **The DJ**: callouts for the music, at the moment: "drop in 8 bars", "back to back: jungle", "last track". Short
+  ones (3-5 s), in their own slot (`anchor='center'` or `slot='dj'`) so they never wait behind the MC's. Use
+  `who='DJ'`.
+
+Keep them off the stream's own text lines (title top left, the piece bottom left), which draw over the page. With
+the `now` panel up, the `now` line says the same: `request_mark(..., on_screen=False)` keeps it to the panel.
+Viewers' chat lines show as they wrote them (the privacy guard checks your own words, not theirs): take the chat
+panel down if chat turns bad. Use `stream_text` for a line that stays (the title, "type !request in chat"),
+`stream_scene` text layers for words that move with the music, and callouts for a moment.
+
 ## Games and commands
 
 Chat commands are plain chat lines; the MC reads them from `chat_watch`. Keep a few, and put them on screen with
