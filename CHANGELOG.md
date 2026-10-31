@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Live: rejected notes and underrun bursts are findable (Live DJ 10-31)
+
+- Every rejected render is kept (the last 50) with its bar, deck, track, clip, note or kit pad, reason and the next
+  step; `live_status` shows the newest three under the render line, and the new `live_rejects(project, since=)`
+  lists them all with the underrun bursts (the last 20). Before, the reason went only to the next reply of any op
+  (often a helper's), the track's own list was cleared by the next instrument swap, and the engine log said
+  nothing.
+- A burst of underruns is logged with the ops sent in the 20 s before it and the tracks whose clips started in the
+  bar before it.
+- A sound added with `sound_import` while the engine runs now plays after a swap or on a new track: the bank
+  reads `project.json` again when it meets a name it does not know. It was read once at the start, so a 62-pad kit
+  swapped in mid-set rejected every sound imported after `live_start`.
+- `live_track(instrument=...)` on a playing track, and `live_queue`/`live_load` batches that are heavy, add a
+  `burst:` line with the render work they schedule against the workers' time (the engine's own render rate) and
+  the bank sounds new to the set, with what to do when it is heavy. A kit's warm-up now plays every pad on every
+  worker, 4 at a time; a swap resets the track's render rate so the new instrument is measured, not the old one.
+
 ### MIDI clock in: the set follows another app (MIDI parity step 8, part 1)
 
 - `live_midi_clock_in(project, source, ...)`: a running set follows the MIDI clock of another app (Ableton, FL

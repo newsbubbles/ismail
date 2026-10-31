@@ -41,6 +41,7 @@ from .midi_play import MidiPlay
 from .arp import LiveArps
 from .clock_in import ClockIn
 from .timeline import EPS, QueueError, Timeline, fmt_bar
+from .trouble import Trouble
 from .. import settings
 
 BLOCK = 1024
@@ -70,9 +71,13 @@ CHUNK_LOOK_S = 0.05     # and render the notes just after it: a pick's scrape or
 CHUNK_REACH_S = 8.0     # a note held across a bar line from longer ago keeps the bars it spans in one chunk
 TICK_EVENTS = 128       # events placed per scheduler pass at most, earliest first: a big queue spreads over passes
 WARM_TAIL_S = 0.25      # a warm-up pays first-use costs; rendering the full tail through a rig only delays real renders
+WARM_PADS = 4           # kit pads per warm-up job
+WARM_PAD_GAP_S = 0.1    # ... played this far apart
 MARGIN_S = 0.5          # render estimate safety margin (quantized launches make this inaudible)
 DEFAULT_RATE = {'mimic': 0.6, 'code': 0.1, 'synth': 0.15, 'sampler': 0.05}   # render s per audio s, until measured
 DRUM_RATE = 0.03
+BURST_SHARE = 0.5       # an op whose renders keep the workers busy this share of the time until they sound is warned
+BURST_NEW_SOUNDS = 16   # ... and one that brings this many bank sounds the set has not played (first reads) is too
 DUCK_LOOKBACK = 4 * SR  # onsets this far back still shape a duck's release
 ROOM_OFF = ("nothing plays in the room; the clock, streams (the phone), recording and live_listen carry on. "
             "live_device(device='default') turns the speaker back on")
@@ -269,6 +274,7 @@ class Engine:
         self._inflight = 0              # render jobs handed to the shared worker queue and not back yet
         self.last_pull = None           # wall time the device last asked for audio
         self.news = collections.deque(maxlen=20)    # problems found between calls: the next reply of any op says them
+        self.trouble = Trouble()        # rejected renders and underrun bursts, kept for live_status and live_rejects
         self._lost_since = {}           # track -> beats of notes whose render came back after they had passed
         self._fifo_n = 0
         self._fifo_lock = threading.Lock()
@@ -313,10 +319,11 @@ class Engine:
         return self.tmap.secs(b1) - self.tmap.secs(b0)
 
     # ------------------------------------------------------------------ rendering
-    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None, need=0, extra=None, bpm=None):
+    def _submit(self, key, track, notes_s, lead_s, warm=False, expr=None, iauto=None, need=0, extra=None, bpm=None,
+                where=None):
         """need: the sample where the first of these notes must sound (renders go out earliest-needed first);
         extra: more keys for the worker ('_chunk', '_beat0'); bpm: the tempo at the event's onset (baked effects
-        and performers keep time with it), else the tempo now."""
+        and performers keep time with it), else the tempo now; where: {clip, on, pitches}, for a rejection's line."""
         bpm = self.bpm if bpm is None else bpm
         tr = self.tracks[track]
         inst = self._job_inst(tr, expr, iauto)
@@ -326,7 +333,8 @@ class Engine:
         jid = self._jid
         audio_s = max(s + d for s, _, d, _ in notes_s) + _tail_s(inst)
         self.jobs[jid] = {'key': key, 'track': track, 'warm': warm, 'wi': None, 'gen': tr['gen'], 'audio_s': audio_s,
-                          'est_s': self._rate(tr) * audio_s}
+                          'est_s': self._rate(tr) * audio_s,
+                          'where': where or {'pitches': [m for _, m, _, _ in notes_s]}}
         if self.n_workers == 0:
             t0 = time.time()
             root = tr['root'] or self.root
@@ -388,24 +396,38 @@ class Engine:
 
     def _warm(self, track):
         """A short throwaway note on every worker (first-use compilation happens off the air), then one 1 s note
-        on whichever worker is free to measure what a second of this instrument costs to render."""
+        on whichever worker is free to measure what a second of this instrument costs to render. A kit warms every
+        pad on every worker, WARM_PADS at a time: each pad reads its sound's file the first time it plays, and a
+        62-pad kit read on air came with a burst of underruns (Live DJ 10-31)."""
         tr = self.tracks[track]
         inst = self._job_inst(tr)
         pitch = int(next(iter(inst['map']))) if inst.get('type') == 'kit' else 60
-        short, full = [(0.0, pitch, 0.1, 100)], [(0.0, pitch, 1.0, 100)]
+        shorts, full = [[(0.0, pitch, 0.1, 100)]], [(0.0, pitch, 1.0, 100)]
+        if inst.get('type') == 'kit':
+            # a few pads per job, a tenth of a second apart: 24 pads at once summed past the peak check
+            pads = [int(p) for p in inst['map']]
+            shorts = [[(WARM_PAD_GAP_S * j, p, 0.1, 100) for j, p in enumerate(pads[i:i + WARM_PADS])]
+                      for i in range(0, len(pads), WARM_PADS)]
         guess = self._rate(tr)
         if self.n_workers == 0:
+            if len(shorts) > 1 or len(shorts[0]) > 1:        # a kit's pads (the 1 s note after them measures)
+                for short in shorts:
+                    tr['warming'] += 1
+                    self._submit(('warm', track), track, short, 0.0, warm=True)
             tr['warming'] += 1
             self._submit(('warm', track), track, full, 0.0, warm=True)
             return
-        tr['warming'] += self.n_workers + 1
+        tr['warming'] += self.n_workers * len(shorts) + 1
         winst = dict(inst, _tail=WARM_TAIL_S)
         for i in range(self.n_workers):
-            self._jid += 1
-            self.jobs[self._jid] = {'key': ('warm', track), 'track': track, 'warm': True, 'wi': i, 'gen': tr['gen'],
-                                    'audio_s': 0.1 + WARM_TAIL_S, 'est_s': guess * (0.1 + WARM_TAIL_S)}
-            self._procs[i]['out'] += 1
-            self._tasks[i].put((self._jid, winst, short, 0.0, self.bpm, tr['root'] or self.root))
+            for short in shorts:
+                self._jid += 1
+                audio_s = short[-1][0] + 0.1 + WARM_TAIL_S
+                self.jobs[self._jid] = {'key': ('warm', track), 'track': track, 'warm': True, 'wi': i,
+                                        'gen': tr['gen'], 'audio_s': audio_s, 'est_s': guess * audio_s,
+                                        'where': {'pitches': [n[1] for n in short]}}
+                self._procs[i]['out'] += 1
+                self._tasks[i].put((self._jid, winst, short, 0.0, self.bpm, tr['root'] or self.root))
         self._submit(('warm', track), track, full, 0.0, warm='measure')
 
     def _result(self, jid, y, secs, err):
@@ -435,8 +457,11 @@ class Engine:
                     if warm == 'measure' or self.n_workers == 0:
                         tr['est'] = secs / job['audio_s']
                     if err:
-                        tr['errors'].append(f"warm-up: {err}")
-                        self.news.append(f"track {track}: warm-up failed: {err}")
+                        tr['errors'] = (tr['errors'] + [f"warm-up: {err}"])[-3:]
+                        e = self.trouble.reject(self, job, f"warm-up failed: {err}", [])
+                        self.news.append(f"track {track}: warm-up failed: {err}. Next: {e['fix']}")
+                    else:
+                        self.trouble.mark_sounded(tr['root'] or self.root, tr['inst'], job['where']['pitches'])
                 return
             if tr is not None:
                 r = secs / max(job['audio_s'], 0.05)
@@ -446,14 +471,19 @@ class Engine:
                 self.renders.pop(key, None)
                 self.stats['rejected'] += 1
                 if tr is not None:
+                    # kept in the trouble log too: the news goes to whichever call comes next, and these three are
+                    # cleared by the next instrument swap
                     tr['errors'] = (tr['errors'] + [err])[-3:]
-                    self.news.append(f"track {track}: a note was not played: {err}")
+                    e = self.trouble.reject(self, job, err, users)
+                    self.news.append("rejected: " + self.trouble.line(e))
                 for k in users:
                     if k in self.cache:
                         self.cache[k] = 'error'
                     self.waiting.pop(k, None)
                 return
             self._keep_render(key, y)
+            if tr is not None:
+                self.trouble.mark_sounded(tr['root'] or self.root, tr['inst'], job['where']['pitches'])
             for k in users:
                 if k not in self.cache:        # clip was replaced or its instrument changed meanwhile
                     self.waiting.pop(k, None)
@@ -613,11 +643,15 @@ class Engine:
                             self.renders[ck] = 'pending'
                             self.rwait[ck] = [key]
                             self._submit(ck, c.track, notes_s, lead, expr=expr, iauto=iauto, need=self.sample(on),
-                                         extra=extra, bpm=tsig[0])
+                                         extra=extra, bpm=tsig[0],
+                                         where={'clip': c.id, 'on': on, 'pitches': [m for _, m, _, _ in ns]})
             self._feed()
             for dn, dk in self.decks.items():
                 if dk.held:
                     self._release(dn, dk, now)
+            burst = self.trouble.check(self)
+            if burst:
+                self.news.append(burst)
             try:
                 self.cin.plan()               # clock in first: MIDI out and clock out plan on the tempo it sets
             except Exception as ex:
@@ -974,6 +1008,7 @@ class Engine:
         if got < frames and self.pos > 0 and self.fade is None:
             self.stats['underruns'] += 1
             self.last_underrun = fmt_bar(self.beat(self.played), self.bpb)
+            self.trouble.underrun(self.played)
         self.played += got
         return out
 
@@ -1404,6 +1439,7 @@ class Engine:
         # measured, a block at ~270% of real time while the mixer waited); a bad instrument now also fails before a
         # new track is half made
         inst = self._resolve_instrument(instrument) if instrument is not None and not remove else None
+        swapped = None                  # (beat, the track's clips) when a playing track's instrument changes
         with self.lock:
             now = self.beat(self.pos)
             if remove:
@@ -1490,9 +1526,10 @@ class Engine:
             if inst is not None:
                 old = tr['inst']
                 tr['inst'] = inst
-                tr['errors'] = []
+                tr['errors'] = []               # the trouble log keeps the old instrument's (live_rejects)
                 tr['gen'] += 1
                 tr['warming'] = 0
+                tr['est'] = None                # the old instrument's render rate; the warm-up measures the new one
                 if old is not None:
                     # the new sound takes over at `at`: drop events from there on and render them again
                     evs = sorted((e for c in self.tl.track_clips(track) for e in self._events_of(c.notes, inst)),
@@ -1500,6 +1537,7 @@ class Engine:
                     beat, _ = self.tl.resolve_at(at, now, now + self._lead_beats(track, evs[:8]))
                     self._rerender_from(track, beat, inst)
                     msg.append(f"instrument changed from {fmt_bar(beat, self.bpb)}")
+                    swapped = (beat, list(self.tl.track_clips(track)))
                 if warm:
                     self._warm(track)
                 msg.append(f"{inst['type']}" + (f" voice {inst['voice']}" if inst.get('voice') else '') + ", warming up")
@@ -1511,7 +1549,13 @@ class Engine:
                 tr['pan'] = max(-1.0, min(1.0, float(pan)))
             tr['gl'], tr['gr'] = G.fader_gains(tr['volume_db'], tr['pan'])
             msg.append(f"vol {tr['volume_db']:g} dB, pan {tr['pan']:g}")
-            return f"{track}: " + ', '.join(msg)
+        out = f"{track}: " + ', '.join(msg)
+        if swapped:
+            # outside the lock: it walks every event the swap renders again
+            line = self._burst_line([(c, swapped[0]) for c in swapped[1]], "this swap", track=track, always=True)
+            if line:
+                out += '\n' + line
+        return out
 
     def cmd_bus(self, bus, fx=None, volume_db=None, remove=False, at='now', deck=None):
         chain = self._chain(fx, f"bus {bus!r}", 0.0) if fx is not None else None
@@ -1914,7 +1958,7 @@ class Engine:
             head += "\n  not live: " + '; '.join(sk)
         if reset:
             head += f"\n  strip reset for the new song (the last one left it at {reset}); live_deck sets it again"
-        return head + '\n' + '\n'.join(ln for ln in out.splitlines() if ln.startswith('runway'))
+        return head + '\n' + '\n'.join(ln for ln in out.splitlines() if ln.startswith(('burst', 'runway')))
 
     def _off_air_cost(self, deck):
         """An off-air deck still costs the mixer while its tracks play notes or ring out; asleep, it costs nothing."""
@@ -2014,6 +2058,93 @@ class Engine:
         """Estimated render seconds for one event of `dur_beats` on `track` (cost grows with the audio length)."""
         tr = self.tracks[track]
         return self._rate(tr) * (dur_beats * self.spb + _tail_s(tr['inst']))
+
+    def _burst(self, spans):
+        """The render work an op has just scheduled at once. spans: [(clip, from beat)]. Counts the events the
+        scheduler sends straight away (those inside its HORIZON_S, and a clip queued ahead: its first pass, as
+        tick does), once each where they share a render, at the engine's render rate for each track (`est`, or
+        the default for its type until measured). Returns (events, render s, seconds until the last of them
+        sounds, the workers' share of that time, {(track, sound)} bank sounds the set has not played yet,
+        {track: kit pads hit})."""
+        now = self.beat(self.pos)
+        horizon = self.beat(self.pos + int(HORIZON_S * SR))
+        seen, new, pads = set(), set(), {}
+        n, work, last = 0, 0.0, now
+        for c, b0 in spans:
+            tr, m = self.tracks.get(c.track), self.meta.get(c.id)
+            if tr is None or m is None or not tr['inst'] or tr.get('midi_only') or m.get('groups') is None:
+                continue
+            inst = tr['inst']
+            hi = horizon
+            if c.start > now + EPS:
+                if c.start - now > PRELOAD_WITHIN_BARS * self.bpb:
+                    continue
+                end = c.end if c.end is not None else c.start + c.length
+                hi = max(hi, min(c.start + c.length, c.start + PRELOAD_S / self.spb, end))
+            code = inst['type'] in ('code', 'mimic')
+            root = tr['root'] or self.root
+            for k, ei, on in self.tl.events(c, max(b0, now), hi, m['groups']):
+                g = m['groups'][ei]
+                if isinstance(g, _Span):
+                    key = (c.id, ei) + self._variant(c, ei, k)
+                    dur = g.end - g.on + CHUNK_PRE_S / self.spb
+                    ps = [p for st, p, _, _ in c.notes if g.on - EPS <= st < g.end]
+                else:
+                    ns = [c.notes[j] for j in g]
+                    t0 = ns[0][0]
+                    # what makes two events one render (tick's render key, less tempo and lanes)
+                    key = (c.track, 0.0 if code else round(t0 % self.bpb, 4),
+                           tuple((round(st - t0, 4), p, round(d, 4), v) for st, p, d, v in ns))
+                    key += self._variant(c, ei, k)
+                    dur = max(st + d for st, _, d, _ in ns) - t0
+                    ps = [p for _, p, _, _ in ns]
+                if key in seen:
+                    continue
+                seen.add(key)
+                n += 1
+                work += self._event_s(c.track, dur)
+                last = max(last, on)
+                if inst['type'] == 'kit':
+                    pads.setdefault(c.track, set()).update(ps)
+                new.update((c.track, x) for x in self.trouble.new_sounds(root, inst, ps))
+        secs = max(self._secs(now, last), BLOCK / SR)
+        return n, work, secs, work / (max(1, self.n_workers) * secs), new, pads
+
+    def _burst_line(self, spans, what, track=None, always=False):
+        """A line for the reply of the op that schedules a burst of renders ('' when it is light, unless always)."""
+        try:
+            n, work, secs, share, new, pads = self._burst(spans)
+        except (KeyError, RuntimeError, IndexError):        # the queue changed under it (it runs outside the lock)
+            return ''
+        if not n:
+            return ''
+        heavy = share >= BURST_SHARE or len(new) >= BURST_NEW_SOUNDS
+        if not (heavy or always):
+            return ''
+        w = f"{self.n_workers} workers" if self.n_workers else "the engine (inline renders)"
+        on_pads = f" on {sum(len(p) for p in pads.values())} kit pads" if pads else ''
+        fresh = (f", {len(new)} bank sound{'s' if len(new) != 1 else ''} new to this set (each worker reads a "
+                 f"sound's file the first time it plays it)" if new else '')
+        head = (f"burst: {what} renders {n} events{on_pads} in the next {secs:.1f} s{fresh}: about {work:.1f} s of "
+                f"render work for {w}, {share * 100:.0f}% of their time")
+        if track is not None:
+            tr = self.tracks[track]
+            head += (f" (at {tr['est']:.3f} s per audio second, measured)" if tr['est'] is not None else
+                     f" (at {self._rate(tr):g} s per audio second, the default for a {tr['inst']['type']}: not "
+                     f"measured yet)")
+        if not heavy:
+            return head + ". Light: no burst expected"
+        fix = []
+        if len(new) >= BURST_NEW_SOUNDS and track is not None:
+            fix.append(f"warm it first: live_track('{track}_warm', instrument=<the same>) makes a silent track whose "
+                       f"warm-up reads every pad on every worker; swap once live_status no longer says WARMING, then "
+                       f"live_track('{track}_warm', remove=True)")
+        elif len(new) >= BURST_NEW_SOUNDS:
+            fix.append("warm the kits first: live_track('<name>_warm', instrument=<the kit>) reads every pad on every "
+                       "worker off the air; queue once live_status no longer says WARMING")
+        fix.append("swap at a bar where the track rests (at='bar:N')" if track is not None else
+                   "queue further ahead, or in smaller batches")
+        return head + ". Expect underruns or late notes: " + '; or '.join(fix)
 
     @staticmethod
     def _rate(tr):
@@ -2228,8 +2359,9 @@ class Engine:
             for cid in list(self.meta):
                 if cid not in self.tl.clips:
                     self.meta.pop(cid)
+        burst = self._burst_line([(c, c.start) for c in added], f"these {len(added)} clips") if len(added) > 1 else ''
         self.tick()
-        return '\n'.join(lines) + '\n' + self._runway()
+        return '\n'.join(lines + ([burst] if burst else [])) + '\n' + self._runway()
 
     def _cancel_section_moves(self, section, beat, gone, cut, stops, tl):
         """The second half of cancel_section: the section's effect moves from `beat` on are dropped (one gliding
@@ -2960,7 +3092,12 @@ class Engine:
                          f"{self.stats['skipped']})" + (f" (last: {self.last_late})" if self.last_late else '') +
                          f", rejected {self.stats['rejected']}, underruns {self.stats['underruns']}" +
                          (f" (last at {self.last_underrun})" if self.last_underrun else ''))
+            lines += self.trouble.status_lines(self.stats['rejected'])
             return '\n'.join(lines)
+
+    def cmd_rejects(self, since=None):
+        with self.lock:
+            return self.trouble.report(self.bpb, since)
 
     def _headroom_line(self):
         """How near the mixer came to a real dropout since the last status. The device plays from AHEAD_S of mixed
@@ -3175,7 +3312,7 @@ def serve(engine, port=0, idle_min=None):
            'keys': engine.cmd_keys, 'arp': engine.cmd_arp,
            'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
            'midi_clock_in': engine.cmd_midi_clock_in,
-           'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo}
+           'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo, 'rejects': engine.cmd_rejects}
     keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')
 
     class H(BaseHTTPRequestHandler):
@@ -3238,6 +3375,8 @@ def serve(engine, port=0, idle_min=None):
                 if req.get('op') != 'clock':            # a listener reading the clock does not keep a set awake
                     engine.last_cmd = time.time()
                 fn = ops.get(req.get('op'))
+                if fn is not None:              # remembered, to name what came just before a burst of underruns
+                    engine.trouble.sent(req['op'], req.get('args'), fmt_bar(engine.beat(engine.pos), engine.bpb))
                 if fn is None:
                     res = {'ok': False, 'error': f"unknown op {req.get('op')!r}; ops: {sorted(ops)}"}
                 else:
