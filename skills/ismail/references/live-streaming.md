@@ -66,7 +66,8 @@ second; it never touches the mixer. You set what it draws with numbers, and it c
 
 - `stream_scene(layers=[...], background=['#07080c', '#1a1030'], trails=0.35)` replaces the layers;
   `replace=False` adds to them. Kinds: `bars`, `ring`, `line` (bands), `pulse`, `particles`, `hits` (a light per
-  track), `text`, `grid`. Positions and sizes are fractions of the frame. `drive` picks what moves a layer: `level`,
+  track), `text`, `grid`. Positions and sizes are fractions of the frame, and so is a `thickness` (0 to 1: a
+  ring's 0.02 is a thin line), never pixels. `drive` picks what moves a layer: `level`,
   `beat`, `band:<i>`, `bands:<lo>-<hi>`, or `track:<name>` (a flash on that track's notes). A wrong field comes back
   with the fields that layer takes.
 - `stream_page()` gives the page's address, the layers, and what the page sees now (beat, level, bands, the notes
@@ -141,7 +142,8 @@ themselves up to date from the stream's own data. They draw on the page, so the 
   background_opacity, outline, outline_color, shadow, shadow_color, align, padding, radius, opacity}`: `font` is a
   name (sans, serif, mono, condensed, display, rounded, or arial, impact, georgia, consolas and a few more) or a
   .ttf/.otf/.woff/.woff2 file under the ismail folder or the stream home; `size` is the font's height as a
-  fraction of the frame (0.06). `enter` and `exit`: none, fade, pop, slide-left, slide-right, slide-up, slide-down
+  fraction of the frame (0.06). Every other number is a fraction too, never pixels or true/false: `outline` 0 to
+  0.3 of the font's size, `shadow` 0 to 1 (its blur), `background_opacity` and `opacity` 0 to 1. `enter` and `exit`: none, fade, pop, slide-left, slide-right, slide-up, slide-down
   (in from that side and back out to it).
 - **Callouts take turns.** One shows at a time in each slot (the anchor's name, or `slot='<your own>'`), so two
   never overlap: a new one waits, higher `priority` (0-9) first, then first asked, and starts the moment the one
