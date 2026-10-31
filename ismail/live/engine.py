@@ -2698,7 +2698,7 @@ class Engine:
             with self._ctl_lock:
                 for control, m, v, via in moves:
                     self._ctl_q.pop(control, None)
-                    self._ctl_q[control] = (m, v, via)
+                    self._ctl_q[control] = (m, v, via, m['st']['seq'])
             if self._ctl_thread:
                 self._ctl_wake.set()
             else:
@@ -2709,16 +2709,18 @@ class Engine:
         """Apply the queued MIDI moves (one per control, its latest), then write the control log."""
         with self._ctl_lock:
             q, self._ctl_q = self._ctl_q, collections.OrderedDict()
-        for control, (m, v, via) in q.items():
-            if self.controls.maps.get(control) is not m:        # remapped or removed since: the move is dropped
-                continue
+        for control, (m, v, via, seq) in q.items():
             try:
+                if self.controls.maps.get(control) is not m:    # remapped or removed since: the move is dropped
+                    continue
                 self._apply(control, m, v, via)
                 m.pop('err', None)
             except (LiveError, KeyError, ValueError) as e:
                 if not m.get('err'):
                     m['err'] = str(e)
                     self.news.append(f"control {control} ({via}): {e}. live_map it again, or remove=True")
+            finally:
+                m['st']['done'] = max(m['st']['done'], seq)  # its moves up to seq are applied (or dropped)
         self.controls.flush()
 
     def _control_loop(self):

@@ -168,6 +168,7 @@ MIDI_KINDS = "'cc:<0-127>', 'cc14:<0-31>' (MSB n with LSB n+32), 'bend', 'pressu
 MODES = ('absolute', 'pickup', 'relative', 'relative64', 'toggle')
 PICKUP_TOL = 2 / 127        # pickup takes over when the knob comes this close to the param, or crosses it
 REL_STEP = 1 / 128          # one tick of a relative encoder: 128 ticks cover the range
+TOGGLE_REPEAT_S = 0.1       # a toggle button's 64-or-more repeated this long after the last, with no release, is a new press
 
 
 def parse_midi(midi, channel=None, mode='absolute'):
@@ -246,8 +247,10 @@ class Controls:
         m = {'target': target, 'param': param, 'spec': spec, 'range': rng, 'curve': curve, 'at': at}
         if midi is not None:
             m['midi'] = dict(midi)
-            m['st'] = {'caught': False, 'last_in': None, 'applied': None, 'msb': None, 'lsb_seen': False,
-                       'down': False}
+            # applied: the last position this map sent; seq/done: sent and applied counts (moves wait in the
+            # engine's queue); pair: a cc14 pair's MSB and LSB per channel; down/t_down: a toggle button's state
+            m['st'] = {'caught': False, 'last_in': None, 'applied': None, 'seq': 0, 'done': 0, 'pair': {},
+                       'down': False, 't_down': 0.0}
         return m
 
     def bound(self, source):
@@ -257,7 +260,8 @@ class Controls:
     def midi_in(self, source, st, d1, d2, now):
         """A message from input `source` -> (the moves it makes [(control, map, position 0..1, via)], whether a map is
         bound to it: a bound message is a control, never a key). now(m): the map's param now as a position 0..1, or
-        None when it cannot be read."""
+        None when it cannot be read. While this map's own moves wait in the engine's queue, relative steps, toggles
+        and pickup count from the last position it sent, not from the param (which has not moved yet)."""
         kind, ch = st & 0xF0, (st & 0x0F) + 1
         moves, hit = [], False
         for control, m in self.bound(source):
@@ -270,25 +274,31 @@ class Controls:
                 if b['mode'] in ('relative', 'relative64'):
                     step = (d2 - 128 if d2 >= 64 else d2) if b['mode'] == 'relative' else d2 - 64
                     if step:
-                        base = now(m)
-                        base = base if base is not None else (s['applied'] or 0.0)
-                        v = min(1.0, max(0.0, base + step * REL_STEP))
+                        base = self._here(m, now)
+                        v = min(1.0, max(0.0, (base if base is not None else 0.0) + step * REL_STEP))
                 elif b['mode'] == 'toggle':
-                    down = d2 >= 64
-                    if down and not s['down']:
+                    down, t = d2 >= 64, self.clock()
+                    # a press: a value of 64 or more after a release, or after TOGGLE_REPEAT_S with no release
+                    # (a trigger button that sends 127 on every press and never 0)
+                    if down and (not s['down'] or t - s['t_down'] >= TOGGLE_REPEAT_S):
                         v = self._flip(m, now)
+                    if down:
+                        s['t_down'] = t
                     s['down'] = down
                 else:
                     v = d2 / 127.0
             elif b['kind'] == 'cc14' and kind == 0xB0 and d1 in (b['num'], b['lsb']):
                 hit = True
+                pr = s['pair'].setdefault(ch, {'msb': None, 'lsb': 0, 'lsb_seen': False})
                 if d1 == b['num']:
-                    s['msb'] = d2
-                    if not s['lsb_seen']:                   # a controller that never sends the LSB: 7 bits
-                        v = d2 / 127.0
-                elif s['msb'] is not None:
-                    s['lsb_seen'] = True
-                    v = ((s['msb'] << 7) | d2) / 16383.0
+                    pr['msb'] = d2
+                    # 7 bits until an LSB is seen; then each half moves it with the other's last value (a
+                    # controller may send the LSB first)
+                    v = ((d2 << 7) | pr['lsb']) / 16383.0 if pr['lsb_seen'] else d2 / 127.0
+                else:
+                    pr['lsb'], pr['lsb_seen'] = d2, True
+                    if pr['msb'] is not None:
+                        v = ((pr['msb'] << 7) | d2) / 16383.0
             elif b['kind'] == 'bend' and kind == 0xE0:
                 hit = True
                 v = (min(1.0, max(-1.0, (((d2 << 7) | d1) - 8192) / 8191.0)) + 1) / 2   # the centre is 0.5
@@ -305,23 +315,41 @@ class Controls:
             if v is None or (b['mode'] == 'pickup' and not self._caught(m, v, now)):
                 continue
             s['applied'] = v
+            s['seq'] += 1
             moves.append((control, m, v, f"midi {b['text']} ch{ch}"))
         return moves, hit
 
-    @staticmethod
-    def _flip(m, now):
-        cur = now(m)
-        cur = cur if cur is not None else (m['st']['applied'] or 0.0)
-        return 0.0 if cur >= 0.5 else 1.0
+    clock = staticmethod(time.monotonic)
 
     @staticmethod
-    def _caught(m, v, now):
+    def pending(m):
+        """Has this map sent moves the engine has not applied yet?"""
+        return m['st']['seq'] != m['st']['done']
+
+    @classmethod
+    def _here(cls, m, now):
+        """Where this map's param is, as far as the map can tell: its last sent position while that waits in the
+        queue, else the param now (else the last position sent)."""
+        s = m['st']
+        if cls.pending(m) and s['applied'] is not None:
+            return s['applied']
+        cur = now(m)
+        return cur if cur is not None else s['applied']
+
+    @classmethod
+    def _flip(cls, m, now):
+        cur = cls._here(m, now)
+        return 0.0 if (cur or 0.0) >= 0.5 else 1.0
+
+    @classmethod
+    def _caught(cls, m, v, now):
         """Pickup (takeover): the knob moves the param only once it reaches the param's value (or passes it), so a
         knob left elsewhere never makes the param jump. Anything else moving the param (the stage, the agent, another
-        map) lets go of it again."""
+        map) lets go of it again: checked against the last position this map applied, never while its own moves
+        still wait in the queue."""
         s = m['st']
-        cur = now(m)
-        if s['caught'] and cur is not None and s['applied'] is not None and abs(cur - s['applied']) > PICKUP_TOL:
+        cur = cls._here(m, now)
+        if s['caught'] and not cls.pending(m) and cur is not None and s['applied'] is not None and                 abs(cur - s['applied']) > PICKUP_TOL:
             s['caught'] = False
         prev, s['last_in'] = s['last_in'], v
         if not s['caught'] and (cur is None or m['curve'] == 'switch' or abs(v - cur) <= PICKUP_TOL

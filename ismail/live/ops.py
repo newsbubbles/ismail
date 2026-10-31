@@ -689,8 +689,9 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     even when no keys are patched; channel: 1 to 16 (default every channel). mode: 'absolute' (the param jumps to the
     knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
     stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
-    'relative64' (64 = still, 65 up, 63 down), each step 1/128 of the range, from the param's value now; 'toggle'
-    (a pad or a button flips between the range's ends on each press). Several maps may share one MIDI control (one
+    'relative64' (64 = still, 65 up, 63 down), each step 1/128 of the range, from the param's value now (fast steps add up); 'toggle'
+    (a pad or a button flips between the range's ends on each press: 64 or more after a release, or a repeat 0.1 s
+    or more after the last with no release). Several maps may share one MIDI control (one
     knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
     is not played or logged by live_midi. Not sure what a knob sends? live_controls(source=<input>) listens."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,

@@ -361,3 +361,90 @@ def test_a_bound_control_leaves_the_unmapped_list(eng):
     eng.midi.heard[('knob box', 'cc:35', 1)] = [5, 1]          # heard before a bind of its pair
     eng.cmd_map('fine', target='lead', param='pan', range=[-1, 1], midi='cc14:3', source='knob')
     assert "cc:35" not in eng.cmd_controls()
+
+
+def test_queued_moves_add_up_for_relative_pickup_and_toggle(eng):
+    eng._ctl_thread = True                                     # a running set: moves wait for the control thread
+    eng.cmd_map('enc', target='lead', param='pan', range=[-1, 1], midi='cc:20', source='knob', mode='relative')
+    eng.cmd_track('lead', pan=0.0)
+    for _ in range(10):
+        send('knob box', 0xB0, 20, 1)                          # ten steps before one drain
+    eng.drain_controls()
+    assert eng.tracks['lead']['pan'] == pytest.approx(20 / 128)
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[0, 10000], midi='cc:74', source='knob',
+                mode='pickup')
+    eng.cmd_fx('lead', 'filter', {'cutoff': 5000})
+    seq = list(range(60, 128))                                 # crosses the param, then keeps turning up
+    for i in range(0, len(seq), 3):
+        for v in seq[i:i + 3]:
+            send('knob box', 0xB0, 74, v)
+        eng.drain_controls()
+    assert cutoff(eng) == pytest.approx(10000)                 # it held on: never let go of its own moves
+    eng.cmd_map('mute', target='bus:room', param='volume_db', range=[0, -120], curve='switch', midi='cc:30',
+                source='knob', mode='toggle')
+    for v in (127, 0, 127, 0):                                 # two presses before one drain
+        send('knob box', 0xB0, 30, v)
+    eng.drain_controls()
+    assert eng.buses['room']['volume_db'] == 0
+    for v in (127, 0, 127, 0, 127, 0):
+        send('knob box', 0xB0, 30, v)
+    eng.drain_controls()
+    assert eng.buses['room']['volume_db'] == -120
+
+
+def test_a_trigger_button_that_never_sends_0_still_toggles(eng):
+    t = [100.0]
+    eng.controls.clock = lambda: t[0]
+    eng.cmd_map('mute', target='bus:room', param='volume_db', range=[0, -120], curve='switch', midi='cc:30',
+                source='knob', mode='toggle')
+    send('knob box', 0xB0, 30, 127)
+    assert eng.buses['room']['volume_db'] == -120
+    t[0] += 0.02
+    send('knob box', 0xB0, 30, 127)                            # a repeat at once: the same press
+    assert eng.buses['room']['volume_db'] == -120
+    t[0] += 0.5
+    send('knob box', 0xB0, 30, 127)                            # a repeat after a gap: a new press
+    assert eng.buses['room']['volume_db'] == 0
+
+
+def test_cc14_lsb_first_and_pairs_per_channel(eng):
+    eng.cmd_map('fine', target='lead', param='pan', range=[0, 1], midi='cc14:7', source='knob', channel=1)
+    send('knob box', 0xB0, 7, 11)
+    send('knob box', 0xB0, 39, 5)                              # an LSB: 14 bits from now on
+    send('knob box', 0xB0, 39, 9)                              # LSB first, then its MSB
+    send('knob box', 0xB0, 7, 12)
+    assert eng.tracks['lead']['pan'] == pytest.approx(((12 << 7) | 9) / 16383)
+    eng.cmd_map('wide', target='pad', param='pan', range=[0, 1], midi='cc14:8', source='knob')   # every channel
+    send('knob box', 0xB0, 8, 100)                             # ch1 MSB
+    send('knob box', 0xB1, 40, 0)                              # ch2 LSB: not the ch1 pair's
+    assert eng.tracks['pad']['pan'] == pytest.approx(100 / 127)
+    send('knob box', 0xB1, 8, 3)                               # ch2's own MSB, with its LSB
+    assert eng.tracks['pad']['pan'] == pytest.approx((3 << 7) / 16383)
+
+
+def test_an_input_that_fails_to_reopen_is_tried_again(eng):
+    eng.midi.poll()
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob')
+    eng.inputs.remove('knob box')
+    eng.midi.poll()
+    held = {'busy': True}
+
+    def opener(name, on_msg):
+        if held['busy']:
+            raise OSError('another program has it open')
+        return FakeInput(name, on_msg)
+    eng.midi.opener = opener
+    eng.inputs.append('knob box')
+    eng.midi.poll()
+    assert any('back, but it did not open' in n for n in eng.drain_news()) and 'knob box' not in FakeInput.opened
+    eng.midi.poll()                                            # still held: tried again, said once
+    assert not any('did not open' in n for n in eng.drain_news())
+    with pytest.raises(LiveError, match="did not open.*close it in the program that holds it, then call again"):
+        eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob')
+    with pytest.raises(LiveError, match='did not open'):
+        eng.cmd_controls(source='knob')
+    held['busy'] = False
+    eng.midi.poll()                                            # the next poll opens it
+    assert any('controls on knob box: plugged back in' in n for n in eng.drain_news())
+    send('knob box', 0xB0, 74, 127)
+    assert cutoff(eng) == pytest.approx(8000)

@@ -168,6 +168,7 @@ class MidiPlay:
         self.lost = set()                   # inputs in use that were unplugged (they reopen when they come back)
         self.listening = {}                 # inputs opened by live_controls(source=) -> when they close (wall time)
         self.heard = collections.OrderedDict()  # (input, 'cc:74', channel) -> [last value, count], not mapped
+        self.retrying = set()               # lost inputs that are back but did not open (said once)
         self.heard_lock = threading.Lock()  # the driver's thread writes `heard`, a command reads it
         self.xv = {}                        # a sounding voice -> its expression (_X), for patches with lanes
 
@@ -210,12 +211,28 @@ class MidiPlay:
         return self.find(source)
 
     def open_for_controls(self, name):
+        """Open an input for a control map now; one that failed to reopen is tried again here, and a failure says
+        what to do."""
+        if name in self.lost:
+            self.lost.discard(name)
+            try:
+                self._open(name)
+            except Exception as ex:
+                self.lost.add(name)
+                raise ValueError(f"MIDI input {name!r} did not open: {ex}. Plug it in, or close it in the program "
+                                 f"that holds it, then call again (midi_sources lists the inputs)")
+            p = self.patches.get(name)
+            if p is not None:
+                p['lost'] = False
+            return
         self._open(name)
 
     def listen(self, name):
         """Open an input only to hear what it sends (live_controls(source=)) for LISTEN_S: its unmapped messages are
         listed. An input a map or a patch already holds needs no listening."""
-        if name in self.ins or name in self.lost:
+        if name in self.lost:
+            self.open_for_controls(name)
+        if name in self.ins:
             if not self._wanted(name) or name in self.listening:
                 self.listening[name] = time.time() + LISTEN_S
             return
@@ -606,7 +623,7 @@ class MidiPlay:
         except Exception:
             names = set()
         if self.known is not None:
-            for n in sorted(names - self.known):
+            for n in sorted(names - self.known | (self.lost & names)):
                 p = self.patches.get(n)
                 if n in self.lost:
                     self.lost.discard(n)
@@ -618,8 +635,13 @@ class MidiPlay:
                                            else f"controls on {n}: plugged back in, its maps work again")
                     except Exception as ex:
                         self.lost.add(n)
-                        self.e.news.append(f"{'keys' if p is not None else 'controls on'} {n}: back, but it did "
-                                           f"not open: {ex}")
+                        if n not in self.retrying:          # said once; tried again on every poll
+                            self.retrying.add(n)
+                            self.e.news.append(f"{'keys' if p is not None else 'controls on'} {n}: back, but it did "
+                                               f"not open: {ex}. Tried again every {POLL_S:g} s; close it in the "
+                                               f"program that holds it")
+                        continue
+                    self.retrying.discard(n)
                 elif p is None and not self._wanted(n):
                     self.e.news.append(f"MIDI input plugged in: {n!r}. live_midi(source={n!r}, instrument=... or "
                                        f"track=...) plays it through the set; live_map(..., midi=..., source={n!r}) "

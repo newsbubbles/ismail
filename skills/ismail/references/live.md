@@ -567,8 +567,10 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   - **Modes.** `'absolute'` (default: the param jumps to the knob). `'pickup'`: the knob takes over only once it
     reaches the param's value or passes it, so nothing jumps after you or the stage moved the param; `live_status`
     says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
-    complement, or 64 = still), 1/128 of the range per step, from the param's value now. `'toggle'`: a pad or a
-    button flips between the range's ends (with `curve='switch'`, a mute: `range=[0, -120]`). Which mode fits
+    complement, or 64 = still), 1/128 of the range per step, from the param's value now (steps that arrive
+    faster than the engine applies them add up). `'toggle'`: a pad or a button flips between the range's ends
+    (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
+    0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
     which source: `relative` and `relative64` only on `'cc:<n>'`; `toggle` on `'cc:<n>'` or `'note:<n>'`; a
     `'note:<n>'` pad only `absolute` or `toggle`; `bend`, `pressure` and `'cc14:<n>'` are `absolute` or `pickup`.
     A wrong pair is refused and the old map stays.

@@ -94,7 +94,12 @@
 - Modes: `'absolute'` (default), `'pickup'` (takeover: the knob moves the param only once it reaches or crosses the
   param's value, and lets go when the stage, the agent or another map moves the param), `'relative'` (two's
   complement encoders) and `'relative64'` (64 = still), 1/128 of the range per step from the param's value now,
-  and `'toggle'` (a pad or button flips between the range's ends). `channel` 1 to 16, default every channel.
+  and `'toggle'` (a pad or button flips between the range's ends; a repeat of 64 or more 0.1 s after the last,
+  with no release, is a new press). `channel` 1 to 16, default every channel. Relative steps, toggles and pickup
+  count from the last position the map sent while its moves wait for the engine, so fast moves add up and pickup
+  holds on. A 14-bit pair keeps its MSB and LSB per channel and moves on either half once an LSB has been seen.
+  An input that fails to reopen after a replug is tried again on every poll, and on the next `live_map` or
+  `live_controls(source=)`, which say what to do when it still fails.
 - One MIDI control may drive several maps (one knob, several params; a reversed range moves one the other way).
 - The map opens its input even when no keys are patched; an input is opened once and shared by `live_midi` and the
   maps, closed when neither uses it, and reopened with its maps when it is plugged back in. A bound message is a
