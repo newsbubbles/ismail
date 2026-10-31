@@ -29,8 +29,10 @@ def track_arp(project: str, track: str, pattern=None, degrees: list = None, note
     the track's pan automation over the arp's bars). restart: 'key' (default: each chord starts the pattern
     again), 'bar', 'off'. swing: 0 to 0.5 of a step. bars=[a, b]: where it plays (default the bars of the
     track's notes). write=True writes the arp's notes into the track in place of the chords (and the cutoff and
-    pan as automation), and turns the arp off: plain notes to edit (undo brings the chords back). off=True turns
-    it off and keeps the chords."""
+    pan as automation), and turns the arp off: plain notes to edit (undo brings the chords back). Outside the arp's
+    bars a written lane holds the value the track had at the write (an automation lane is held to the song's ends),
+    so a later track_set pan or filter change does not show there until that lane is changed (automation_set) or
+    cleared; the reply says which. off=True turns it off and keeps the chords."""
     P = _load(project)
     tr = P.track(track)
     bpb = P.bpb
@@ -72,6 +74,7 @@ def track_arp(project: str, track: str, pattern=None, degrees: list = None, note
                  "'mode': 'lp', 'cutoff': 2000}) and the steps move it")
     span = f"bars {int(sp[0] // bpb) + 1}-{int((sp[1] - 1e-6) // bpb) + 1}" if sp else "no bars"
     if write:
+        had = set(tr.get('automation') or {})
         tr['arp'] = cfg
         ex = A.expand(tr, bpb)
         n_old = len(tr.get('notes') or [])
@@ -84,7 +87,11 @@ def track_arp(project: str, track: str, pattern=None, degrees: list = None, note
         return '\n'.join([f"{track}: wrote the arp as {len(st)} steps ({len(ex['notes'])} notes now, {n_old} "
                           f"before) over {span}" + (f"; {', '.join(moved)} written as automation" if moved else '')
                           + ". The arp is off: these are plain notes to edit (undo brings the chords back)"]
-                         + A.preview(st, bpb) + L)
+                         + A.preview(st, bpb) + L + [
+            f"outside {span} the {k} lane holds {A.fmt_num(A._static(tr, k))} (the track's value now): a later "
+            f"{'track_set pan' if k == 'pan' else 'filter cutoff'} change does not show there; change the lane with "
+            f"automation_set(..., param='{k}', mode='merge') or clear it with automation_clear(..., param='{k}')"
+            for k in moved if k not in had and k != 'cutoff'])
     tr['arp'] = cfg
     P.save()
     head = (f"{track}: arp " + ("on" if not old else f"{', '.join(changed) or 'nothing'} changed") +

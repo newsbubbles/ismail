@@ -218,3 +218,50 @@ def test_midi_export_carries_the_steps(proj, tmp_path):
     from ismail import midifile as MF
     f = MF.read(out)
     assert sum(len(t['notes']) for t in f['tracks']) == 8
+
+
+# ------------------------------------------------------------------ review fixes (adversarial pass, 10-31)
+def test_swing_counts_inside_each_bar_so_every_downbeat_lands_in_any_meter():
+    c = cfg(pattern='up', rate=1, swing=0.3, restart='bar')
+    st = A.steps(c, C_MAJ, 0, 9, 0, 0, 3)                                    # 3/4
+    assert [round(b, 2) for b, *_ in st] == [0, 1.3, 2, 3, 4.3, 5, 6, 7.3, 8]
+    # the same window from a later origin (another bar line) gives the same times: live and studio agree
+    a = [round(b, 6) for b, *_ in A.steps(c, C_MAJ, 6, 9, 0, 0, 3)]
+    b = [round(b, 6) for b, *_ in A.steps(c, C_MAJ, 6, 9, 3, 0, 3)]
+    assert a == b == [6, 7.3, 8]
+
+
+def test_octaves_over_a_wide_chord_walk_in_order_without_repeats():
+    run = lambda held, **kw: pitches(A.steps(cfg(octaves=2, **kw), held, 0, 1, 0, 0, 4))   # noqa: E731
+    assert run([(48, 100), (60, 100)]) == [[48], [60], [72], [48]]
+    assert run([(48, 100), (64, 100)]) == [[48], [60], [64], [76]]
+    assert run([(60, 100), (48, 100)], pattern='order') == [[60], [48], [72], [60]]   # pressed order, each once
+
+
+def test_any_spelling_of_a_key():
+    for k, pc in (('Cb', 11), ('E#', 5), ('Fb', 4), ('B#', 0), ('Bb', 10), ('F#', 6), ('a', 9)):
+        assert A._key_pc(k) == pc
+    c = cfg(notes='B3 D#4 F#4', key='B', scale='major')
+    assert pitches(A.steps(A.configure(c, {'key': 'Cb'})[0], [], 0, 0.75, 0, 0, 4)) == [[59], [63], [66]]
+    with pytest.raises(A.ArpError, match="a note name such as A, C#, Bb, Cb"):
+        cfg(key='H')
+
+
+def test_a_sprite_is_a_synth_for_the_cutoff():
+    assert A.cutoff_target({'instrument': {'type': 'sprite'}}) == 'inst.filter.cutoff'
+
+
+def test_a_chord_held_into_the_arps_bars_is_arped_there_and_kept_outside():
+    tr = {'instrument': {'type': 'synth'}, 'notes': [[0.0, 60, 12.0, 100], [0.0, 64, 12.0, 90]],
+          'arp': {'pattern': 'up', 'rate': 1, 'bars': [2, 2]}}
+    ex = A.expand(tr, 4)
+    assert [n for n in ex['notes'] if n[0] < 4] == [[0.0, 60, 4.0, 100], [0.0, 64, 4.0, 90]]
+    assert [n[:2] for n in ex['notes'] if 4 <= n[0] < 8] == [[4, 60], [5, 64], [6, 60], [7, 64]]
+    assert [n for n in ex['notes'] if n[0] >= 8] == [[8, 60, 4.0, 100], [8, 64, 4.0, 90]]   # as written after
+
+
+def test_write_says_which_lanes_now_hold_the_tracks_value(proj):
+    api.track_set(proj, 'lead', pan=0.25)
+    api.track_arp(proj, 'lead', pan=[-1, 1], bars=[1, 1])
+    r = api.track_arp(proj, 'lead', write=True)
+    assert "outside bars 1-1 the pan lane holds 0.25 (the track's value now)" in r and 'automation_clear' in r

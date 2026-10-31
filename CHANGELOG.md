@@ -36,7 +36,12 @@
 - `track_arp(project, track, ...)`: a track's held chords (its notes) play through the arp at render, or a step
   list over `bars=[a, b]`. The notes stay as written; the renderer, decks (`live_load`) and `midi_write` /
   `midi_play` all play the steps. `write=True` writes the steps into the track as plain notes (the cutoff and pan
-  as automation) and turns the arp off; `undo` brings the chords back.
+  as automation) and turns the arp off; `undo` brings the chords back. Outside the arp's bars a written lane holds
+  the track's value at the write (the reply names it and how to change it). A chord held into the arp's bars is
+  arped from their start and plays as written outside them. Any key spelling works (`'Cb'`, `'E#'`). Swing counts
+  within each bar (every downbeat lands, in any meter); octaves over a wide chord walk in pitch order, each note once.
+- Live: at most 32 arp voices (the oldest fades over 20 ms), the pedal keeps keys in the order pressed, `latch=True`
+  over a held chord keeps it, and a new note source queued at a bar replaces the one queued there.
 - Note sources: `pattern` (`'up'`, `'down'`, `'updown'`, `'downup'`, `'order'`, `'random'`, `'chord'`, or held-key
   numbers like `[1, 3, 2, 4]`), `degrees` (scale steps above the lowest held key, with `key` + `scale`), or `notes`
   (an exact step list, `'A3 C4 E4 A4 | F3 A3 C4 F4'`, one bar per group, switching on bar lines). With key + scale

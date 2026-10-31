@@ -24,7 +24,7 @@ import math
 import random
 
 from .notation import NotationError, fmt_num, midi_to_name, parse_num, pitch_to_midi
-from .tune import NOTE_NAMES, SCALES
+from .tune import SCALES
 
 PATTERNS = ('up', 'down', 'updown', 'downup', 'order', 'random', 'chord')
 RESTARTS = ('key', 'bar', 'off')
@@ -32,6 +32,7 @@ DEFAULTS = {'pattern': 'up', 'degrees': None, 'notes': None, 'notes_key': None, 
             'gate': 0.5, 'velocity': None, 'accent': None, 'slide': None, 'octave': None, 'cutoff': None,
             'pan': None, 'transpose': 0, 'key': None, 'scale': None, 'restart': 'key', 'swing': 0.0}
 SETTINGS = tuple(k for k in DEFAULTS if k != 'notes_key')
+SOURCES = ('pattern', 'degrees', 'notes')     # one note source at a time
 PER_STEP = ('gate', 'velocity', 'accent', 'slide', 'octave', 'cutoff', 'pan')
 ACCENT_VEL = 127            # an accented step plays at this velocity
 SLIDE_OVER = 0.1            # a slid step lasts into the next by this much of a step (a mono voice glides there)
@@ -52,10 +53,16 @@ def _num(x, what):
 
 
 def _key_pc(key):
-    k = NOTE_NAMES.get(str(key).strip().upper().replace('♯', '#').replace('♭', 'B'))
-    if k is None:
-        raise ArpError(f"key {key!r}: a note name such as A, C#, Bb (the scale goes in scale=)")
-    return k
+    """A key's pitch class (0 = C), read as note names are everywhere (pitch_to_midi): A, C#, Bb, Cb, E#, F##."""
+    t = str(key).strip().replace('♯', '#').replace('♭', 'b')
+    if t and t[1:] and set(t[1:]) <= {'#', 'b', 'B'}:
+        t = t[0] + t[1:].replace('B', 'b')
+    try:
+        if not t or not t[0].isalpha() or (t[1:] and not set(t[1:]) <= {'#', 'b'}):
+            raise NotationError(t)
+        return pitch_to_midi(t[0].upper() + t[1:] + '4') % 12
+    except NotationError:
+        raise ArpError(f"key {key!r}: a note name such as A, C#, Bb, Cb (the scale goes in scale=)")
 
 
 def scale_steps(scale):
@@ -295,7 +302,8 @@ def _walk(cfg, held):
             order.append((m, v))
     srt = sorted(order)
     octs = range(int(cfg.get('octaves') or 1))
-    up = [(m + 12 * o, v) for o in octs for m, v in srt]
+    # over octaves a wide chord's copies overlap (C3 C4 up an octave is C4 C5): each pitch once, low to high
+    up = _once(sorted(((m + 12 * o, v) for o in octs for m, v in srt), key=lambda x: x[0]))
     p = cfg['pattern']
     if p == 'down':
         return up[::-1]
@@ -305,8 +313,18 @@ def _walk(cfg, held):
         d = up[::-1]
         return d + d[-2:0:-1]
     if p == 'order':
-        return [(m + 12 * o, v) for o in octs for m, v in order]
+        return _once([(m + 12 * o, v) for o in octs for m, v in order])
     return up
+
+
+def _once(seq):
+    """seq [(midi, vel)] with each pitch once, where it first comes."""
+    seen, out = set(), []
+    for m, v in seq:
+        if m not in seen:
+            seen.add(m)
+            out.append((m, v))
+    return out
 
 
 def step_notes(cfg, held, k, j, bar_i):
@@ -358,10 +376,16 @@ def _line(cfg, origin, t):
     return math.ceil((t - origin) / cfg['rate'] - EPS)
 
 
-def sound_time(cfg, origin, n):
-    """Where grid step n sounds: its line, every second step late by swing."""
-    t = origin + n * cfg['rate']
-    return t + (cfg['swing'] * cfg['rate'] if n % 2 else 0.0)
+def sound_time(cfg, origin, n, bpb):
+    """Where grid step n sounds: its line, every second step of its bar late by swing (counted from the bar line, so
+    every bar starts on its downbeat in any meter, live and in the studio alike)."""
+    rate = cfg['rate']
+    t = origin + n * rate
+    if not cfg['swing']:
+        return t
+    bar_line = origin + math.floor((t - origin) / bpb + EPS) * bpb
+    j = n - _line(cfg, origin, bar_line)
+    return t + (cfg['swing'] * rate if j % 2 else 0.0)
 
 
 def steps(cfg, held, t0, t1, origin, anchor, bpb):
@@ -375,7 +399,7 @@ def steps(cfg, held, t0, t1, origin, anchor, bpb):
     n = _line(cfg, origin, t0 - rate)
     n_anchor = _line(cfg, origin, anchor)
     while True:
-        t = sound_time(cfg, origin, n)
+        t = sound_time(cfg, origin, n, bpb)
         if t >= t1 - EPS:
             break
         nominal = origin + n * rate
@@ -388,7 +412,7 @@ def steps(cfg, held, t0, t1, origin, anchor, bpb):
                 ns = step_notes(cfg, held, k, j, bar_i)
                 if ns:
                     if _at(cfg.get('slide'), k):
-                        dur = sound_time(cfg, origin, n + 1) - t + SLIDE_OVER * rate
+                        dur = sound_time(cfg, origin, n + 1, bpb) - t + SLIDE_OVER * rate
                     else:
                         dur = rate * float(_at(cfg['gate'], k))
                     out.append((t, ns, dur, _at(cfg.get('cutoff'), k), _at(cfg.get('pan'), k)))
@@ -418,7 +442,7 @@ def track_steps(tr, cfg, bpb):
     lo, hi = sp
     if cfg.get('notes') is not None:
         return steps(cfg, [], lo, hi, lo, lo, bpb), sp
-    ns = sorted((n for n in (tr.get('notes') or []) if lo - EPS <= n[0] < hi), key=lambda n: (n[0], n[1]))
+    ns = sorted(_inside(tr.get('notes') or [], lo, hi), key=lambda n: (n[0], n[1]))
     if not ns:
         return [], sp
     cuts = sorted({lo, hi} | {n[0] for n in ns} | {min(hi, n[0] + n[2]) for n in ns})
@@ -434,11 +458,39 @@ def track_steps(tr, cfg, bpb):
     return out, sp
 
 
+def _inside(notes, lo, hi):
+    """The parts of notes that sound in [lo, hi), each clipped to it: a chord held from before the arp's bars counts
+    as pressed at their start."""
+    out = []
+    for n in notes:
+        a, b = max(n[0], lo), min(n[0] + n[2], hi)
+        if n[0] < hi - EPS and b > a + EPS:
+            out.append([a, n[1], b - a, n[3]] + list(n[4:]))
+    return out
+
+
+def _outside(notes, lo, hi):
+    """The parts of notes outside [lo, hi), as written there: a note running into the arp's bars ends at them, one
+    running past them comes back after."""
+    out = []
+    for n in notes:
+        st, end = n[0], n[0] + n[2]
+        if end <= lo + EPS or st >= hi - EPS:
+            out.append(list(n))
+            continue
+        if st < lo - EPS:
+            out.append([st, n[1], round(min(end, lo) - st, 6), n[3]] + list(n[4:]))
+        if end > hi + EPS:
+            a = max(st, hi)
+            out.append([a, n[1], round(end - a, 6), n[3]] + list(n[4:]))
+    return out
+
+
 def cutoff_target(tr):
     """Which automation the per-step cutoff moves on this track: the instrument's own filter (a synth, a sampler with
-    a filter), else the first filter effect on the track; None when the voice exposes no cutoff."""
+    a filter; a sprite is a synth), else the first filter effect on the track; None when the voice exposes no cutoff."""
     inst = tr.get('instrument') or {}
-    if inst.get('type') == 'synth' or (inst.get('type') == 'sampler' and inst.get('filter')):
+    if inst.get('type') in ('synth', 'sprite') or (inst.get('type') == 'sampler' and inst.get('filter')):
         return 'inst.filter.cutoff'
     for i, f in enumerate(tr.get('fx') or []):
         if f.get('type') == 'filter':
@@ -493,7 +545,7 @@ def expand(tr, bpb):
     if sp is None:
         return tr
     lo, hi = sp
-    keep = [n for n in (tr.get('notes') or []) if not lo - EPS <= n[0] < hi]
+    keep = _outside(tr.get('notes') or [], lo, hi)
     notes = keep + [[round(b, 6), m, round(d, 6), v] for b, ns, d, _, _ in st for m, v in ns]
     out = dict(tr, notes=sorted(notes))
     auto = {k: list(v) for k, v in (tr.get('automation') or {}).items()}

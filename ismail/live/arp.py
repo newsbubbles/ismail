@@ -24,21 +24,34 @@ from .. import dsp
 from ..dsp import SR
 
 MAX_VOICES = 32
+FADE_ROOM = 8                # of those, kept for voices fading out after a steal
 LIVE_ONLY = ('latch',)
 
 
 class ArpVoice:
-    __slots__ = ('y', 'i', 'wait', 'g', 'gate', 'rel', 'left', 'ba', 'zi')
+    __slots__ = ('y', 'i', 'wait', 'g', 'gate', 'rel', 'left', 'ba', 'zi', 'stolen')
 
     def __init__(self, y, wait, gain, pan, gate, rel, cutoff):
         gl, gr = dsp.pan_gains(pan or 0.0)
         self.y, self.i, self.wait = y, 0, int(wait)
         self.g = np.array([gl * gain, gr * gain], dtype=np.float32)
         self.gate, self.rel, self.left = max(1, int(gate)), max(1, int(rel)), None
-        self.ba = None
+        self.ba, self.stolen = None, False
         if cutoff is not None and cutoff < 0.45 * SR:
             self.ba = butter(2, float(cutoff) / (SR / 2), 'low')
             self.zi = np.zeros((2, 2))
+
+    def steal(self, n):
+        """End within n samples: a fade from where it is (a voice still waiting never starts)."""
+        self.stolen = True
+        if self.wait > 0 and self.i == 0:
+            self.i = self.y.shape[1]              # never sounded: done
+        elif self.left is None:
+            self.gate = min(self.gate, self.i + 1)
+            self.rel = min(self.rel, n)
+        elif self.left > n:                       # already fading: the rest of the fade, faster, from its level
+            self.rel = max(1, int(self.rel * n / self.left))
+            self.left = n
 
     def render(self, n):
         """((n, 2) of this voice for the next n samples, whether it is done): the wait, the note up to its gate,
@@ -126,7 +139,7 @@ class LiveArps:
             new_cfg, _ = A.configure(None, settings)
             start = when if when is not None else self.e.midi.sound_beat()
             a = {'source': name, 'cfg': new_cfg, 'latch': bool(latch), 'down': collections.OrderedDict(),
-                 'pedal': {}, 'latched': [], 'restart': False, 'origin': (start // bpb) * bpb, 'anchor': start,
+                 'held': collections.OrderedDict(), 'latched': [], 'restart': False, 'origin': (start // bpb) * bpb, 'anchor': start,
                  'start': start, 'done': start, 'stop': None, 'pending': [], 'steps': 0, 'missed': 0,
                  'recent': collections.deque(maxlen=64)}
             p = self.e.midi.patches[name]
@@ -155,7 +168,10 @@ class LiveArps:
                 now_cfg = a['cfg']
                 same = next((x for x in pend if abs(x[0] - when) <= A.EPS), None)
                 if same is not None:
-                    same[1] = dict(same[1], **delta)
+                    old = same[1]
+                    if any(k in delta for k in A.SOURCES):    # a new note source replaces the one queued there
+                        old = {k: v for k, v in old.items() if k not in A.SOURCES}
+                    same[1] = dict(old, **delta)
                 elif delta:
                     pend.append([when, delta])
                 pend.sort(key=lambda x: x[0])
@@ -167,6 +183,11 @@ class LiveArps:
                     raise A.ArpError(f"{ex} (with the change queued at {_bar(b, bpb)} on top; live_status lists "
                                      f"the queued changes)")
             if latch is not None:
+                if latch and not a['latch']:
+                    p = self.e.midi.patches.get(name)
+                    if p is not None:
+                        self._prune(a, p)
+                    a['latched'] = list(a['held'].items())     # the chord held now keeps playing
                 a['latch'] = bool(latch)
                 if not latch:
                     a['latched'] = []
@@ -205,18 +226,20 @@ class LiveArps:
             return False
         m = note                                  # by the key itself: a transpose change never strands a key
         with self.lock:
+            self._prune(a, p)
             if vel:
-                if a['latch'] and not a['down'] and not (p['sustain'] and a['pedal']):
-                    a['latched'] = []
+                if a['latch'] and not a['held']:
+                    a['latched'] = []             # a new chord after all keys were let go replaces the latched one
                 a['down'][m] = vel
-                a['pedal'].pop(m, None)
+                a['held'].pop(m, None)            # pressed again: it moves to the end of the order
+                a['held'][m] = vel
                 if a['latch'] and m not in [x for x, _ in a['latched']]:
                     a['latched'].append((m, vel))
                 a['restart'] = True
             else:
-                v = a['down'].pop(m, None)
-                if v is not None and p['sustain']:
-                    a['pedal'][m] = v
+                a['down'].pop(m, None)
+                if not p['sustain']:
+                    a['held'].pop(m, None)        # under the pedal it stays held, in its place
         return True
 
     def clear(self, p):
@@ -225,18 +248,21 @@ class LiveArps:
         if a is not None:
             with self.lock:
                 a['down'].clear()
-                a['pedal'].clear()
+                a['held'].clear()
                 a['latched'] = []
 
+    @staticmethod
+    def _prune(a, p):
+        """The pedal is up: the keys it held (let go meanwhile) are let go now."""
+        if not p['sustain'] and len(a['held']) != len(a['down']):
+            for m in [m for m in a['held'] if m not in a['down']]:
+                del a['held'][m]
+
     def _held(self, a, p):
-        """The keys the arp holds now, [(midi, vel)] in the order pressed, with the patch's transpose (as its keys
-        sound). Called under the lock."""
-        if not p['sustain']:
-            a['pedal'].clear()
-        if a['latch']:
-            keys = list(a['latched'])
-        else:
-            keys = list(a['down'].items()) + [x for x in a['pedal'].items() if x[0] not in a['down']]
+        """The keys the arp holds now, [(midi, vel)] in the order pressed (the pedal's included, in their places),
+        with the patch's transpose (as its keys sound). Called under the lock."""
+        self._prune(a, p)
+        keys = list(a['latched']) if a['latch'] else list(a['held'].items())
         t = p['transpose']
         return [(m + t, v) for m, v in keys]
 
@@ -307,13 +333,20 @@ class LiveArps:
             if y is None:
                 a['missed'] += 1
                 continue
-            if len(self.voices) >= MAX_VOICES:
-                self.voices[0].gate = min(self.voices[0].gate, self.voices[0].i + 1)
-                self.voices[0].rel = min(self.voices[0].rel, int(0.02 * SR))
+            self._make_room()
             g = 10 ** (p['vol'] / 20) * (v / 100.0) ** 1.3
             self.voices.append(ArpVoice(y, wait, g, pan, gate, rel, cut))
         a['steps'] += 1
         a['recent'].append((round(beat, 6), [m for m, _ in ns], [v for _, v in ns], round(dur, 6)))
+
+    def _make_room(self):
+        """Before a new voice: with MAX_VOICES - FADE_ROOM sounding, the oldest one not already ending fades out over
+        20 ms; voices past MAX_VOICES (ending ones first, oldest first) are dropped. Never more than MAX_VOICES."""
+        live = [v for v in self.voices if not v.stolen]
+        if len(live) >= MAX_VOICES - FADE_ROOM:
+            live[0].steal(int(0.02 * SR))
+        while len(self.voices) >= MAX_VOICES:
+            self.voices.remove(next((v for v in self.voices if v.stolen), self.voices[0]))
 
     # ------------------------------------------------------------------ what it says
     def lines(self):

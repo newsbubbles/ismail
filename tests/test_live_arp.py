@@ -272,3 +272,52 @@ def test_what_it_says_when_asked_wrong(eng):
         eng.cmd_arp(pattern='up')
     with pytest.raises(LiveError, match="at="):
         eng.cmd_arp(source='test keys', at='bar:0.5')
+
+
+# ------------------------------------------------------------------ review fixes (adversarial pass, 10-31)
+def test_the_voice_cap_holds_on_a_dense_chord_pattern(eng):
+    from ismail.live import arp as LA
+    eng.cmd_arp(source='test keys', at='now', pattern='chord', octaves=2, rate=1 / 16, gate=4)
+    for m in (48, 52, 55, 59):
+        key(0x90, m, 100)
+    most = 0
+    for _ in range(12):
+        pulls(eng, 0.25)
+        most = max(most, len(eng.arp.voices))
+    assert most <= LA.MAX_VOICES and len(recent(eng)) > 40
+
+
+def test_a_new_note_source_at_the_same_bar_replaces_the_queued_one(eng):
+    eng.cmd_arp(source='test keys', at='now')
+    eng.cmd_arp(source='test keys', pattern='down', at='bar:3')
+    r = eng.cmd_arp(source='test keys', notes='C4 E4 G4', at='bar:3')
+    a = eng.arp.arps['test keys']
+    assert 'notes' in r and a['pending'][0][1] == {'notes': 'C4 E4 G4'}
+    pulls(eng, 5.0)
+    assert a['cfg']['notes'] == 'C4 E4 G4' and a['cfg']['pattern'] is None
+
+
+def test_order_under_the_pedal_keeps_the_press_order(eng):
+    eng.cmd_arp(source='test keys', at='now', pattern='order')
+    a, p = eng.arp.arps['test keys'], eng.midi.patches['test keys']
+    key(0xB0, 64, 127)
+    for m in (60, 64, 67):
+        key(0x90, m, 100)
+    key(0x80, 60, 0)
+    assert [m for m, _ in eng.arp._held(a, p)] == [60, 64, 67]
+    key(0xB0, 64, 0)
+    assert [m for m, _ in eng.arp._held(a, p)] == [64, 67]
+
+
+def test_latch_turned_on_over_a_held_chord_keeps_it(eng):
+    eng.cmd_arp(source='test keys', at='now')
+    for m in (60, 64, 67):
+        key(0x90, m, 100)
+    eng.cmd_arp(source='test keys', latch=True, at='now')
+    for m in (60, 64, 67):
+        key(0x80, m, 0)
+    a, p = eng.arp.arps['test keys'], eng.midi.patches['test keys']
+    assert [m for m, _ in eng.arp._held(a, p)] == [60, 64, 67]
+    n0 = len(recent(eng))
+    pulls(eng, 1.0)
+    assert len(recent(eng)) > n0
