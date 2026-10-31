@@ -519,8 +519,10 @@ def test_an_encoder_that_never_gives_a_picture_stops_after_three_tries(home, mon
     with out.lock:
         out.pushers = {'rec': FakePusher()}
         out._start_encoder()
-    assert wait_for(lambda: out.stopped, timeout=20)
-    states = [d['state'] for d in hub.log.after(0) if d['kind'] == 'status']
+    def states():
+        return [d['state'] for d in hub.log.after(0) if d['kind'] == 'status']
+    assert wait_for(lambda: 'end' in states(), timeout=20)        # 'stopped' is set a moment before end() logs
+    states = states()
     assert states == ['encoder restart', 'encoder restart', 'encoder stopped', 'end']
     assert out.enc_fails == 3 and not out.pushers and out.enc is None
     st = out.status()
