@@ -135,6 +135,13 @@
 - Not yet: notes as triggers for actions, program change, polyphonic aftertouch and MPE as controls, encoder
   step size or acceleration per map.
 
+### a standing grant can be kept to its own kind of step (qa 10-30)
+
+- `grant_add(context=[...])` and a `context` list in standing_grants.json: the entry covers an ask only when one of
+  its context words is in the ask too. A room-edit grant whose keywords include "typed yes" no longer covers "a
+  typed yes to deploy the site". `grant_list` shows the context as "only with: ...". Entries without a context
+  match as before.
+
 ### fixes
 
 - Streaming in `mode='page'` no longer loops (2026-10-31). The page window's crop was measured once, when the
