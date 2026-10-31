@@ -416,7 +416,17 @@ def stream_page() -> str:
     return '\n'.join([f"page: {res['url']} ({'open in its stream window' if win.get('open') else 'no stream window'})",
                       f"scene: {len(sc['layers'])} layers, " + ', '.join(l['kind'] for l in sc['layers']),
                       f"now: {eng}; level {f.get('level')} ({f.get('rms_db')} dB rms)",
-                      f"bands 0-15: {bands}", f"notes just played: {hits}"])
+                      f"bands 0-15: {bands}", f"notes just played: {hits}", _drew_line(res.get('drew'))])
+
+
+def _drew_line(d):
+    if not d:
+        return 'callouts and panels: no page has drawn any yet (none open, or none set)'
+    ago = time.time() - d['at']
+    if ago > 10:
+        return f'callouts and panels: no page open now (the last one said what it drew {int(ago)} s ago)'
+    return (f"the page draws: callouts {', '.join(f'#{i}' for i in d['callouts']) or 'none'}; panels "
+            f"{', '.join(d['panels']) or 'none'}")
 
 
 @op()
@@ -439,3 +449,93 @@ def _out_text(st):
     if st.get('encoder_error'):
         lines.append(f"  encoder: {st['encoder_error']}")
     return '\n'.join(lines)
+
+
+# ------------------------------------------------------------------ callouts and panels over the visual page
+
+def _secs(s):
+    return f'{max(0.0, s):.1f} s'
+
+
+@op(mutates=True)
+def stream_callout(text: str = None, style: dict = None, anchor: str = None, x: float = None, y: float = None,
+                   w: float = None, slot: str = None, enter: str = 'fade', exit: str = 'fade', anim_s: float = 0.4,
+                   duration_s: float = 6.0, priority: int = 5, who: str = None, clear: bool = False,
+                   id: int = None) -> str:
+    """Put a timed callout on the visual page, live, with no blip: a line that comes in, stays duration_s and goes.
+    Reach for it for a moment on screen: "drop in 8 bars", "welcome, raiders", "next up: deep house for @Ana".
+    anchor: top, top-left, top-right, left, center, right, lower-third (the default), bottom, bottom-left,
+    bottom-right; or x, y (fractions of the frame: the point the box is pinned to), which also nudge an anchor.
+    w: the box's widest, a fraction of the frame width (0.6), text wraps inside it. style: {font (sans, serif,
+    mono, condensed, display, rounded, or arial, arial black, bahnschrift, consolas, courier new, georgia, impact,
+    segoe ui, tahoma, times new roman, trebuchet ms, verdana; or a .ttf/.otf/.woff/.woff2 file under the ismail
+    folder or the stream home), size (font height, a fraction of the frame height, 0.06), color, weight (100-900,
+    700), italic, background ('#rrggbb' or 'none'), background_opacity (0.55), outline (stroke width, a fraction of
+    the font size), outline_color, shadow (glow blur, a fraction of the font size), shadow_color, align (left,
+    center, right), padding and radius (fractions of the font size), opacity}. enter / exit: none, fade, pop,
+    slide-left, slide-right, slide-up, slide-down (in from that side and out to it), anim_s long. Callouts in one
+    slot (the anchor's name by default, or slot='<your own>') take turns and never overlap: a new one waits,
+    higher priority (0-9) first, then first asked; nothing cuts the one showing. who: your role, logged.
+    clear=True takes down every callout, or the one with id=, or every one in slot=. With no text and no clear it
+    says what shows and what waits. The page draws in mode='page' (stream_visual); the stream's own text lines
+    (title top left, now bottom left) draw over it, so keep callouts off those corners."""
+    note = guards.check_private(text, where='the stream') if text is not None else ''
+    if isinstance(id, str):
+        id = int(id.strip().lstrip('#'))
+    spec = {} if text is None else dict(style=style, anchor=anchor, x=x, y=y, w=w, enter=enter, exit=exit,
+                                        anim_s=anim_s, duration_s=duration_s, priority=priority)
+    res = _call('callout', text=text, clear=clear or None, id=id, slot=slot, who=who, **spec)
+    t, out = res['t'], []
+    if res['removed']:
+        out.append('took down ' + ', '.join(f'#{i}' for i in res['removed']))
+    for c in res['callouts']:
+        if c['id'] == res['added']:
+            out.append(f"#{c['id']} in {c['slot']}: " + (f"showing now for {_secs(c['end'] - c['start'])}"
+                       if c['state'] == 'showing' else f"queued, starts in {_secs(c['start'] - t)}"))
+    showing = [c for c in res['callouts'] if c['state'] == 'showing']
+    queued = [c for c in res['callouts'] if c['state'] == 'queued']
+    out.append('showing: ' + ('; '.join(f"#{c['id']} {c['text']!r} ({c['slot']}, {_secs(c['end'] - t)} left)"
+                                        for c in showing) or 'nothing'))
+    out.append('queued: ' + ('; '.join(f"#{c['id']} {c['text']!r} ({c['slot']}, in {_secs(c['start'] - t)})"
+                                       for c in queued) or 'none'))
+    if showing or queued:
+        out.append('take one down: stream_callout(clear=True, id=<n>)')
+    return guards.with_note('\n'.join(out), note)
+
+
+@op(mutates=True)
+def stream_panel(kind: str = None, on: bool = True, anchor: str = None, x: float = None, y: float = None,
+                 w: float = None, rows: int = None, title: str = None, empty: str = None, style: dict = None,
+                 venues: list = None) -> str:
+    """Show the stream's own data on screen in a panel on the visual page: the request line, the song playing and
+    who requested it, recent chat, or the credits. It keeps itself up to date (about once a second), with no blip.
+    Reach for it when viewers should see where the set is: show the request line, whose request plays now, or
+    recent chat on the stream picture. kind: now (the request playing and "requested by
+    @name", or the stream's now line), requests (the waiting line in play order, with places and names), chat (the
+    newest chat lines, names and text; venues=[...] for only some) or credits (the viewers whose requests played).
+    One panel per kind; fields you leave out keep their value, so stream_panel('chat', rows=8) changes only that.
+    anchor / x / y / w and style as stream_callout (style also takes accent: the title's and the names' colour).
+    rows: 1-12. title: the line on top ('Up next'; '' for none). empty: a line to show when there is nothing
+    ('type !request <style> in chat'); without it an empty panel hides. on=False takes the panel down. With no
+    kind it lists the panels and what each shows now. Viewers' lines show as they wrote them: take the chat panel
+    down if chat turns bad."""
+    note = guards.check_private(title, empty, where='the stream') if (title or empty) else ''
+    if isinstance(venues, str):
+        venues = [v.strip() for v in venues.split(',') if v.strip()]
+    res = _call('panel', kind=kind, on=None if on else False, anchor=anchor, x=x, y=y, w=w, rows=rows, title=title,
+                empty=empty, style=style, venues=venues)
+    panels = res['panels']
+    out = []
+    if kind and not on:
+        out.append(f'took down the {kind} panel')
+    if not panels:
+        out.append("no panels up: stream_panel('now'), ('requests'), ('chat') or ('credits')")
+    for k, p in panels.items():
+        pl = p['place']
+        where = pl['anchor'] or f"x {pl['x']}, y {pl['y']}"
+        rows_ = p['shows']
+        shows = ('; '.join(' '.join(str(r[f]) if f != 'by' else '@' + str(r[f]) for f in ('place', 'text', 'by')
+                                    if r.get(f) not in (None, '')) for r in rows_) if rows_ else
+                 (f"nothing yet, so it shows {p['empty']!r}" if p['empty'] else 'nothing yet, so it hides'))
+        out.append(f"{k}: {where}, {p['rows']} rows, title {p['title']!r}; shows {shows}")
+    return guards.with_note('\n'.join(out), note)

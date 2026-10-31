@@ -13,7 +13,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import adapters, config as C, scene as SC
+from . import adapters, config as C, overlay as OV, scene as SC
 from .chatlog import ChatLog
 from .levels import Levels
 
@@ -38,6 +38,19 @@ class Hub:
             self.scene = SC.check_scene(SC.DEFAULT)
         self.scene_v = 1
         self.page_view = None         # (width, height) in device pixels, as the page last reported its canvas
+        self.callouts = OV.Callouts() # timed text over the page (overlay.py); gone with the server, like a moment
+        self.panels = {}              # kind -> a panel bound to live data, kept in panels.json
+        try:
+            for kind, raw in json.loads((C.HOME / 'panels.json').read_text(encoding='utf8')).items():
+                try:
+                    self.panels[kind] = OV.check_panel(kind, raw)
+                except ValueError:
+                    continue          # a font file that moved: that panel waits for stream_panel again
+        except (OSError, ValueError, AttributeError):
+            pass
+        self.overlay_cond = threading.Condition()
+        self.overlay_v = 1
+        self.page_drew = None         # {at, callouts, panels}: what an open page last said it drew
         self.reload()
 
     # ------------------------------------------------------------ venues
@@ -187,8 +200,79 @@ class Hub:
     def op_page(self):
         self.levels.want(5.0)
         _, f = self.levels.wait(-1, 0.5)
-        return {'url': f'http://127.0.0.1:{self.port}/visual', 'scene': self.scene, 'frame': f,
+        return {'url': f'http://127.0.0.1:{self.port}/visual', 'scene': self.scene, 'frame': f, 'drew': self.page_drew,
                 'window': self.output.page_window() if self.output else None}
+
+    # ------------------------------------------------------------ callouts and panels over the page (overlay.py)
+    def _overlay_changed(self):
+        with self.overlay_cond:
+            self.overlay_v += 1
+            self.overlay_cond.notify_all()
+
+    def op_callout(self, text=None, clear=False, id=None, slot=None, who=None, **spec):
+        """Add a callout, take some down (clear=True: all, or id=, or slot=), or with neither, say what shows."""
+        now = OV.now()
+        removed, added = [], None
+        if not clear and text is None and (id is not None or spec):
+            raise ValueError("stream_callout: text= to show one, clear=True (with id= or slot=) to take some down, "
+                             "or nothing to see what shows")
+        with self.overlay_cond:
+            if clear:
+                if slot is not None and id is None and not any(c['slot'] == slot for c in self.callouts.items):
+                    raise ValueError(f"no callout in slot {slot!r} (in use: "
+                                     f"{', '.join(sorted({c['slot'] for c in self.callouts.items})) or 'none'})")
+                removed = self.callouts.clear(now, None if id is None else int(id), slot)
+            if text is not None:
+                added = self.callouts.add(OV.check_callout(text, slot=slot, **spec), now, who)
+            sched = self.callouts.schedule(now)
+        if removed or added:
+            self._overlay_changed()
+            C.HOME.mkdir(parents=True, exist_ok=True)
+            with open(C.HOME / 'callouts.jsonl', 'a', encoding='utf8') as f:
+                ev = ({'ev': 'add', 'id': added['id'], 'who': who, 'slot': added['slot'], 'text': added['text'],
+                       'duration_s': added['duration_s']} if added else {'ev': 'clear', 'ids': removed, 'who': who})
+                f.write(json.dumps({'at': round(now, 2), **ev}, ensure_ascii=False) + '\n')
+        return {'t': now, 'added': added and added['id'], 'removed': removed,
+                'callouts': [{k: c[k] for k in ('id', 'text', 'slot', 'state', 'start', 'end', 'priority', 'who')}
+                             for c in sched]}
+
+    def op_panel(self, kind=None, on=True, **fields):
+        """Show, change (the fields given; the rest keep their value) or take down (on=False) one panel."""
+        if kind is not None:
+            if kind not in OV.PANELS:
+                raise ValueError(f"panel kind {kind!r}: one of {', '.join(OV.PANELS)}")
+            if not on:
+                if self.panels.pop(kind, None) is None:
+                    raise ValueError(f"no {kind} panel is up (up: {', '.join(self.panels) or 'none'})")
+            else:
+                raw = dict(self.panels[kind]['raw']) if kind in self.panels else {}
+                if 'style' in fields and isinstance(fields['style'], dict) and isinstance(raw.get('style'), dict):
+                    fields['style'] = {**raw['style'], **fields['style']}
+                raw.update({k: v for k, v in fields.items() if v is not None})
+                self.panels[kind] = OV.check_panel(kind, raw)
+            C.HOME.mkdir(parents=True, exist_ok=True)
+            (C.HOME / 'panels.json').write_text(json.dumps({k: p['raw'] for k, p in self.panels.items()}, indent=1),
+                                                encoding='utf8')
+            self._overlay_changed()
+        elif fields or not on:
+            raise ValueError(f"stream_panel: kind= one of {', '.join(OV.PANELS)}")
+        return {'panels': {k: {**OV.page_panel(p), 'raw': p['raw'], 'shows': OV.panel_rows(p, self.log)}
+                           for k, p in self.panels.items()}}
+
+    def live(self):
+        """What the page draws over its canvas: the callouts (with their times) and each panel with its rows now."""
+        now = OV.now()
+        with self.overlay_cond:
+            sched = self.callouts.schedule(now)
+        panels = []
+        for p in list(self.panels.values()):
+            try:
+                panels.append({**OV.page_panel(p), 'shows': OV.panel_rows(p, self.log)})
+            except Exception:     # a queue file mid-write: this panel skips one beat, the page carries on
+                continue
+        return {'v': self.overlay_v, 't': now, 'panels': panels,
+                'callouts': [{k: c[k] for k in ('id', 'text', 'slot', 'state', 'start', 'end', 'place', 'style',
+                                                'enter', 'exit', 'anim_s')} for c in sched]}
 
     # ------------------------------------------------------------ output (output.py)
     def _out(self):
@@ -270,6 +354,29 @@ class Handler(BaseHTTPRequestHandler):
                 while self.hub.scene_v == v and time.time() < end:
                     self.hub.scene_cond.wait(min(5.0, max(0.01, end - time.time())))
                 return self._json(200, {'v': self.hub.scene_v, 'scene': self.hub.scene})
+        if u.path == '/visual/live':                      # callouts and panels, at once on a change, else each wait s
+            v, wait = int(q.get('v', ['0'])[0] or 0), min(5.0, float(q.get('wait', ['0'])[0] or 0))
+            if 'drew' in q:                               # what the page drew last frame, for stream_page
+                self.hub.page_drew = {'at': time.time(),
+                                      'callouts': [int(x) for x in q.get('c', [''])[0].split(',') if x.isdigit()],
+                                      'panels': [x for x in q.get('p', [''])[0].split(',') if x in OV.PANELS]}
+            with self.hub.overlay_cond:
+                if self.hub.overlay_v == v:
+                    self.hub.overlay_cond.wait(max(0.0, wait))
+            try:
+                return self._json(200, self.hub.live())
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                return None                               # the page closed mid-poll
+        if u.path.startswith('/visual/font/'):
+            p = OV.FONT_FILES.get(u.path.rsplit('/', 1)[-1])
+            if p is None or not p.is_file():
+                return self._json(404, {'error': 'no such font: a style names its font file first'})
+            b = p.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', OV.FONT_TYPES[p.suffix.lower()])
+            self.send_header('Content-Length', str(len(b)))
+            self.end_headers()
+            return self.wfile.write(b)
         if u.path == '/visual/size':                      # the page says how big it draws, so the capture can crop
             try:
                 self.hub.page_view = (int(float(q['w'][0])), int(float(q['h'][0])))
