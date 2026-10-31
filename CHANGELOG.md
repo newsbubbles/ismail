@@ -142,6 +142,16 @@
   typed yes to deploy the site". `grant_list` shows the context as "only with: ...". Entries without a context
   match as before.
 
+### fixes
+
+- Streaming in `mode='page'` no longer loops (2026-10-31). The page window's crop was measured once, when the
+  window first opened, so a window that later changed size made every encoder restart fail ("no packets") every
+  5 s for as long as the stream ran. Each restart also opened the page window again, because Edge hands a launch
+  on a profile it already runs to that browser and exits at once. Now the page window has no resize border, is
+  held at the stream's size while live, is found by its title (never a second one), and is fitted and measured
+  again on every encoder start. Three encoder starts in a row with no picture stop the stream, with a status line
+  that names the cause and the next call (`stream_visual(mode='cqt')` or `capture='gdi'`).
+
 ## 0.4.3 (2026-10-28)
 
 ### what ismail hands its own Blender scripts and hooks is a file you can open (ledger:M382, M383)

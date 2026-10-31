@@ -474,3 +474,82 @@ def test_page_mode_captures_the_page_window_cropped(tmp_path):
     g = a[a.index('-filter_complex') + 1]
     assert 'gdigrab' in a and f'title={output.PAGE_TITLE}' in a and 'crop=1280:720:8:31,' in g
     assert 'showcqt' not in g and 'overlay' not in g.split('drawtext')[0]
+
+
+def test_an_encoder_failure_names_its_cause_and_the_next_call():
+    page = {**output.DEFAULT_VISUAL, 'mode': 'page', 'capture': 'wgc'}
+    crop = ('[Parsed_crop_3 @ 0] Failed to configure input pad on Parsed_crop_3 | [fc#0 @ 0] Terminating thread with '
+            'return code -22 (Invalid argument) | [out#0/mpegts @ 0] Nothing was written into output file')
+    cause, nxt = output.encoder_failure(crop, page)
+    assert 'crop' in cause and 'changed size' in cause
+    assert "stream_visual(mode='cqt')" in nxt and "capture='gdi'" in nxt and nxt.endswith('stream_go')
+    gone = ('[Parsed_gfxcapture_0 @ 0] Failed to configure output pad on Parsed_gfxcapture_0 | Error configuring '
+            'filter graph: No such file or directory')
+    cause, nxt = output.encoder_failure(gone, {**output.DEFAULT_VISUAL, 'window': 'hall (on air)', 'capture': 'gdi'})
+    assert "no window titled 'hall (on air)'" in cause and 'window=None' in nxt and "capture='wgc'" in nxt
+    cause, nxt = output.encoder_failure('x | Unknown encoder h264_qsv', output.DEFAULT_VISUAL)
+    assert cause == 'Unknown encoder h264_qsv' and 'stream_look' in nxt
+
+
+class FakePusher:
+    url_of, secrets, sent = None, (), 0
+
+    def feed(self, b, total):
+        pass
+
+    def stop(self):
+        pass
+
+    def status(self):
+        return {'state': 'live'}
+
+
+def test_an_encoder_that_never_gives_a_picture_stops_after_three_tries(home, monkeypatch):
+    """2026-10-31: a page capture that gave no packets restarted every 5 s for as long as the stream ran, and each
+    restart brought the page window up again. Now three starts in a row with nothing written stop the output."""
+    import sys
+    script = ('import sys; sys.stderr.write("[Parsed_crop_3 @ 0] Failed to configure input pad on Parsed_crop_3\\n'
+              '[out#0/mpegts @ 0] Nothing was written into output file\\n"); sys.exit(1)')
+    monkeypatch.setattr(output, 'ffmpeg', lambda: sys.executable)
+    monkeypatch.setattr(output, 'build_encoder_args', lambda *a: [sys.executable, '-c', script])
+    hub = StubHub(home)
+    out = output.Output(hub)
+    out.visual['window'], out.visual['capture'], out.nvenc = 'hall (on air)', 'gdi', False
+    monkeypatch.setattr(output, 'window_content_box', lambda title: None)
+    with out.lock:
+        out.pushers = {'rec': FakePusher()}
+        out._start_encoder()
+    def states():
+        return [d['state'] for d in hub.log.after(0) if d['kind'] == 'status']
+    assert wait_for(lambda: 'end' in states(), timeout=20)        # 'stopped' is set a moment before end() logs
+    states = states()
+    assert states == ['encoder restart', 'encoder restart', 'encoder stopped', 'end']
+    assert out.enc_fails == 3 and not out.pushers and out.enc is None
+    st = out.status()
+    assert st['state'] == 'off' and st['summary'].startswith('off: the encoder failed 3 starts in a row')
+    assert "crop of the 'hall (on air)' window" in st['stopped'] and 'Next: stream_visual(window=None)' in st['stopped']
+    time.sleep(2.5)
+    assert len([d for d in hub.log.after(0) if d['kind'] == 'status']) == 4       # and nothing starts it again
+
+
+def test_a_page_window_already_open_is_fitted_again_never_opened_twice(home, monkeypatch):
+    """Edge hands a launch on a profile it already runs to that browser and exits, so the process we started says
+    nothing about the window: an open page window is found by its title, kept, and its crop measured again."""
+    closed, fitted = [], []
+    monkeypatch.setattr(output, 'windows_titled', lambda title: [11, 22] if title == output.PAGE_TITLE else [])
+    monkeypatch.setattr(output, 'close_windows', closed.extend)
+    monkeypatch.setattr(output, 'fit_window', lambda title, W, H, view, **k: fitted.append((W, H)) or [0, 31, W, H])
+
+    def no_launch(*a, **k):
+        raise AssertionError('a second page window was launched')
+    monkeypatch.setattr(output.subprocess, 'Popen', no_launch)
+    hub = StubHub(home)
+    hub.page_view = (900, 500)                        # an old report: measured again, never used as it was
+    out = output.Output(hub)
+    out.visual.update(mode='page', width=1280, height=720)
+    out.open_page()
+    assert closed == [22] and fitted == [(1280, 720)] and out.page_box == [0, 31, 1280, 720]
+    assert hub.page_view is None and out.page_window()['open']
+    out._visual_used = {**out.visual}
+    out.end()                                         # nothing streaming: the page window is closed with the take
+    assert closed == [22, 11, 22]
