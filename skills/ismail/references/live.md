@@ -620,7 +620,9 @@ straight to the speakers.
   `live_midi(source='keys', lanes={'bend': {'midi': 'bend', 'range': 12}, 'level': None})` changes a range or a
   message, turns a lane off, or drives a lane the sound does not have (a synth bends that way too). The patch's
   status line says what drives what. `mpe=True` for an MPE controller (lower zone): channel 1 is the master, whose
-  values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure.
+  values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure. Two fingers on one
+  pitch are two keys. When the controller hands a channel to a new note, the old note's tail keeps its own bend,
+  and the new note starts without the old note's pressure and mod (a bend sent just before its note-on is kept).
   - A key plays a note rendered ahead, so lanes move it as pitch and gain only: `bend` and `vib` as a resampled read
     (a note bent up also ends sooner), `level` as gain, each ramped over one output buffer. Lanes that change the
     sound itself (mute, slide, breath, tongue ...) are refused here, with the clip's `expr` named instead.

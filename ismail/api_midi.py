@@ -128,8 +128,8 @@ def _bend_rpn(ch, lmap, lanes):
 def _write_lanes(part, tr, lmap, as_mpe, b0, b1, shift):
     """A track's lanes (automation inst.lane.<name>, in beats) over the beats b0..b1 into part['events'] as MIDI,
     moved `shift` beats earlier as the notes are. as_mpe: the notes onto member channels 2-16 (a free one, else the
-    one held longest), each note's lanes over its own span on its own channel, after the MPE configuration (RPN 6
-    on channel 1). The reply's lines."""
+    one whose note ends soonest), each note's lanes over its own span on its own channel, after the MPE
+    configuration (RPN 6 on channel 1). The reply's lines."""
     pts = {k[10:]: v for k, v in (tr.get('automation') or {}).items() if k.startswith('inst.lane.') and v}
     done = [x for x in pts if x in lmap]
     ev, L, clamped = [], [], {}
@@ -175,38 +175,58 @@ def _pad_name(v):
     return os.path.splitext(os.path.basename(str(v)))[0] if v else '?'
 
 
+def _file_zone(f):
+    """The MPE zone the file configures (RPN 6 with members, in any track: a conductor track may hold it): its master
+    channel (0 lower, 15 upper), or None."""
+    return next((t['mpe_master'] for t in f['tracks'] if t['mpe']), None)
+
+
 def _key(spec, f):
     """What a key in `into` names: a track's name, '#<index>', or 'ch<1-16>' (that channel in every track), as
-    (notes, controller messages, bend ranges by channel from RPN 0, MPE configured)."""
+    (notes, controller messages in file order, bend ranges {channel: [(beat, semitones)]} from RPN 0 in any track,
+    the MPE zone's master channel or None)."""
     s = str(spec).strip()
     ranges = {}
     for t in f['tracks']:                        # an RPN may sit in another track than the notes (a conductor)
-        for c, r in t['bend_range'].items():
-            ranges.setdefault(c, r)
+        for c, hist in t['bend_ranges'].items():
+            ranges.setdefault(c, []).extend(hist)
+    ranges = {c: sorted(h, key=lambda x: x[0]) for c, h in ranges.items()}
     if s.startswith('#') and s[1:].isdigit():
         k = int(s[1:])
         if k >= len(f['tracks']):
             raise OpError(f"{s}: the file has tracks #0-#{len(f['tracks']) - 1}")
         t = f['tracks'][k]
-        return t['notes'], t['ctl'], {**ranges, **t['bend_range']}, t['mpe'] is not None
+        return t['notes'], t['ctl'], ranges, t['mpe_master'] if t['mpe'] else _file_zone(f)
     if s.lower().startswith('ch') and s[2:].isdigit():
         ch = int(s[2:]) - 1
         if not 0 <= ch <= 15:
             raise OpError(f"{s}: channels are ch1 to ch16")
         return ([n for t in f['tracks'] for n in t['notes'] if n[4] == ch],
-                sorted(c for t in f['tracks'] for c in t['ctl'] if c[1] == ch), ranges, False)
+                sorted((c for t in f['tracks'] for c in t['ctl'] if c[1] == ch), key=lambda c: c[0]), ranges, None)
     hits = [t for t in f['tracks'] if t['name'] == s]
     if len(hits) != 1:
         raise OpError(f"{s!r} is not one track name in the file; call midi_read without into to list them, then use "
                       f"the name, '#<index>' or 'ch<n>'")
     t = hits[0]
-    return t['notes'], t['ctl'], {**ranges, **t['bend_range']}, t['mpe'] is not None
+    return t['notes'], t['ctl'], ranges, t['mpe_master'] if t['mpe'] else _file_zone(f)
 
 
-def _is_mpe(configured, asked=None):
-    """An MPE part: the file configures MPE (RPN 6), or the caller says so (mpe=True; mpe=False overrides the
-    file). A multi-channel part with bend on several channels is not enough: a type 0 GM file looks the same."""
-    return bool(asked) if asked is not None else bool(configured)
+def _range_at(hist, beat, default):
+    """The bend range in force at a beat on one channel: the last RPN 0 at or before it, else default."""
+    r = default
+    for b, v in hist or ():
+        if b <= beat + 1e-9:
+            r = v
+        else:
+            break
+    return r
+
+
+def _is_mpe(zone, asked=None):
+    """An MPE part: the file configures MPE (RPN 6 with members, zone its master channel), or the caller says so
+    (mpe=True; mpe=False overrides the file). A multi-channel part with bend on several channels is not enough: a
+    type 0 GM file looks the same."""
+    return bool(asked) if asked is not None else zone is not None
 
 
 def _ctl_counts(ctl):
@@ -217,10 +237,11 @@ def _ctl_counts(ctl):
     return out
 
 
-def _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base, asked=None):
+def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None):
     """The lanes a part's controller messages carry, written into tr's automation (inst.lane.<name>, beats from
-    base): (lines for the reply, warnings)."""
-    mpe = _is_mpe(configured, asked)
+    base): (lines for the reply, warnings). A bend is read at the range in force on its channel at its time."""
+    mpe = _is_mpe(zone, asked)
+    master = zone if zone is not None else ML.MPE_MASTER
     try:
         lmap = ML.resolve(lanes, ML.FILE_MPE if mpe else ML.FILE)
     except ML.LaneMapError as e:
@@ -232,31 +253,40 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base, aske
     L, W, wrote = [], [], []
     for lane, (kind, num, lo, hi) in lmap.items():
         what = ML.midi_name(kind, num)
-        if kind == 'bend' and not (isinstance(given.get(lane), dict) and 'range' in given[lane]):
-            rs = [ranges[c] for c in sorted(chs - ({ML.MPE_MASTER} if mpe else set())) if c in ranges]
-            if rs:
-                r = max(set(rs), key=rs.count)
-                lo, hi = -r, r
+        fixed = kind != 'bend' or (isinstance(given.get(lane), dict) and 'range' in given[lane])
         if mpe:
-            evs, over, skipped = ML.mpe_merge(notes, ctl, what)
+            evs, over, skipped = ML.mpe_merge(notes, ctl, what, master=master, with_ch=True)
             if over and evs:
                 W.append(f"WARNING {target}.{lane}: MPE gives each note its own {what}, ismail's lanes are per track: "
                          f"{over} notes overlap a newer one, and the lane follows the newest (last-note priority)")
             if skipped and evs:
-                W.append(f"WARNING {target}.{lane}: {skipped} {what} messages on the MPE master channel (1) were "
-                         f"left out; the lane holds the member channels' per-note values")
+                W.append(f"WARNING {target}.{lane}: {skipped} {what} messages on the MPE master channel "
+                         f"({master + 1}) were left out; the lane holds the member channels' per-note values")
         else:
-            evs = [(b, raw) for b, _, w, raw in ctl if w == what]
+            evs = [(b, raw, c) for b, c, w, raw in ctl if w == what]
         if not evs:
             continue
-        pts = [[round(base + b, 6), v] for b, v in ML.lane_points(evs, kind, lo, hi)]
+        used_r = set()
+
+        def val(b, raw, c):
+            if fixed:
+                return ML.from_raw(kind, lo, hi, raw)
+            r = _range_at(ranges.get(c), b, hi)
+            used_r.add(r)
+            return ML.from_raw(kind, -r, r, raw)
+        vals = [(b, val(b, raw, c)) for b, raw, c in evs]
+        if not fixed:
+            hi = max(used_r)
+            lo = -hi
+        pts = [[round(base + b, 6), v] for b, v in ML.value_points(vals, ML.tol(kind, lo, hi))]
         key = 'inst.lane.' + lane
         auto = tr.setdefault('automation', {})
         a, z = pts[0][0], pts[-1][0]
         auto[key] = sorted([p for p in auto.get(key, []) if not a <= p[0] <= z] + pts)
         wrote.append(lane)
         L.append(f"    lane {lane}: {len(pts)} points from {len(evs)} {what} messages"
-                 + (f" (bend range +-{fmt_num(hi)})" if kind == 'bend' else f" ({fmt_num(lo)}..{fmt_num(hi)})")
+                 + ((f" (bend range +-{'/'.join(fmt_num(r) for r in sorted(used_r))})" if not fixed else
+                     f" (bend range +-{fmt_num(hi)})") if kind == 'bend' else f" ({fmt_num(lo)}..{fmt_num(hi)})")
                  + (", per note (MPE)" if mpe else ''))
     used = {ML.midi_name(k, n) for k, n, _, _ in lmap.values()}
     left = {w: c for w, c in _ctl_counts(ctl).items() if w not in used}
@@ -291,7 +321,8 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     -> vib (0..50 cents), cc:11 -> level (-40..0 dB), cc:2 -> breath (0..1); the reply names the messages no lane
     took. lanes: the map as data, as midi_write takes it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range':
     [lo, hi]}}, {lane: None} skips one), e.g. {'mute': {'midi': 'cc:20', 'range': [0, 1]}}. An MPE part (the file
-    configures MPE with RPN 6, or mpe=True; mpe=False reads such a part per channel) is read per note: bend at +-48
+    configures MPE with RPN 6 in any track, lower or upper zone, or mpe=True; mpe=False reads it as one plain part,
+    every channel's messages into one lane) is read per note: bend at +-48
     unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
     ismail's lanes are per track. Lanes replace the target's points over the span they cover; quantize moves notes
     only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
@@ -319,10 +350,12 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         for t in f['tracks']:
             ns = t['notes']
             cc = _ctl_counts(t['ctl'])
-            ctl_txt = (("; MPE, " if _is_mpe(t['mpe'] is not None) else "; ")
+            mz = t['mpe_master'] if t['mpe'] else (_file_zone(f) if len({n[4] for n in ns}) >= 2 else None)
+            rngs = sorted({r for h in t['bend_ranges'].values() for _, r in h})
+            ctl_txt = ((f"; MPE{' (upper zone, master channel 16)' if mz == 15 else ''}, " if mz is not None
+                        else "; ")
                        + "expression: " + ', '.join(f"{w} {c}" for w, c in sorted(cc.items()))
-                       + (f" (bend range +-{'/'.join(sorted({fmt_num(r) for r in t['bend_range'].values()}))})"
-                          if t['bend_range'] else '')) if cc else ''
+                       + (" (bend range +-" + '/'.join(fmt_num(r) for r in rngs) + ")" if rngs else '')) if cc else ''
             if not ns:
                 L.append(f"  #{t['index']} {t['name'] or '(no name)'}: no notes" + ctl_txt)
                 continue
@@ -338,7 +371,7 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     out, warn = [], []
     for spec, target in into.items():
         tr = P.track(target)
-        notes, ctl, ranges, configured = _key(spec, f)
+        notes, ctl, ranges, zone = _key(spec, f)
         if not notes:
             out.append(f"  {spec} -> {target}: no notes")
             continue
@@ -353,7 +386,7 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         tr['notes'] = sorted(tr['notes'] + rows)
         out.append(f"  {spec} -> {target}: {len(rows)} notes, bars {bar + int(min(r[0] for r in rows) - base) // bpb}"
                    f"-{bar + int(max(r[0] for r in rows) - base) // bpb}")
-        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, configured, lanes, base, mpe)
+        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, mpe)
         out += lt
         warn += lw
         if _is_kit(tr):

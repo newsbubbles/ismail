@@ -370,7 +370,8 @@ class MidiPlay:
                 raise
         if lanes is not None:
             p['lanes'] = lanes or None
-        if mpe is not None:
+        if mpe is not None and bool(mpe) != p['mpe']:
+            self.release_all(p)                  # held keys are named per channel with MPE: let go of them first
             p['mpe'] = bool(mpe)
         self._expr_setup(p)
         return '\n'.join(msg + [self.line(p)])
@@ -488,8 +489,8 @@ class MidiPlay:
             if kind == 0x90 and d2:
                 self.note_on(p, d1, d2, ch)
             elif kind == 0x80 or kind == 0x90:
-                self._expr_off(p, p['held'].get(d1))
-                self.note_off(p, d1)
+                self._expr_off(p, p['held'].get(self._hk(p, d1, ch)), ch)
+                self.note_off(p, d1, ch)
             elif kind == 0xB0 and d1 == 64:
                 p['sustain'] = d2 >= 64
                 if not p['sustain']:
@@ -544,23 +545,29 @@ class MidiPlay:
             return
         v = Voice(y, 10 ** (p['vol'] / 20) * (vel / 100.0) ** 1.3)
         with self.lock:
-            old = p['held'].pop(note, None)
+            old = p['held'].pop(self._hk(p, note, ch), None)
             if old is not None:
                 old.release(int(0.02 * SR))
-                self._expr_off(p, old)
+                self._expr_off(p, old, ch)
             if len(self.voices) >= MAX_VOICES:
                 self.voices[0].release(int(0.02 * SR))
             self._expr_new(p, v, ch)             # before any buffer mixes it
             self.voices.append(v)
             if not p['oneshot']:
-                p['held'][note] = v
+                p['held'][self._hk(p, note, ch)] = v
         p['played'] += 1
 
-    def note_off(self, p, note):
+    @staticmethod
+    def _hk(p, note, ch):
+        """A held key's name: its note, or with MPE (channel, note), since two fingers may hold one pitch on two
+        channels."""
+        return (ch, note) if p.get('mpe') else note
+
+    def note_off(self, p, note, ch=1):
         if self._arp() is not None and self._arp().key(p, note, 0):
             return
         with self.lock:
-            v = p['held'].pop(note, None)
+            v = p['held'].pop(self._hk(p, note, ch), None)
             if v is None:
                 return
             if p['sustain']:
@@ -964,13 +971,16 @@ class MidiPlay:
         if not p['xmap']:
             return False
         if kind == 0xB0 and d1 == 121:                       # reset all controllers
-            for c, vals in p['xs'].items():                  # in place: the keys hold these dicts
-                if c == ch or (p['mpe'] and ch == 1):
-                    vals.clear()
+            hit = [vals for c, vals in p['xs'].items() if c == ch or (p['mpe'] and ch == 1)]
+            for vals in hit:                                 # in place: the keys hold these dicts
+                vals.clear()
+            for x in list(self.xv.values()):                 # and the keys' own poly pressure
+                if any(x.chan is vals for vals in hit):
+                    x.poly.clear()
             return True
         if kind == 0xA0:                                     # poly pressure: one key's own
             b = p['xmsg'].get('pressure')
-            v = p['held'].get(d1)
+            v = p['held'].get(self._hk(p, d1, ch))
             x = self.xv.get(v) if v is not None else None
             if b is not None and x is not None:
                 x.poly[b[0]] = ML.from_raw(b[1], b[2], b[3], d2)
@@ -982,6 +992,7 @@ class MidiPlay:
             return False
         lane, k, lo, hi = b
         p['xs'].setdefault(ch, {})[lane] = ML.from_raw(k, lo, hi, raw)
+        p.setdefault('xstale', {}).get(ch, set()).discard(lane)    # sent since the last key let go: this note's
         return True
 
     def _expr_new(self, p, v, ch):
@@ -990,16 +1001,24 @@ class MidiPlay:
         if not p['xmap'] or p['oneshot']:
             return
         master = p['xs'].setdefault(1, {}) if p['mpe'] and ch != 1 else None
+        chan = p['xs'].setdefault(ch, {})
+        for lane in p.setdefault('xstale', {}).pop(ch, ()):  # MPE: a reused channel drops the last note's pressure
+            chan.pop(lane, None)                              # and mod; a value sent since (the bend) stays
         live = set(self.voices)
         self.xv = {u: x for u, x in self.xv.items() if u in live}
-        self.xv[v] = _X(p['xs'].setdefault(ch, {}), master, p['xhz'])
+        self.xv[v] = _X(chan, master, p['xhz'])
 
-    def _expr_off(self, p, v):
+    def _expr_off(self, p, v, ch=1):
         """A key let go with MPE: its release tail keeps the values its channel had then, since the controller hands
-        that channel to the next note, whose bend must not move this tail. The master channel still applies."""
+        that channel to the next note, whose bend must not move this tail. The master channel still applies. The
+        channel's pressure and mod become stale: the next note on it starts without them unless they are sent
+        again (its bend, sent just before its note-on as MPE controllers do, is kept)."""
         x = self.xv.get(v) if v is not None else None
         if x is not None and p['mpe']:
             x.chan = dict(x.chan)
+            if ch != 1:
+                bend = {b[0] for w, b in p['xmsg'].items() if w == 'bend'}
+                p.setdefault('xstale', {})[ch] = {lane for lane in p['xs'].get(ch, {}) if lane not in bend}
 
     def _expr_mix(self, v, x, acc, n):
         """Adds a voice with expression to acc: its note read at 2^(bend/12) times its speed (a vib in cents as a

@@ -213,3 +213,49 @@ def test_a_key_has_its_expression_from_its_first_buffer_and_an_mpe_tail_keeps_it
     bend(2, rng=2, ch=1)                               # the master still moves the tail
     eng._pull(BLOCK)
     assert eng.midi.xv[v].rate == pytest.approx(2 ** (14 / 12), abs=1e-3)
+
+
+def test_mpe_two_fingers_on_one_pitch_are_two_keys(eng, lanes_voice):
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, mpe=True)
+    msg(0x91, 60, 100)
+    msg(0x92, 60, 100)
+    a, b = eng.midi.voices
+    p = eng.midi.patches['keys in']
+    assert p['held'] == {(2, 60): a, (3, 60): b} and a.rel is None
+    bend(12, rng=48, ch=3)
+    msg(0x81, 60, 0)                                   # the first finger lifts: only its own key ends
+    assert a.rel is not None and b.rel is None and (3, 60) in p['held']
+    assert eng.midi.xv[b].chan is p['xs'][3]           # still live, not frozen
+    bend(0, rng=48, ch=3)
+    assert eng.midi.xv[b].val('bend') == 0.0
+    msg(0xA2, 60, 127)                                 # poly pressure finds the key by channel
+    assert eng.midi.xv[b].poly == {'level': pytest.approx(6.0)} and eng.midi.xv[a].poly == {}
+
+
+def test_reset_all_controllers_clears_a_keys_poly_pressure_too(eng, lanes_voice):
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]})
+    msg(0x90, 60, 100)
+    v = eng.midi.voices[0]
+    msg(0xA0, 60, 127)
+    msg(0xD0, 127, 0)
+    assert eng.midi.xv[v].val('level') == pytest.approx(12.0)
+    msg(0xB0, 121, 0)
+    assert eng.midi.xv[v].val('level') == 0.0 and eng.midi.xv[v].poly == {}
+
+
+def test_an_mpe_channel_reused_drops_the_old_notes_pressure_but_keeps_a_fresh_bend(eng, lanes_voice):
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, mpe=True)
+    msg(0x92, 60, 100)
+    msg(0xD2, 127, 0)                                  # full pressure on channel 3
+    msg(0xB2, 1, 127)                                  # and the mod wheel
+    msg(0x82, 60, 0)
+    bend(12, rng=48, ch=3)                             # the next note's bend, just before its note-on
+    msg(0x92, 64, 100)
+    w = eng.midi.voices[1]
+    x = eng.midi.xv[w]
+    assert x.val('level') == 0.0 and x.val('vib') == 0.0 and x.g == 1.0
+    assert x.val('bend') == pytest.approx(12.0, abs=0.01)
+    msg(0x82, 64, 0)
+    msg(0xD2, 64, 0)                                   # a pressure sent before the next note-on is that note's
+    msg(0x92, 67, 100)
+    assert eng.midi.xv[eng.midi.voices[2]].val('level') == pytest.approx(6 * 64 / 127)

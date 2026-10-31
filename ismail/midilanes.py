@@ -99,9 +99,9 @@ def resolve(lanes, base, allowed=None):
             assert len(rg) == 2 and lo != hi and math.isfinite(lo) and math.isfinite(hi)
         except (TypeError, ValueError, IndexError, AssertionError):
             raise LaneMapError(f"lanes[{lane!r}] range {rg!r}: [lo, hi], two different numbers in the lane's unit")
-        if kind == 'bend' and abs(lo + hi) > 1e-9:
-            raise LaneMapError(f"lanes[{lane!r}]: pitch bend is centred, so its range is [-r, r] (or the number r); "
-                               f"got {rg!r}")
+        if kind == 'bend' and (abs(lo + hi) > 1e-9 or lo > hi):
+            raise LaneMapError(f"lanes[{lane!r}]: pitch bend is centred, so its range is [-r, r] with r > 0 (or the "
+                               f"number r); got {rg!r}")
         if kind == 'bend' and abs(hi - lo) / 2 > 127:
             raise LaneMapError(f"lanes[{lane!r}]: a bend range is at most 127 semitones")
         key = midi_name(kind, num)
@@ -179,18 +179,23 @@ def lane_points(events, kind, lo, hi, step=STEP, tick=1 / 960):
     """Messages [(beat, raw)] (sorted) as a lane's points [[beat, value]]: a value held for longer than a ramp's
     spacing gets a point just before the next message (MIDI holds a value; a lane is linear between points), and
     points on a straight line between their neighbours are dropped."""
-    if not events:
+    return value_points([(b, from_raw(kind, lo, hi, raw)) for b, raw in events], tol(kind, lo, hi), step, tick)
+
+
+def value_points(vals, half_step, step=STEP, tick=1 / 960):
+    """lane_points on values already in the lane's unit [(beat, value)] (sorted), half_step the tolerance (half a
+    message step, tol()): for bends read at a range that changes during the file."""
+    if not vals:
         return []
     pts = []
-    for i, (b, raw) in enumerate(events):
-        v = from_raw(kind, lo, hi, raw)
+    for b, v in vals:
         if pts and b - pts[-1][0] > step * 1.5 and v != pts[-1][1]:
             pts.append([max(pts[-1][0], b - tick), pts[-1][1]])
         if pts and abs(b - pts[-1][0]) < 1e-12:
             pts[-1][1] = v
         else:
             pts.append([b, v])
-    e = tol(kind, lo, hi) * 2.02          # one message step: a slow ramp read back is a staircase
+    e = half_step * 2.02                 # one message step: a slow ramp read back is a staircase
     keep, a = [pts[0]], 0
     for j in range(2, len(pts)):
         A, C = pts[a], pts[j]
@@ -239,13 +244,13 @@ def voice_lanes(inst, root=None):
     return set()
 
 
-def mpe_merge(notes, ctl, what, master=MPE_MASTER):
+def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False):
     """MPE: each note's own channel stream of one message ('bend', 'pressure', 'cc:<n>') joined into one lane by
     last-note priority. notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)]. At any time the lane
     belongs to the newest-started note still sounding; when that note ends it goes back to the newest older note
     still held, and while nothing sounds the last owner keeps it. In each owner's stretch the lane takes that
-    note's channel's value. Returns (events [(beat, raw)], notes overlapped by a newer one, master-channel messages
-    left out)."""
+    note's channel's value. master: the zone's master channel (0 lower, 15 upper). Returns (events [(beat, raw)],
+    or [(beat, raw, channel)] with with_ch, notes overlapped by a newer one, master-channel messages left out)."""
     by_ch = {}
     skipped = 0
     for b, ch, w, raw in ctl:
@@ -274,12 +279,12 @@ def mpe_merge(notes, ctl, what, master=MPE_MASTER):
         evs = by_ch.get(ch, [])
         before = [r for b, r in evs if b <= a + 1e-9]
         if before:
-            out.append((a, before[-1]))
-        out += [(b, r) for b, r in evs if a + 1e-9 < b < z - 1e-9]
+            out.append((a, before[-1], ch))
+        out += [(b, r, ch) for b, r in evs if a + 1e-9 < b < z - 1e-9]
     out.sort(key=lambda e: e[0])
     dedup = []
-    for b, r in out:
-        if dedup and dedup[-1][1] == r:
+    for b, r, ch in out:
+        if dedup and dedup[-1][1:] == (r, ch):
             continue
-        dedup.append((b, r))
-    return dedup, overlapped, skipped
+        dedup.append((b, r, ch))
+    return (dedup if with_ch else [(b, r) for b, r, _ in dedup]), overlapped, skipped

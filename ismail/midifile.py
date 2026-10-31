@@ -100,10 +100,12 @@ def _read_vlq(b, i):
 def read(path):
     """{'ppq', 'format', 'tempos': [(beat, bpm)], 'meters': [(beat, num, den)], 'markers': [(beat, text)],
     'tracks': [{'index', 'name', 'channels': set, 'programs': {ch: prog}, 'notes': [(beat, pitch, dur, vel, ch)],
-    'ctl': [(beat, ch, 'bend' | 'pressure' | 'cc:<n>' | 'poly:<pitch>', value)], 'bend_range': {ch: semitones},
-    'mpe': member channels or None}]}. Beats are quarter notes from the start of the file. A note-on with no
-    note-off is held to the track's end. Bend values are 0..16383 (8192 the centre), the rest 0..127; RPN and data
-    entry messages are read into bend_range (RPN 0) and mpe (RPN 6, the MPE configuration) and not listed in ctl."""
+    'ctl': [(beat, ch, 'bend' | 'pressure' | 'cc:<n>' | 'poly:<pitch>', value)], 'bend_range': {ch: semitones, the
+    last set}, 'bend_ranges': {ch: [(beat, semitones)]}, 'mpe': member channels or None (an MPE configuration with 0
+    members turns MPE off), 'mpe_master': the configuring zone's master channel (0 lower, 15 upper) or None}]}.
+    Beats are quarter notes from the start of the file. A note-on with no note-off is held to the track's end. Bend
+    values are 0..16383 (8192 the centre), the rest 0..127; RPN and data entry messages are read into bend_range
+    and bend_ranges (RPN 0) and mpe (RPN 6, the MPE configuration) and not listed in ctl."""
     with open(path, 'rb') as f:
         b = f.read()
     if b[:4] != b'MThd':
@@ -124,7 +126,7 @@ def read(path):
         i = end
         tick, status, held = 0, 0, {}
         tr = {'index': k, 'name': '', 'channels': set(), 'programs': {}, 'notes': [], 'ctl': [], 'bend_range': {},
-              'mpe': None}
+              'bend_ranges': {}, 'mpe': None, 'mpe_master': None}
         rp = {}                                              # channel -> [RPN msb, lsb] selected
         while j < end:
             dt, j = _read_vlq(b, j)
@@ -182,10 +184,13 @@ def read(path):
                     sel[:] = [127, 127]
                 elif d[0] == 6 and sel == [0, 0]:
                     tr['bend_range'][ch] = float(d[1])
+                    tr['bend_ranges'].setdefault(ch, []).append((tick / div, float(d[1])))
                 elif d[0] == 38 and sel == [0, 0] and ch in tr['bend_range']:
                     tr['bend_range'][ch] = int(tr['bend_range'][ch]) + d[1] / 100.0
+                    hist = tr['bend_ranges'][ch]
+                    hist[-1] = (hist[-1][0], tr['bend_range'][ch])
                 elif d[0] == 6 and sel == [0, 6]:
-                    tr['mpe'] = d[1]
+                    tr['mpe'], tr['mpe_master'] = (d[1], ch) if d[1] else (None, None)
                 elif d[0] not in (6, 38):
                     tr['ctl'].append((tick / div, ch, f"cc:{d[0]}", d[1]))
         for (ch, p), ons in held.items():                    # never released: held to the track's end

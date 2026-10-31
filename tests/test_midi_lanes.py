@@ -211,3 +211,93 @@ def test_a_multichannel_gm_file_is_not_mpe_unless_it_says_so_or_the_caller_does(
     out = OPS['midi_read'](q, path, into={'band': 'solo'}, mpe=True)
     assert 'per note (MPE)' in out and '(bend range +-48)' in out and _lane(q, 'solo', 'bend')[0][1] == \
         pytest.approx(48)
+
+
+def _raw_file(path, events, ppq=480, tracks=None):
+    """A file as another program writes it: one track of raw events (delta-time bytes included), or several."""
+    trks = tracks or [events]
+    body = b''
+    for evs in trks:
+        ev = b''.join(evs) + b'\x00\xff\x2f\x00'
+        body += b'MTrk' + struct.pack('>I', len(ev)) + ev
+    path.write_bytes(b'MThd' + struct.pack('>IHHH', 6, 0 if len(trks) == 1 else 1, len(trks), ppq) + body)
+    return str(path)
+
+
+def _rpn(ch, lsb, value):
+    c = 0xB0 | ch
+    return bytes([0, c, 101, 0, 0, c, 100, lsb, 0, c, 6, value])
+
+
+def _solo(tmp_path, name='q'):
+    q = str(tmp_path / name)
+    api.project_new(q, bpm=120, length_bars=2)
+    api.track_add(q, 'solo', instrument={'type': 'code', 'voice': 'flute', 'tail': 0.5})
+    return q
+
+
+def test_an_mpe_configuration_with_no_members_is_mpe_off(tmp_path):
+    path = _raw_file(tmp_path / 'off.mid', [_rpn(0, 6, 0), bytes([0, 0xE1, 0x7F, 0x7F, 0, 0x91, 60, 100]),
+                                            bytes([0x83, 0x60, 0x81, 60, 0])])
+    assert MF.read(path)['tracks'][0]['mpe'] is None
+    q = _solo(tmp_path)
+    out = OPS['midi_read'](q, path, into={'#0': 'solo'})
+    assert 'MPE' not in out and '(bend range +-2)' in out and _lane(q, 'solo', 'bend') == [[0.0, 2.0]]
+
+
+def test_an_upper_zone_file_reads_channel_16_as_its_master(tmp_path):
+    path = _raw_file(tmp_path / 'up.mid', [_rpn(15, 6, 15), bytes([0, 0xE0, 0x7F, 0x7F, 0, 0x90, 60, 100]),
+                                           bytes([0, 0xEF, 0, 0]), bytes([0x83, 0x60, 0x80, 60, 0])])
+    f = MF.read(path)
+    assert f['tracks'][0]['mpe'] == 15 and f['tracks'][0]['mpe_master'] == 15
+    q = _solo(tmp_path)
+    assert 'MPE (upper zone, master channel 16)' in OPS['midi_read'](q, path)
+    out = OPS['midi_read'](q, path, into={'#0': 'solo'})
+    assert 'per note (MPE)' in out and 'master channel (16) were left out' in out
+    assert _lane(q, 'solo', 'bend') == [[0.0, 48.0]]          # channel 1 is a member here, its note bent to the top
+
+
+def test_a_reversed_bend_range_is_refused(tmp_path):
+    p = _lead(str(tmp_path / 'song'))
+    with pytest.raises(api.OpError, match=r'\[-r, r\] with r > 0'):
+        OPS['midi_write'](p, out=str(tmp_path / 'r.mid'), lanes={'bend': {'range': [2, -2]}})
+    out = OPS['midi_write'](p, out=str(tmp_path / 'r.mid'), lanes={'level': {'range': [0, -40]}})
+    assert 'level -> cc:11 0..-40' in out                     # a controller may run the other way
+
+
+def test_each_bend_is_read_at_the_range_in_force_when_it_was_sent(tmp_path):
+    ev = [_rpn(0, 0, 2), bytes([0, 0x90, 60, 100, 0, 0xE0, 0x7F, 0x7F]),            # +2 at range 2
+          bytes([0x83, 0x60, 0xB0, 101, 0, 0, 0xB0, 100, 0, 0, 0xB0, 6, 12]),        # beat 1: range 12
+          bytes([0, 0xE0, 0x7F, 0x7F]), bytes([0x83, 0x60, 0x80, 60, 0])]            # +12 at range 12
+    path = _raw_file(tmp_path / 'rng.mid', ev)
+    q = _solo(tmp_path)
+    assert '(bend range +-2/12)' in OPS['midi_read'](q, path)
+    out = OPS['midi_read'](q, path, into={'#0': 'solo'})
+    assert '(bend range +-2/12)' in out
+    pts = _lane(q, 'solo', 'bend')
+    assert pts[0] == [0.0, pytest.approx(2.0)] and pts[-1] == [1.0, pytest.approx(12.0)]
+
+
+def test_messages_on_one_tick_keep_their_file_order_by_channel_too(tmp_path):
+    path = _raw_file(tmp_path / 'same.mid', [bytes([0, 0x90, 60, 100]),
+                                             bytes([0x83, 0x60, 0xB0, 11, 127, 0, 0xB0, 11, 0]),
+                                             bytes([0x83, 0x60, 0x80, 60, 0])])
+    for key in ('#0', 'ch1'):
+        q = _solo(tmp_path, 'q' + key[-1])
+        OPS['midi_read'](q, path, into={key: 'solo'})
+        assert _lane(q, 'solo', 'level') == [[1.0, -40.0]], key      # 127 then 0: the 0 is the value
+
+
+def test_an_mpe_configuration_in_a_conductor_track_counts_for_the_notes_track(tmp_path):
+    path = _raw_file(tmp_path / 'cond.mid', None, tracks=[
+        [_rpn(0, 6, 15)],
+        [bytes([0, 0xE1, 0x7F, 0x7F, 0, 0x91, 60, 100, 0, 0xE2, 0, 0x40]),
+         bytes([0x83, 0x60, 0x92, 64, 100]), bytes([0x83, 0x60, 0x81, 60, 0, 0, 0x82, 64, 0])]])
+    q = _solo(tmp_path)
+    assert '#1 (no name): 2 notes, channel 2/3' in OPS['midi_read'](q, path) and 'MPE, expression' in \
+        OPS['midi_read'](q, path)
+    out = OPS['midi_read'](q, path, into={'#1': 'solo'})
+    assert 'per note (MPE)' in out and '(bend range +-48)' in out
+    assert _lane(q, 'solo', 'bend') == [[0.0, 48.0], [pytest.approx(1 - 1 / 960), 48.0], [1.0, 0.0]]
+    out = OPS['midi_read'](q, path, into={'#1': 'solo'}, mpe=False)        # one plain part: +-2, channels merged
+    assert 'MPE' not in out and '(bend range +-2)' in out
