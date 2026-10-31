@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -242,7 +243,8 @@ def test_private_words_never_reach_the_page(sandbox, tmp_path, monkeypatch):
 # ------------------------------------------------------------------ the page draws them
 
 def _browser():
-    for p in (shutil.which('msedge'), shutil.which('chrome'), shutil.which('chromium'),
+    # google-chrome before chromium: on Ubuntu runners chromium is a snap, which cannot use a profile in tmp
+    for p in (shutil.which('msedge'), shutil.which('chrome'), shutil.which('google-chrome'), shutil.which('chromium'),
               r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
               r'C:\Program Files\Google\Chrome\Application\chrome.exe'):
         if p and Path(p).exists():
@@ -257,7 +259,8 @@ def test_the_page_draws_a_callout_and_a_panel(sandbox, tmp_path):
                    style={'background': '#ff2266', 'size': 0.08})
     R.request_add(who='ViewerA', what='deep house')
     hub.op_panel('requests')
-    proc = subprocess.Popen([_browser(), '--headless=new', '--disable-gpu', '--no-first-run', '--mute-audio',
+    linux = ['--no-sandbox'] if sys.platform.startswith('linux') else []      # CI runs as a user with no sandbox
+    proc = subprocess.Popen([_browser(), '--headless=new', '--disable-gpu', '--no-first-run', '--mute-audio', *linux,
                              f'--user-data-dir={tmp_path / "profile"}', '--window-size=1280,720',
                              f'http://127.0.0.1:{hub.port}/visual?debug=1'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
