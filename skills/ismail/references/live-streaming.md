@@ -26,6 +26,10 @@ person's yes, every time.
    channel='<slug>')`. Any other site: `platform='rtmp'` with its `ingest` address (output only, no chat).
    A recording of every set: `venue_set(name='archive', platform='file', channel='<folder>/set.flv')`.
 3. `venue_list`, then ask the person for what it lists, one venue at a time.
+4. Stream only, no chat: `chat=False` needs only the key; add the login later for chat. For example
+   `venue_set(name='yt', platform='youtube', channel='@handle', chat=False, ingest='rtmp://a.rtmp.youtube.com/live2')`,
+   then the person types `python -m ismail.stream key yt`, and `stream_go` works. Twitch chat can be read with no
+   login at all (replies need it).
 
 What each site's chat can do here:
 
@@ -70,7 +74,13 @@ second; it never touches the mixer. You set what it draws with numbers, and it c
 - Keep the page's own text clear of the stream's text lines (the title top left, the piece bottom left): they draw
   on top.
 - On air, the page opens in its own small browser window (its own profile, muted) that the encoder captures, cropped
-  to the page. Leave that window where it is; covering it is fine.
+  to the page. Leave that window where it is; covering it is fine. It has no resize border, and while live
+  anything that changes its size is undone within a second or two, so the picture always fills the frame. One
+  page window at a time: an open one is reused, never a second opened.
+- If the encoder starts three times in a row with no picture (a window capture that gives no frames), the stream
+  stops itself, with no more restarts, and `stream_status` names the cause and the next call: usually
+  `stream_visual(mode='cqt')` (no window) or `capture='gdi'`, then `stream_go` again (a public venue takes the
+  person's yes again).
 
 ## Chat: the MC
 
@@ -183,6 +193,8 @@ Chat commands are plain chat lines; the MC reads them from `chat_watch`. Keep a 
 
 - `stream_status` says, per venue, whether chat is reading, waiting (YouTube waits for the channel to go live), or
   needs a login, and the line the person types for it.
+- The stream stopped itself (`stream_status` says "the encoder failed 3 starts in a row"): read the cause and make
+  the call it names, then `stream_go` again. It never retries on its own after that.
 - A site that keeps reconnecting: `stream_look` shows its own error (a wrong key, the site down). Say it plainly
   and leave the other sites live.
 - YouTube's quota for the day is used up: its chat comes back after midnight Pacific; the stream itself carries on.

@@ -140,7 +140,8 @@ def title_regex(title):
 def fit_window(title, W, H, view, timeout=20.0):
     """Wait for the page's window, size it so the page draws exactly W x H, and return where that canvas sits in
     the window's client area, [x, y, w, h] for the capture's crop (an app window draws its own title bar inside
-    its client area). view() is the page's own report of its canvas size. None off Windows or if it never shows."""
+    its client area). view() is the page's own report of its canvas size. None off Windows or if it never shows.
+    The window loses its resize border and maximize button: dragging it can no longer change the stream's picture."""
     if os.name != 'nt':
         return None
     import ctypes
@@ -151,12 +152,26 @@ def fit_window(title, W, H, view, timeout=20.0):
     except (AttributeError, OSError):
         pass
     end = time.time() + timeout
-    h = 0
+    h, nudge = 0, None
     while time.time() < end and not (h and view()):
         h = u.FindWindowW(None, title)
+        if h and nudge is None:
+            nudge = time.time() + 1.0
+        elif h and time.time() > nudge:           # a window already open reports its size only on a resize
+            wr = wintypes.RECT()
+            u.GetWindowRect(h, ctypes.byref(wr))
+            u.MoveWindow(h, wr.left, wr.top, wr.right - wr.left + 2, wr.bottom - wr.top, True)
+            nudge = time.time() + 2.0
         time.sleep(0.25)
     if not h or not view():
         return None
+    if u.IsIconic(h) or u.IsZoomed(h):
+        u.ShowWindow(h, 9)                                      # SW_RESTORE
+    style = u.GetWindowLongW(h, -16)                            # GWL_STYLE
+    if style & 0x00050000:                                      # WS_THICKFRAME | WS_MAXIMIZEBOX
+        u.SetWindowLongW(h, -16, style & ~0x00050000)
+        u.SetWindowPos(h, 0, 0, 0, 0, 0, 0x0027)                # FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER
+        time.sleep(0.6)
     for _ in range(3):                                          # resize, then let the page report its new size
         wr, cr = wintypes.RECT(), wintypes.RECT()
         u.GetWindowRect(h, ctypes.byref(wr))
@@ -169,6 +184,57 @@ def fit_window(title, W, H, view, timeout=20.0):
     u.GetClientRect(h, ctypes.byref(cr))
     pw, ph = view()
     return [max(0, (cr.right - pw) // 2), max(0, cr.bottom - ph), min(pw, cr.right), min(ph, cr.bottom)]
+
+
+def windows_titled(title):
+    """Every visible top-level window with exactly this title, front first (FindWindowW's pick is the first). Edge
+    hands a second launch on a profile it already runs to that browser and exits, so the page window outlives the
+    process we started: it is found by its title. [] off Windows."""
+    if os.name != 'nt':
+        return []
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    found = []
+
+    def cb(h, _):
+        b = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(h, b, 256)
+        if b.value == title and u.IsWindowVisible(h):
+            found.append(h)
+        return True
+    u.EnumWindows(ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(cb), 0)
+    return found
+
+
+def close_windows(hs):
+    if os.name == 'nt':
+        import ctypes
+        for h in hs:
+            ctypes.windll.user32.PostMessageW(h, 0x0010, 0, 0)       # WM_CLOSE: the window closes as if clicked shut
+
+
+ENCODER_TRIES = 3          # encoder starts in a row that give no picture before the output stops trying
+
+
+def encoder_failure(err, vis):
+    """(cause, next call) for an encoder that exited with nothing written, read from its last stderr lines."""
+    window = PAGE_TITLE if vis.get('mode') == 'page' else vis.get('window')
+    if window and re.search(r'Parsed_crop|crop.*(too big|Invalid)', err):
+        cause = (f"the crop of the {window!r} window is bigger than the window the capture got (it changed size, "
+                 f"or another window has the same title)")
+    elif window and re.search(r"gfxcapture.*(output pad|No such file)|Can't find window|No such file", err):
+        cause = f"no window titled {window!r} to capture (it was closed, or its title changed)"
+    elif window:
+        cause = f"the capture of the {window!r} window gave no frames"
+    else:
+        cause = (err.split(' | ')[-1] or 'it exited at once')[-200:]
+    if not window:
+        return cause, 'stream_look shows the encoder error; fix it, then stream_go'
+    nowin = "mode='cqt'" if vis.get('mode') == 'page' else 'window=None'
+    other = "'wgc'" if vis.get('capture') == 'gdi' else "'gdi'"
+    nxt = f"stream_visual({nowin}) for a picture with no window, or stream_visual(capture={other}), then stream_go"
+    return cause, nxt
 
 
 def build_encoder_args(vis, text_dir, preview, pcm_url, nvenc):
@@ -386,6 +452,10 @@ class Output:
         self.nvenc = None
         self.chat_thread = None
         self.live_since = None
+        self.enc_fails = 0             # encoder starts in a row that wrote nothing
+        self.stopped = None            # why the output stopped itself, until the next stream_go
+        self._visual_used = self.visual  # what the running encoder was started with
+        self.hold_thread = None
 
     # ------------------------------------------------------------ the sound: /pcm on the stream server
     def serve_pcm(self, handler):
@@ -454,12 +524,19 @@ class Output:
 
     def page_window(self):
         p = getattr(self, 'browser', None)
-        return {'open': bool(p and p.poll() is None), 'title': PAGE_TITLE}
+        return {'open': bool(p and p.poll() is None) or bool(windows_titled(PAGE_TITLE)), 'title': PAGE_TITLE}
 
     def open_page(self):
         """The visual page in its own app window (its own browser profile, never the person's), sized to the
-        stream, kept rendering when covered, so the encoder can capture it by its title. It draws only: no sound."""
-        if self.page_window()['open']:
+        stream, kept rendering when covered, so the encoder can capture it by its title. It draws only: no sound.
+        An open window is kept, never a second one opened: on every encoder start it is fitted again and the crop
+        measured again, so a window that changed size is never captured with an old crop."""
+        W, H = int(self.visual['width']), int(self.visual['height'])
+        wins = windows_titled(PAGE_TITLE)
+        close_windows(wins[1:])                   # one window with the title: the capture takes the first it finds
+        self.hub.page_view = None
+        if wins or self.page_window()['open']:
+            self.page_box = fit_window(PAGE_TITLE, W, H, lambda: self.hub.page_view)
             return
         exe = next((x for x in (shutil.which('msedge'), shutil.which('chrome'), shutil.which('chromium'),
                                 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -468,7 +545,6 @@ class Output:
                    None)
         if not exe:
             raise ValueError("mode='page' needs Edge or Chrome to show the page (none found); use mode='cqt' etc.")
-        W, H = int(self.visual['width']), int(self.visual['height'])
         gpu = [] if self.capture() == 'wgc' else ['--disable-gpu']   # gdigrab sees a GPU-composited window as blank
         self.browser = subprocess.Popen(
             [exe, f'--app=http://127.0.0.1:{self.hub.port}/visual?stream=1', f"--user-data-dir={C.HOME / 'browser'}",
@@ -477,7 +553,6 @@ class Output:
              '--disable-background-timer-throttling', '--disable-features=CalculateNativeWinOcclusion',
              *gpu, '--mute-audio'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=FLAGS & 0x08000000)
-        self.hub.page_view = None
         self.page_box = fit_window(PAGE_TITLE, W, H, lambda: self.hub.page_view)
 
     def capture(self):
@@ -505,15 +580,21 @@ class Output:
             raise ValueError("ffmpeg is not on PATH (or config_set('ffmpeg', <path>)): streaming needs it")
         if self.visual['mode'] == 'page':
             self.open_page()
+            if not self.hold_thread:
+                self.hold_thread = threading.Thread(target=self._hold_page, daemon=True)
+                self.hold_thread.start()
         if self.nvenc is None:
             self.nvenc = self.visual['encoder'] in ('auto', 'nvenc') and has_nvenc()
-        args = build_encoder_args(self._visual_now(), self.text_dir, self.preview_path(),
+        self._visual_used = self._visual_now()
+        args = build_encoder_args(self._visual_used, self.text_dir, self.preview_path(),
                                   f'http://127.0.0.1:{self.hub.port}/pcm', self.nvenc)
+        self.enc_tail.clear()                     # this start's errors only, for the cause if it fails
         self.enc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     creationflags=FLAGS)
         self.enc_started = time.time()
-        threading.Thread(target=self._enc_errs, args=(self.enc,), daemon=True).start()
-        threading.Thread(target=self._fanout, args=(self.enc,), daemon=True).start()
+        errs = threading.Thread(target=self._enc_errs, args=(self.enc,), daemon=True)
+        errs.start()
+        threading.Thread(target=self._fanout, args=(self.enc, errs), daemon=True).start()
 
     def _enc_errs(self, proc):
         for raw in proc.stderr:
@@ -521,23 +602,62 @@ class Output:
             if line:
                 self.enc_tail.append(line)
 
-    def _fanout(self, proc):
+    def _fanout(self, proc, errs=None):
+        got = 0
         while True:
             b = proc.stdout.read1(65536) if hasattr(proc.stdout, 'read1') else proc.stdout.read(65536)
             if not b:
                 break
+            got += len(b)
             self.total += len(b)
             for p in list(self.pushers.values()):
                 p.feed(b, self.total)
+        if errs:
+            errs.join(5)                                       # its last stderr lines are in the tail
         with self.lock:
             if self.enc is proc and self.pushers:              # it died under us: once with NVENC off, then again
                 err = ' | '.join(self.enc_tail)
+                self.enc_fails = 0 if got else self.enc_fails + 1
+                if self.enc_fails >= ENCODER_TRIES:            # it never gave a picture: stop, say why, never loop
+                    self._give_up(err)
+                    return
                 if self.nvenc and time.time() - self.enc_started < 10:
                     self.nvenc = False
                 self.hub.log.add('status', 'output', state='encoder restart', text=err[-300:])
                 time.sleep(2.0)
                 if self.pushers:
                     self._start_encoder()
+
+    def _hold_page(self):
+        """While a page take runs, its window stays at the stream's size: whatever resizes it (a DPI change, Edge
+        itself) is undone within a second or two, so the page never draws smaller than the frame it fills."""
+        while self.pushers and self.visual['mode'] == 'page':
+            want = (int(self.visual['width']), int(self.visual['height']))
+            if self.hub.page_view and self.hub.page_view != want and windows_titled(PAGE_TITLE):
+                box = fit_window(PAGE_TITLE, *want, lambda: self.hub.page_view, timeout=3.0)
+                with self.lock:
+                    if box and box != self.page_box and self.pushers:     # the canvas moved in its window: new crop
+                        self.page_box = box
+                        self._restart_all()
+            time.sleep(1.0)
+        self.hold_thread = None
+
+    def _restart_all(self):
+        """A new encoder and a new pusher per venue: a 2-3 s blip on every site."""
+        urls = {n: p.url_of for n, p in self.pushers.items()}
+        secrets = {n: p.secrets for n, p in self.pushers.items()}
+        for p in self.pushers.values():
+            p.stop()
+        self._stop_encoder()
+        self.pushers = {n: Pusher(n, u, secrets[n]) for n, u in urls.items()}
+        self._start_encoder()
+
+    def _give_up(self, err):
+        cause, nxt = encoder_failure(err, self._visual_used)
+        self.stopped = (f"the encoder failed {self.enc_fails} starts in a row with no picture, so the stream stopped "
+                        f"(no more restarts): {cause}. Next: {nxt}")
+        self.hub.log.add('status', 'output', state='encoder stopped', text=self.stopped, error=err[-300:])
+        self.end()
 
     def _stop_encoder(self):
         p, self.enc = self.enc, None
@@ -592,6 +712,7 @@ class Output:
             self._url(n, all_v[n], check=True)
         urls = {n: (lambda n=n: self._url(n, C.load_venues().get(n) or all_v[n])) for n in names}
         with self.lock:
+            self.stopped, self.enc_fails = None, 0
             for n, url in urls.items():
                 if n in self.pushers:
                     continue
@@ -620,8 +741,11 @@ class Output:
             if not self.pushers:
                 self._stop_encoder()
                 self.live_since = None
-                if self.page_window()['open']:
-                    self.browser.terminate()
+                p = getattr(self, 'browser', None)
+                if p and p.poll() is None:
+                    p.terminate()
+                if p or self._visual_used.get('mode') == 'page':   # also a window Edge took over from our process
+                    close_windows(windows_titled(PAGE_TITLE))
         if names:
             self.hub.log.add('status', 'output', state='end', text=f"stopped streaming to {', '.join(names)}")
         return self.status()
@@ -654,13 +778,7 @@ class Output:
         if restart:
             with self.lock:
                 if self.enc is not None and self.pushers:
-                    urls = {n: p.url_of for n, p in self.pushers.items()}
-                    secrets = {n: p.secrets for n, p in self.pushers.items()}
-                    for p in self.pushers.values():
-                        p.stop()
-                    self._stop_encoder()
-                    self.pushers = {n: Pusher(n, u, secrets[n]) for n, u in urls.items()}
-                    self._start_encoder()
+                    self._restart_all()
         return {'visual': self.visual, 'restarted': bool(restart and self.pushers)}
 
     def set_text(self, slot, text):
@@ -713,7 +831,10 @@ class Output:
             d['live_min'] = int((time.time() - self.live_since) // 60)
         if self.enc_tail and not on:
             d['encoder_error'] = ' | '.join(self.enc_tail)[-300:]
+        if self.stopped and not self.pushers:
+            d['stopped'] = self.stopped
         parts = [f"{n} {p['state']}" for n, p in d['venues'].items()]
         d['summary'] = (f"LIVE {d.get('live_min', 0)} min to " + ', '.join(parts) + f"; {d['engine']}; picture "
-                        f"{d['mode']} via {d['encoder']}") if d['state'] == 'live' else 'off (stream_go starts it)'
+                        f"{d['mode']} via {d['encoder']}") if d['state'] == 'live' else (
+                            f"off: {d['stopped']}" if d.get('stopped') else 'off (stream_go starts it)')
         return d
