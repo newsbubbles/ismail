@@ -2629,7 +2629,7 @@ class Engine:
             self.midi.release(old['source'])
         if binding is None:
             return f"{control} -> {O.describe(m)}: its moves apply in the engine at once and are logged by bar"
-        self.midi.bound_now(binding['source'])
+        self.midi.bound_now(binding['source'], binding)
         same = [c for c, x in self.controls.bound(binding['source']) if c != control and
                 x['midi']['text'] == binding['text'] and x['midi']['channel'] == binding['channel']]
         return (f"{control} -> {O.describe(m)}: each move applies in the engine at once and is logged by bar "

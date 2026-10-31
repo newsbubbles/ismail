@@ -337,3 +337,27 @@ def test_listening_closes_the_input_after_a_while_and_a_map_takes_it_over(eng, m
     with pytest.raises(LiveError, match='could not open'):
         eng.cmd_controls(source='pad')
     assert 'pad grid' not in eng.midi.listening and MP.LISTEN_S == 120
+
+
+def test_a_bound_control_leaves_the_unmapped_list(eng):
+    eng.cmd_controls(source='knob')                            # listening: the person turns two knobs
+    send('knob box', 0xB0, 74, 90)
+    send('knob box', 0xB0, 75, 40)
+    send('knob box', 0xB1, 74, 12)                             # cc:74 on channel 2 too
+    r = eng.cmd_controls()
+    assert "'knob box' cc:74 ch1: last 90" in r and "'knob box' cc:75 ch1" in r
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], midi='cc:74', source='knob',
+                channel=1)
+    r = eng.cmd_controls()
+    assert "cc:74 ch1" not in r and "'knob box' cc:75 ch1: last 40" in r
+    assert "'knob box' cc:74 ch2: last 12" in r                # another channel: still not mapped
+    send('knob box', 0xB0, 74, 100)                            # a bound move is a control, never heard
+    assert "cc:74 ch1" not in eng.cmd_controls()
+    eng.cmd_map('fine', target='lead', param='pan', range=[-1, 1], midi='cc14:3', source='knob')
+    send('knob box', 0xB0, 3, 1)
+    send('knob box', 0xB0, 35, 1)
+    eng.cmd_map('fine', remove=True)
+    assert "cc:3 " not in eng.cmd_controls()                   # heard while bound: never listed
+    eng.midi.heard[('knob box', 'cc:35', 1)] = [5, 1]          # heard before a bind of its pair
+    eng.cmd_map('fine', target='lead', param='pan', range=[-1, 1], midi='cc14:3', source='knob')
+    assert "cc:35" not in eng.cmd_controls()

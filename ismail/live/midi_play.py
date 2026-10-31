@@ -222,10 +222,15 @@ class MidiPlay:
         self._open(name)
         self.listening[name] = time.time() + LISTEN_S
 
-    def bound_now(self, name):
-        """A map was just bound to input `name`: it stops being a listen-only input, and the keys it holds are let
-        go (a note or the pedal now bound would never send the release that frees them)."""
+    def bound_now(self, name, binding=None):
+        """A map was just bound to input `name`: it stops being a listen-only input, what it heard of that control
+        leaves the unmapped list, and the keys it holds are let go (a note or the pedal now bound would never send
+        the release that frees them)."""
         self.listening.pop(name, None)
+        if binding is not None:
+            with self.heard_lock:
+                for k in [k for k in self.heard if k[0] == name and self._takes(binding, k[1], k[2])]:
+                    del self.heard[k]
         p = self.patches.get(name)
         if p is not None:
             p['sustain'] = False
@@ -236,6 +241,15 @@ class MidiPlay:
         for n in [n for n, until in self.listening.items() if until <= now]:
             del self.listening[n]
             self.release(n)
+
+    @staticmethod
+    def _takes(b, what, ch):
+        """Does binding b take a message heard as `what` ('cc:74', 'note:36', 'bend', 'pressure') on channel ch?"""
+        if b['channel'] is not None and ch != b['channel']:
+            return False
+        if b['kind'] == 'cc14':
+            return what in (f"cc:{b['num']}", f"cc:{b['lsb']}")
+        return what == b['text']
 
     def _hear(self, name, st, d1, d2):
         what = O.midi_text(st, d1)
@@ -253,6 +267,8 @@ class MidiPlay:
         """What the open inputs sent that no map takes, newest last: the numbers live_map(midi=...) needs."""
         with self.heard_lock:
             rows = [(k, list(v)) for k, v in self.heard.items() if source is None or k[0] == source]
+        maps = [m['midi'] for _, m in list(self.e.controls.maps.items()) if m.get('midi')]
+        rows = [(k, v) for k, v in rows if not any(b['source'] == k[0] and self._takes(b, k[1], k[2]) for b in maps)]
         L = []
         if source is not None and source in self.listening:
             left = max(0, round(self.listening[source] - time.time()))
