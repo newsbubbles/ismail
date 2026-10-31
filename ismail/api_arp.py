@@ -19,10 +19,11 @@ def track_arp(project: str, track: str, pattern=None, degrees: list = None, note
     low first in a chord), 'random', 'chord', or a list of held-note numbers ([1, 3, 2, 4]; 1 = the lowest, 0 = a
     rest); degrees: scale steps above the lowest held note ([0, 2, 4, 7], needs key and scale); notes: an exact
     step list 'A3 C4 E4 A4 | F3 A3 C4 F4', one bar per '|' group from bars[0], cycling (needs bars when the track
-    has no notes). rate: beats per step (0.25 = 16ths). octaves: 1 to 4. key + scale: held notes snap onto the
-    scale; on a step list, key= moves it from the key it was given with, each note kept on its scale degree.
+    has no notes). rate: beats per step (default 0.25 = 16ths). octaves: 1 to 4 (default 1). key + scale: held
+    notes snap onto the scale; on a step list, key= moves it from the key it was given with, each note kept on its scale degree.
     transpose: semitones. Per step (a number, or a list cycling on its own length; [] clears): gate (fraction of
-    a step), velocity (1-127; default each note's own), accent (0/1: velocity 127), slide (0/1: the step overlaps
+    a step, 0.5), velocity (1-127; default each note's own), accent (0/1: velocity 127), slide (0/1: the step
+    overlaps
     the next, so a synth with mono and glide glides), octave (-3 to 3), cutoff (Hz: written as the instrument's
     filter.cutoff on a synth or a sampler with a filter, else the track's first filter effect), pan (-1 to 1, as
     the track's pan automation over the arp's bars). restart: 'key' (default: each chord starts the pattern

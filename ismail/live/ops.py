@@ -712,7 +712,8 @@ def live_controls(project: str, control: str = None, last: int = 20, source: str
     are logged the same way. It also lists what the open MIDI inputs sent that no map takes (input, 'cc:74' or
     'note:36' or 'bend', channel, last value): the numbers live_map(midi=...) needs. source=<input> opens that input
     to listen for 120 s (a controller with nothing mapped yet; each call restarts it, a map on it keeps it open): ask
-    the person to move the knob, then call again."""
+    the person to move the knob, then call again. Reach for it when you need to know what a knob or pad on the
+    person's controller sends (its cc or note number and channel) before live_map."""
     return _call(project, 'controls', control=control, last=last, source=source)
 
 
@@ -764,7 +765,8 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     synth). Live, a key plays a note rendered ahead, so lanes move it only as pitch and gain: bend, vib and level.
     mpe=True: an MPE controller (lower zone): channel 1 the master, whose values add to every note, and each note's
     own channel 2-16 its own bend (+-48) and pressure. A message bound with live_map stays that map's control.
-    Tell the person before their keys first sound."""
+    Tell the person before their keys first sound. Reach for it when the person wants to play their MIDI keyboard,
+    pads or MPE keyboard through the set, its pitch bend wheel, pressure and mod wheel included."""
     if instrument is not None:
         instrument = _check_instrument(project, instrument)
     return _call(project, 'midi', source=source, track=track, instrument=instrument, volume_db=volume_db,
@@ -786,7 +788,8 @@ def live_arp(project: str, source: str = None, pattern=None, degrees: list = Non
     0 = a rest); degrees: scale steps above the lowest held key ([0, 2, 4, 7], None = a rest; needs key and scale);
     notes: an exact step list 'A3 C4 E4 A4 | F3 A3 C4 F4', one bar per '|' group, switching on bar lines, each
     group cycling inside its bar ('.' a rest, 'C4,E4' two at once); it plays with no keys held.
-    rate: beats per step (0.25 = 16ths, 1/3 = 8th triplets). octaves: 1 to 4. key ('A', 'F#') + scale ('minor',
+    rate: beats per step (default 0.25 = 16ths, 1/3 = 8th triplets; 1/64 to 4). octaves: 1 to 4 (default 1).
+    key ('A', 'F#') + scale ('minor',
     'major', 'dorian' ... or semitones [0, 2, 3, ...]): held keys snap onto the scale; on a step list, key= moves
     it from the key it was given with, each note kept on its scale degree. transpose: semitones.
     Per step (a number, or a list cycling on its own length; [] clears): gate (fraction of a step, 0.5),
@@ -826,8 +829,9 @@ def live_midi_out(project: str, track: str = None, port: str = None, channel: in
 @op()
 def live_midi_clock(project: str, port: str = None, on: bool = True, position: bool = False,
                     offset_ms: float = None) -> str:
-    """Send MIDI clock from the live set to a port, so Ableton, FL Studio or a drum machine follows the set's tempo
-    and starts on its bar line. Reach for it when another app or a hardware box should play in time with the set.
+    """Send MIDI clock from the live set to a port, so Ableton, FL Studio or a drum machine plays at the set's
+    tempo and starts on its bar line. Reach for it when another app or a hardware box should play in time with the
+    set.
     24 pulses per quarter note at the set's tempo (one tempo per set) start at once, so the receiver can lock to it;
     Start goes out right before the first pulse of the next bar line, which becomes the other app's bar 1.
     position=True sends that bar's Song Position Pointer first and Continue instead of Start, for a DAW that follows
@@ -843,11 +847,12 @@ def live_midi_clock_in(project: str, source: str = None, on: bool = True, transp
                        offset_ms: float = None, bandwidth_hz: float = None, tempo_tol_bpm: float = None,
                        phase_tol_ms: float = None, max_bend_pct: float = None, step_beats: int = None,
                        dropout_ms: float = None) -> str:
-    """The set follows another app's MIDI clock in: Ableton, FL Studio, a DAW through a loopMIDI port, or a drum
-    machine sets the set's tempo and beat, and with transport='follow' its Start, Stop and Continue. Reach for it
+    """The set follows another app's MIDI clock in: a DAW or a drum machine sets the set's tempo and beat, and
+    with transport='follow' its Start, Stop and Continue. Reach for it
     when the set should follow, sync to or slave to an external clock, the tempo of my drum machine or my DAW, when
     something else leads and ismail plays in time with it (the other way round, the set leading: live_midi_clock).
-    source: an input's name or a unique part of it (midi_sources). The tempo comes from the 24 ticks per beat
+    source: an input's name or a unique part of it (midi_sources; Ableton or FL Studio send it through a loopMIDI
+    port). The tempo comes from the 24 ticks per beat
     through a loop filter (bandwidth_hz, default 0.5: a steady tempo change shows about 0.215 / bandwidth_hz s
     late, 430 ms by default; higher follows sooner and wobbles more on a jittery clock). The set changes tempo the way
     live_tempo does (its notes render again from the change), at the first beat its renders can reach, at most once

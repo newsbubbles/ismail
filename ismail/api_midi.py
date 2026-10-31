@@ -41,7 +41,9 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     {lane: None} to leave one out; e.g. {'bend': {'range': 12}, 'mute': {'midi': 'cc:20', 'range': [0, 1]}}. The
     reply names lanes with no message and values clamped to a range. mpe: True (every melodic track) or a list of
     track names written as MPE: channel 1 the master, each note on its own member channel 2 to 16 with the track's
-    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth."""
+    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth. Reach for it when
+    the person wants to export or write the song or a part as MIDI for their DAW, a hardware sequencer or an MPE
+    synth, its lanes as pitch bend and controllers."""
     P = _load(project)
     P.d = expand_project(P.d)                    # a track's arp goes out as its steps
     names = tracks or [n for n, t in P.d['tracks'].items() if t.get('notes')]
@@ -292,7 +294,8 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     configures MPE with RPN 6, or mpe=True; mpe=False reads such a part per channel) is read per note: bend at +-48
     unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
     ismail's lanes are per track. Lanes replace the target's points over the span they cover; quantize moves notes
-    only."""
+    only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
+    import into a song, its pitch bend, mod wheel, other controllers and MPE included."""
     path = os.path.abspath(file)
     if not os.path.exists(path):
         raise OpError(f"no file {path}")
