@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### fixes
+
+- Page mode reaches the sites again (2026-10-31, the first YouTube dry run). The loop that holds the page window at
+  the stream's size restarted the live encoder whenever the page drew a few pixels off that size (display scaling),
+  every few seconds, before the window capture gave its first frame (about 15 s), so the site got nothing and no
+  line said why. It now refits the window and keeps the crop for the next start, and never restarts the encoder.
+
 ### Callouts and panels on the stream's visual page (stream page plan, step 1)
 
 - `stream_callout(text, style, anchor or x/y, enter, exit, duration_s, priority, who)`: a timed line on the visual
