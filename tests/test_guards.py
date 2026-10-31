@@ -511,3 +511,31 @@ def test_a_route_still_stops_at_the_still_ask_list_and_his_senses(grants):
     assert gc(ask='should I publish the teaser?', sender='Song Agent').startswith('ask: G2 matched')
     assert gc(ask='can you listen to the teaser mix?', sender='Song Agent').startswith('ask: G2 matched')
     assert gc(ask='is the teaser exam ready for you?', sender='Song Agent').startswith('ask: G2 matched')
+
+
+def test_a_context_keeps_a_grant_to_its_own_kind_of_step(grants):
+    # a room-edit grant shares "typed yes" with a site deploy ask; its context keeps it to the room (qa 10-30 G5)
+    _entries(grants, {'id': 'G5', 'date': '2026-01-05', 'keywords': ['typed yes', 'room rebuild'],
+                      'says': 'his spoken word in the headset is his yes for room edits', 'kind': 'grant',
+                      'source': 'D-5', 'owner': 'Room Dev', 'context': ['room', 'stage', 'scene']})
+    gc = api.OPS['grant_check']
+    assert gc(ask='NEEDS NATE: a typed yes to deploy site-fixes-1030', sender='Site Agent').startswith(
+        'ask: no standing grant')
+    assert gc(ask='do I need a typed yes for the room rebuild?', sender='Song Agent').startswith(
+        "send: this is Room Dev's")
+    assert gc(ask='a typed yes for the stage room rebuild?', sender='Room Dev').startswith('act:')
+    assert guards.grant_for('a typed yes to deploy the site') is None
+    assert guards.grant_for('a typed yes for the room')['id'] == 'G5'
+
+
+def test_grant_add_takes_a_context(tmp_path, monkeypatch):
+    p = tmp_path / 'local' / 'standing_grants.json'
+    monkeypatch.setenv(guards.GRANTS_ENV, str(p))
+    add = api.OPS['grant_add']
+    with pytest.raises(api.OpError, match='context'):
+        add(says='room edits by voice', keywords=['room rebuild'], source='D-5', context=[' '])
+    out = add(says='room edits by voice', keywords=['typed yes'], source='D-5', context=['room', 'stage'])
+    assert 'only with: room, stage' in out
+    assert json.loads(p.read_text())[0]['context'] == ['room', 'stage']
+    assert api.OPS['grant_check'](ask='a typed yes to deploy the site?').startswith('ask:')
+    assert api.OPS['grant_check'](ask='a typed yes for the room?').startswith('act:')
