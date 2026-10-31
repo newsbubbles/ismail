@@ -8,7 +8,7 @@ import time
 import numpy as np
 import soundfile as sf
 
-from . import dsp, fx as fxmod, instruments, notation, voices
+from . import arp, dsp, fx as fxmod, instruments, notation, voices
 from . import settings
 
 LOG_PARAMS = ('cutoff', 'freq', '_hz')
@@ -131,6 +131,7 @@ class Stems(collections.abc.Mapping):
 
 class Renderer:
     def __init__(self, project, root, start_bar=None, end_bar=None, only=None, cache=True):
+        project = arp.expand_project(project)     # a track's arp (track_arp) plays as its steps
         self.project = project
         self.root = root
         self.sr = project.get('sr', 44100)

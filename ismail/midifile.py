@@ -2,8 +2,10 @@
 midi like ableton"; plan in D:/ismail-hq/proposals/midi-parity.md).
 
 write(path, tracks, bpm, beats_per_bar, markers, name) makes a type 1 file: a conductor track (name, tempo, meter,
-markers) and one track per part (name, channel, notes). read(path) gives every track's notes in beats (quarter
-notes), with the tempo map, meters, markers and names, from type 0 or 1 files.
+markers) and one track per part (name, channel, notes, and channel events: controllers, bend, pressure). read(path)
+gives every track's notes in beats (quarter notes), its controller, bend and pressure messages, bend ranges (RPN 0)
+and MPE configuration (RPN 6), with the tempo map, meters, markers and names, from type 0 or 1 files. Lanes as
+MIDI (the mapping both ways) are in midilanes.py.
 """
 import struct
 
@@ -40,9 +42,12 @@ def _text(s):
 
 
 def write(path, tracks, bpm, beats_per_bar=4, markers=None, name=None):
-    """tracks: [{'name': str, 'channel': 0-15, 'notes': [(start_beat, pitch, dur_beats, vel)]}]. markers:
-    [(beat, text)]. Same-pitch notes on one channel that overlap are cut where the next one starts, so every
-    note-off belongs to its own note. Returns the number of notes written."""
+    """tracks: [{'name': str, 'channel': 0-15, 'notes': [(start_beat, pitch, dur_beats, vel[, channel])],
+    'events': [(beat, bytes)]}]: a note's own channel (MPE) wins over the track's; events are channel messages
+    (controllers, bend, pressure, RPNs), written in their order after the note-offs and before the note-ons of
+    their tick.
+    markers: [(beat, text)]. Same-pitch notes on one channel that overlap are cut where the next one starts, so
+    every note-off belongs to its own note. Returns the number of notes written."""
     tempo = round(60_000_000 / float(bpm))
     num = int(beats_per_bar)
     head = [(0, 0, _meta(0x03, _text(name or 'ismail'))), (0, 1, _meta(0x51, tempo.to_bytes(3, 'big'))),
@@ -54,17 +59,21 @@ def write(path, tracks, bpm, beats_per_bar=4, markers=None, name=None):
         ev = [(0, 0, _meta(0x03, _text(tr.get('name', ''))))]
         if tr.get('program') is not None:
             ev.append((0, 1, bytes([0xC0 | ch, int(tr['program']) & 0x7F])))
-        notes = sorted((round(s * PPQ), int(p), max(1, round(d * PPQ)), v) for s, p, d, v in tr['notes'])
+        # after the note-offs of their tick (a reused MPE channel's old note ends before the new note's bend) and
+        # before its note-ons
+        ev += [(round(b * PPQ), 2.5, bytes(data)) for b, data in tr.get('events') or ()]
+        notes = sorted((round(n[0] * PPQ), int(n[1]), max(1, round(n[2] * PPQ)), n[3],
+                        (int(n[4]) & 0x0F) if len(n) > 4 else ch) for n in tr['notes'])
         nxt = {}
         for i in range(len(notes) - 1, -1, -1):          # the next start of the same pitch, to cut overlaps
-            t, p, d, v = notes[i]
+            t, p, d, v, c = notes[i]
             end = t + d
-            if p in nxt and nxt[p] < end:
-                end = max(t + 1, nxt[p])
-            nxt[p] = t
+            if (c, p) in nxt and nxt[(c, p)] < end:
+                end = max(t + 1, nxt[(c, p)])
+            nxt[(c, p)] = t
             vel = max(1, min(127, int(round(v))))
-            ev.append((end, 2, bytes([0x80 | ch, p & 0x7F, 0])))        # offs before ons at the same tick
-            ev.append((t, 3, bytes([0x90 | ch, p & 0x7F, vel])))
+            ev.append((end, 2, bytes([0x80 | c, p & 0x7F, 0])))        # offs before ons at the same tick
+            ev.append((t, 3, bytes([0x90 | c, p & 0x7F, vel])))
             count += 1
         chunks.append(_chunk(ev))
     with open(path, 'wb') as f:
@@ -90,8 +99,13 @@ def _read_vlq(b, i):
 
 def read(path):
     """{'ppq', 'format', 'tempos': [(beat, bpm)], 'meters': [(beat, num, den)], 'markers': [(beat, text)],
-    'tracks': [{'index', 'name', 'channels': set, 'programs': {ch: prog}, 'notes': [(beat, pitch, dur, vel, ch)]}]}.
-    Beats are quarter notes from the start of the file. A note-on with no note-off is held to the track's end."""
+    'tracks': [{'index', 'name', 'channels': set, 'programs': {ch: prog}, 'notes': [(beat, pitch, dur, vel, ch)],
+    'ctl': [(beat, ch, 'bend' | 'pressure' | 'cc:<n>' | 'poly:<pitch>', value)], 'bend_range': {ch: semitones, the
+    last set}, 'bend_ranges': {ch: [(beat, semitones)]}, 'mpe': member channels or None (an MPE configuration with 0
+    members turns MPE off), 'mpe_master': the configuring zone's master channel (0 lower, 15 upper) or None}]}.
+    Beats are quarter notes from the start of the file. A note-on with no note-off is held to the track's end. Bend
+    values are 0..16383 (8192 the centre), the rest 0..127; RPN and data entry messages are read into bend_range
+    and bend_ranges (RPN 0) and mpe (RPN 6, the MPE configuration) and not listed in ctl."""
     with open(path, 'rb') as f:
         b = f.read()
     if b[:4] != b'MThd':
@@ -111,7 +125,9 @@ def read(path):
         j, end = i + 8, i + 8 + ln
         i = end
         tick, status, held = 0, 0, {}
-        tr = {'index': k, 'name': '', 'channels': set(), 'programs': {}, 'notes': []}
+        tr = {'index': k, 'name': '', 'channels': set(), 'programs': {}, 'notes': [], 'ctl': [], 'bend_range': {},
+              'bend_ranges': {}, 'mpe': None, 'mpe_master': None}
+        rp = {}                                              # channel -> [RPN msb, lsb] selected
         while j < end:
             dt, j = _read_vlq(b, j)
             tick += dt
@@ -154,6 +170,29 @@ def read(path):
                     tr['notes'].append((t0 / div, d[0], max(tick - t0, 1) / div, v, ch))
             elif typ == 0xC0:
                 tr['programs'].setdefault(ch, d[0])
+            elif typ == 0xE0:
+                tr['ctl'].append((tick / div, ch, 'bend', (d[1] << 7) | d[0]))
+            elif typ == 0xD0:
+                tr['ctl'].append((tick / div, ch, 'pressure', d[0]))
+            elif typ == 0xA0:
+                tr['ctl'].append((tick / div, ch, f"poly:{d[0]}", d[1]))
+            elif typ == 0xB0:
+                sel = rp.setdefault(ch, [127, 127])
+                if d[0] in (101, 100):
+                    sel[0 if d[0] == 101 else 1] = d[1]
+                elif d[0] in (99, 98):                       # an NRPN: data entry is not an RPN's any more
+                    sel[:] = [127, 127]
+                elif d[0] == 6 and sel == [0, 0]:
+                    tr['bend_range'][ch] = float(d[1])
+                    tr['bend_ranges'].setdefault(ch, []).append((tick / div, float(d[1])))
+                elif d[0] == 38 and sel == [0, 0] and ch in tr['bend_range']:
+                    tr['bend_range'][ch] = int(tr['bend_range'][ch]) + d[1] / 100.0
+                    hist = tr['bend_ranges'][ch]
+                    hist[-1] = (hist[-1][0], tr['bend_range'][ch])
+                elif d[0] == 6 and sel == [0, 6]:
+                    tr['mpe'], tr['mpe_master'] = (d[1], ch) if d[1] else (None, None)
+                elif d[0] not in (6, 38):
+                    tr['ctl'].append((tick / div, ch, f"cc:{d[0]}", d[1]))
         for (ch, p), ons in held.items():                    # never released: held to the track's end
             for t0, v in ons:
                 tr['notes'].append((t0 / div, p, max(tick - t0, 1) / div, v, ch))

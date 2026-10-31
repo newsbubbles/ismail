@@ -20,7 +20,7 @@ CATEGORIES = [
     ('sketch', 'a quick sketch from words, kept or dropped', ('sketch', 'sketch_keep', 'sketch_wait')),
     ('write', 'tracks, notes, patterns, buses, automation, stem maps',
      ('track_add', 'track_set', 'track_remove', 'bus_add', 'notes_write', 'notes_read', 'notes_clear', 'notes_copy',
-      'notes_transform', 'pattern_write', 'automation_', 'stem_map_set', 'audio_place')),
+      'notes_transform', 'pattern_write', 'automation_', 'stem_map_set', 'audio_place', 'track_arp')),
     ('sounds', 'choosing and making sounds: the kit by family, voices, instruments, presets, effects, samples, speech',
      ('kit', 'voices_list', 'voice_help', 'instrument_help', 'instrument_set', 'instrument_show', 'presets_list', 'fx_',
       'samples_', 'sound_list', 'sound_make', 'sound_import', 'sound_speak', 'sound_autotune')),
