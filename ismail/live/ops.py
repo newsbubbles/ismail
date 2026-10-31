@@ -230,8 +230,10 @@ def live_status(project: str, deck: str = None) -> str:
     other programs load the machine); `headroom:` is the real risk: the mixed audio still waiting when the device
     pulled, at its thinnest since the previous status, out of the 500 ms kept ahead (0 = a dropout, THIN under
     125 ms). Judge a pause by headroom, not by the mixer %. deck='B' lists that deck's tracks and buses instead.
-    Problems that arrive between calls (a dropped note, a stall) are added to the next reply of any live op. The
-    last line is the machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
+    Problems that arrive between calls (a dropped note, a stall) are added to the next reply of any live op. Under
+    the render line: the newest rejected renders (bar, track, clip, what and why, and the call that fixes it) and
+    the last burst of underruns with what was sent just before it; live_rejects lists them all. The last line is
+    the machine's free commit and disk (takes are written to disk; a full disk stops the recording)."""
     out = _call(project, 'status', deck=deck)
     try:
         from .. import machine
@@ -301,7 +303,9 @@ def live_track(project: str, track: str, instrument=None, volume_db: float = Non
     (live_stream(name='bus:<b>')) then carries only the tracks routed to it, which a send cannot do (the dry track
     stays on the master). It is set when the track is created; to move a track, remove it and create it again.
     A new instrument or chain on a playing track takes over at `at` (live_queue values, or 'now'); a replaced
-    chain's tail rings out. New instruments warm up off the air first (live_status shows WARMING). volume_db <= +6.
+    chain's tail rings out. New instruments warm up off the air first (live_status shows WARMING; a kit plays every
+    pad on every worker). A new instrument on a playing track adds a 'burst:' line: what it renders again at once,
+    against the workers' time, and what to do when that is heavy. volume_db <= +6.
     remove=True silences and deletes the track now. To move one effect param (a sweep, a fade), use live_fx instead of resending the chain. deck='B' puts a new
     track on deck B (created if needed): it then plays through that deck's strip and cue."""
     stack = None
@@ -546,6 +550,16 @@ def live_queue(project: str, clips: list = None, section: str = None, cancel_sec
     args.update({k: v for k, v in (('section', section), ('cancel_section', cancel_section),
                                    ('cancel_at', cancel_at)) if v is not None})
     return _older_engine(lambda: _call(project, 'queue', **args))
+
+
+@op()
+def live_rejects(project: str, since: int = None) -> str:
+    """Every rejected render the engine kept (its last 50): the bar, deck, track, clip, the note or kit pad, the
+    reason, and the next step (a missing sound: sound_import it, then live_track(track, instrument=<the same>)
+    renders the silent notes again). Then the underrun bursts (its last 20): how many, at which bar, and the ops
+    sent and clips started just before (a swap of a big kit, a drop landing on many tracks). since=<bar> keeps
+    those from that bar on. live_status shows the newest few; this is the whole list."""
+    return _call(project, 'rejects', since=since)
 
 
 @op()

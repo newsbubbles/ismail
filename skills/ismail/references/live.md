@@ -29,8 +29,8 @@ section costs a minute or more. Compose whole sections only for real changes, an
    sweep = two moves, the second a beat later (`bar:N.25`). A whole cycle of moves goes in one call:
    `live_fx(moves=[...])` (the DJ kit builds them). `at` takes the same words everywhere (`now` = `asap`).
 4. **Listen every turn**: `live_status` (levels per track and bus, runway, late events, notes that "never
-   sounded" because their render came back too late, a deck held off air until it is rendered, underruns, safety
-   gain reduction) and `live_listen(bars=4, view=...)` (on the live output `bars` is a count of the last bars; a
+   sounded" because their render came back too late, a deck held off air until it is rendered, rejected renders
+   and underruns with where they happened (`live_rejects` lists them all), safety gain reduction) and `live_listen(bars=4, view=...)` (on the live output `bars` is a count of the last bars; a
    `[a, b]` range only works with `recording=`). Write the Listening Report lines as for a render.
 5. **Change on phrase boundaries** (`next_4`, `next_8`), not mid-phrase, unless the cut is the point.
 6. **Record** with `live_record`: the take starts on a downbeat and has a `.json` sidecar;
@@ -264,6 +264,30 @@ sessions' renders, Blender and video jobs.
   workers=2, priority='high')` and the same deck, it read 28% (peak 37%) with no underruns 45 s later. When the
   mixer stays over about 70% with a light deck, restart (a 20 s gap, said to the person first) rather than trim
   more tracks. On a shared 8-thread machine, start sets with `workers=2`.
+- **Rejected notes and underrun bursts are logged; read them before you guess.** Under the `render:` line,
+  `live_status` shows the newest three rejected renders, each with its bar, deck, track, clip, the note or kit pad,
+  the reason and the next step, and the last burst of underruns with what came just before it. `live_rejects`
+  lists everything kept (the last 50 rejections and 20 bursts); `since=<bar>` keeps those from that bar on. A
+  rejected note stays silent on later passes of its clip until it renders again: after the fix, send
+  `live_track(track, instrument=<the same>)`. A sound added with `sound_import` while the engine runs plays on
+  the next swap or new track (the engine reads the folder's `project.json` again when it meets a name it does not
+  know). A missing one reads `rejected: bar 3 beat 3 (11:24:29) track stab clip c1 (pad C#2 = whisper_reverb_01):
+  InstrumentError: sound 'whisper_reverb_01' is not in the bank of <folder>/project.json (1 sound). Next:
+  sound_import the sound into <folder> ...`. A burst reads `7 underruns at bar 946 (12:10:31): 3 s after
+  live_track(track='kit', instrument=kit of 62 pads); clips started on 2 tracks in the bar before (bass, kit)`.
+  The same lines come in the next reply of any op, and in the engine log.
+- **A swap or a big batch says what it renders.** `live_track(instrument=...)` on a playing track, and
+  `live_queue` or `live_load` with several clips, add a `burst:` line: how many events render at once, the kit
+  pads and the bank sounds the set has not played yet, and the render seconds against the workers' time until
+  those notes sound (from the track's measured render rate, or the default for its type until the warm-up has
+  measured one). A swap always says it; a batch only when it is heavy. Heavy means the renders need half the
+  workers' time or more, or bring 16 or more sounds new to the set (each worker reads a sound's file the first
+  time it plays it). These two lines are the engine's settings, not measured thresholds for underruns. Then it
+  says `Expect underruns or late notes` and what to do: warm a big kit first on a silent track,
+  `live_track('kit_warm', instrument=<the kit>)` (a kit's warm-up plays every pad on every worker, off the air),
+  swap once `live_status` no longer says WARMING, then remove `kit_warm`; or swap at a bar where the track rests.
+  In the tests the work estimate of a 16-note pluck swap was 0.19 s against 0.33 s measured: read it as a lower
+  bound, within a factor of 3.
 - **Never use priority tricks instead of fewer jobs.** A loop that kept helper processes at Idle priority polled
   the process list every 3 s and cost a full core by itself, and Idle priority did not stop a busy machine from
   starving the mixer. Stop the work instead.
