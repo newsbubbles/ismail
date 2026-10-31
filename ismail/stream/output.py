@@ -630,15 +630,19 @@ class Output:
 
     def _hold_page(self):
         """While a page take runs, its window stays at the stream's size: whatever resizes it (a DPI change, Edge
-        itself) is undone within a second or two, so the page never draws smaller than the frame it fills."""
+        itself) is undone within a second or two, so the page never draws smaller than the frame it fills. It never
+        restarts the encoder: on 10-31 a page that drew a few pixels off the stream's size (display scaling) made
+        this restart a live encoder every few seconds, before its capture (about 15 s to first frames) ever started,
+        so YouTube got nothing and no line said why. The new crop is kept for the next start; a crop that no longer
+        fits makes the encoder fail, and that start measures again (three such starts stop the stream)."""
         while self.pushers and self.visual['mode'] == 'page':
             want = (int(self.visual['width']), int(self.visual['height']))
-            if self.hub.page_view and self.hub.page_view != want and windows_titled(PAGE_TITLE):
+            view = self.hub.page_view
+            if view and max(abs(view[0] - want[0]), abs(view[1] - want[1])) > 4 and windows_titled(PAGE_TITLE):
                 box = fit_window(PAGE_TITLE, *want, lambda: self.hub.page_view, timeout=3.0)
                 with self.lock:
-                    if box and box != self.page_box and self.pushers:     # the canvas moved in its window: new crop
+                    if box:
                         self.page_box = box
-                        self._restart_all()
             time.sleep(1.0)
         self.hold_thread = None
 

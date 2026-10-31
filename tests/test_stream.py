@@ -553,3 +553,31 @@ def test_a_page_window_already_open_is_fitted_again_never_opened_twice(home, mon
     out._visual_used = {**out.visual}
     out.end()                                         # nothing streaming: the page window is closed with the take
     assert closed == [22, 11, 22]
+
+
+def test_holding_the_page_window_never_restarts_a_live_encoder(home, monkeypatch):
+    """2026-10-31: a page that drew a few pixels off the stream's size (display scaling) made the hold loop restart
+    the live encoder every few seconds, before its capture ever gave a frame, so YouTube got nothing. Now it refits
+    the window and keeps the crop for the next start, and the running encoder is left alone."""
+    hub = StubHub(home)
+    hub.page_view = (1200, 676)
+    out = output.Output(hub)
+    out.visual['mode'] = 'page'
+    monkeypatch.setattr(output, 'windows_titled', lambda title: [1])
+    monkeypatch.setattr(output, 'fit_window', lambda *a, **k: [0, 40, 1280, 720])
+    restarts = []
+    monkeypatch.setattr(out, '_restart_all', lambda: restarts.append(1))
+
+    class Running:
+        def poll(self):
+            return None
+    enc = out.enc = Running()
+    out.pushers = {'rec': FakePusher()}
+    t = threading.Thread(target=out._hold_page, daemon=True)
+    t.start()
+    assert wait_for(lambda: out.page_box == [0, 40, 1280, 720], timeout=5)
+    time.sleep(1.5)
+    assert out.enc is enc and not restarts
+    out.pushers = {}
+    t.join(5)
+    assert not t.is_alive()
