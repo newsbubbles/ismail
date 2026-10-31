@@ -351,7 +351,8 @@ def stream_visual(mode: str = None, colors: list = None, background: str = None,
     auto (wgc where ffmpeg has it), wgc (Windows Graphics Capture: GPU-drawn pages such as the stage's WebGL, and a
     covered window, come through; the page draws on the GPU) or gdi (gdigrab: a GPU-drawn window comes out blank, so
     the page draws in software). A Chrome or Edge window is cropped to its web content. Look at the result with
-    stream_look."""
+    stream_look. An encoder that starts three times in a row with no picture stops the stream; stream_status says
+    why and what to call next."""
     params = {k: v for k, v in dict(mode=mode, colors=colors, background=background, image=image, window=window,
                                      area=area, text_color=text_color, font_size=font_size,
                                      chat_overlay=chat_overlay, width=width, height=height, fps=fps,
