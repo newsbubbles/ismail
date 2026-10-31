@@ -755,7 +755,7 @@ When another app or a drum machine leads (its tempo, its play and stop), the set
 - Clock out (`live_midi_clock`) and the arp follow the followed tempo. Clock in and clock out on the same port is
   refused (the set would chase its own clock): use two loopMIDI ports.
 - Measured on synthetic clocks (`tests/test_midi_clock_in.py`): a steady clock with 1 ms jitter keeps the beats
-  within 4.3 ms; a ramp of 10 BPM over 16 s trails by up to 31 ms while it ramps.
+  within 4.1 ms with 0 to 2 tempo changes a minute; a ramp of 10 BPM over 16 s trails by up to 32 ms while it ramps.
 - Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed), their Start and Stop
   passed on to clock out, and the silence while they are stopped reaching `live_listen`, `live_record` and the
   streams (only the speakers go silent).

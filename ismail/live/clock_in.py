@@ -10,9 +10,15 @@ damped). Measured in tests/test_midi_clock_in.py: its tempo follows a steady ram
 (430 ms at the default 0.5 Hz, 205 ms at 1 Hz, 95 ms at 2 Hz), settles on a step change within 0.1 BPM in 1.9 s at
 0.5 Hz, and holds a clock with 1 ms of jitter within 0.25 BPM. A tick more than half a period late counts the ticks
 lost before it; the error taken from one tick is clipped to half a period, so a burst of buffered ticks moves
-nothing far. On the engine (same test file): a steady 126 BPM clock with 1 ms jitter keeps ismail's beats within
-4.3 ms of theirs with 4 to 6 tempo changes in 15 s; a ramp of 10 BPM over 16 s trails by at most 31 ms during the ramp
-and is back within 0.3 ms after it.
+nothing far. w is held at most 0.5 (the loop goes unstable from sqrt(2)): a high bandwidth on a slow clock runs
+lower than asked, and the reply says below which tempo.
+
+Once the tempo holds, a straight line through the last 2 to 16 s of ticks gives the tempo and the beat instead of
+the loop: far steadier on a jittery clock, so a steady clock asks for almost no tempo changes. When the loop and the
+line differ by more than tempo_tol_bpm for APART_S, the tempo really changed: the line starts again and the loop
+leads until it has 2 s of the new tempo. On the engine (same test file): a steady 126 BPM clock with 1 ms
+jitter keeps ismail's beats within 4.1 ms of theirs with 0 to 2 tempo changes in 60 s (four seeds); a ramp of 10 BPM
+over 16 s trails by at most 32 ms during the ramp and is back within 4.4 ms after it.
 
 The set follows by tempo changes, the way live_tempo makes them: every change needs its notes rendered again, so
 the follower changes the tempo at a beat the renders can reach (the render lead), at most once per step_beats. At
@@ -39,6 +45,7 @@ Not yet: Ableton Link and MIDI Time Code; their meter (ismail's beats per bar is
 their Start and Stop forwarded to clock out; the silence while they are stopped is on the speakers only:
 live_listen, live_record and the streams still carry the set.
 """
+import collections
 import math
 import re
 import threading
@@ -53,6 +60,9 @@ from .timeline import EPS, fmt_bar
 PPQN = 24
 WARM = 24                   # ticks fitted by least squares before the loop takes over (one beat)
 TICK, SPP, START, CONTINUE, STOP = 0xF8, 0xF2, 0xFA, 0xFB, 0xFC
+W_MAX = 0.5                 # the loop's w = 2 pi B T is held at most this (it is unstable from sqrt(2) on)
+STEADY_S = (2.0, 16.0)      # the steady tempo: a straight line through the ticks of the last 2 to 16 s
+APART_S = 0.25              # the loop and the steady line this long apart by more than tempo_tol_bpm: a real change
 FADE_S = 0.005              # the speakers' fade when the transport stops or starts
 LOCK_BEND = (0.67, 1.5)     # silent before a lock bar, the set may run this much slower or faster to reach it
 LOCK_TRIES = 16             # their bar lines tried for a lock
@@ -88,6 +98,8 @@ class ClockFilter:
         self.t1 = None              # the predicted time of the next
         self.last = None            # the raw arrival time of the last tick
         self.jit = 0.0              # rms of the errors the loop took, s
+        self.hist = collections.deque()     # (tick number, arrival time) of the last STEADY_S[1] seconds
+        self.since = 0              # the steady line starts at this tick number (a real tempo change restarts it)
 
     @property
     def ready(self):
@@ -104,14 +116,16 @@ class ClockFilter:
             self.last, self.t0, self._warm = t, t, [(0, t)]
             return 0
         k = 1
-        if self.T is not None:
+        if self.n >= WARM:                  # not while warming: a period from a few jittery ticks is too rough
             late = t - self.t1
-            if late > 0.5 * self.T:
-                k = 1 + int(round(late / self.T))
+            # lost ticks: later than half a period plus the jitter seen (a late tick at 400 BPM is not a lost one)
+            if late > 0.5 * self.T + min(3.0 * self.jit, self.T):
+                k = 1 + int(late / self.T + 0.5)
         self.last = t
         if self.n + k < WARM:
             self.n += k
             self._warm.append((self.n, t))
+            self._keep(t)
             x = np.array([w[0] for w in self._warm], dtype=float)
             y = np.array([w[1] for w in self._warm]) - self._warm[0][1]
             T, c = np.polyfit(x, y, 1)
@@ -119,17 +133,48 @@ class ClockFilter:
                 self.T = float(T)
                 self.t0 = self._warm[0][1] + float(c) + self.T * self.n
                 self.t1 = self.t0 + self.T
+                if len(x) > 2:
+                    self.jit = float(np.sqrt(np.mean((y - (c + T * x)) ** 2)))
             return k
         T = self.T
         self.t1 += (k - 1) * T
         e = max(-0.5 * T, min(0.5 * T, t - self.t1))
-        w = 2 * math.pi * self.B * T
+        w = self.w()
         self.t0 = self.t1
         self.t1 += math.sqrt(2.0) * w * e + T
         self.T += w * w * e
         self.n += k
+        self._keep(t)
         self.jit = math.sqrt(0.98 * self.jit ** 2 + 0.02 * e * e)
         return k
+
+    def w(self):
+        return min(2 * math.pi * self.B * self.T, W_MAX)
+
+    def clamped_below(self):
+        """The tempo (BPM) below which this bandwidth is held at W_MAX for stability, or None when it never is in
+        20 to 400 BPM."""
+        b = 60.0 * 2 * math.pi * self.B / (PPQN * W_MAX)
+        return b if b > 20.0 else None
+
+    def _keep(self, t):
+        self.hist.append((self.n, t))
+        while self.hist and t - self.hist[0][1] > STEADY_S[1]:
+            self.hist.popleft()
+
+    def restart_steady(self):
+        self.since = self.n
+
+    def steady(self):
+        """(seconds per tick, the fitted time of the last tick) from a straight line through the ticks since the
+        last real tempo change (2 to 16 s of them), or None while there are fewer than 2 s."""
+        h = [x for x in self.hist if x[0] >= self.since]
+        if len(h) < 3 or h[-1][1] - h[0][1] < STEADY_S[0]:
+            return None
+        x = np.array([a for a, _ in h], dtype=float)
+        y = np.array([b for _, b in h]) - h[0][1]
+        T, c = np.polyfit(x - x[-1], y, 1)
+        return (float(T), h[0][1] + float(c)) if T > 0 else None
 
 
 class ClockIn:
@@ -160,6 +205,7 @@ class ClockIn:
         self.last_err = None        # the phase error at the last decision, s (+: ismail late)
         self.events = []            # transport messages seen, newest last (their names)
         self.ignored = 0
+        self._apart = None          # when the loop and the steady line first disagreed
 
     def now(self):
         return self.e.mout.now()
@@ -243,6 +289,8 @@ class ClockIn:
                                   f"{fmt_num(spp / 4 / e.bpb + 1)}); the set relocks on a bar line")
                 return
             if st == STOP:
+                if self.running:
+                    self.pos_next = self.pos + 1                # Continue goes on from the next tick
                 was, self.running, self.lock_req = self.running, False, False
                 self._gate(e.played, False)
                 if was is not False:
@@ -308,8 +356,20 @@ class ClockIn:
             if not ready:
                 return
             ref = self._ref()
+            st = self.f.steady()
+            if st is not None:
+                if abs(60.0 / (PPQN * st[0]) - 60.0 / (PPQN * ref[2])) > self.cfg['tempo_tol_bpm']:
+                    if self._apart is None:
+                        self._apart = now
+                    elif now - self._apart > APART_S:       # the loop has gone somewhere else: a real change
+                        self.f.restart_steady()
+                        self._apart, st = None, None
+                else:
+                    self._apart = None
+            if st is not None:                              # steady: the line, far quieter than the loop
+                ref = (st[1], ref[1], st[0])
             est = 60.0 / (PPQN * ref[2])
-            running, lock_req = self.running, self.lock_req
+            running, lock_req, fresh = self.running, self.lock_req, self.fresh
         a = e.mout.anchor()
         if a is None:
             return
@@ -319,7 +379,8 @@ class ClockIn:
         if follow and running is False:
             self._tempo_only(est)                           # stopped: their position stands still
         elif follow and lock_req:
-            self._lock(est, ref, a)
+            if not fresh:                                   # their first tick after it gives their position
+                self._lock(est, ref, a)
         else:
             self._follow(est, ref, a)
 
@@ -487,6 +548,9 @@ class ClockIn:
                      f"at the first beat its renders can reach; beats kept within {self.cfg['phase_tol_ms']:g} ms "
                      f"of theirs (offset {self.cfg['offset_ms']:+g} ms), bending at most "
                      f"{self.cfg['max_bend_pct']:g}% while heard")
+        cb = self.f.clamped_below()
+        if cb is not None:
+            lines.append(f"below {cb:.0f} BPM the loop runs below {B:g} Hz: it is held there to stay stable")
         if self.mode == 'follow':
             lines.append("transport follow: their Stop silences the set (its time and queue run on); Start or "
                          "Continue bring it back in on the first of their bar lines it can reach. transport='tempo' "

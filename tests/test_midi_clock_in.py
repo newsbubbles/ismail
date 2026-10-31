@@ -82,6 +82,24 @@ def test_a_step_settles_within_two_seconds():
     assert 1.0 < settle < 2.5
 
 
+def test_a_high_bandwidth_on_a_slow_clock_stays_stable():
+    """w = 2 pi B T is held at 0.5: bandwidth 5 Hz at 40 BPM (w would be 4.9, past sqrt(2)) stays on 40, within 1 BPM
+    on a 1 ms jitter (a wide loop, so not a quiet one)."""
+    f, est = run_filter(ticks(40, 0, 60, jitter=0.001), B=5.0)
+    late = est[est[:, 0] > 20, 1]
+    assert np.all(np.isfinite(late)) and np.max(np.abs(late - 40)) < 1.0
+    assert f.w() == 0.5 and f.clamped_below() == pytest.approx(157, abs=1)
+    assert ClockFilter(0.5).clamped_below() is None
+
+
+@pytest.mark.parametrize('seed', [1, 2, 3, 4, 5])
+def test_late_ticks_at_400_bpm_are_not_lost_ticks(seed):
+    """A tick 3 ms late at 400 BPM (half a period is 3.1 ms) is jitter, not a lost tick: the count stays exact."""
+    ts = ticks(400, 0, 20, jitter=0.0015, seed=seed)
+    f = ClockFilter()
+    assert sum(f.tick(t) for _, t in ts) == len(ts) - 1
+
+
 def test_lost_ticks_are_counted_and_a_burst_moves_little():
     ts = ticks(120, 0, 10)
     kept = [x for i, x in enumerate(ts) if i not in (300, 301, 302)]       # three ticks lost on the cable
@@ -220,7 +238,7 @@ def test_tempo_only_follows_their_tempo_and_beat(eng):
     print(f"126 BPM, 1 ms jitter: phase {err.mean():+.2f} ms mean, {np.abs(err).max():.2f} max; "
           f"{eng.cin.changes - n} tempo changes in the last 15 s")
     assert np.abs(err).max() < 6.0
-    assert eng.cin.changes - n <= 6        # a steady clock does not keep the set re-rendering (render lead varies)
+    assert eng.cin.changes - n <= 2                        # a steady clock does not keep the set re-rendering
     s = eng.cmd_status()
     assert re.search(r"clock in <- 'Test Clock': theirs 12[56][.0-9]* BPM \([.0-9]+ ms jitter\) \| set 12[56]", s)
     assert 'transport ignored (tempo only)' in s and 'tempo changes' in s and 'phase ' in s
@@ -288,18 +306,80 @@ def test_continue_lands_on_their_song_position(eng):
     assert abs(speaker(eng, bL) - t_their) < 0.004
 
 
+def now_msg(e, st, d1=0, d2=0):
+    """A message arriving now: after every tick already given to the input. Returns its time."""
+    e.feed.append((e.clk.t, st, d1, d2))
+    e.feed.sort(key=lambda m: m[0])
+    return e.clk.t
+
+
+def first_after(ts, t):
+    """The index of their first tick arriving after time t."""
+    return next(j for j, (_, b) in enumerate(ts) if b > t)
+
+
 def test_a_song_position_jump_while_running_relocks(eng):
     kick(eng)
     eng.cmd_midi_clock_in(source=SRC)
-    clock(eng, 120, 100.2, 115, start=0xFA)
+    ts = clock(eng, 120, 100.2, 116, start=0xFA)
     run(eng, 106)
     first = eng.cin.locked
-    eng.feed.append((106.001, 0xF2, 32, 0))                # they jump to bar 3 while playing
-    eng.feed.sort(key=lambda m: m[0])
-    run(eng, 115)
+    tS = now_msg(eng, 0xF2, 32, 0)                         # they jump to beat 8 (song position 32) while playing
+    run(eng, 116)
     assert 'they jumped to song position 32' in '\n'.join(eng.news)
     xL, bL = eng.cin.locked
     assert eng.cin.locked != first and not eng.cin.lock_req and xL >= 8 and xL % 4 == 0
+    t_their = ts[first_after(ts, tS) + int(round((xL - 8) * 24))][0]
+    assert abs(speaker(eng, bL) - t_their) < 0.004         # ismail's bar line on their (new) bar line
+
+
+@pytest.mark.parametrize('stop_s', [0.0, 0.016])
+def test_a_slow_clock_running_through_stop_locks_on_its_first_tick(eng, stop_s):
+    """At 80 BPM a tick is longer than a mix block, so a scheduler pass runs between Start and their next tick:
+    the lock waits for that tick (it carries their position 0), and never uses the stopped position."""
+    kick(eng)
+    eng.cmd_midi_clock_in(source=SRC)
+    ts = clock(eng, 80, 100.2, 125, start=0xFA)
+    run(eng, 103.3)
+    now_msg(eng, 0xFC)                                     # Stop; their clock keeps running
+    run(eng, 105.0 + stop_s)
+    tS = now_msg(eng, 0xFA)
+    run(eng, 124)
+    xL, bL = eng.cin.locked
+    t_their = ts[first_after(ts, tS) + int(round(xL * 24))][0]
+    assert abs(speaker(eng, bL) - t_their) < 0.004
+
+
+def test_continue_without_song_position_goes_on_from_where_they_stopped(eng):
+    kick(eng)
+    eng.cmd_midi_clock_in(source=SRC)
+    ts = clock(eng, 120, 100.2, 120, start=0xFA)
+    run(eng, 104.3)                                        # stopped mid-bar
+    now_msg(eng, 0xFC)
+    run(eng, 104.4)
+    stopped_at = eng.cin.pos
+    assert stopped_at % 96                                 # not on a bar line
+    run(eng, 106)
+    tC = now_msg(eng, 0xFB)
+    run(eng, 119)
+    xL, bL = eng.cin.locked
+    assert xL * 24 > stopped_at
+    t_their = ts[first_after(ts, tC) + int(round(xL * 24)) - (stopped_at + 1)][0]
+    assert abs(speaker(eng, bL) - t_their) < 0.004
+
+
+@pytest.mark.parametrize('seed', [1, 2, 3, 4])
+def test_a_steady_jittery_clock_asks_for_almost_no_tempo_changes(eng, seed):
+    """126 BPM with 1 ms jitter for 75 s: after the first 15 s, at most one correction (two changes) in 60 s."""
+    kick(eng)
+    ts = clock(eng, 126, 100.3, 175, jitter=0.001, seed=seed)
+    eng.cmd_midi_clock_in(source=SRC, transport='tempo')
+    run(eng, 115)
+    n = eng.cin.changes
+    run(eng, 175)
+    err = phase_ms(eng, ts, 115, 174)
+    print(f"seed {seed}: {eng.cin.changes - n} tempo changes in 60 s, phase max {np.abs(err).max():.1f} ms")
+    assert eng.cin.changes - n <= 2 and np.abs(err).max() < 6.0
 
 
 def test_a_dropout_holds_the_tempo_and_says_so(eng):

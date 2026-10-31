@@ -10,8 +10,10 @@
   430 ms late, a step settles within 0.1 BPM in 1.9 s, 1 ms of jitter reads within 0.25 BPM; measured in the tests).
   The set changes tempo as `live_tempo` does, at the first beat its renders reach, at most once per `step_beats`,
   only past `tempo_tol_bpm` or `phase_tol_ms`, bending at most `max_bend_pct` so ismail's beats land on theirs;
-  `offset_ms` for an app whose sound is late. On a synthetic 126 BPM clock with 1 ms jitter the beats stay within
-  4.3 ms, with 4 to 6 tempo changes in 15 s.
+  `offset_ms` for an app whose sound is late. Once the tempo holds, a straight line through the last 2 to 16 s of
+  ticks replaces the loop (steadier on jitter): on a synthetic 126 BPM clock with 1 ms jitter the beats stay within
+  4.1 ms, with 0 to 2 tempo changes in 60 s over four seeds. The loop's w is held at 0.5 (stable at any bandwidth),
+  and a late tick is told from a lost one with the jitter seen.
 - `transport='follow'` (default): their Stop silences the set on the speakers (a 5 ms fade; MIDI out notes held
   back too), Start or Continue (from their Song Position Pointer) bring it in on the first of their bar lines its
   render lead can reach, with its own bar line locked there; a Song Position while running relocks. `'tempo'`:
