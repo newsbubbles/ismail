@@ -244,7 +244,9 @@ price), accounts and passwords, or deleting; those go to the person every time.
 say what you did), `send:` (another agent's) or `ask:`. The file is kept by ops only: `grant_add(says, keywords,
 source, owner, kind)` needs the person's own words as `source` (a decision id, a phone note `n<id>`, a VR note,
 `chat: <their words>` or `memory: <file>`) and refuses keywords that would match any ask; `grant_list()` and
-`grant_drop(id, why)` (the entry is kept in `grants_dropped.jsonl`).
+`grant_drop(id, why)` (the entry is kept in `grants_dropped.jsonl`). When a grant's keywords could also name a
+different kind of step, give it `context=['room', 'stage']`: it then covers an ask only when one of those words is
+in it too, so "a typed yes for the room rebuild" matches and "a typed yes to deploy the site" is asked.
 
 ## The page's sounds: make them, attach them
 

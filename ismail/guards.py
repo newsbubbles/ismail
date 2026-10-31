@@ -9,7 +9,9 @@ Three refusals, each saying why and what the next call is:
    says how to turn the rest on.
 2. Do not ask for what is already granted. A yes/no question whose words a standing grant covers is refused. Grants
    live in a local file: ~/.ismail/standing_grants.json (the setting guards.grants moves it), a JSON list of
-   {"id", "date", "topic", "keywords": [...], "says", "owner", "kind", "source"}. With no file there is no check.
+   {"id", "date", "topic", "keywords": [...], "says", "owner", "kind", "source", "context": [...]}. With no file
+   there is no check. `context` (optional) scopes an entry: at least one of its words must also be in the ask, so a
+   grant for room edits ("typed yes" + context ["room", "stage"]) does not cover "a typed yes to deploy the site".
    An entry with an `owner` belongs to that agent: kind "grant" (the default) means the person already said yes to
    this kind of step, so its owner acts and anyone else sends it to the owner; kind "route" means this kind of
    question is the owner's to answer, so it goes to them and not to the person. Some asks no grant covers: anything
@@ -247,11 +249,20 @@ def load_grants():
     return sorted(out, key=lambda g: not g.get('source')), ''      # an entry with the person's source matches first
 
 
+def _in_context(g, texts):
+    """True when the entry has no context, or one of its context words appears, whole word, in the texts."""
+    ctx = [str(c).strip() for c in (g.get('context') or []) if str(c).strip()]
+    return not ctx or any(_word_re(c).search(s) for c in ctx for s in texts)
+
+
 def grant_for(*values):
-    """The first grant one of whose keywords appears, whole word, in the values; else None."""
+    """The first grant one of whose keywords appears, whole word, in the values (and, if it has a context, one of
+    its context words too); else None."""
     grants, _ = load_grants()
     texts = _flat(values)
     for g in grants:
+        if not _in_context(g, texts):
+            continue
         for k in g['keywords']:
             k = str(k).strip()
             if k and any(_word_re(k).search(s) for s in texts):
@@ -274,6 +285,8 @@ def assess(question, yes_no=True, sender=None):
     for g in grants:
         kind = g.get('kind') or 'grant'
         if not (yes_no if kind == 'grant' else asked):
+            continue
+        if not _in_context(g, texts):
             continue
         if any(_word_re(str(k).strip()).search(s) for k in g['keywords'] if str(k).strip() for s in texts):
             out['entry'] = g

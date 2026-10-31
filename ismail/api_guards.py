@@ -52,8 +52,9 @@ def _line(g):
     who = f", {g['owner']}'s" if g.get('owner') else ''
     src = (f", from {g['source']}" if g.get('source') else
            ", no source: matched after the sourced ones; grant_drop it and grant_add it with its source")
+    ctx = f"; only with: {', '.join(map(str, g['context']))}" if g.get('context') else ''
     return (f"{g.get('id')} ({g.get('date')}, {kind}{who}{src}): {g.get('says')}; keywords: "
-            f"{', '.join(map(str, g.get('keywords') or []))}")
+            f"{', '.join(map(str, g.get('keywords') or []))}{ctx}")
 
 
 @op()
@@ -99,14 +100,15 @@ def grant_list() -> str:
 
 @op(mutates=True)
 def grant_add(says: str, keywords: list, source: str, owner: str = None, kind: str = 'grant', topic: str = None,
-              id: str = None, date: str = None) -> str:
+              id: str = None, date: str = None, context: list = None) -> str:
     """Record a standing grant (the person said yes to a kind of step: kind='grant', its owner acts without asking)
     or a route (a kind of question belongs to an agent: kind='route', owner required, asks go to it, not to the
     person). says: the grant in a few plain words. keywords: whole words or phrases that mark an ask it covers
     (['merge', 'merging']); a word that would match any ask ('yes', 'go') is refused. source: where the person
     said it: a decision id ('D-150' or 'hq:D-150'), a phone note ('n5737'), a VR note ('vr:<scene>:<id>'), their
     words ('chat: <exact words>') or a memory file ('memory: <name>'). Public, money, accounts and deleting cannot
-    be granted. id: default the next G<n>."""
+    be granted. context: words of which at least one must also be in the ask for the entry to match (['room',
+    'stage'] keeps a room-edit grant off a site deploy that shares a keyword). id: default the next G<n>."""
     says = str(says or '').strip()
     if not says:
         raise OpError("says: the grant in a few plain words, e.g. 'merge reviewed pull requests on green'")
@@ -133,6 +135,11 @@ def grant_add(says: str, keywords: list, source: str, owner: str = None, kind: s
                       f"person), got {kind!r}")
     if kind == 'route' and not owner:
         raise OpError("a route needs owner=: the agent that answers this kind of question")
+    ctx = None
+    if context is not None:
+        if not isinstance(context, (list, tuple)) or not [c for c in context if str(c).strip()]:
+            raise OpError("context: a list of words, one of which must also be in the ask, e.g. ['room', 'stage']")
+        ctx = [str(c).strip() for c in context if str(c).strip()]
     p, data = _read()
     ids = {str(g.get('id')) for g in data if isinstance(g, dict)}
     if id is None:
@@ -144,6 +151,8 @@ def grant_add(says: str, keywords: list, source: str, owner: str = None, kind: s
          'says': says, 'kind': kind, 'source': source}
     if owner:
         g['owner'] = owner
+    if ctx:
+        g['context'] = ctx
     data.append(g)
     _write(p, data)
     return f"added {_line(g)}\nphone and stage asks it covers are refused from now on; grant_check tests any other ask"
