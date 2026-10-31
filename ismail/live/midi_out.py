@@ -371,6 +371,18 @@ class MidiOut:
         return act
 
     # ------------------------------------------------------------------ the set's end
+    def silence(self):
+        """Clock in, their Stop: every note held on a routed port gets its note-off now (the set has gone silent;
+        notes due later are held back by the gate)."""
+        with self.lock:
+            for name, p in self.ports.items():
+                chans = {r['ch'] for r in self.routes.values() if r['port'] == name}
+                if chans:
+                    try:
+                        p['notes'].release(channels=chans, all_off=False)
+                    except Exception:
+                        pass
+
     def end(self, after_s=0.0):
         """live_stop: notes stop with the fade; at its end every held note goes off and the clock stops."""
         if not (self.routes or self.clock) or self.ending is not None:

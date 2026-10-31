@@ -809,7 +809,9 @@ When another app or a drum machine leads (its tempo, its play and stop), the set
 - `transport='follow'` (default): their Stop silences the set on the speakers at once (its time and queue run on),
   and Start or Continue bring it back in on the first of their bar lines it can reach. ismail mixes ahead, so it
   cannot land on their very first beat: the news says "locked, their bar 2 = ismail bar 5". Start counts from their
-  bar 1, Continue from their Song Position. Turning clock in on never silences the set; their Stop does.
+  bar 1, Continue from their Song Position. Turning clock in on does not silence the set, but their Start (or
+  Continue, or a Song Position jump) does, from that moment to the lock bar: one to two bars of silence, then the
+  set comes in on their bar line. Tell them before they press Start.
   `transport='tempo'`: tempo and beats only, their transport ignored, bar lines need not line up.
 - **Lining up by ear.** `offset_ms` (-500 to 2000) lands ismail later for an app whose sound comes out late. Ask
   whether ismail's kick sits on theirs, and change it in steps of 5 to 10 ms.
@@ -826,8 +828,8 @@ When another app or a drum machine leads (its tempo, its play and stop), the set
   setting to change. `source='screen keys'` is refused: the on-screen keys send no clock.
 - **Example.** A set plays; the person says "my drum machine leads: follow its tempo."
   1. `midi_sources()` names the input (here `'drum machine'`, its USB MIDI). Tell them: "Turn on MIDI clock out
-     on your drum machine. The set keeps playing as it is until you press Start on the machine; then it comes in on
-     one of your bar lines, at your tempo, and your Stop silences it."
+     on your drum machine. The set keeps playing as it is until you press Start on the machine. Then it goes quiet
+     for one or two bars and comes in on one of your bar lines, at your tempo. Your Stop silences it."
   2. `live_midi_clock_in(source='drum machine')`. The reply: `clock in <- 'drum machine'`, `follows its tempo: a
      0.5 Hz loop filter (a steady tempo change shows about 430 ms late), a tempo change at most every 4 beats, ...`,
      the transport line, and `clock in <- 'drum machine': waiting for clock (nothing heard yet)`. Still waiting
@@ -836,13 +838,17 @@ When another app or a drum machine leads (its tempo, its play and stop), the set
      in there at 126 BPM`. `live_status`: `theirs 126 BPM (0.4 ms jitter) | set 126 BPM | running, their bar 2 =
      ismail bar 33 | phase +0.3 ms (+: ismail late) | 2 tempo changes`.
   4. Tell them: "Locked: the set follows your machine at 126 BPM, from your bar 2. Change the tempo on the machine
-     and the set follows within about half a second. Does our kick sit on yours?" When they hear it early or late,
-     `live_midi_clock_in(offset_ms=10)` (positive = ismail later), in steps of 5 to 10 ms.
+     and you hear the set change about 1.5 seconds later; it is on your tempo and your beat in about 3.5 seconds.
+     Does our kick sit on yours?" When they hear it early or late, `live_midi_clock_in(offset_ms=10)` (positive =
+     ismail later), in steps of 5 to 10 ms.
   5. They ask you for a faster tempo while it follows: `live_tempo` is refused (the error says so). Tell them to
      turn it up on the machine, or `live_midi_clock_in(on=False)` first (the reply: `clock in off: 'drum machine'
      let go; the set holds 126 BPM ...; live_tempo works again`).
 - Measured on synthetic clocks (`tests/test_midi_clock_in.py`): a steady clock with 1 ms jitter keeps the beats
-  within 4.1 ms with 0 to 2 tempo changes a minute; a ramp of 10 BPM over 16 s trails by up to 32 ms while it ramps.
+  within 4.1 ms with 0 to 2 tempo changes a minute; a ramp of 10 BPM over 16 s trails by up to 32 ms while it ramps;
+  after a step of their tempo (120 to 100, 90, 80, 150 or 200, and 140 to 70) every tick is counted and the beats
+  are back within `phase_tol_ms` in 2 to 4.6 s with `transport='tempo'`, 2.9 to 7.9 s with `'follow'` (which keeps
+  their bar lines), and 13 s for a halving (140 to 70) in `'follow'`.
 - Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed), their Start and Stop
   passed on to clock out, and the silence while they are stopped reaching `live_listen`, `live_record` and the
   streams (only the speakers go silent).

@@ -1,9 +1,10 @@
 """MIDI clock in (MIDI parity step 8, part 1): the filter's tempo from synthetic ticks (jitter, a ramp and its lag in
-ms, a step, lost ticks, a burst), then a silent engine following a synthetic clock: tempo and beat phase locked,
-a ramp followed, Stop silencing the speakers and Start / Continue bringing the set in on their bar line, a Song
-Position jump, a dropout holding the tempo, clock out and the arp on the followed tempo, live_tempo refused, and
-clock in and clock out on one port refused. Every port is a stand-in fed messages with controlled timestamps on a
-fake clock; no MIDI device opens, no audio plays, nothing renders to disk."""
+ms, steps with every tick counted, lost ticks, a burst, a duplicate), then a silent engine following a synthetic
+clock: tempo and beat phase locked, a ramp followed, tempo steps in both transports, bandwidths up to 5 Hz keeping
+one steady line, Stop silencing the speakers (and MIDI out's held notes) and Start / Continue bringing the set in on
+their bar line, a Song Position jump, a dropout holding the tempo, clock out and the arp on the followed tempo,
+live_tempo refused, and clock in and clock out on one port refused. Every port is a stand-in fed messages with
+controlled timestamps on a fake clock; no MIDI device opens, no audio plays, nothing renders to disk."""
 import random
 import re
 
@@ -72,14 +73,39 @@ def test_a_tempo_ramp_is_followed_with_the_documented_lag(B, lag):
     assert abs(est[-1, 1] - 132) < 0.01                 # and it ends on the new tempo
 
 
-def test_a_step_settles_within_two_seconds():
-    step = lambda t: 120.0 if t < 10 else 126.0          # noqa: E731
-    _, est = run_filter(ticks(step, 0, 20))
+@pytest.mark.parametrize('a, b', [(120, 126), (120, 110), (120, 100), (120, 90), (120, 80), (120, 150),
+                                  (120, 200), (120, 240), (140, 70)])
+def test_a_step_settles_at_once_and_every_tick_is_counted(a, b):
+    """A step is told by the half-beat line and the loop starts again there: within 0.1 BPM in well under a second,
+    no overshoot, and a step down (each tick later than the loop predicts) counts no lost ticks."""
+    step = lambda t: a if t < 10 else b                  # noqa: E731
+    ts = ticks(step, 0, 30)
+    f = ClockFilter()
+    n, est = 0, []
+    for true, t in ts:
+        n += f.tick(t) or 0
+        est.append((true, f.bpm() or 0.0))
+    est = np.array(est)
     after = est[est[:, 0] > 10]
-    off = np.nonzero(np.abs(after[:, 1] - 126) >= 0.1)[0]
+    off = np.nonzero(np.abs(after[:, 1] - b) >= 0.1)[0]
     settle = after[off[-1] + 1, 0] - 10 if len(off) else 0.0
-    print(f"step 120 -> 126: within 0.1 BPM after {settle * 1000:.0f} ms")
-    assert 1.0 < settle < 2.5
+    over = max(0.0, float(np.max((after[:, 1] - b) * np.sign(b - a))))
+    print(f"step {a} -> {b}: within 0.1 BPM after {settle * 1000:.0f} ms, overshoot {over:.2f} BPM, "
+          f"count off by {n - (len(ts) - 1)}")
+    assert n == len(ts) - 1 and f.steps >= 1
+    assert settle < 0.6 and over < 0.1
+
+
+def test_a_duplicate_tick_is_ignored():
+    ts = ticks(120, 0, 20)
+    dup = {200, 333, 410}
+    f = ClockFilter()
+    n = 0
+    for i, (_, t) in enumerate(ts):
+        n += f.tick(t) or 0
+        if i in dup:
+            assert f.tick(t + 0.0004) is None             # the same tick again, 0.4 ms later (a doubled route)
+    assert n == len(ts) - 1 and f.dups == len(dup) and abs(f.bpm() - 120) < 0.01
 
 
 def test_a_high_bandwidth_on_a_slow_clock_stays_stable():
@@ -97,22 +123,22 @@ def test_late_ticks_at_400_bpm_are_not_lost_ticks(seed):
     """A tick 3 ms late at 400 BPM (half a period is 3.1 ms) is jitter, not a lost tick: the count stays exact."""
     ts = ticks(400, 0, 20, jitter=0.0015, seed=seed)
     f = ClockFilter()
-    assert sum(f.tick(t) for _, t in ts) == len(ts) - 1
+    assert sum(f.tick(t) or 0 for _, t in ts) == len(ts) - 1
 
 
 def test_lost_ticks_are_counted_and_a_burst_moves_little():
     ts = ticks(120, 0, 10)
     kept = [x for i, x in enumerate(ts) if i not in (300, 301, 302)]       # three ticks lost on the cable
     f = ClockFilter()
-    n = sum(f.tick(t) for _, t in kept)
+    n = sum(f.tick(t) or 0 for _, t in kept)
     assert n == len(ts) - 1 and abs(f.bpm() - 120) < 0.01      # periods since the first tick
     burst = [(a, b) for a, b in ts]
     for i in range(320, 330, 2):                     # pairs arriving together (a driver's buffer)
         burst[i] = (burst[i][0], burst[i + 1][1])
     f2 = ClockFilter()
-    for _, t in burst:
-        f2.tick(t)
+    n2 = sum(f2.tick(t) or 0 for _, t in burst)
     assert abs(f2.bpm() - 120) < 0.3
+    assert n2 == len(ts) - 1 and f2.dups == 0             # a buffered pair is two ticks, not a lost one and a duplicate
 
 
 # ---------------------------------------------------------------------------------------------------- the engine
@@ -380,6 +406,99 @@ def test_a_steady_jittery_clock_asks_for_almost_no_tempo_changes(eng, seed):
     err = phase_ms(eng, ts, 115, 174)
     print(f"seed {seed}: {eng.cin.changes - n} tempo changes in 60 s, phase max {np.abs(err).max():.1f} ms")
     assert eng.cin.changes - n <= 2 and np.abs(err).max() < 6.0
+
+
+STEPS = [(120, 100), (120, 90), (120, 80), (120, 150), (120, 200), (140, 70)]
+
+
+@pytest.mark.parametrize('mode', ['tempo', 'follow'])
+@pytest.mark.parametrize('a, b', STEPS)
+def test_a_tempo_step_is_followed_and_the_beats_land_again(eng, a, b, mode):
+    """Their tempo steps at 110 s: the set ends on their tempo, every tick is counted, and ismail's beats are back
+    within phase_tol_ms (transport 'follow' after their Start: on their own beats; 'tempo': the nearest of theirs)."""
+    kick(eng)
+    f = lambda t: a if t < 110 else b                    # noqa: E731
+    end = 130 if mode == 'follow' else 124            # 'follow' keeps their bar lines: a halving takes longer
+    ts = clock(eng, f, 100.3, end, start=0xFA if mode == 'follow' else None)
+    eng.cmd_midi_clock_in(source=SRC, transport=mode)
+    run(eng, end)
+    assert eng.cin.count == len(ts) - 1
+    if mode == 'follow':
+        assert eng.cin.pos == len(ts) - 1
+    assert eng.bpm == pytest.approx(b, abs=0.25)
+    err = phase_ms(eng, ts, 110, end - 0.5)
+    t_beats = np.array([x[0] for i, x in enumerate(ts) if i % 24 == 0 and 110 <= x[0] <= end - 0.5])
+    tol = eng.cin.cfg['phase_tol_ms']
+    bad = np.nonzero(np.abs(err) > tol)[0]
+    land = t_beats[bad[-1] + 1] - 110 if len(bad) else 0.0
+    last = np.abs(err[t_beats > end - 4.5]).max()
+    print(f"{a} -> {b} ({mode}): set {eng.bpm:.2f} BPM, beats within {tol} ms from +{land:.1f} s, last 4 s max "
+          f"{last:.1f} ms; {eng.cin.changes} tempo changes")
+    assert land < (15.0 if mode == 'follow' else 6.0)
+    assert last <= tol
+
+
+@pytest.mark.parametrize('B', [0.5, 1.0, 2.0, 5.0])
+def test_a_wide_loop_does_not_restart_the_steady_line(eng, B):
+    """The real-change test reads the last second's ticks, not the loop: at any bandwidth a steady 126 BPM clock with
+    1 ms jitter keeps one steady line and asks for almost no tempo changes."""
+    kick(eng)
+    ts = clock(eng, 126, 100.3, 175, jitter=0.001)
+    eng.cmd_midi_clock_in(source=SRC, transport='tempo', bandwidth_hz=B)
+    run(eng, 115)
+    n, since = eng.cin.changes, eng.cin.f.since
+    run(eng, 175)
+    err = phase_ms(eng, ts, 115, 174.5)
+    print(f"B={B} Hz: {eng.cin.changes - n} tempo changes in 60 s, phase max {np.abs(err).max():.1f} ms")
+    assert eng.cin.f.since == since                       # no restart from the loop's wobble
+    assert eng.cin.changes - n <= 2 and np.abs(err).max() < 6.0
+
+
+def test_dropout_ms_is_at_least_three_tick_periods(eng):
+    """dropout_ms=50 on a 40 BPM clock (a tick every 62.5 ms): no dropout between ticks."""
+    kick(eng)
+    eng.cmd_midi_clock_in(source=SRC, transport='tempo', dropout_ms=50)
+    clock(eng, 40, 100.2, 112)
+    run(eng, 112)
+    assert 'NO CLOCK' not in eng.cmd_status() and not any('no clock from' in x for x in eng.news)
+    assert eng.cin.f.bpm() == pytest.approx(40, abs=0.05)
+    assert eng.cin._dropout_s() == pytest.approx(3 * 60 / (24 * 40), rel=0.01)
+
+
+def test_a_start_while_playing_holds_midi_out_to_the_lock_bar_and_stop_lets_notes_go(eng):
+    eng.cmd_track('hat', instrument={'type': 'kick'})
+    eng.cmd_queue([{'track': 'hat', 'lanes': {'C1': 'x' * 16}, 'at': 'next_bar'}])    # a note every 16th
+    eng.cmd_midi_out(track='hat', port='Test Out')
+    eng.cmd_midi_clock_in(source=SRC)
+    clock(eng, 120, 100.1, 104)
+    run(eng, 104)
+    out = FakePort.opened['Test Out']
+    assert [b for _, b in out.sent if b[0] & 0xF0 == 0x90]      # playing: notes go out
+    clock(eng, 120, 104.2, 112, start=0xFA)                   # their Start while the set plays
+    run(eng, 112)
+    xL, bL = eng.cin.locked
+    t_in = speaker(eng, bL)
+    ons = [t for t, b in out.sent if b[0] & 0xF0 == 0x90 and b[2]]
+    early = [t for t in ons if 104.2 < t < t_in - 0.001]
+    assert not early, f"{len(early)} note-ons between their Start and the lock bar ({t_in:.3f} s)"
+    assert min(t for t in ons if t > 104.2) == pytest.approx(t_in, abs=1e-6)
+
+
+def test_their_stop_sends_held_notes_their_note_off(eng):
+    eng.cmd_track('pad', instrument='preset:pluck')
+    eng.cmd_queue([{'track': 'pad', 'notes': '0 C4 8 100', 'beats': 8, 'loop': None, 'at': 'next_bar'}])
+    eng.cmd_midi_out(track='pad', port='Test Out')
+    eng.cmd_midi_clock_in(source=SRC)
+    clock(eng, 120, 100.1, 106)
+    run(eng, 104)
+    out = FakePort.opened['Test Out']
+    assert [b for _, b in out.sent if b[0] & 0xF0 == 0x90 and b[1] == 60]   # the pad note is sounding
+    assert not [b for _, b in out.sent if b[0] & 0xF0 == 0x80 and b[1] == 60]
+    n = len(out.sent)
+    tS = now_msg(eng, 0xFC)                                   # Stop, mid note
+    run(eng, tS + 0.05)
+    offs = [(t, b) for t, b in out.sent[n:] if b[0] & 0xF0 == 0x80 and b[1] == 60]
+    assert offs and offs[0][0] == pytest.approx(tS, abs=0.03), 'their Stop sends the held note its note-off'
 
 
 def test_a_dropout_holds_the_tempo_and_says_so(eng):

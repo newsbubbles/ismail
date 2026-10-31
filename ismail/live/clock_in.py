@@ -6,35 +6,48 @@ The filter. Ticks arrive with jitter (a USB cable, a driver, the other app's own
 beat) are fitted by least squares; then a second-order delay-locked loop (F. Adriaensen, "Using a DLL to filter
 time", 2005) takes over: each tick's error against the predicted time e moves the prediction by b * e and the tick
 period by c * e, with w = 2 pi B T (B the loop bandwidth in Hz, T the period), b = sqrt(2) w, c = w^2 (critically
-damped). Measured in tests/test_midi_clock_in.py: its tempo follows a steady ramp about 0.215 / B seconds late
-(430 ms at the default 0.5 Hz, 205 ms at 1 Hz, 95 ms at 2 Hz), settles on a step change within 0.1 BPM in 1.9 s at
-0.5 Hz, and holds a clock with 1 ms of jitter within 0.25 BPM. A tick more than half a period late counts the ticks
-lost before it; the error taken from one tick is clipped to half a period, so a burst of buffered ticks moves
-nothing far. w is held at most 0.5 (the loop goes unstable from sqrt(2)): a high bandwidth on a slow clock runs
-lower than asked, and the reply says below which tempo.
+damped). Measured in tests/test_midi_clock_in.py: its tempo follows a steady ramp about 0.215 / B seconds late (430
+ms at the default 0.5 Hz, 205 ms at 1 Hz, 95 ms at 2 Hz), and holds a clock with 1 ms of jitter within 0.25 BPM. A
+step the loop would take seconds to reach (and overshoot) is told by a straight line through the last SHORT ticks
+(half a beat) far from the loop's period (STEP_PCT, or 6 of the line's own errors): the loop starts again from that
+line and again half a beat later, so a step of 4 percent or more settles within 0.1 BPM in 0.2 to 0.5 s with no
+overshoot. Lost ticks are counted by the measured interval (a gap of more than LOST_X periods plus the jitter),
+never by the loop's prediction, which lags a tempo change; a tick far earlier than the period right after a normal
+interval is a duplicate and is ignored. The error taken from one tick is clipped to half a period, so a burst of
+buffered ticks moves nothing far. w is held at most 0.5 (the loop goes unstable from sqrt(2)): a high bandwidth on a
+slow clock runs lower than asked, and the reply says below which tempo.
 
 Once the tempo holds, a straight line through the last 2 to 16 s of ticks gives the tempo and the beat instead of
-the loop: far steadier on a jittery clock, so a steady clock asks for almost no tempo changes. When the loop and the
-line differ by more than tempo_tol_bpm for APART_S, the tempo really changed: the line starts again and the loop
-leads until it has 2 s of the new tempo. On the engine (same test file): a steady 126 BPM clock with 1 ms
-jitter keeps ismail's beats within 4.1 ms of theirs with 0 to 2 tempo changes in 60 s (four seeds); a ramp of 10 BPM
-over 16 s trails by at most 32 ms during the ramp and is back within 4.4 ms after it.
+the loop: far steadier on a jittery clock, so a steady clock asks for almost no tempo changes. When a line through
+the last second (RECENT_S) and the steady line differ by more than tempo_tol_bpm for APART_S, the tempo really
+changed: the steady line starts again and the loop leads until it has 2 s of the new tempo. The last second's line,
+not the loop, makes this test, so a loop at a high bandwidth (wobblier on jitter) does not restart the steady line.
+On the engine (same test file): a steady 126 BPM clock with 1 ms jitter keeps ismail's beats within 4.1 ms of theirs
+with 0 to 2 tempo changes in 60 s (four seeds); a ramp of 10 BPM over 16 s trails by at most 32 ms during the ramp
+and is back within 4.4 ms after it.
 
-The set follows by tempo changes, the way live_tempo makes them: every change needs its notes rendered again, so
-the follower changes the tempo at a beat the renders can reach (the render lead), at most once per step_beats. At
-each step it predicts the phase error at that beat (when ismail's beat reaches the speakers against when the other
-app's beat arrives, plus offset_ms) and sets the tempo for the step so the error is gone at its end, then the
-filter's tempo after it. The bend is held within max_bend_pct while the set is heard, so a large error closes over
-a few steps. Nothing changes while the error is within phase_tol_ms and the tempo within tempo_tol_bpm.
+The set follows by tempo changes, the way live_tempo makes them: every change needs its notes rendered again, so the
+follower changes the tempo at a beat the renders can reach (the render lead), at most once per step_beats. At each
+step it predicts the phase error at that beat (when ismail's beat reaches the speakers against when the other app's
+beat arrives, plus offset_ms) and sets the tempo for the step so the error is gone at its end, then the filter's
+tempo after it. The bend is held within max_bend_pct while the set is heard, so a large error closes over a few
+steps; after a step change of their tempo it may bend up to STEP_BEND_PCT until the beats are back within
+phase_tol_ms, and transport='tempo' lands on the nearest of their beats rather than the beat it had. Measured on the
+engine: after their step of 120 to 126 BPM the set first sounds a new tempo about 1.5 s later (the decision at 0.4 s
+plus the render lead) and is on their tempo with the beats back within phase_tol_ms in about 3.5 s; for steps of 120
+to 80 to 200 and 140 to 70, in 2 to 4.6 s with transport='tempo' and 2.9 to 7.9 s with 'follow' (13 s for the
+halving there). Nothing changes while the error is within phase_tol_ms and the tempo within tempo_tol_bpm.
 
 The transport. transport='follow': Stop silences the set on the speakers at once (a 5 ms fade; the set's time runs
-on and its queue keeps playing silent), and Start or Continue bring it back in on a bar line: ismail mixes ahead,
-so it cannot land on the other app's first beat; it picks the first of the other app's bar lines its render lead
-can reach, runs its tempo there through the silent stretch (0.67 to 1.5 times the tempo) so its own next bar line
-lands on it, and opens there ("their bar 3 = ismail bar 17"). Start counts from their bar 1, Continue from the Song
-Position Pointer they sent. A Song Position while running is a jump: the set relocks the same way. Turning clock
-in on never silences the set: Stop does. transport='tempo' follows the tempo and lands ismail's beats on theirs
-and ignores Start, Stop and Song Position (bar lines need not line up).
+on and its queue keeps playing silent), and Start or Continue bring it back in on a bar line: ismail mixes ahead, so
+it cannot land on the other app's first beat; it picks the first of the other app's bar lines its render lead can
+reach, runs its tempo there through the silent stretch (0.67 to 1.5 times the tempo) so its own next bar line lands
+on it, and opens there ("their bar 3 = ismail bar 17"). Start counts from their bar 1, Continue from the Song
+Position Pointer they sent. A Song Position while running is a jump: the set relocks the same way. Turning clock in
+on does not silence the set, but their Start, Continue or a Song Position jump does, from that moment to the lock
+bar (one to two bars: the render lead plus the bend to their bar line); then it comes in there. transport='tempo'
+follows the tempo and lands ismail's beats on theirs and ignores Start, Stop and Song Position (bar lines need not
+line up).
 
 A dropout (no tick for dropout_ms) holds the last tempo and says so in the news and live_status; the set keeps
 playing. When ticks come back, the ticks missed are counted from the time and the follow goes on.
@@ -46,6 +59,7 @@ their Start and Stop forwarded to clock out; the silence while they are stopped 
 live_listen, live_record and the streams still carry the set.
 """
 import collections
+import itertools
 import math
 import re
 import threading
@@ -62,7 +76,13 @@ WARM = 24                   # ticks fitted by least squares before the loop take
 TICK, SPP, START, CONTINUE, STOP = 0xF8, 0xF2, 0xFA, 0xFB, 0xFC
 W_MAX = 0.5                 # the loop's w = 2 pi B T is held at most this (it is unstable from sqrt(2) on)
 STEADY_S = (2.0, 16.0)      # the steady tempo: a straight line through the ticks of the last 2 to 16 s
-APART_S = 0.25              # the loop and the steady line this long apart by more than tempo_tol_bpm: a real change
+APART_S = 0.25              # the last second's line and the steady line this long apart: a real change
+RECENT_S = 1.0              # the real-change test reads a straight line through the ticks of the last second
+SHORT = 12                  # ticks in the short line that tells a tempo step (half a beat)
+STEP_PCT = 4.0              # the short line this far from the loop's period (or 6 of its own errors): a step
+LOST_X = 2.5                # a gap longer than this many periods (plus the jitter) counts lost ticks
+STEP_BEND_PCT = 15.0        # after a tempo step of theirs the set may bend this much to catch their beat up
+DROPOUT_TICKS = 3           # dropout_ms is at least this many tick periods
 FADE_S = 0.005              # the speakers' fade when the transport stops or starts
 LOCK_BEND = (0.67, 1.5)     # silent before a lock bar, the set may run this much slower or faster to reach it
 LOCK_TRIES = 16             # their bar lines tried for a lock
@@ -100,6 +120,12 @@ class ClockFilter:
         self.jit = 0.0              # rms of the errors the loop took, s
         self.hist = collections.deque()     # (tick number, arrival time) of the last STEADY_S[1] seconds
         self.since = 0              # the steady line starts at this tick number (a real tempo change restarts it)
+        self.gap = None             # the last interval between arrivals
+        self.reseeded = 0           # tick number of the last step (the loop started again there)
+        self.steps = 0              # tempo steps taken at once
+        self._confirm = False       # a step was taken: half a beat later the loop starts again on the new tempo alone
+        self.dups = 0               # ticks ignored as duplicates
+        self._Th = collections.deque(maxlen=SHORT)  # the loop's period at each of the last SHORT ticks
 
     @property
     def ready(self):
@@ -108,20 +134,32 @@ class ClockFilter:
     def bpm(self):
         return 60.0 / (PPQN * self.T) if self.T else None
 
+    @property
+    def confirming(self):
+        return self._confirm
+
     def tick(self, t):
-        """A tick arrived at t. Returns the tick periods since the last one (1, more when ticks were lost; 0 for the
-        first)."""
+        """A tick arrived at t. Returns the tick periods since the last one (1; more for ticks lost in a gap of more
+        than LOST_X periods; 0 for the first), or None for a duplicate it ignored.
+
+        Counting goes by the measured interval, never by the loop's prediction, which lags a tempo change: a step to
+        half the tempo is one tick a period late each time, not a lost tick. A tick far earlier than the period
+        right after a normal interval is a duplicate; right after a late one it is the second of a buffered pair."""
         t = float(t)
         if self.last is None:
             self.last, self.t0, self._warm = t, t, [(0, t)]
             return 0
+        gap = t - self.last
         k = 1
-        if self.n >= WARM:                  # not while warming: a period from a few jittery ticks is too rough
-            late = t - self.t1
-            # lost ticks: later than half a period plus the jitter seen (a late tick at 400 BPM is not a lost one)
-            if late > 0.5 * self.T + min(3.0 * self.jit, self.T):
-                k = 1 + int(late / self.T + 0.5)
-        self.last = t
+        if self.T is not None:
+            slack = 3.0 * self.jit
+            thr = min(0.25 * self.T, self.T - 1.5 * slack)       # none when the jitter is too wide to tell
+            if self.n >= WARM and thr > 0 and gap < thr and (self.gap is None or self.gap < 1.5 * self.T):
+                self.dups += 1
+                return None
+            if self.n >= WARM and gap > LOST_X * self.T + slack:
+                k = max(1, int(gap / self.T + 0.5))
+        self.last, self.gap = t, gap
         if self.n + k < WARM:
             self.n += k
             self._warm.append((self.n, t))
@@ -136,6 +174,11 @@ class ClockFilter:
                 if len(x) > 2:
                     self.jit = float(np.sqrt(np.mean((y - (c + T * x)) ** 2)))
             return k
+        self.n += k
+        self._keep(t)
+        self._Th.append(self.T)
+        if self._step(t):
+            return k
         T = self.T
         self.t1 += (k - 1) * T
         e = max(-0.5 * T, min(0.5 * T, t - self.t1))
@@ -143,10 +186,49 @@ class ClockFilter:
         self.t0 = self.t1
         self.t1 += math.sqrt(2.0) * w * e + T
         self.T += w * w * e
-        self.n += k
-        self._keep(t)
         self.jit = math.sqrt(0.98 * self.jit ** 2 + 0.02 * e * e)
         return k
+
+    def _line(self, h):
+        x = np.array([a for a, _ in h], dtype=float)
+        y = np.array([b for _, b in h]) - h[0][1]
+        T, c = np.polyfit(x - x[-1], y, 1)
+        return float(T), h[0][1] + float(c)
+
+    def _step(self, t):
+        """A tempo step the loop would take seconds to reach (and overshoot): the short line through the last half
+        beat is far from the loop's period. The loop starts again there, and so does the steady line."""
+        if self.n - self.reseeded < SHORT or len(self.hist) < SHORT:
+            return False
+        h = list(itertools.islice(reversed(self.hist), SHORT))[::-1]      # the last SHORT, oldest first
+        if h[0][0] < self.reseeded:
+            return False
+        Ts, tl = self._line(h)
+        sd = self.jit * math.sqrt(12.0 / (SHORT ** 3 - SHORT))     # the short line's own error, seconds per tick
+        if Ts <= 0:
+            return False
+        # against a line through the second before this half beat (since the last step), else the loop's period
+        # half a beat ago: never the loop now, which starts to chase a step and wobbles at a high bandwidth. On a
+        # ramp that line is under a second behind, well inside STEP_PCT.
+        t_lo = h[0][1] - RECENT_S
+        before = []
+        for x in itertools.islice(reversed(self.hist), SHORT, None):     # newest first, past the half beat
+            if x[1] < t_lo or x[0] < self.reseeded:
+                break
+            before.append(x)
+        before.reverse()
+        ref = self._line(before)[0] if len(before) >= SHORT else self._Th[0]
+        if self._confirm:                   # the first line after a step was partly the old tempo: this one is not
+            self._confirm = False
+        elif abs(Ts - ref) <= max(STEP_PCT / 100 * ref, 6.0 * sd):
+            return False
+        else:
+            self._confirm = True
+            self.steps += 1
+        self.T, self.t0 = Ts, tl
+        self.t1 = tl + Ts
+        self.reseeded = self.since = self.n
+        return True
 
     def w(self):
         return min(2 * math.pi * self.B * self.T, W_MAX)
@@ -165,16 +247,27 @@ class ClockFilter:
     def restart_steady(self):
         self.since = self.n
 
-    def steady(self):
+    def steady(self, before=None):
         """(seconds per tick, the fitted time of the last tick) from a straight line through the ticks since the
-        last real tempo change (2 to 16 s of them), or None while there are fewer than 2 s."""
-        h = [x for x in self.hist if x[0] >= self.since]
+        last real tempo change (2 to 16 s of them), or None while there are fewer than 2 s. before: only the ticks
+        numbered below it."""
+        h = [x for x in self.hist if x[0] >= self.since and (before is None or x[0] < before)]
         if len(h) < 3 or h[-1][1] - h[0][1] < STEADY_S[0]:
             return None
-        x = np.array([a for a, _ in h], dtype=float)
-        y = np.array([b for _, b in h]) - h[0][1]
-        T, c = np.polyfit(x - x[-1], y, 1)
-        return (float(T), h[0][1] + float(c)) if T > 0 else None
+        T, c = self._line(h)
+        return (T, c) if T > 0 else None
+
+    def recent(self):
+        """Seconds per tick from a straight line through the ticks of the last RECENT_S, or None (fewer than
+        SHORT): the real-change test, steady at any bandwidth."""
+        if not self.hist:
+            return None
+        t = self.hist[-1][1]
+        h = [x for x in self.hist if t - x[1] <= RECENT_S]
+        if len(h) < SHORT:
+            return None
+        T, _ = self._line(h)
+        return T if T > 0 else None
 
 
 class ClockIn:
@@ -205,10 +298,17 @@ class ClockIn:
         self.last_err = None        # the phase error at the last decision, s (+: ismail late)
         self.events = []            # transport messages seen, newest last (their names)
         self.ignored = 0
-        self._apart = None          # when the loop and the steady line first disagreed
+        self._apart = None          # when the last second's line and the steady line first disagreed
+        self._steps_seen = 0        # the filter's tempo steps the follower has caught up with
+        self.catching = False       # catching their beat up after a step, with STEP_BEND_PCT
 
     def now(self):
         return self.e.mout.now()
+
+    def _dropout_s(self):
+        """dropout_ms, but at least DROPOUT_TICKS periods: a slow clock is not lost between two of its ticks."""
+        T = self.f.T if self.f.T is not None else 60.0 / (PPQN * 20.0)    # one tick yet: the slowest clock
+        return max(self.cfg['dropout_ms'] / 1000, DROPOUT_TICKS * T)
 
     @property
     def lag(self):
@@ -217,7 +317,7 @@ class ClockIn:
     # ------------------------------------------------------------------ the speakers' gate (transport='follow')
     def _gate(self, sample, opened):
         """From played sample `sample` on the speakers are open or shut; a later transition is replaced."""
-        self.gates = tuple(g for g in self.gates if g[0] < sample) + ((int(sample), bool(opened)),)
+        self.gates = (tuple(g for g in self.gates if g[0] < sample) + ((int(sample), bool(opened)),))[-64:]
 
     def is_open(self, sample):
         st = True
@@ -240,12 +340,7 @@ class ClockIn:
             elif s < played + n:
                 inside.append((s - played, o))
         if not inside and self._g == (1.0 if base else 0.0):
-            if base and gates and gates[-1][0] <= played and self.lock.acquire(blocking=False):
-                try:                                    # all passed and open: nothing left to apply
-                    if self.gates is gates:
-                        self.gates = ()
-                finally:
-                    self.lock.release()
+            # the gates stay: MIDI out asks about a note's sample up to its wall time, after the device passed it
             return None if base else np.zeros(n, dtype=np.float32)
         step = 1.0 / (FADE_S * SR)
         g = np.empty(n, dtype=np.float32)
@@ -293,11 +388,12 @@ class ClockIn:
                     self.pos_next = self.pos + 1                # Continue goes on from the next tick
                 was, self.running, self.lock_req = self.running, False, False
                 self._gate(e.played, False)
+                e.mout.silence()                            # notes held on their synths go off with the set
                 if was is not False:
                     e.news.append(f"clock in: Stop from {self.source!r}: the set is silent until Start or Continue "
                                   f"(its time and queue run on)")
                 return
-            if self.f.last is not None and t - self.f.last > self.cfg['dropout_ms'] / 1000:
+            if self.f.last is not None and t - self.f.last > self._dropout_s():
                 self.f.reset()                              # their clock starts again with the transport
             if st == START:
                 self.pos_next = 0
@@ -309,10 +405,12 @@ class ClockIn:
     def _tick(self, t):
         f = self.f
         gap = None if f.last is None else t - f.last
-        if gap is not None and gap > self.cfg['dropout_ms'] / 1000 and not (self.mode == 'follow' and self.running):
+        if gap is not None and gap > self._dropout_s() and not (self.mode == 'follow' and self.running):
             f.reset()                                       # no position to carry over: their beats start again
             self.D = None
         k = f.tick(t)
+        if k is None:                                       # a duplicate: no position of its own
+            return
         self.count += k
         if self.mode == 'follow' and self.running:
             if self.fresh:
@@ -343,25 +441,26 @@ class ClockIn:
             if last is None:
                 return
             stopped = self.mode == 'follow' and self.running is False
-            if now - last > self.cfg['dropout_ms'] / 1000:
+            if now - last > self._dropout_s():
                 if self.dropped is None and not stopped:    # a stopped app may well stop its clock too
                     self.dropped = last
-                    e.news.append(f"clock in: no clock from {self.source!r} for {self.cfg['dropout_ms']:g} ms: "
+                    e.news.append(f"clock in: no clock from {self.source!r} for {self._dropout_s() * 1000:.0f} ms: "
                                   f"holding {fmt_num(round(e.bpm, 2))} BPM (the set plays on)")
                 return
             if self.dropped is not None and not stopped:
                 e.news.append(f"clock in: the clock from {self.source!r} is back after "
                               f"{last - self.dropped:.1f} s; following again")
             self.dropped = None
-            if not ready:
+            if not ready or self.f.confirming:              # a step's tempo is known half a beat after it
                 return
             ref = self._ref()
-            st = self.f.steady()
-            if st is not None:
-                if abs(60.0 / (PPQN * st[0]) - 60.0 / (PPQN * ref[2])) > self.cfg['tempo_tol_bpm']:
+            st, rc = self.f.steady(), self.f.recent()
+            if st is not None and rc is not None:
+                # a real change: the last second's line, not the loop (its wobble grows with its bandwidth)
+                if abs(60.0 / (PPQN * st[0]) - 60.0 / (PPQN * rc)) > self.cfg['tempo_tol_bpm']:
                     if self._apart is None:
                         self._apart = now
-                    elif now - self._apart > APART_S:       # the loop has gone somewhere else: a real change
+                    elif now - self._apart > APART_S:
                         self.f.restart_steady()
                         self._apart, st = None, None
                 else:
@@ -369,7 +468,7 @@ class ClockIn:
             if st is not None:                              # steady: the line, far quieter than the loop
                 ref = (st[1], ref[1], st[0])
             est = 60.0 / (PPQN * ref[2])
-            running, lock_req, fresh = self.running, self.lock_req, self.fresh
+            running, lock_req, fresh, D = self.running, self.lock_req, self.fresh, self.D
         a = e.mout.anchor()
         if a is None:
             return
@@ -382,7 +481,7 @@ class ClockIn:
             if not fresh:                                   # their first tick after it gives their position
                 self._lock(est, ref, a)
         else:
-            self._follow(est, ref, a)
+            self._follow(est, ref, a, D)
 
     def _earliest(self, bpm):
         """The first whole beat a tempo change can land on: past the mix, behind the renders it needs."""
@@ -412,31 +511,47 @@ class ClockIn:
     def _step(self):
         return float(self.cfg['step_beats'] or self.e.bpb)
 
-    def _err(self, beat, ref, a):
+    def _err(self, beat, ref, a, D):
         """Seconds ismail's `beat` reaches the speakers after their beat for it arrives (plus offset_ms)."""
-        return self.e.mout.wall(beat, 0.0, a) - (self._t_ext(ref, beat - self.D) + self.cfg['offset_ms'] / 1000)
+        return self.e.mout.wall(beat, 0.0, a) - (self._t_ext(ref, beat - D) + self.cfg['offset_ms'] / 1000)
 
-    def _follow(self, est, ref, a):
+    def _follow(self, est, ref, a, D):
         e = self.e
         off = self.cfg['offset_ms'] / 1000
-        if self.D is None:                                  # first lock on the beat: the nearest of their beats
+        if D is None:                                       # first lock on the beat: the nearest of their beats
             heard = e.mout.beat_at(self.now(), a)
             x = (self.now() - off - ref[0]) / ref[2] / PPQN + ref[1] / PPQN
-            self.D = float(round(heard - x))
+            D = float(round(heard - x))
+            with self.lock:
+                self.D = D
+        if self.f.steps != self._steps_seen:               # they stepped: catch up fast, on the nearest beat
+            self._steps_seen, self.catching = self.f.steps, True
         bp = max(math.ceil(e.beat(e.pos) - EPS) + 1, self.next_ok)
-        err = self._err(bp, ref, a)
+        err = self._err(bp, ref, a, D)
+        if self.catching and not (self.mode == 'follow' and self.known):
+            r = round(err * est / 60.0)                     # their bar lines are not kept: any beat of theirs will do
+            if r:
+                D -= r
+                with self.lock:
+                    self.D = D
+                err = self._err(bp, ref, a, D)
         cur = e.tmap.at_beat(bp)[2]
         if abs(err) * 1000 <= self.cfg['phase_tol_ms'] and abs(cur - est) <= self.cfg['tempo_tol_bpm']:
-            self.last_err = err
+            self.last_err, self.catching = err, False
             return
         b0 = self._earliest(est)
         if b0 < self.next_ok - EPS:                         # one decision per step of the mix
             return
-        err = self._err(b0, ref, a)
+        err = self._err(b0, ref, a, D)
         self.last_err = err
         L = self._step()
         span = L * 60.0 / est - err
         bend = self.cfg['max_bend_pct'] / 100
+        if self.catching:
+            if abs(err) * 1000 <= self.cfg['phase_tol_ms']:
+                self.catching = False
+            else:
+                bend = max(bend, STEP_BEND_PCT / 100)
         bpm1 = 60.0 * L / span if span > 0 else est * (1 + bend)
         bpm1 = min(max(bpm1, est * (1 - bend)), est * (1 + bend), 400.0)
         bpm1 = max(bpm1, 20.0)
@@ -474,8 +589,8 @@ class ClockIn:
         self._change(b0, bpm)
         if abs(bpm - est) > 1e-9:
             self._change(bL, est)
-        self.D = bL - xL
         with self.lock:
+            self.D = bL - xL
             if not self.lock_req:                           # a Stop came in meanwhile: stay silent
                 return
             self.lock_req = False
@@ -596,7 +711,7 @@ class ClockIn:
                              (f" ({f.jit * 1000:.1f} ms jitter)" if f.ready else " (warming up)"))
             parts.append(f"set {fmt_num(round(e.bpm, 2))} BPM")
             stopped = self.mode == 'follow' and self.running is False
-            if not stopped and (self.dropped is not None or self.now() - f.last > self.cfg['dropout_ms'] / 1000):
+            if not stopped and (self.dropped is not None or self.now() - f.last > self._dropout_s()):
                 parts.append(f"NO CLOCK for {self.now() - f.last:.1f} s: holding the last tempo")
             if self.mode == 'follow':
                 if self.running is False:

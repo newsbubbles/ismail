@@ -5,19 +5,27 @@
 ### MIDI clock in: the set follows another app (MIDI parity step 8, part 1)
 
 - `live_midi_clock_in(project, source, ...)`: a running set follows the MIDI clock of another app (Ableton, FL
-  Studio, a DAW through a loopMIDI port) or a drum machine, from a named input. The tempo comes from the 24 ticks per
-  beat through a second-order delay-locked loop (`bandwidth_hz`, default 0.5 Hz: a steady tempo ramp is followed
-  430 ms late, a step settles within 0.1 BPM in 1.9 s, 1 ms of jitter reads within 0.25 BPM; measured in the tests).
-  The set changes tempo as `live_tempo` does, at the first beat its renders reach, at most once per `step_beats`,
-  only past `tempo_tol_bpm` or `phase_tol_ms`, bending at most `max_bend_pct` so ismail's beats land on theirs;
-  `offset_ms` for an app whose sound is late. Once the tempo holds, a straight line through the last 2 to 16 s of
-  ticks replaces the loop (steadier on jitter): on a synthetic 126 BPM clock with 1 ms jitter the beats stay within
-  4.1 ms, with 0 to 2 tempo changes in 60 s over four seeds. The loop's w is held at 0.5 (stable at any bandwidth),
-  and a late tick is told from a lost one with the jitter seen.
-- `transport='follow'` (default): their Stop silences the set on the speakers (a 5 ms fade; MIDI out notes held
-  back too), Start or Continue (from their Song Position Pointer) bring it in on the first of their bar lines its
-  render lead can reach, with its own bar line locked there; a Song Position while running relocks. `'tempo'`:
-  tempo and beats only. A dropout holds the last tempo and says so; lost ticks are counted from the time.
+  Studio, a DAW through a loopMIDI port) or a drum machine, from a named input. The tempo comes from the 24 ticks
+  per beat through a second-order delay-locked loop (`bandwidth_hz`, default 0.5 Hz: a steady tempo ramp is followed
+  430 ms late, a step of 4 percent or more is told by a half-beat line and settles within 0.1 BPM in 0.2 to 0.5 s
+  with no overshoot, 1 ms of jitter reads within 0.25 BPM; measured in the tests). After their step the set first
+  sounds the new tempo about 1.5 s later and is on their tempo and beat in about 3.5 s (120 to 126 BPM); steps
+  from 120 to 80 to 200 and 140 to 70 land again in 2 to 4.6 s (`'tempo'`) or 2.9 to 7.9 s (`'follow'`, 13 s for the
+  halving). The set
+  changes tempo as `live_tempo` does, at the first beat its renders reach, at most once per `step_beats`, only past
+  `tempo_tol_bpm` or `phase_tol_ms`, bending at most `max_bend_pct` so ismail's beats land on theirs; `offset_ms`
+  for an app whose sound is late. Once the tempo holds, a straight line through the last 2 to 16 s of ticks replaces
+  the loop (steadier on jitter): on a synthetic 126 BPM clock with 1 ms jitter the beats stay within 4.1 ms, with 0
+  to 2 tempo changes in 60 s over four seeds. The loop's w is held at 0.5 (stable at any bandwidth), and lost ticks
+  are counted by the measured interval (more than 2.5 periods), not the loop's prediction, so a tempo step counts
+  every tick; a duplicate tick is ignored. The real-change test reads the last second's ticks, so bandwidths up to 5
+  Hz keep the steady line.
+- `transport='follow'` (default): their Stop silences the set on the speakers (a 5 ms fade; MIDI out notes held back
+  too), Start or Continue (from their Song Position Pointer) bring it in on the first of their bar lines its render
+  lead can reach, with its own bar line locked there; a Song Position while running relocks. `'tempo'`: tempo and
+  beats only. Their Start, Continue or a Song Position jump while the set plays silences it until the lock bar (one
+  to two bars). Their Stop also sends note-offs for the notes held on MIDI out. A dropout holds the last tempo and
+  says so (`dropout_ms` is at least 3 tick periods); lost ticks are counted from the time.
 - Clock out and the arp follow the followed tempo. Clock in and clock out on one port is refused both ways (the set
   would chase its own clock). `live_tempo` is refused while clock in is on. `live_status` shows the follow.
 - `live_tempo`'s change is now one engine method shared with clock in (no change in behavior).
