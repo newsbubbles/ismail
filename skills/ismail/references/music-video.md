@@ -31,9 +31,32 @@ python -m ismail.video posesheet -s songs/<slug> s04_foyer.py [f,f]   each chara
 python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ... [--wait 2h]   (refuses on clipping; -- --allowclip)
 python -m ismail.video contact -s songs/<slug> video/renders/shots/s04_foyer_v1.mp4 16
 python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range 33 41]
+python -m ismail.video spectro <audio> <out.mp4> [--mode scroll] [--still 42.5]   spectrogram + playhead (below)
 ```
 
 `render` waits for the machine's GPU slot (`ismail.machine`, SKILL.md "The machine is shared") before each shot, so the board's rules hold for it as for any Blender render: one GPU job on the machine, none while the GPU is hot or a drive is nearly full, and none while a live set is on air. It stands in line up to 4 hours by default, long enough to outlast a live set, because a render queue is work the person walks away from (`--wait 12h` longer, `--wait 0` refuses at once). When the slot is refused it says why, names the shots not rendered and exits 75: read the board with `python -m ismail.machine`, then run those shots again. Do not wrap it in `machine run`; it takes the slot itself. `still` and `posesheet` take no slot (seconds of work). Run the module from a directory that is not the repo's parent, or the source folder can shadow the installed package.
+
+### Spectrogram clips with a playhead
+
+`spectro` makes a video of any audio file's spectrogram with a glowing line at the play position (no song folder
+and no Blender needed, only numpy and ffmpeg). The look follows the stream's cqt picture: log frequency, low at the
+bottom, a centred sound white and a panned one orange (left) or blue (right). The line is a white core in a blue
+halo, and the halo grows and brightens where the music under it is bright, so loud passages flare as it passes.
+
+```
+python -m ismail.video spectro <audio> <out.mp4> [--mode static|scroll] [--start 30 --end 90]
+python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   one frame, seconds: check the look first
+```
+
+- `static` (default): the clip's whole spectrogram fills the frame and the line sweeps across it, start to end.
+  `scroll`: the picture moves right to left under a fixed line (`--at 0.5` of the width), `--window_s 12` seconds
+  in view.
+- The look's raw numbers: `--line_color --halo_color --line_width --bloom_px --glow --bloom_gain --accent --smooth_s`
+  for the line (`--bloom_gain 0` gives the same glow everywhere), `--fmin --fmax --range_db --gamma --cscheme` for
+  the picture, `--width --height --fps --crf`, `--audio false` for a silent clip. `--help` lists them with defaults.
+- It renders on the CPU at about a third of real time on this machine (30 s of 1080p took 80 s), so run a whole
+  song in a slot: `python -m ismail.machine run --cpu --est 15m --what "spectro" -- python -m ismail.video spectro ...`.
+  Check one `--still` per mode before the full render.
 
 ## The loop
 

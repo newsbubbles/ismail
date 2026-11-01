@@ -10,6 +10,9 @@
                             refuses on clipping unless -- --allowclip
   contact <video> [n]       contact sheet of n frames of any video -> video/build/look/contact_<name>.png
   edit [-- --sheet a b n | -- --range a b]   runs video/cut.py (sheet = contact sheet of bars a..b-1)
+  spectro <audio> <out>     a spectrogram video with a glowing playhead line (any audio file, no song needed):
+                            --mode static|scroll, --start/--end seconds, --still <s> for one png frame, and the
+                            look's raw numbers (python -m ismail.video spectro --help lists them)
 """
 import argparse
 import glob
@@ -163,7 +166,29 @@ def cmd_contact(song, video, n):
     print(f'{video}: {total} frames -> {out}')
 
 
+def cmd_spectro(argv):
+    from . import spectro
+    ap = argparse.ArgumentParser(prog='python -m ismail.video spectro', description=spectro.__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('audio')
+    ap.add_argument('out', help='.mp4 for the video, .png with --still')
+    ap.add_argument('--still', type=float, help='one frame at this time (seconds) instead of the video')
+    for k, v in spectro.DEFAULTS.items():
+        if k == 'cscheme':
+            ap.add_argument('--cscheme', help=f"six numbers, left rgb then right rgb (default {'|'.join(map(str, v))})")
+        elif isinstance(v, bool):
+            ap.add_argument(f'--{k}', type=lambda s: s.lower() in ('1', 'true', 'yes', 'on'), help=f'default {v}')
+        else:
+            ap.add_argument(f'--{k}', type=type(v) if v is not None else float, help=f'default {v}')
+    a = vars(ap.parse_args(argv))
+    if a.get('cscheme'):
+        a['cscheme'] = tuple(float(x) for x in a['cscheme'].replace(',', '|').split('|'))
+    print(spectro.render(a.pop('audio'), a.pop('out'), **a))
+
+
 def main():
+    if sys.argv[1:2] == ['spectro']:
+        return cmd_spectro(sys.argv[2:])
     ap = argparse.ArgumentParser(prog='python -m ismail.video', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('command')
     ap.add_argument('args', nargs='*')

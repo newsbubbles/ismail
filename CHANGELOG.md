@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Spectrogram videos with a glowing playhead (Nate 11-01)
+
+- `python -m ismail.video spectro <audio> <out.mp4>` draws any audio file's spectrogram (the stream's cqt colours)
+  with a white-blue line at the play position whose glow grows and brightens over bright passages. `static` sweeps
+  the line across the whole clip; `scroll` moves the picture under a fixed line. Every part of the look is a raw
+  number (colours, width, bloom radius, the gain from the music's brightness to the glow); `--still` gives one
+  frame to check first. Guide: skills/ismail/references/music-video.md, "Spectrogram clips with a playhead".
+
 ### fixes
 
 - Page mode reaches the sites again (2026-10-31, the first YouTube dry run). The loop that holds the page window at
