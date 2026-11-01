@@ -181,7 +181,10 @@ def render(audio, out, **kw):
             fr[:, a:b] = 1 - (1 - fr[:, a:b]) * (1 - light)                             # screen blend
         return (np.clip(fr, 0, 1) * 255 + 0.5).astype(np.uint8)
 
-    ff = settings.get('ffmpeg') or 'ffmpeg'
+    ff = settings.get('ffmpeg')
+    if not ff:
+        raise RuntimeError("ffmpeg not found: install it (it must be on PATH) or name its path in the 'ffmpeg' "
+                           "setting (ISMAIL_FFMPEG); spectro writes every frame through it")
     if still is not None:
         i = min(n_frames - 1, max(0, int(round((float(still) - t0) * fps))))
         cmd = [ff, '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{Wd}x{Ht}',
