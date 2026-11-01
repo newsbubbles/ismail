@@ -1,6 +1,7 @@
 """Render workers: one note (or mono phrase) per job, in separate processes so rendering never holds the audio
 thread's GIL. A job renders exactly what the offline renderer would for those notes (same instrument code);
 the result is trimmed to where it falls silent."""
+import difflib
 import json
 import os
 import time
@@ -15,23 +16,47 @@ MAX_PEAK = 4.0          # +12 dBFS: a single event louder than this is a broken 
 
 
 class SoundBank:
-    """Sampler sounds of the live project (its project.json sound bank), for instruments.set_resolvers."""
+    """Sampler sounds of the live project (its project.json sound bank), for instruments.set_resolvers. A name it
+    does not know reads project.json again when the file changed, so a sound imported while the engine runs plays
+    on the next render (the DJ's 62-piece kit once failed on every sound imported after live_start)."""
 
     def __init__(self, root):
         self.root = root
         self.cache = {}
+        self.meta, self.mtime = {}, None
+        self._read()
+
+    def _read(self):
+        path = os.path.join(self.root, 'project.json')
         try:
-            with open(os.path.join(root, 'project.json'), encoding='utf8') as f:
-                self.meta = json.load(f).get('sounds', {})
+            mtime = os.stat(path).st_mtime_ns
+            with open(path, encoding='utf8') as f:
+                meta = json.load(f).get('sounds', {})
         except (OSError, ValueError):
-            self.meta = {}
+            return
+        # a sound imported again under its old name: drop what was read of its old file
+        for k in [k for k in self.cache if meta.get(k) != self.meta.get(k)]:
+            del self.cache[k]
+        self.meta, self.mtime = meta, mtime
+
+    def _changed(self):
+        try:
+            return os.stat(os.path.join(self.root, 'project.json')).st_mtime_ns != self.mtime
+        except OSError:
+            return False
 
     def sound(self, name):
         if name not in self.cache:
             import soundfile as sf
+            if name not in self.meta and self._changed():
+                self._read()
             m = self.meta.get(name)
             if m is None:
-                raise instruments.InstrumentError(f"sound {name!r} not in the live project's bank; have: {sorted(self.meta)}")
+                near = difflib.get_close_matches(name, list(self.meta), n=3, cutoff=0.5)
+                raise instruments.InstrumentError(
+                    f"sound {name!r} is not in the bank of {os.path.join(self.root, 'project.json')} "
+                    f"({len(self.meta)} sound{'s' if len(self.meta) != 1 else ''}"
+                    + (f"; near: {', '.join(near)}" if near else '') + ")")
             y, sr = sf.read(os.path.join(self.root, m['file']), dtype='float64', always_2d=True)
             y = y.T if y.shape[1] > 1 else np.vstack([y.T, y.T])
             if sr != SR:
