@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### fixes
+
+- Page mode reaches the sites again (2026-10-31, the first YouTube dry run). The loop that holds the page window at
+  the stream's size restarted the live encoder whenever the page drew a few pixels off that size (display scaling),
+  every few seconds, before the window capture gave its first frame (about 15 s), so the site got nothing and no
+  line said why. It now refits the window and keeps the crop for the next start, and never restarts the encoder.
+
+### Callouts and panels on the stream's visual page (stream page plan, step 1)
+
+- `stream_callout(text, style, anchor or x/y, enter, exit, duration_s, priority, who)`: a timed line on the visual
+  page, live, with no encoder restart. Fonts from a checked list or a font file under the ismail folder or the
+  stream home; size, colour, weight, background and its opacity, outline, shadow, align. Callouts in one slot take
+  turns back to back (higher priority first, then first asked), so they never overlap; `clear=True` takes down
+  all, one by `id`, or a `slot`. Replies say what shows and what waits, with ids. The privacy guard checks the text.
+- `stream_panel(kind)`: panels bound to the stream's data that update themselves about once a second: `now` (the
+  request playing and who asked), `requests` (the line with places), `chat` (the newest lines, names and site)
+  and `credits`. Kept in panels.json, apart from the scene, so the DJ's `stream_scene` never removes the MC's panels.
+- The page reports what it drew; `stream_page()` says it. The request queue's replay moved to
+  `stream/request_log.py` so the stream server reads it without loading every op.
+
 ### Live: rejected notes and underrun bursts are findable (Live DJ 10-31)
 
 - Every rejected render is kept (the last 50) with its bar, deck, track, clip, note or kit pad, reason and the next
@@ -158,6 +178,16 @@
   its context words is in the ask too. A room-edit grant whose keywords include "typed yes" no longer covers "a
   typed yes to deploy the site". `grant_list` shows the context as "only with: ...". Entries without a context
   match as before.
+
+### fixes
+
+- Streaming in `mode='page'` no longer loops (2026-10-31). The page window's crop was measured once, when the
+  window first opened, so a window that later changed size made every encoder restart fail ("no packets") every
+  5 s for as long as the stream ran. Each restart also opened the page window again, because Edge hands a launch
+  on a profile it already runs to that browser and exits at once. Now the page window has no resize border, is
+  held at the stream's size while live, is found by its title (never a second one), and is fitted and measured
+  again on every encoder start. Three encoder starts in a row with no picture stop the stream, with a status line
+  that names the cause and the next call (`stream_visual(mode='cqt')` or `capture='gdi'`).
 
 ## 0.4.3 (2026-10-28)
 

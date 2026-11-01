@@ -8,11 +8,23 @@
   html, body { margin: 0; height: 100%; background: #07080c; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; }
   #hud { position: fixed; left: 8px; bottom: 8px; font: 12px ui-monospace, monospace; color: #9aa3b2;
-    background: rgba(0, 0, 0, .5); padding: 4px 8px; border-radius: 4px; display: none; }
+    background: rgba(0, 0, 0, .5); padding: 4px 8px; border-radius: 4px; display: none; z-index: 3; }
+  /* callouts and panels: page elements over the canvas, placed and styled from GET /visual/live */
+  #overlay { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
+  .box { position: absolute; box-sizing: border-box; width: max-content; white-space: pre-wrap; overflow-wrap: break-word;
+    line-height: 1.2; paint-order: stroke fill; will-change: transform, opacity; }
+  .panel { transition: opacity .4s; }
+  .panel .head { font-weight: 700; font-size: .8em; letter-spacing: .04em; margin-bottom: .3em; }
+  .panel .row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel .row + .row { margin-top: .2em; }
+  .panel .by { font-weight: 700; }
+  .panel .tag { opacity: .6; font-size: .75em; }
+  .panel .sub { opacity: .85; font-size: .8em; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="overlay"></div>
 <div id="hud"></div>
 <script>
 // The stream's visual: draws the scene the agent sets (GET /visual/scene) from the set's levels (/levels, 30 fps).
@@ -171,6 +183,105 @@ const draw = {
   },
 };
 
+// ---- callouts and panels (overlay.py on the server): text over the canvas, timed and styled by the agent. Each is a
+// page element, so fonts, wrapping, outlines and backgrounds come from the browser. The server sends each callout's
+// start and end on its own clock; the page only follows them.
+const ov = document.getElementById('overlay');
+let live = {callouts: [], panels: []}, liveV = 0, clockOff = 0, fontsAdded = {}, boxes = {}, panelKey = {}, panelShown = {};
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+function useFont(st) {
+  if (!st.font_url || fontsAdded[st.font_url]) return;
+  fontsAdded[st.font_url] = true;
+  const fam = st.font_css.split(',')[0].replace(/"/g, '');
+  new FontFace(fam, `url(${st.font_url})`).load().then(f => document.fonts.add(f)).catch(() => {});
+}
+function styleBox(el, st, pl) {
+  useFont(st);
+  Object.assign(el.style, {
+    left: pl.x * 100 + '%', top: pl.y * 100 + '%', maxWidth: pl.w * 100 + 'vw', fontFamily: st.font_css,
+    fontSize: st.size * 100 + 'vh', fontWeight: st.weight, fontStyle: st.italic ? 'italic' : 'normal',
+    color: st.color, textAlign: st.align, padding: `${st.padding * 0.6}em ${st.padding}em`,
+    borderRadius: st.radius + 'em',
+    background: st.background === 'none' ? 'transparent' : rgba(st.background, st.background_opacity),
+    webkitTextStroke: st.outline ? `${st.outline}em ${st.outline_color}` : '',
+    textShadow: st.shadow ? `0 0 ${st.shadow}em ${st.shadow_color}, 0 0 ${st.shadow / 2}em ${st.shadow_color}` : ''});
+}
+function pin(pl) {   // which point of the box sits on (x, y): the anchor's side
+  return [{left: 0, center: -50, right: -100}[pl.align] ?? 0, {top: 0, middle: -50, bottom: -100}[pl.valign] ?? 0];
+}
+function anim(kind, k) {   // k: 0 out of sight .. 1 in place; returns [opacity, transform]
+  k = 1 - Math.pow(1 - Math.max(0, Math.min(1, k)), 3);
+  const d = (1 - k) * 30;
+  return {none: [1, ''], fade: [k, ''], pop: [k, `scale(${0.6 + 0.4 * k + 0.08 * Math.sin(k * Math.PI)})`],
+          'slide-left': [k, `translateX(${-d}vw)`], 'slide-right': [k, `translateX(${d}vw)`],
+          'slide-up': [k, `translateY(${-d}vh)`], 'slide-down': [k, `translateY(${d}vh)`]}[kind] || [k, ''];
+}
+function drawCallouts() {
+  const t = (Date.now() + clockOff) / 1000, seen = {};
+  for (const c of live.callouts) {
+    if (t < c.start || t >= c.end) continue;
+    seen[c.id] = true;
+    let el = boxes[c.id];
+    if (!el) { el = boxes[c.id] = document.createElement('div'); el.className = 'box callout'; el.dataset.id = c.id;
+      el.textContent = c.text; styleBox(el, c.style, c.place); ov.appendChild(el); }
+    const a = c.anim_s || 1e-4, kin = (t - c.start) / a, kout = (c.end - t) / a;
+    const [op, tr] = kin < kout ? anim(c.enter, kin) : anim(c.exit, kout), [px, py] = pin(c.place);
+    el.style.opacity = op * c.style.opacity;
+    el.style.transform = `translate(${px}%, ${py}%) ${tr}`;
+  }
+  for (const id in boxes) if (!id.startsWith('panel-') && !seen[id]) { boxes[id].remove(); delete boxes[id]; }
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[ch]);
+}
+function panelHTML(p) {
+  const acc = `style="color:${p.style.accent}"`, head = p.title ? `<div class="head" ${acc}>${esc(p.title)}</div>` : '';
+  const by = r => `<span class="by" ${acc}>@${esc(r.by)}</span>`, tag = s => s ? ` <span class="tag">${esc(s)}</span>` : '';
+  if (!p.shows.length) return p.empty ? head + `<div class="row">${esc(p.empty)}</div>` : '';
+  const rows = p.shows.map(r => {
+    if (p.kind === 'now')
+      return `<div>${esc(r.text)}</div>` + (r.by ? `<div class="sub">requested by ${by(r)}${tag(r.venue)}</div>` : '');
+    if (p.kind === 'chat')
+      return `<div class="row"><span class="by" ${acc}>${esc(r.by)}</span>${tag(r.venue)} ${esc(r.text)}</div>`;
+    if (p.kind === 'requests')
+      return `<div class="row">${r.place}. ${esc(r.text)} ${by(r)}${r.votes ? tag('+' + r.votes) : ''}</div>`;
+    return `<div class="row">${by(r)}${tag(r.text)}</div>`;
+  });
+  return head + rows.join('');
+}
+function drawPanels() {
+  const up = {};
+  for (const p of live.panels) {
+    up[p.kind] = true;
+    let el = boxes['panel-' + p.kind];
+    if (!el) { el = boxes['panel-' + p.kind] = document.createElement('div'); el.className = 'box panel';
+      el.dataset.kind = p.kind; el.style.opacity = 0; ov.appendChild(el); }
+    const html = panelHTML(p), key = JSON.stringify([p.place, p.style]) + html;
+    if (panelKey[p.kind] !== key) {    // only a change touches the page
+      panelKey[p.kind] = key;
+      if (html) el.innerHTML = html;   // an emptied panel fades out with its last rows
+      styleBox(el, p.style, p.place);
+      const [px, py] = pin(p.place); el.style.transform = `translate(${px}%, ${py}%)`;
+    }
+    el.style.opacity = html ? p.style.opacity : 0;
+    panelShown[p.kind] = !!html;
+  }
+  for (const k in panelKey) if (!up[k]) { boxes['panel-' + k]?.remove(); delete boxes['panel-' + k]; delete panelKey[k];
+    delete panelShown[k]; }
+}
+async function pollLive() {
+  for (;;) {
+    try {
+      const drew = `drew=1&c=${Object.keys(boxes).filter(k => !k.startsWith('panel-'))}&p=${Object.keys(panelShown).filter(k => panelShown[k])}`;
+      const j = await (await fetch(`/visual/live?v=${liveV}&wait=1&${drew}`)).json();   // and says what it drew
+      clockOff = j.t * 1000 - Date.now(); liveV = j.v; live = j;
+      drawPanels(); drawCallouts();     // also here, so a page whose frames are held back (hidden) stays right
+    } catch (e) { await new Promise(r => setTimeout(r, 2000)); }
+  }
+}
+
 function render(now) {
   const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
   const bg = scene.background || ['#07080c'];
@@ -185,11 +296,13 @@ function render(now) {
     try { draw[L.kind] && draw[L.kind](i, L, now, dt); } catch (e) { /* one bad layer never stops the picture */ }
     cx.restore();
   });
+  drawCallouts();
   if (hud.style.display === 'block')
-    hud.textContent = `level ${frame.level?.toFixed(2)}  beat ${frame.beat ?? '-'}  bpm ${frame.bpm ?? '-'}  engine ${frame.engine ?? 'none'}`;
+    hud.textContent = `level ${frame.level?.toFixed(2)}  beat ${frame.beat ?? '-'}  bpm ${frame.bpm ?? '-'}  engine ${frame.engine ?? 'none'}` +
+      `  callouts ${live.callouts.length}  panels ${live.panels.length}`;
   requestAnimationFrame(render);
 }
-pollScene(); listen(); requestAnimationFrame(render);
+pollScene(); pollLive(); listen(); requestAnimationFrame(render);
 </script>
 </body>
 </html>
