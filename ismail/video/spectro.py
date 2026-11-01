@@ -126,7 +126,7 @@ def glow_strip(B_col_region, x_off, k, o):
     return core, halo
 
 
-def render(audio, out, **kw):
+def render(src, out, **kw):
     """Render the video (or, with still=<seconds>, one png frame) and return a short report."""
     still = kw.pop('still', None)
     o = dict(DEFAULTS)
@@ -138,7 +138,7 @@ def render(audio, out, **kw):
         raise ValueError(f"mode {o['mode']!r}: 'static' (the line sweeps the whole clip) or 'scroll' "
                          "(the picture moves under a fixed line)")
     Wd, Ht, fps = int(o['width']), int(o['height']), float(o['fps'])
-    y, sr = sf.read(audio, dtype='float32', always_2d=True)
+    y, sr = sf.read(src, dtype='float32', always_2d=True)
     t0 = float(o['start'])
     t1 = float(o['end']) if o['end'] is not None else y.shape[0] / sr
     if not 0 <= t0 < t1:
@@ -194,7 +194,7 @@ def render(audio, out, **kw):
     cmd = [ff, '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{Wd}x{Ht}',
            '-r', f'{fps:g}', '-i', '-']
     if o['audio']:
-        cmd += ['-ss', f'{t0:.3f}', '-t', f'{dur:.3f}', '-i', audio, '-map', '0:v', '-map', '1:a', '-c:a', 'aac',
+        cmd += ['-ss', f'{t0:.3f}', '-t', f'{dur:.3f}', '-i', src, '-map', '0:v', '-map', '1:a', '-c:a', 'aac',
                 '-b:a', '320k']
     cmd += ['-c:v', 'libx264', '-preset', 'medium', '-crf', str(o['crf']), '-pix_fmt', 'yuv420p', '-shortest', out]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)

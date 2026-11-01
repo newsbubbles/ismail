@@ -81,3 +81,17 @@ def test_video_has_audio_and_length(song, tmp_path):
     s = subprocess.run([probe, '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', out],
                        capture_output=True, text=True).stdout.split()
     assert s == ['video', 'audio']
+    spectro.render(song, out, width=160, height=90, fps=10, start=1.0, end=3.0, audio=False)
+    s = subprocess.run([probe, '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', out],
+                       capture_output=True, text=True).stdout.split()
+    assert s == ['video']
+
+
+def test_cli_audio_switch_keeps_the_file(song, tmp_path, monkeypatch):
+    """`--audio false` turns the soundtrack off; it must not replace the audio file argument (Marketing 11-01)."""
+    from ismail.video import __main__ as cli
+    seen = {}
+    monkeypatch.setattr(spectro, 'render', lambda src, out, **kw: seen.update(src=src, out=out, **kw) or 'ok')
+    cli.cmd_spectro([song, 'o.mp4', '--start', '1', '--end', '2', '--audio', 'false'])
+    assert seen['src'] == song and seen['out'] == 'o.mp4'
+    assert seen['audio'] is False and seen['start'] == 1.0
