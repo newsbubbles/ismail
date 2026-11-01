@@ -53,9 +53,15 @@ What each site's chat can do here:
    (the piece). `chat_overlay` puts the newest chat line in a corner by itself.
 3. Ask the person: "Go live on Twitch and YouTube now?" Only their answer counts, in their words:
    `stream_go(['twitch', 'yt'], approved='<their words>')`. It is logged with the time. A `file` venue needs no yes.
+   Ask again for every go: words from an earlier go or a dry run do not count.
 4. `stream_look` right after, and every few minutes: each site's state (live, or reconnecting with the site's own
    error), MB sent, and a preview frame to Read. A site that drops reconnects on its own; the others carry on.
-5. `stream_end()` stops every site (or `stream_end(['kick'])` one). Chat stays connected for the goodbyes.
+5. When the set's last sound ends, the agent that started the stream ends it: `stream_end()` stops every site (or
+   `stream_end(['kick'])` one). Chat stays connected for the goodbyes. Do not leave it for the person: the stream
+   carries silence until someone ends it (10-31: seven hours of silence on YouTube after the set).
+6. YouTube keeps a recording of a broadcast only up to 12 hours. For a set that can run longer, do one of these
+   so the set is kept: end and go again at a break before 12 hours (a new yes, and a new broadcast link), or keep
+   a `file` venue (the archive, above) recording beside the sites.
 
 ## The visual page
 
