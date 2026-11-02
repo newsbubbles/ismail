@@ -234,8 +234,8 @@ def hub_say(to: str = None, text: str = '', files: list = None, buttons: list = 
     | 'toggle' | 'text', 'label': 'Tempo', 'options': [...]}]} (the phone panel's schema). Where a place cannot show
     buttons or a form, they become typed replies, and the answer's `shown` says so. press: who may press or answer:
     to (the person it went to; in a channel, anyone there), anyone, owner (Nate only). who: your role, logged as the
-    sender. approved: Nate's
-    words, needed on a public place (posting there is publishing). Refused while hub_pause is on, except to Nate."""
+    sender. approved: Nate's words, needed on a public place (posting there is publishing). Refused while hub_pause
+    is on, except to Nate."""
     vals = [text] + [b if isinstance(b, str) else json.dumps(b) for b in (buttons or [])] + \
         ([json.dumps(form)] if form else [])
     note = guards.check_private(*vals, where='a hub message')
