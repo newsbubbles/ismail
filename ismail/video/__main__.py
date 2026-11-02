@@ -170,7 +170,7 @@ def cmd_spectro(argv):
     from . import spectro
     ap = argparse.ArgumentParser(prog='python -m ismail.video spectro', description=spectro.__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('audio')
+    ap.add_argument('src', metavar='audio', help='the audio file (wav, flac, mp3)')   # --audio is the mux switch
     ap.add_argument('out', help='.mp4 for the video, .png with --still')
     ap.add_argument('--still', type=float, help='one frame at this time (seconds) instead of the video')
     for k, v in spectro.DEFAULTS.items():
@@ -183,7 +183,7 @@ def cmd_spectro(argv):
     a = vars(ap.parse_args(argv))
     if a.get('cscheme'):
         a['cscheme'] = tuple(float(x) for x in a['cscheme'].replace(',', '|').split('|'))
-    print(spectro.render(a.pop('audio'), a.pop('out'), **a))
+    print(spectro.render(a.pop('src'), a.pop('out'), **a))
 
 
 def main():
