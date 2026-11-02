@@ -8,6 +8,8 @@ KEEP = 5000          # lines kept in memory; the file keeps all
 
 
 class ChatLog:
+    KINDS = KINDS        # a log that carries more kinds (the hub's) sets its own
+
     def __init__(self, path):
         self.path = path
         self.lines = []
@@ -27,7 +29,7 @@ class ChatLog:
         self.lines = self.lines[-KEEP:]
 
     def add(self, kind, venue, **fields):
-        assert kind in KINDS, kind
+        assert kind in self.KINDS, kind
         with self.cond:
             self.n += 1
             d = {'n': self.n, 'ts': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()), 'at': round(time.time(), 2),

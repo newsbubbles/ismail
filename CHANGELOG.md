@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The hub: the team reachable from Discord, one log for every place (Nate 11-02, ledger:M429)
+
+- `hub_*` ops: one numbered log for what people send from every place, each line stamped with who sent it (their
+  linked name, or a guest named by the platform's own id) and what their words may do (Nate's word, a suggestion,
+  a request). `hub_say` sends text, mp3s, buttons and forms (the phone panel's schema) the way each place can, or
+  as typed replies, and says which. A press or a form comes back to the agent that asked.
+- Discord: a bot over the gateway and REST, with no Discord library and no privileged intents: direct messages,
+  @mentions in channels, buttons, pop-up forms, mp3s that play in the chat. The person types the token
+  (`python -m ismail.hub token <place>`) and pairs their account with a one-time code on their phone page.
+- A new place answers only Nate; a public place needs his words for anything an agent posts; `hub_pause` stops
+  every place but his own messages at once.
+- The phone, VR stage and stream chat ops are unchanged. Guide: skills/ismail/references/hub.md. Plan:
+  songs/_migration/HUB_PLAN.md (phases 2 to 5 fold the other places in).
+
 ### Spectrogram videos with a glowing playhead (Nate 11-01)
 
 - `python -m ismail.video spectro <audio> <out.mp4>` draws any audio file's spectrogram (the stream's cqt colours)
