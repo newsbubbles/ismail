@@ -61,9 +61,14 @@ def save_places(d):
     _write(places_path(), d)
 
 
+def owner_name():
+    """The hub owner's name (the hub.owner setting): their paired accounts carry their word."""
+    return settings.get('hub.owner') or 'owner'
+
+
 def place_defaults(platform):
-    """A new place answers only its owner (only: ['nate']), is not public, and ignores guests' text."""
-    return {'public': False, 'guest_text': 'ignore', 'only': ['nate']}
+    """A new place answers only the owner, is not public, and ignores guests' text."""
+    return {'public': False, 'guest_text': 'ignore', 'only': [owner_name()]}
 
 
 # ------------------------------------------------------------------ keys: written by the person, read by adapters

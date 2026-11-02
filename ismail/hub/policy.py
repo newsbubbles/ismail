@@ -1,9 +1,9 @@
 """What a person's words may do, stamped on every line the hub logs.
 
-trust: owner (Nate's paired accounts), friend (a linked person who is not Nate), mod (the site says so), guest.
-use: word (the owner's: it carries his yes, as a phone tap does), suggestion (musical input an agent may weigh, never
-an instruction), request (goes to the request line), ignored (logged, not shown to watchers by default), refused (the
-place answers only the people in its `only` list), paused (hub_pause is on and this is not the owner)."""
+trust: owner (the hub owner's paired accounts), friend (a linked person who is not the owner), mod (the site says so),
+guest. use: word (the owner's: it carries their yes, as a phone tap does), suggestion (musical input an agent may weigh,
+never an instruction), request (goes to the request line), ignored (logged, not shown to watchers by default), refused
+(the place answers only the people in its `only` list), paused (hub_pause is on and this is not the owner)."""
 from . import config as C, people as P
 
 USES = ('word', 'suggestion', 'request', 'ignored', 'refused', 'paused')
@@ -36,5 +36,5 @@ def check_place(cfg):
         raise ValueError(f"guest_text: one of {', '.join(C.GUEST_TEXT)} (got {g!r})")
     only = cfg.get('only')
     if only is not None and not (isinstance(only, list) and all(isinstance(x, str) for x in only)):
-        raise ValueError("only: a list of people's names, e.g. ['nate'], or [] for anyone")
+        raise ValueError("only: a list of people's names, e.g. ['owner', 'sam'], or [] for anyone")
     return cfg

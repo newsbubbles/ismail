@@ -35,6 +35,12 @@ def who(platform, user_id):
     return None, None
 
 
+def role_of(person):
+    """A person's role: as stored, else owner for the hub.owner name, else friend."""
+    stored = load()['people'].get(person, {}).get('role')
+    return stored or ('owner' if person == C.owner_name() else 'friend')
+
+
 def accounts_of(person):
     return list(load()['people'].get(person, {}).get('accounts', []))
 
@@ -47,7 +53,7 @@ def link(person, acc, role=None):
     for name, p in d['people'].items():
         if acc in p.get('accounts', []) and name != person:
             raise ValueError(f"{acc} is already {name}'s: unlink it first (python -m ismail.hub unlink {acc})")
-    p = d['people'].setdefault(person, {'accounts': [], 'role': role or ('owner' if person == 'nate' else 'friend')})
+    p = d['people'].setdefault(person, {'accounts': [], 'role': role or role_of(person)})
     if role:
         p['role'] = role
     if acc not in p['accounts']:

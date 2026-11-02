@@ -13,6 +13,10 @@
   (`python -m ismail.hub token <place>`) and pairs their account with a one-time code on their phone page.
 - A new place answers only Nate; a public place needs his words for anything an agent posts; `hub_pause` stops
   every place but his own messages at once.
+- The owner is a setting (`hub.owner`), not a name in the code; friends the owner invites pair the same way, and
+  their words reach the agents as suggestions (`hub_place(..., only=[...], guest_text='suggestion')`).
+- Tested live on Discord (11-02): pairing, the stranger rule, an mp3 that plays in the chat, buttons, a four-field
+  pop-up form (choice, check, toggle, text) and a reply, end to end.
 - The phone, VR stage and stream chat ops are unchanged. Guide: skills/ismail/references/hub.md. Plan:
   songs/_migration/HUB_PLAN.md (phases 2 to 5 fold the other places in).
 
