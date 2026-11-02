@@ -51,6 +51,9 @@ CATEGORIES = [
                "screen (what plays, whose request, the line, chat), every site's chat read and answered, and the "
                "request queue the MC fills and the DJ plays from",
      ('stream_', 'venue_', 'chat_', 'request_')),
+    ('hub', "talking with people on every place in one log: Discord now, more later; buttons, forms and mp3s shown "
+            "the way each place can, who sent what and what their words may do, pairing, the pause switch",
+     ('hub_',)),
     ('asks', "before you ask the person: their standing grants, and which agent owns which questions", ('grant_',)),
     ('stage', 'the browser and VR stage: scenes, objects, actors, takes, views', ('stage_',)),
 ]
@@ -61,8 +64,8 @@ ROLES = {
              'lexicon', 'together', 'asks'],
     'voice': ['listen', 'exam', 'fit', 'sounds', 'compare', 'render', 'phone', 'lexicon', 'asks'],
     'sound': ['sounds', 'fit', 'listen', 'compare', 'exam', 'render', 'asks'],
-    'dj': ['live', 'phone', 'stream', 'listen', 'together', 'sounds', 'exam', 'lexicon', 'asks'],
-    'mc': ['stream', 'phone', 'live', 'asks'],
+    'dj': ['live', 'phone', 'hub', 'stream', 'listen', 'together', 'sounds', 'exam', 'lexicon', 'asks'],
+    'mc': ['stream', 'hub', 'phone', 'live', 'asks'],
     'stage': ['stage', 'phone', 'exam', 'listen', 'asks'],
     'film': ['stage', 'render', 'listen', 'exam', 'asks'],
     'dev': [c[0] for c in CATEGORIES],

@@ -2677,6 +2677,7 @@ from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* 
 from .stream import ops as _stream_ops  # noqa: E402,F401  (registers the stream_*, venue_*, chat_* ops)
 from .stream import request_queue as _stream_requests  # noqa: E402,F401  (registers the request_* ops, ledger:M290)
 from .stream import venue_rules as _stream_rules  # noqa: E402,F401  (registers venue_rules, chat_commands, ledger:M291)
+from .hub import ops as _hub_ops  # noqa: E402,F401  (registers the hub_* ops: every place in one log, ledger:M429)
 
 
 def __getattr__(name):

@@ -61,6 +61,9 @@ class Adapter:
         raise RuntimeError(f'{self.platform} chat cannot be written to from here')
 
     # ---- helpers
+    def text_max(self):
+        return C.MAX_LEN.get(self.platform, 500)
+
     def keys(self):
         return C.load_keys(self.name)
 
@@ -112,7 +115,7 @@ class Adapter:
         text = ' '.join(str(text or '').split())
         if not text:
             raise ValueError('nothing to say')
-        mx = C.MAX_LEN.get(self.platform, 500)
+        mx = self.text_max()
         if len(text) > mx:
             raise ValueError(f'{len(text)} characters: {self.platform} takes at most {mx}. Say it shorter or in two '
                              f'lines')
