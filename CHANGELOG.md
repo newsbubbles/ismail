@@ -19,6 +19,11 @@
   pop-up form (choice, check, toggle, text) and a reply, end to end.
 - The phone, VR stage and stream chat ops are unchanged. Guide: skills/ismail/references/hub.md. Plan:
   songs/_migration/HUB_PLAN.md (phases 2 to 5 fold the other places in).
+- Phase 2: the owner's phone page and VR lines come into the hub log, read only (the phone inbox and the scenes'
+  event files, never their servers), so one `hub_watch` sees everything; `mine=True` leaves out lines for other
+  agents. `hub_presence` lists the phone and VR too. `hub_say` to the owner picks the bot or the phone page, where
+  they were last seen, and a panel answer there comes back as a press or form. VR stays read only. Setting:
+  `hub.bridges`.
 
 ### Spectrogram videos with a glowing playhead (Nate 11-01)
 

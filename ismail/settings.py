@@ -174,6 +174,10 @@ SETTINGS = [
     Setting('hub.owner', 'ISMAIL_HUB_OWNER', 'str', 'owner',
             "the hub owner's name: their paired accounts carry their word, and a new place answers only them", 'hub',
             live=False, when='restart the hub (hub_stop, then hub_start)'),
+    Setting('hub.bridges', 'ISMAIL_HUB_BRIDGES', 'list', lambda: ['phone', 'stage'],
+            "the owner's places the hub reads into its log, read only: phone (the page's inbox), stage (VR); [] none",
+            'hub', live=False, when='restart the hub (hub_stop, then hub_start)', choices=('phone', 'stage'),
+            default_doc='phone, stage'),
     # the MCP server's tool list
     Setting('mcp.roles', 'ISMAIL_MCP_ROLES', 'list', list,
             'serve only these roles\' tools (dj, mc, song, ...); --roles wins', 'mcp',

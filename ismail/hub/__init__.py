@@ -17,5 +17,6 @@ The hub server (`python -m ismail.hub.server`, started by hub_start) is one loca
   instruction: per place it is ignored, a suggestion, or a request. hub_pause stops every public place at once.
 
 The phone (ismail/phone), the VR stage (ismail/stage) and stream chat (ismail/stream) keep their own ops and files
-unchanged; the plan folds them in later, one at a time, behind their tests.
+unchanged; the plan folds them in later, one at a time, behind their tests. Until then the hub copies the owner's
+phone and VR lines into its log, read only (bridges.py), and can send to the phone page through the phone_* ops.
 """

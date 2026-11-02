@@ -13,7 +13,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ..stream.chatlog import ChatLog
-from . import adapters, config as C, message as M, people as P, policy
+from . import adapters, bridges, config as C, message as M, people as P, policy
 
 OPEN_KEEP = 500           # buttons and forms kept answerable (the newest)
 QUIET_UNTIL = ('ignored', 'refused', 'paused')
@@ -36,6 +36,8 @@ class Hub:
         self.presence = C._read(C.HOME / 'presence.json', {})   # person -> {place: last seen}
         self.claims = C._read(C.HOME / 'claims.json', {})       # str(n) -> {by, at, why}
         self.told = {}                                          # (place, user, what) -> when a fixed reply went
+        self.bridges = {}                                       # phone, stage: read only (bridges.py)
+        self.phone = bridges.PhonePlace()
         self.reload()
 
     # ------------------------------------------------------------ places
@@ -60,8 +62,49 @@ class Hub:
         return places
 
     def shutdown(self):
-        for a in list(self.adapters.values()):
+        for a in list(self.adapters.values()) + list(self.bridges.values()):
             a.stop()
+
+    # ------------------------------------------------------------ the owner's phone page and VR, read only
+    def start_bridges(self, sources=None, **where):
+        """Copy the owner's phone and VR lines into the log (the hub.bridges setting; where: phone=<inbox path
+        callable>, stage=<scenes folders callable>, for tests)."""
+        for s in bridges.enabled() if sources is None else sources:
+            if s not in self.bridges:
+                b = bridges.BRIDGES[s](self, where[s]) if s in where else bridges.BRIDGES[s](self)
+                self.bridges[s] = b
+                b.start()
+
+    def _owner_user(self, venue):
+        return {'id': venue, 'name': C.owner_name(), 'display': 'phone page' if venue == 'phone' else 'VR'}
+
+    def seen_owner(self, venue):
+        """The owner was on the phone page or in VR just now (hub_presence); saved at most every 5 s."""
+        with self.lock:
+            seen = self.presence.setdefault(C.owner_name(), {})
+            last, seen[venue] = seen.get(venue, 0), round(time.time(), 1)
+            if seen[venue] - last >= 5:
+                self._save()
+
+    def bridged(self, venue, kind, f):
+        """A line the owner sent on the phone page or in VR, copied by a bridge: logged as their word."""
+        self.seen_owner(venue)
+        return self.log.add(kind, venue, platform=venue, user=self._owner_user(venue), person=C.owner_name(),
+                            trust='owner', use='word', **f)
+
+    def panel_answer(self, r, f):
+        """A phone answer to a panel the hub opened (hub_say to the owner on the phone): a press or a form for the
+        agent that sent it. False when the panel is not the hub's."""
+        o = self.open.get(f"phone:{r.get('id')}")
+        if o is None:
+            return False
+        label = r.get('answer')
+        b = next((b for b in o['buttons'] if b['label'] == label), None)
+        g = {**f, 'msg_id': r['id'], 'button': b['id'] if b else None, 'label': label, 'for': o['by']}
+        if r.get('dismissed'):
+            g['dismissed'] = True
+        self.bridged('phone', 'form' if o.get('form') and not r.get('dismissed') else 'press', g)
+        return True
 
     def _save(self):
         if len(self.open) > OPEN_KEEP:
@@ -167,9 +210,11 @@ class Hub:
                          'state': a.status() if a else 'off', 'caps': a.caps if a else None,
                          'keys': C.key_summary(name) if cfg['platform'] != 'fake' else 'none needed'})
         return {'up_s': int(now - self.started), 'port': self.port, 'lines': self.log.n, 'paused': C.paused(),
-                'watching': sorted(w for w, t in self.watchers.items() if now - t < 120), 'places': rows}
+                'watching': sorted(w for w, t in self.watchers.items() if now - t < 120), 'places': rows,
+                'bridges': [b.status() for b in self.bridges.values()]}
 
-    def op_listen(self, who, since=None, wait=25.0, places=None, people=None, kinds=None, quiet=False, every=False):
+    def op_listen(self, who, since=None, wait=25.0, places=None, people=None, kinds=None, quiet=False, every=False,
+                  mine=False):
         self.watchers[who] = time.time()
         if since is None:
             since = self.log.n
@@ -182,6 +227,8 @@ class Hub:
             if people and d.get('person') not in people:
                 return False
             if not quiet and d.get('use') in QUIET_UNTIL:
+                return False
+            if mine and d.get('for') not in (None, who):
                 return False
             return every or d['kind'] not in ('press', 'form') or d.get('for') in (None, who)
         lines = self.log.wait(int(since), float(wait or 0), pick)
@@ -203,14 +250,25 @@ class Hub:
         """(adapter, user id or None, where or None, person or None) for a destination."""
         if reply_to is not None:
             d = next((x for x in self.log.lines if x['n'] == int(reply_to)), None)
-            if d is None or d['kind'] not in ('msg', 'press', 'form'):
+            if d is None or d['kind'] not in ('msg', 'press', 'form', 'event'):
                 raise ValueError(f'no message n={reply_to} in the log to answer (hub_read shows them)')
+            if d['venue'] == 'stage':
+                raise ValueError(f"n={reply_to} was said in VR. VR: read only in phase 2: answer it with stage_say "
+                                 f"on scene {d.get('scene')!r}")
+            if d['venue'] == 'phone':
+                return self.phone, None, None, d.get('person')
+            if d['kind'] == 'event':
+                raise ValueError(f'n={reply_to} is an event, not a message to answer')
             a = self.adapters.get(d['venue'])
             if a is None:
                 raise ValueError(f"{d['venue']} is not connected now (hub_status)")
             dm = d.get('dm') or str(d.get('where') or '').startswith('dm')
             return a, (d['user'] or {}).get('id') if dm else None, None if dm else d.get('where'), d.get('person')
         to = str(to or '')
+        if to == 'phone' and 'phone' in self.bridges:
+            return self.phone, None, None, C.owner_name()
+        if to == 'stage':
+            raise ValueError("VR: read only in phase 2: stage_say reaches the person in the headset")
         if ':' in to and to.split(':', 1)[0] in self.adapters:
             place, where = to.split(':', 1)
             return self.adapters[place], None, where, None
@@ -220,17 +278,22 @@ class Hub:
                 raise ValueError(f"{to} has no default channel: hub_place({to!r}, channel='<id>'), or to='{to}:<id>'")
             return self.adapters[to], None, where, None
         accs = P.accounts_of(to)
-        if not accs:
+        owner = P.role_of(to) == 'owner'
+        if not accs and not owner:
             raise ValueError(f"no person or place named {to!r}: a person linked with hub_pair, a place from "
                              f"hub_status, "
                              f"or place:<channel or thread id>")
         seen = self.presence.get(to, {})
-        options = [(seen.get(name, 0), name, acc.split(':', 1)[1]) for acc in accs for name, a in self.adapters.items()
-                   if acc.split(':', 1)[0] == a.platform and a.state == 'reading']
+        options = [(seen.get(name, 0), 1, name, acc.split(':', 1)[1]) for acc in accs
+                   for name, a in self.adapters.items() if acc.split(':', 1)[0] == a.platform and a.state == 'reading']
+        if owner and 'phone' in self.bridges and self.phone.up():      # the owner's phone page; a tie goes to the bot
+            options.append((seen.get('phone', 0), 0, 'phone', ''))
         if not options:
-            raise ValueError(f"{to} has no connected place now ({', '.join(accs)}); hub_status shows each place, "
-                             f"and the phone (phone_say) reaches them as before")
-        _, name, uid = max(options)
+            raise ValueError(f"{to} has no connected place now ({', '.join(accs) or 'no accounts'}); hub_status shows "
+                             f"each place, and the phone (phone_say) reaches them as before")
+        _, _, name, uid = max(options)
+        if name == 'phone':
+            return self.phone, None, None, to
         return self.adapters[name], uid, None, to
 
     def op_say(self, to=None, text='', files=None, buttons=None, form=None, press='to', thread=None, reply_to=None,
@@ -238,7 +301,7 @@ class Hub:
         a, uid, where, person = self._route(to, reply_to)
         if thread:
             where, uid = thread, None
-        owner = person is not None and P.load()['people'].get(person, {}).get('role') == 'owner'
+        owner = person is not None and P.role_of(person) == 'owner'
         cfg = self.configs.get(a.name, {})
         if not owner:
             if C.paused():
@@ -253,7 +316,10 @@ class Hub:
         if reply_to is not None:
             d = next((x for x in self.log.lines if x['n'] == int(reply_to)), {})
             mid = d.get('id') if d.get('kind') == 'msg' else None
-        got = a.deliver(r, to=uid, thread=where, reply_to=mid)
+        if a is self.phone:
+            got = a.deliver(r, by=by)
+        else:
+            got = a.deliver(r, to=uid, thread=where, reply_to=mid)
         key = f"{a.name}:{got['id']}"
         if r['buttons'] or r['form'] or r['typed']:
             self.open[key] = {'place': a.name, 'where': got.get('where'), 'by': by, 'press': press, 'at': time.time(),
@@ -263,7 +329,11 @@ class Hub:
         d = self.log.add('said', a.name, platform=a.platform, by=by, to=person or uid or where, id=got['id'],
                          where=got.get('where'), text=r['text'], files=[f['name'] for f in r['files']] or None,
                          buttons=out['buttons'] or None, form=out['form'], shown=r['shown'], approved=approved)
-        return {'place': a.name, 'id': got['id'], 'n': d['n'], 'shown': r['shown'] or ['text']}
+        shown = ([f"the phone page: {', '.join(got['how'])}"] if got.get('how') else []) + (r['shown'] or ['text'])
+        if owner and reply_to is None and self.presence.get(person, {}).get('stage'):
+            shown.append(f"VR: read only in phase 2 (they were in VR "
+                         f"{int(time.time() - self.presence[person]['stage'])} s ago; stage_say reaches them there)")
+        return {'place': a.name, 'id': got['id'], 'n': d['n'], 'shown': shown}
 
     def op_edit(self, n, text=None, files=None, by=None):
         d = next((x for x in self.log.lines if x['n'] == int(n) and x['kind'] == 'said'), None)
@@ -350,6 +420,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     C.HOME.mkdir(parents=True, exist_ok=True)
     hub = Hub(a.port)
+    hub.start_bridges()
     Handler.hub = hub
     srv = ThreadingHTTPServer(('127.0.0.1', a.port), Handler)
     srv.daemon_threads = True
