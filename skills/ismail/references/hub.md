@@ -3,7 +3,8 @@
 People reach the team from places: a Discord bot now, more later (Telegram, WhatsApp, the chat of a live stream).
 The hub puts everything they send into one numbered log, says who sent it and what their words may do, and shows
 what you send the way each place can. The phone page, the VR stage and stream chat keep their own ops (`phone_*`,
-`stage_*`, `chat_*`); use those as before.
+`stage_*`, `chat_*`); use those as before. The hub also copies the owner's phone and VR lines into its log, read
+only (below).
 
 ## What runs where
 
@@ -37,10 +38,27 @@ every wake. Each line carries:
 
 When several agents watch, `hub_claim(n, who)` before acting on a line.
 
+## The phone page and VR, read only
+
+- The hub copies what the owner sends on the phone page and in VR into its log, so one hub_watch sees it all. The
+  lines have venue `phone` or `stage`, person the owner, use `word`. What they say or type is kind `msg`; a tap, a
+  mood, a button or a panel answer is kind `event`. `src_kind` and `src_n` are the original line's kind and number,
+  and `for` names the agent it was addressed to there.
+- `hub_watch(..., mine=True)` leaves out lines addressed to another agent. `places=['phone']` reads only the phone.
+- Read only: the hub never claims, marks or answers anything there. `phone_claim`, `phone_watch`, `stage_listen` and
+  the stage ear work as before, and the hub does not show up as a phone watcher or a VR listener.
+- The `hub.bridges` setting names what it reads: `phone` and `stage` by default, `[]` for none. `hub_status` says
+  whether each one is reading.
+- `hub_presence(<owner>)` lists the phone and VR too, from what they sent there.
+
 ## Sending: hub_say
 
 - `to`: a person (a linked name: goes to the connected place where they were last seen), a place (its default
   channel), or `place:<channel or thread id>`; or `reply_to=<n>` answers where the line was said.
+- The owner's phone page counts as a place for them when its server is up: text is a caption, buttons and a form
+  are a panel, files are download cards. `to='phone'` sends there directly. A press or answer on that panel comes
+  back to you as a press or form line; "Not now" comes back as a press with `dismissed: true`.
+- VR is read only for now: to answer a line from VR, use `stage_say`. When the owner was in VR, `shown` says so.
 - `files`: local paths. Mp3s play in the chat where the place allows. The answer says when a file is too big
   (Discord: 20 MB): render at 192 kbps.
 - `buttons`: labels or `[{'id': 'keep', 'label': 'Keep'}]`, the phone panel's schema.

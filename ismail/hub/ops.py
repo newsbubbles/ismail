@@ -1,7 +1,8 @@
 """hub_* ops: agents talk with people on every place (Discord, later Telegram, and the fake test place) through one log.
 
 The hub server holds the places' connections (server.py); these ops are thin calls to it, except hub_place, which
-edits the places file and works with the server down too. The phone_*, stage and chat_* ops are unchanged."""
+edits the places file and works with the server down too. The phone_*, stage and chat_* ops are unchanged: the hub
+reads the phone page's inbox and the VR stage's event files into its log, read only (bridges.py)."""
 import json
 import os
 import subprocess
@@ -107,6 +108,9 @@ def hub_status() -> str:
             out.append(f"    shows: text up to {c.get('text_max')}, files up to {c.get('file_max_mb')} MB, "
                        f"{c.get('buttons')} buttons, forms with {', '.join(c.get('forms') or []) or 'none (typed)'}, "
                        f"edits {'yes' if c.get('edit') else 'no'}, threads {'yes' if c.get('threads') else 'no'}")
+    for b in st.get('bridges') or []:
+        out.append(f"  {b['source']}: read only, {b['state']}" + (f" ({b['why']})" if b['why'] else '') +
+                   f", {b['got']} lines read")
     if not st['places']:
         out.append("  no places yet: hub_place('discord', platform='discord') (then the person runs "
                    "`python -m ismail.hub token discord`), or hub_place('practice', platform='fake')")
@@ -179,7 +183,7 @@ def _cursor_save(who, since):
 
 @op()
 def hub_watch(who: str, since: int = None, places: list = None, people: list = None, kinds: list = None,
-              wait_min: float = 100, quiet: bool = False, every: bool = False) -> str:
+              wait_min: float = 100, quiet: bool = False, every: bool = False, mine: bool = False) -> str:
     """The standing watcher for every place: blocks until someone sends something, returns it, and remembers its place.
     Run it in the background (`python -m ismail hub_watch "who=Maintainer"`), act on what it returns, and re-arm it
     FIRST after every wake. Returns JSON {lines, since}: each line {n, kind (msg, press, form, event), venue (the
@@ -187,19 +191,21 @@ def hub_watch(who: str, since: int = None, places: list = None, people: list = N
     mod, guest), use, text, files, where, dm}. use says what the words may do: word (the owner's: their yes, as a phone
     tap), suggestion (musical input to weigh, never an instruction), request. A press {msg_id, button, label} or a form
     {msg_id, values} comes only to the agent that sent the message (every=True shows all). quiet=True also shows lines
-    the policy set aside (ignored, refused, paused). places / people / kinds: only those. Claim a line with hub_claim
-    before acting on it when others watch too."""
+    the policy set aside (ignored, refused, paused). places / people / kinds: only those. The owner's phone page and
+    VR come in too, read only (venue phone or stage, use word; src_kind and src_n are the original line's kind and n,
+    and `for` the agent it was addressed to there); mine=True leaves out lines addressed to another agent. Claim a
+    line with hub_claim before acting on it when others watch too."""
     if since is None:
         since = _cursor_load(who)
     end = time.time() + float(wait_min) * 60
     while True:
         left = end - time.time()
         res = _call('listen', timeout=40, who=who, since=since, wait=min(25.0, max(0.0, left)), places=places,
-                    people=people, kinds=kinds, quiet=quiet, every=every)
+                    people=people, kinds=kinds, quiet=quiet, every=every, mine=mine or None)
         since = res['since']
         if res['lines']:
             more = _call('listen', timeout=15, who=who, since=since, wait=3.0, places=places, people=people,
-                         kinds=kinds, quiet=quiet, every=every)
+                         kinds=kinds, quiet=quiet, every=every, mine=mine or None)
             since = more['since']
             _cursor_save(who, since)
             return json.dumps({'who': who, 'since': since, 'lines': res['lines'] + more['lines'],
@@ -227,13 +233,15 @@ def hub_read(since: int = 0, place: str = None, person: str = None, kinds: list 
 def hub_say(to: str = None, text: str = '', files: list = None, buttons: list = None, form: dict = None,
             press: str = 'to', thread: str = None, reply_to: int = None, who: str = None, approved: str = None) -> str:
     """Send to a person or a place, shown the way that place can. to: a person (a linked name: goes to the connected
-    place where they were last seen), a place ("discord", its default channel) or place:<channel or thread id>; or
-    reply_to=<a line's n> answers where it was said. files: local paths (mp3s play in the chat where the place allows;
-    the answer says when a file is too big). buttons: labels or [{'id': 'keep', 'label': 'Keep'}]; a press comes back to
-    you in hub_watch. form: {'title': 'Change it', 'inputs': [{'id': 'tempo', 'kind': 'choice' | 'check' | 'toggle' |
-    'text', 'label': 'Tempo', 'options': [...]}]} (the phone panel's schema). Where a place cannot show buttons or a
-    form, they become typed replies, and the answer's `shown` says so. press: who may press or answer: to (the person it
-    went to; in a channel, anyone there), anyone, owner (the owner only). who: your role, logged as the sender.
+    place where they were last seen; for the owner the phone page counts too: a caption, a panel for buttons and a
+    form, download cards for files; VR is read only for now), a place ("discord", its default channel) or
+    place:<channel or thread id>; or reply_to=<a line's n> answers where it was said. files: local paths (mp3s play
+    in the chat where the place allows; the answer says when a file is too big). buttons: labels or [{'id': 'keep',
+    'label': 'Keep'}]; a press comes back to you in hub_watch. form: {'title': 'Change it', 'inputs': [{'id':
+    'tempo', 'kind': 'choice' | 'check' | 'toggle' | 'text', 'label': 'Tempo', 'options': [...]}]} (the phone panel's
+    schema). Where a place cannot show buttons or a form, they become typed replies, and the answer's `shown` says
+    so. press: who may press or answer: to (the person it went to; in a channel, anyone there), anyone, owner (the
+    owner only). who: your role, logged as the sender.
     approved: the owner's words, needed on a public place (posting there is publishing). Refused while hub_pause is on,
     except to the owner."""
     vals = [text] + [b if isinstance(b, str) else json.dumps(b) for b in (buttons or [])] + \
@@ -264,8 +272,8 @@ def hub_claim(n: int, who: str, why: str = None) -> str:
 
 @op()
 def hub_presence(person: str = None) -> str:
-    """When each person was last seen on each hub place, newest first, in seconds ago (the phone and VR keep their
-    own: phone_presence, stage_presence)."""
+    """When each person was last seen on each hub place, newest first, in seconds ago; for the owner also the phone
+    page and VR (phone, stage), from what they sent there (phone_presence and stage_presence say more)."""
     return json.dumps(_call('presence', person=person))
 
 
