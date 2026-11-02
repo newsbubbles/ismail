@@ -1,7 +1,7 @@
 """The person's side of the hub, typed in a terminal (an agent never sees what is typed here).
 
   python -m ismail.hub token <place>              paste the bot's token (hidden as you type)
-  python -m ismail.hub link <person> <account>    e.g. link nate discord:123456789012345678
+  python -m ismail.hub link <person> <account>    e.g. link sam discord:123456789012345678
   python -m ismail.hub unlink <account>
   python -m ismail.hub pair <person>              a one-time code to send to the bot as `pair <code>`
   python -m ismail.hub people

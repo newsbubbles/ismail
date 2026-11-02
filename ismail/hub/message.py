@@ -7,7 +7,8 @@ and the answer says which, so the agent knows what the person saw."""
 import os
 import re
 
-PRESS = ('to', 'anyone', 'owner')      # who may press a button or answer a form: the person it went to, anyone, Nate
+# who may press a button or answer a form: the person it went to, anyone, the owner
+PRESS = ('to', 'anyone', 'owner')
 
 
 def _inputs(inputs):
@@ -57,7 +58,7 @@ def render(out, caps, place):
     if files:
         if not caps.get('files_out'):
             raise ValueError(f"{place} cannot carry files; a link would mean hosting them in public, which needs "
-                             f"Nate's OK")
+                             f"the owner's OK")
         big = [f for f in files if f['mb'] > caps.get('file_max_mb', 8)]
         if big:
             raise ValueError(f"{', '.join(f['name'] + ' (' + str(f['mb']) + ' MB)' for f in big)}: {place} takes "

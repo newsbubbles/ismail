@@ -170,6 +170,10 @@ SETTINGS = [
     Setting('phone.keep_master', 'ISMAIL_PHONE_KEEP_MASTER', 'bool', True,
             'the phone server takes the live master while an engine plays, page open or not', 'phone',
             live=False, when='restart the phone page server (phone_stop, then phone_start)'),
+    # the hub
+    Setting('hub.owner', 'ISMAIL_HUB_OWNER', 'str', 'owner',
+            "the hub owner's name: their paired accounts carry their word, and a new place answers only them", 'hub',
+            live=False, when='restart the hub (hub_stop, then hub_start)'),
     # the MCP server's tool list
     Setting('mcp.roles', 'ISMAIL_MCP_ROLES', 'list', list,
             'serve only these roles\' tools (dj, mc, song, ...); --roles wins', 'mcp',

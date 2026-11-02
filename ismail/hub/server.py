@@ -242,11 +242,11 @@ class Hub:
         cfg = self.configs.get(a.name, {})
         if not owner:
             if C.paused():
-                raise ValueError(f"the hub is paused ({C.paused().get('why')}): only Nate is answered until "
+                raise ValueError(f"the hub is paused ({C.paused().get('why')}): only the owner is answered until "
                                  f"hub_pause(off)")
             if cfg.get('public') and not approved:
-                raise ValueError(f"{a.name} is public: a message from an agent there is publishing. Ask Nate first "
-                                 f"(phone_ask with the draft), then pass approved='<his words>'")
+                raise ValueError(f"{a.name} is public: a message from an agent there is publishing. Ask the owner "
+                                 f"first (phone_ask with the draft), then pass approved='<their words>'")
         out = M.check(text, files, buttons, form, press)
         r = M.render(out, a.caps, a.name)
         mid = None

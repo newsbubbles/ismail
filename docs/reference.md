@@ -91,6 +91,7 @@ configurations keep working. Regenerate this table with `python -m ismail.settin
 | `live.ceiling_db` | float | -1 | the live master's peak ceiling in dBFS; the file can only lower it | at the next live_start | `ISMAIL_LIVE_CEILING_DB` |
 | `live.idle_min` | float | 60 | minutes a live engine with nothing to play waits before it stops itself | at the next live_start | `ISMAIL_LIVE_IDLE_MIN` |
 | `phone.keep_master` | bool | true | the phone server takes the live master while an engine plays, page open or not | after a restart: restart the phone page server (phone_stop, then phone_start) | `ISMAIL_PHONE_KEEP_MASTER` |
+| `hub.owner` | str | owner | the hub owner's name: their paired accounts carry their word, and a new place answers only them | after a restart: restart the hub (hub_stop, then hub_start) | `ISMAIL_HUB_OWNER` |
 | `mcp.roles` | list | none | serve only these roles' tools (dj, mc, song, ...); --roles wins | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_MCP_ROLES` |
 | `mcp.shelves` | list | none | serve only these shelves' tools (live, stream, phone, ...); --shelves wins | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_MCP_SHELVES` |
 | `mcp.max_tools` | int | no cap | refuse to start the MCP server when it would serve more tools than this; --max-tools wins | after a restart: restart ismail (the MCP server, or quit and reopen the app); a CLI call picks it up at once | `ISMAIL_MCP_MAX_TOOLS` |

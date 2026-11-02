@@ -127,6 +127,11 @@ already use (Claude Code, Codex, Cursor, any MCP client) on one side and to you 
 - **The phone page.** The set in your pocket, with the screen off. Talk back through your earbuds; the agent puts
   its own panels on the page for whatever it needs to ask you, from "sample this or play it as a melody?" to a
   listening test with the labels hidden.
+- **Live streams.** One set out to Twitch, YouTube, Kick or any site that takes RTMP at once, with a picture drawn
+  from the music, and every site's chat in one place for the agents to answer. Going live is your yes, every time.
+- **Chat apps.** Message your agents from Discord: text, voice notes and mp3s in, and back the buttons and forms
+  they make up on the spot, each place showing them the best way it can. Invite friends and they can try it too,
+  through your agent, with what their words may do set by you ([the hub](skills/ismail/references/hub.md)).
 
 The agent measures everything it can and asks your ears and eyes only what its measurements can't settle.
 
@@ -238,6 +243,7 @@ its declared server for an MCP handshake.
 - The agent's own changes to a live set land between its turns, 5 to 30 seconds apart (your taps on the phone or
   the stage act at once).
 - The VR stage is tested on one headset (Quest 3) with one person.
+- Chat apps: Discord only so far. Telegram, WhatsApp and the stream chats join the same log later.
 - It needs a capable agent, and your ear stays the final judge. The listening tests so far had one listener.
 
 How it compares with Suno, streaming models such as Lyria RealTime, and bridges into Ableton or FL Studio: see the

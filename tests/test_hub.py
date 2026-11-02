@@ -26,6 +26,7 @@ def wait_for(fn, timeout=5.0):
 @pytest.fixture
 def hub(tmp_path, monkeypatch):
     monkeypatch.setattr(C, 'HOME', tmp_path / 'hub')
+    monkeypatch.setenv('ISMAIL_HUB_OWNER', 'nate')
     C.HOME.mkdir(parents=True)
     h = server.Hub(0)
     server.Handler.hub = h
@@ -296,3 +297,15 @@ def test_buttons_in_a_channel_answer_anyone_there_but_owner_only_buttons_answer_
     got = lines(hub, who='Maintainer', kinds=['press'], quiet=True)
     assert [(d['label'] if d['use'] != 'refused' else None, d['use']) for d in got] == [('A', 'suggestion'),
                                                                                          (None, 'refused')]
+
+
+def test_the_owner_is_a_setting_not_a_name_in_the_code(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, 'HOME', tmp_path / 'hub')
+    owner = {'name': None}
+    monkeypatch.setattr(C.settings, 'get', lambda k, *a: owner['name'] if k == 'hub.owner' else None)
+    assert C.place_defaults('discord')['only'] == ['owner']       # unset: the name "owner"
+    assert P.role_of('owner') == 'owner' and P.role_of('nate') == 'friend'
+    owner['name'] = 'sam'
+    assert C.place_defaults('fake')['only'] == ['sam']
+    P.link('sam', 'discord:1')
+    assert P.who('discord', '1') == ('sam', 'owner') and P.who('discord', '2') == (None, None)
