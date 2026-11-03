@@ -25,22 +25,6 @@
   they were last seen, and a panel answer there comes back as a press or form. VR stays read only. Setting:
   `hub.bridges`.
 
-### Spectrogram videos: a camera path (Nate 11-02, ledger:M430)
-
-- `spectro --camera "0:full,4:12,200:12,210:full"`: keys of seconds in view over time, so one clip shows the whole
-  song, eases into a 12 s window that rolls under the line, and eases back out. The view stays inside the clip:
-  the line rides in from the left edge and drifts out to the right edge at the end, with no black padding.
-  `--ease_s` sets how long each change takes (0: the whole gap between keys).
-- Extras the music drives, each 0 (off) by default: `--minimap` (px; the whole clip along the bottom with a box
-  for the view), `--zoom_follow` (the view breathes with the smoothed loudness, `--follow_s`), `--kick_pulse` (a
-  punch-in and a flash on low onsets, `--kick_hz`, `--kick_decay_s`).
-- `--kick_pulse` and `--zoom_follow` take keys too ("t:depth,...", linear between them), so the agent sets when and
-  how much: `--kick_pulse "0:0,180:0,182:0.6,200:0.6,202:0"` punches only in the climax.
-- Faster: the picture is kept as 8-bit and only the glow is drawn in floats, frames go to ffmpeg from a writer
-  thread, and `--preset` picks libx264's speed (medium as before). `static` and `scroll` look as before (at most
-  1 of 255 apart, in the glow).
-- Guide: skills/ismail/references/music-video.md, "Spectrogram clips with a playhead".
-
 ### Spectrogram videos with a glowing playhead (Nate 11-01)
 
 - `python -m ismail.video spectro <audio> <out.mp4>` draws any audio file's spectrogram (the stream's cqt colours)
