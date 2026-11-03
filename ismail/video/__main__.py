@@ -11,8 +11,9 @@
   contact <video> [n]       contact sheet of n frames of any video -> video/build/look/contact_<name>.png
   edit [-- --sheet a b n | -- --range a b]   runs video/cut.py (sheet = contact sheet of bars a..b-1)
   spectro <audio> <out>     a spectrogram video with a glowing playhead line (any audio file, no song needed):
-                            --mode static|scroll, --start/--end seconds, --still <s> for one png frame, and the
-                            look's raw numbers (python -m ismail.video spectro --help lists them)
+                            --mode static|scroll or --camera "0:full,4:12" (zoom keys), --start/--end seconds,
+                            --still <s> for one png frame, and the look's raw numbers (python -m ismail.video
+                            spectro --help lists them)
 """
 import argparse
 import glob
@@ -176,6 +177,9 @@ def cmd_spectro(argv):
     for k, v in spectro.DEFAULTS.items():
         if k == 'cscheme':
             ap.add_argument('--cscheme', help=f"six numbers, left rgb then right rgb (default {'|'.join(map(str, v))})")
+        elif k == 'camera':
+            ap.add_argument('--camera', help='keys "t:window_s,..." in seconds, full = the whole clip, e.g. '
+                            '"0:full,4:12,200:12,210:full" (supersedes --mode)')
         elif isinstance(v, bool):
             ap.add_argument(f'--{k}', type=lambda s: s.lower() in ('1', 'true', 'yes', 'on'), help=f'default {v}')
         else:
