@@ -34,6 +34,11 @@
 - Extras the music drives, each 0 (off) by default: `--minimap` (px; the whole clip along the bottom with a box
   for the view), `--zoom_follow` (the view breathes with the smoothed loudness, `--follow_s`), `--kick_pulse` (a
   punch-in and a flash on low onsets, `--kick_hz`, `--kick_decay_s`).
+- The needle and snaps (Nate 11-03, ledger:M431): with a camera, `--at` takes keys "t:at[:snap],..." eased like the
+  camera's, so the line can be held back over a build and put back in place on the drop; any camera or needle key
+  with `:snap` arrives in its last `--snap_s` (0.12 s) instead of easing over the gap.
+- Guide: "Camera craft" in music-video.md, the rules (the window is the scroll speed, change it every 4 to 16
+  bars on the sections, the kick punch at 2 or 3 key moments) and a worked 18-key plan for a 5-minute track.
 - `--kick_pulse` and `--zoom_follow` take keys too ("t:depth,...", linear between them), so the agent sets when and
   how much: `--kick_pulse "0:0,180:0,182:0.6,200:0.6,202:0"` punches only in the climax.
 - Faster: the picture is kept as 8-bit and only the glow is drawn in floats, frames go to ffmpeg from a writer

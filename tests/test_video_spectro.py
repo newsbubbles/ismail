@@ -192,3 +192,44 @@ def test_kick_pulse_keys_only_where_on(song, tmp_path):
     off = frame(song, tmp_path, 2.1, camera='0:2', kick_pulse='0:0,3:0,3.1:1')    # on only after 3 s
     on = frame(song, tmp_path, 2.1, camera='0:2', kick_pulse='0:1,3:1')
     assert (off == plain).all() and on.mean() > plain.mean() + 2
+
+
+def test_needle_held_back_on_a_build_and_snapped_in_on_the_drop():
+    at = spectro.needle('0:0.5,60:0.35,64:0.5:snap', [0, 30, 60, 63.8, 63.94, 64, 80])
+    assert np.isclose(at[0], 0.5) and 0.35 < at[1] < 0.5 and np.isclose(at[2], 0.35)
+    assert np.isclose(at[3], 0.35) and 0.35 < at[4] < 0.5 and np.allclose(at[5:], 0.5)   # the snap: the last 0.12 s
+    assert np.allclose(spectro.needle(0.4, [0, 9]), 0.4) and np.allclose(spectro.needle('0.4', [0, 9]), 0.4)
+    assert np.isclose(spectro.needle('10:0.5,20:0.3', [15], t0=10)[0], 0.3)             # file seconds
+    with pytest.raises(ValueError, match='0 to 1'):
+        spectro.needle('0:0.5,4:1.5', [0])
+    with pytest.raises(ValueError, match='keys like'):
+        spectro.needle('0:0.5:bounce', [0])
+
+
+def test_camera_snap_key_and_needle_array():
+    keys = spectro.parse_camera('0:12,64:4:snap')
+    assert keys == [(0, 12), (64, 4, 'snap')]
+    w = spectro.camera_path(keys, [10, 63, 63.94, 64, 80], 100)[0]
+    assert np.allclose(w[[0, 1]], 12) and 4 < w[2] < 12 and np.allclose(w[3:], 4)
+    t = np.array([20, 30, 40.0])
+    at = spectro.needle('0:0.5,30:0.3,40:0.5', t)
+    w, left, x = spectro.camera_path([(0, 10)], t, 100, at=at)
+    assert np.allclose(x, at)                                          # the line sits where the needle says
+
+
+@needs_ffmpeg
+def test_needle_keys_need_a_camera_and_draw(song, tmp_path):
+    with pytest.raises(ValueError, match='timed at keys work with a camera'):
+        frame(song, tmp_path, 1.0, mode='scroll', at='0:0.5,2:0.3')
+    a = frame(song, tmp_path, 2.5, camera='0:2', at='0:0.5,2.5:0.3')
+    b = frame(song, tmp_path, 2.5, camera='0:2', at=0.5)
+    assert a.shape == b.shape and np.abs(a.astype(int) - b).mean() > 1
+
+
+def test_cli_needle_keys(song, monkeypatch):
+    from ismail.video import __main__ as cli
+    seen = {}
+    monkeypatch.setattr(spectro, 'render', lambda src, out, **kw: seen.update(kw) or 'ok')
+    cli.cmd_spectro([song, 'o.mp4', '--camera', '0:full,4:12,64:4:snap', '--at', '0:0.5,60:0.35,64:0.5:snap',
+                     '--snap_s', '0.08'])
+    assert seen['snap_s'] == 0.08 and np.isclose(spectro.needle(seen['at'], [64.0])[0], 0.5)

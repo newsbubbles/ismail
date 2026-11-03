@@ -180,6 +180,10 @@ def cmd_spectro(argv):
         elif k == 'camera':
             ap.add_argument('--camera', help='keys "t:window_s,..." in seconds, full = the whole clip, e.g. '
                             '"0:full,4:12,200:12,210:full" (supersedes --mode)')
+        elif k == 'at':
+            ap.add_argument('--at', help='where the line sits, a share of the width (default 0.5), or with --camera '
+                            'keys "t:at[:snap],..." eased like the camera keys, e.g. "0:0.5,60:0.35,64:0.5:snap" '
+                            '(held back over a build, back in place on the drop)')
         elif k in ('kick_pulse', 'zoom_follow'):
             ap.add_argument(f'--{k}', help=f'a depth 0..1 (default {v}), or keys "t:depth,..." in seconds, linear '
                             'between them, e.g. "0:0,180:0,182:0.6,200:0.6,202:0" (on only from 182 to 200 s)')

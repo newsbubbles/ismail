@@ -37,6 +37,8 @@ column pairs) for the wider views; a frame takes the nearest columns of the copy
 
     python -m ismail.video spectro <audio> <out.mp4> [--mode scroll] [--start 30 --end 90] [--still 42.5]
     python -m ismail.video spectro <audio> <out.mp4> --camera "0:full,4:12,200:12,210:full" --minimap 72 --kick_pulse 0.6
+    python -m ismail.video spectro <audio> <out.mp4> --camera "0:full,6:27.4,27:13.7,55:6.9,82:13.7,106:3.4,110:6.9:snap,137:1.7,165:27.4,294:full" --at "0:0.5,82:0.5,108:0.35,110:0.5:snap" --kick_pulse "0:0,110:0,110.1:0.7,124:0.7,126:0"
+    (a song tells its story in many keys: a change every 4 to 16 bars; music-video.md, "Camera craft")
 """
 import queue
 import subprocess
@@ -47,7 +49,7 @@ import soundfile as sf
 
 from .. import settings
 
-DEFAULTS = dict(mode='static', camera=None, ease_s=0.0, width=1920, height=1080, fps=30, start=0.0, end=None,
+DEFAULTS = dict(mode='static', camera=None, ease_s=0.0, snap_s=0.12, width=1920, height=1080, fps=30, start=0.0, end=None,
                 window_s=12.0, at=0.5, fmin=30.0, fmax=16000.0, range_db=48.0, gamma=1.8, cscheme=(1, 0.5, 0, 0, 0.5, 1),
                 line_color='#f2f9ff', halo_color='#5aaeff', line_width=3, bloom_px=26, glow=0.55, bloom_gain=1.6, accent=0.9,
                 smooth_s=0.12, minimap=0, zoom_follow=0.0, follow_s=4.0, kick_pulse=0.0, kick_hz=150.0,
@@ -184,22 +186,31 @@ def glow_strip(B_col_region, x_off, k, o):
     return core, halo
 
 
+def _split_keys(s, what, example):
+    """'t:value[:snap],...' or [(t, value[, 'snap']), ...] as [(t, value, shape)], shape 'ease' or 'snap'."""
+    try:
+        ks = [p.split(':') for p in s.replace(' ', '').split(',') if p] if isinstance(s, str) else list(s)
+        out = []
+        for k in ks:
+            if not 2 <= len(k) <= 3 or (len(k) == 3 and str(k[2]).lower() not in ('ease', 'snap')):
+                raise ValueError
+            out.append((float(k[0]), k[1], str(k[2]).lower() if len(k) == 3 else 'ease'))
+    except (ValueError, TypeError):
+        raise ValueError(f'{what} {s!r}: keys like "{example}" (seconds:value, and :snap on a key to arrive '
+                         'there fast)') from None
+    return out
+
+
 def parse_camera(s):
-    """'0:full,4:12,200:12,210:full' (seconds:window_s, 'full' = the whole clip) or a list of pairs, as
-    [(t_s, window_s or None), ...] sorted by time."""
-    if isinstance(s, str):
-        try:
-            s = [p.split(':') for p in s.replace(' ', '').split(',') if p]
-            s = [(float(t), w) for t, w in s]
-        except ValueError:
-            raise ValueError(f'camera {s!r}: keys like "0:full,4:12,200:12" (seconds:window seconds, full = the '
-                             'whole clip)') from None
+    """'0:full,4:12,200:12,210:full' (seconds:window_s, 'full' = the whole clip; a third field 'snap' arrives at
+    that key in the last snap_s instead of easing over the gap, e.g. '64:4:snap' on a drop) or a list of pairs, as
+    [(t_s, window_s or None), ...] sorted by time (a snap key as (t_s, window_s, 'snap'))."""
     keys = []
-    for t, w in s:
+    for t, w, shape in _split_keys(s, 'camera', '0:full,4:12,200:12'):
         w = None if w is None or str(w).lower() == 'full' else float(w)
         if w is not None and w <= 0.05:
             raise ValueError(f'camera key {t}:{w}: a window is more than 0.05 s (or full)')
-        keys.append((float(t), w))
+        keys.append((t, w) if shape == 'ease' else (t, w, shape))
     if not keys:
         raise ValueError('camera: at least one key, e.g. "0:full,4:12"')
     return sorted(keys, key=lambda k: k[0])
@@ -224,23 +235,45 @@ def keyed(v, t, t0=0.0):
     return np.interp(t, [k[0] for k in ks], [k[1] for k in ks])
 
 
-def camera_path(keys, t, dur, ease_s=0.0, at=0.5):
+def _eased(kt, kv, snap, t, ease_s=0.0, snap_s=0.12):
+    """Values at times t: each key's value is reached at its time, easing (smoothstep) over the whole gap from the
+    key before, or over its last ease_s (ease_s > 0), or for a snap key over its last snap_s; held before the first
+    key and after the last."""
+    t = np.asarray(t, dtype=float)
+    kt, kv, snap = np.asarray(kt, dtype=float), np.asarray(kv, dtype=float), np.asarray(snap, dtype=bool)
+    if len(kt) == 1:
+        return np.full_like(t, kv[0])
+    j = np.clip(np.searchsorted(kt, t, side='right'), 1, len(kt) - 1)
+    a, b = kt[j - 1], kt[j]
+    span = b - a if ease_s <= 0 else np.minimum(b - a, ease_s)
+    span = np.where(snap[j], np.minimum(b - a, snap_s), span)
+    u = np.clip((t - (b - span)) / np.maximum(span, 1e-9), 0, 1)
+    u = u * u * (3 - 2 * u)                              # smoothstep
+    v = kv[j - 1] + (kv[j] - kv[j - 1]) * u
+    return np.where(t < kt[0], kv[0], np.where(t >= kt[-1], kv[-1], v))
+
+
+def needle(v, t, t0=0.0, ease_s=0.0, snap_s=0.12):
+    """The line's place on screen (a share of the width, 0..1) at clip times t: a number all through, or keys
+    "t:at[:snap],..." in file seconds, eased like the camera's (so "0:0.5,60:0.35,64:0.5:snap" holds the needle
+    back over a build to 60 s and puts it back in place on the drop at 64 s)."""
+    t = np.asarray(t, dtype=float)
+    if not isinstance(v, (str, list, tuple)) or (isinstance(v, str) and ':' not in v):
+        return np.full_like(t, float(v))
+    ks = sorted((k[0] - t0, float(k[1]), k[2]) for k in _split_keys(v, 'at', '0:0.5,60:0.35,64:0.5:snap'))
+    if any(not 0 <= k[1] <= 1 for k in ks):
+        raise ValueError(f'at {v!r}: each value is a share of the width, 0 to 1')
+    return _eased([k[0] for k in ks], [k[1] for k in ks], [k[2] == 'snap' for k in ks], t, ease_s, snap_s)
+
+
+def camera_path(keys, t, dur, ease_s=0.0, at=0.5, snap_s=0.12):
     """The camera at clip times t (array, seconds from the clip's start, 0..dur): (window_s, the view's left edge in
     clip seconds, the line's x as a share of the width), each an array like t. Keys are [(t_s, window_s or None)]
-    in clip seconds, sorted; None = the whole clip."""
+    in clip seconds, sorted; None = the whole clip; a key (t_s, window_s, 'snap') is reached in its last snap_s.
+    at: the line's share of the width, a number or an array like t (needle())."""
     t = np.asarray(t, dtype=float)
-    kt = np.array([k[0] for k in keys])
     kw = np.log(np.array([min(dur, k[1]) if k[1] else dur for k in keys]))
-    j = np.clip(np.searchsorted(kt, t, side='right'), 1, max(1, len(kt) - 1))
-    if len(kt) == 1:
-        lw = np.full_like(t, kw[0])
-    else:
-        a, b = kt[j - 1], kt[j]
-        span = b - a if ease_s <= 0 else np.minimum(b - a, ease_s)
-        u = np.clip((t - (b - span)) / np.maximum(span, 1e-9), 0, 1)
-        u = u * u * (3 - 2 * u)                              # smoothstep
-        lw = kw[j - 1] + (kw[j] - kw[j - 1]) * u
-        lw = np.where(t < kt[0], kw[0], np.where(t >= kt[-1], kw[-1], lw))
+    lw = _eased([k[0] for k in keys], kw, [len(k) > 2 and k[2] == 'snap' for k in keys], t, ease_s, snap_s)
     w = np.minimum(np.exp(lw), dur)
     left = np.clip(t - at * w, 0, dur - w)
     return w, left, (t - left) / w
@@ -276,6 +309,8 @@ def render(src, out, **kw):
         raise ValueError(f"mode {o['mode']!r}: 'static' (the line sweeps the whole clip) or 'scroll' "
                          "(the picture moves under a fixed line)")
     cam = o['camera'] is not None
+    if not cam and ':' in str(o['at']):
+        raise ValueError('timed at keys work with a camera path (for the whole clip: camera "0:full")')
     extras = [k for k in ('minimap', 'zoom_follow', 'kick_pulse') if o[k]]
     if extras and not cam:
         raise ValueError(f'{", ".join(extras)} work with a camera path (for the whole clip: camera "0:full")')
@@ -290,9 +325,9 @@ def render(src, out, **kw):
     ft = np.arange(n_frames) / fps                    # frame times, clip seconds
     lead = 0
     if cam:
-        keys = [(t - t0, w) for t, w in parse_camera(o['camera'])]
+        keys = [(k[0] - t0,) + tuple(k[1:]) for k in parse_camera(o['camera'])]
         follow = keyed(o['zoom_follow'], ft, t0)
-        w_min = min([min(dur, w) for _, w in keys if w] or [dur]) * 2 ** -float(follow.max())
+        w_min = min([min(dur, k[1]) for k in keys if k[1]] or [dur]) * 2 ** -float(follow.max())
         px_per_s = Wd / w_min
     elif o['mode'] == 'static':
         px_per_s = Wd / dur
@@ -318,8 +353,8 @@ def render(src, out, **kw):
     reach = int(o['bloom_px'] * 1.4 * 3) + int(o['line_width']) + 2
 
     if cam:
-        at = float(o['at'])
-        w_cam = camera_path(keys, ft, dur, float(o['ease_s']), at)[0]
+        at = needle(o['at'], ft, t0, float(o['ease_s']), float(o['snap_s']))
+        w_cam = camera_path(keys, ft, dur, float(o['ease_s']), at, float(o['snap_s']))[0]
         win = w_cam
         if follow.any():                            # loudness 0..1 over the clip, heavily smoothed
             loud = column_drive(levels[0][0], int(round(float(o['follow_s']) * px_per_s)))

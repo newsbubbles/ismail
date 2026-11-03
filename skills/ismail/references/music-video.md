@@ -57,6 +57,11 @@ python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   on
   (4, 12)]`. Between keys the view eases (smoothstep) over the whole gap, or over the last `--ease_s` seconds
   before the next key (0, the default: the whole gap). While zoomed the view stays inside the clip: the line rides
   in from the left edge, rolls at `--at`, and drifts to the right edge at the end. No black padding.
+- A key with a third field `snap` arrives fast instead of easing over the gap: in its last `--snap_s 0.12`
+  seconds, so `"...,106:3.4,110:6.9:snap"` lands the new window on the drop's downbeat at 110 s.
+- The needle: with a camera, `--at` also takes keys of seconds and the line's place (a share of the width), eased
+  like the camera keys and with the same `:snap`. `--at "0:0.5,82:0.5,108:0.35,110:0.5:snap"` holds the needle
+  back over the build (the picture runs ahead of it) and puts it back in place on the drop.
 - Extras for a camera path, each 0 (off) by default:
   - `--minimap 72`: a strip that many px high along the bottom with the whole clip and a box for the view. It
     covers the picture's lowest rows, and it fades out as the view widens to the full clip.
@@ -69,6 +74,7 @@ python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   on
     past the ends, so an effect is on only where you say. `--kick_pulse "0:0,180:0,182:0.6,200:0.6,202:0"` punches
     only in the climax from 182 to 200 s, with 2 s ramps. Keep the punch for climaxes (Nate 11-03: "only on
     climaxes"), not the whole song.
+- Camera craft: see "Camera craft" below before you plan keys. One zoom per song is too little.
 - A camera path computes the spectrogram once at its tightest view (the smallest window, less zoom_follow's
   breath) and halves it for the wider views, so memory grows with the clip's length over that window: render an
   album song by song (`--start --end`), not the whole album at a 12 s window in one clip.
@@ -79,6 +85,37 @@ python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   on
 - It renders on the CPU at about a third of real time on this machine (30 s of 1080p took 80 s), so run a whole
   song in a slot: `python -m ismail.machine run --cpu --est 15m --what "spectro" -- python -m ismail.video spectro ...`.
   Check one `--still` per mode before the full render.
+
+#### Camera craft (Nate 11-03, ledger:M431)
+
+The keys are the video's story. Nate's notes on a first try with one zoom per song: "Overall... boring", and the
+zoom "could be much more reactive to how the song actually goes". So:
+
+- The window is the scroll speed. A 1-bar window moves 16 times faster across the screen than a 16-bar one: tight
+  reads as energy, wide as calm and overview. Count windows in bars (60 / bpm * 4 seconds a bar).
+- Change the window every 4 to 16 bars, on section starts and phrase lines (`analyze_structure` gives the
+  sections; the tempo gives the bars). Where the groove repeats, move between levels (16, 8, 4, 1 bars) so the
+  screen does not repeat with it.
+- Builds: tighten step by step and hold the needle back (`--at` 0.3 to 0.4) so the picture runs ahead of it. On
+  the drop's downbeat, snap the window and the needle into place (`:snap`).
+- Breakdowns: wide (16 bars or the whole clip), the needle at 0.5, no kick.
+- The kick punch: 2 or 3 key moments a track (the main drops, the peak), held for some bars, keyed on and off,
+  0 everywhere else. `--zoom_follow` at most 0.2 to 0.3 under the keys, never the only motion.
+- The edges: the whole clip at the start and at the end.
+- Check a still at each section start (`--still`) before the whole render.
+
+A worked plan for a 5-minute track at 140 bpm (a bar is 1.71 s; 16 bars 27.4 s, 8 bars 13.7 s, 4 bars 6.9 s):
+intro 0 to 27, groove 27 to 82, build 82 to 110, drop 110 to 165, break 165 to 192, build 192 to 206, drop 206
+to 275, outro to 300.
+
+```
+--camera "0:full,6:27.4,27:13.7,55:6.9,68:13.7,82:13.7,106:3.4,110:6.9:snap,137:1.7,151:6.9,165:27.4,192:27.4,204:1.7,206:13.7:snap,240:6.9,260:13.7,280:27.4,294:full"
+--at "0:0.5,82:0.5,108:0.35,110:0.5:snap,192:0.5,205:0.3,206:0.5:snap"
+--kick_pulse "0:0,110:0,110.1:0.7,124:0.7,126:0,206:0,206.1:0.8,233:0.8,235:0"
+--minimap 72 --zoom_follow 0.2
+```
+
+Eighteen camera keys in five minutes: a change about every 16 s, more around the builds and the drops.
 
 ## The loop
 
