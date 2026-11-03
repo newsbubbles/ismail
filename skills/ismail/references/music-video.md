@@ -65,10 +65,6 @@ python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   on
   - `--kick_pulse 0.6` (0 to 1): on each low onset (below `--kick_hz 150`) the picture punches in about the line,
     up to 5%, and brightens, up to 35%, then decays over `--kick_decay_s 0.15` seconds.
   - For extras over the whole clip with no zoom: `--camera 0:full`.
-  - When: `--kick_pulse` and `--zoom_follow` also take keys of seconds and depth, linear between them and held
-    past the ends, so an effect is on only where you say. `--kick_pulse "0:0,180:0,182:0.6,200:0.6,202:0"` punches
-    only in the climax from 182 to 200 s, with 2 s ramps. Keep the punch for climaxes (Nate 11-03: "only on
-    climaxes"), not the whole song.
 - A camera path computes the spectrogram once at its tightest view (the smallest window, less zoom_follow's
   breath) and halves it for the wider views, so memory grows with the clip's length over that window: render an
   album song by song (`--start --end`), not the whole album at a 12 s window in one clip.

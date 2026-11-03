@@ -18,9 +18,9 @@ Two modes, and a camera path:
 Extras the music drives (camera only, each 0 = off):
 - `minimap`: a strip that many px high along the bottom with the whole clip's spectrogram and a box for the window
   in view; it fades in as the view leaves the full clip (fully shown at half the clip or tighter).
-- `zoom_follow` (0..1, or keys "t:depth,..." for when): the window breathes with the loudness, smoothed over `follow_s`: wider when loud, tighter
+- `zoom_follow` (0..1): the window breathes with the loudness, smoothed over `follow_s`: wider when loud, tighter
   when quiet, up to 2**zoom_follow times either way, on top of the camera keys (none on a full view).
-- `kick_pulse` (0..1, or keys "t:depth,..." for when, e.g. only the climaxes): on each low-band onset (below `kick_hz`, from the spectrogram's low rows) the picture punches
+- `kick_pulse` (0..1): on each low-band onset (below `kick_hz`, from the spectrogram's low rows) the picture punches
   in about the line by up to 5% and brightens by up to 35%, decaying over `kick_decay_s`.
 
 The colours follow the stream's cqt look (ffmpeg showcqt): log frequency, low at the bottom, the left channel's
@@ -205,25 +205,6 @@ def parse_camera(s):
     return sorted(keys, key=lambda k: k[0])
 
 
-def keyed(v, t, t0=0.0):
-    """A depth at clip times t (array): v is a number (all through), or keys "t:value,..." / [(t_s, value), ...] in
-    file seconds like the camera's, linear between keys and held past the first and last (so "0:0,180:0,182:0.6,
-    200:0.6,202:0" is on only from 182 to 200 s, with 2 s ramps)."""
-    t = np.asarray(t, dtype=float)
-    if v is None or v == '':
-        return np.zeros_like(t)
-    if not isinstance(v, (str, list, tuple)):
-        return np.full_like(t, float(v))
-    if isinstance(v, str) and ':' not in v:
-        return np.full_like(t, float(v))
-    try:
-        ks = [p.split(':') for p in v.replace(' ', '').split(',') if p] if isinstance(v, str) else v
-        ks = sorted((float(a) - t0, float(b)) for a, b in ks)
-    except ValueError:
-        raise ValueError(f'{v!r}: a number or keys like "0:0,180:0,182:0.6" (file seconds:value)') from None
-    return np.interp(t, [k[0] for k in ks], [k[1] for k in ks])
-
-
 def camera_path(keys, t, dur, ease_s=0.0, at=0.5):
     """The camera at clip times t (array, seconds from the clip's start, 0..dur): (window_s, the view's left edge in
     clip seconds, the line's x as a share of the width), each an array like t. Keys are [(t_s, window_s or None)]
@@ -291,8 +272,8 @@ def render(src, out, **kw):
     lead = 0
     if cam:
         keys = [(t - t0, w) for t, w in parse_camera(o['camera'])]
-        follow = keyed(o['zoom_follow'], ft, t0)
-        w_min = min([min(dur, w) for _, w in keys if w] or [dur]) * 2 ** -float(follow.max())
+        follow = float(o['zoom_follow'])
+        w_min = min([min(dur, w) for _, w in keys if w] or [dur]) * 2 ** -follow
         px_per_s = Wd / w_min
     elif o['mode'] == 'static':
         px_per_s = Wd / dur
@@ -321,19 +302,18 @@ def render(src, out, **kw):
         at = float(o['at'])
         w_cam = camera_path(keys, ft, dur, float(o['ease_s']), at)[0]
         win = w_cam
-        if follow.any():                            # loudness 0..1 over the clip, heavily smoothed
+        if follow:                                  # loudness 0..1 over the clip, heavily smoothed
             loud = column_drive(levels[0][0], int(round(float(o['follow_s']) * px_per_s)))
             loud = loud[np.minimum((ft * px_per_s).astype(int), len(loud) - 1)]
             zoomed = np.clip(np.log2(dur / w_cam), 0, 1)
             win = np.minimum(dur, w_cam * 2 ** (follow * zoomed * (2 * loud - 1)))
         left = np.clip(ft - at * win, 0, dur - win)
         kick = np.zeros(n_frames)
-        depth = keyed(o['kick_pulse'], ft, t0)
-        if depth.any():
+        if o['kick_pulse']:
             mid = _edges(sr, Ht, o['fmin'], o['fmax'])[1:-1][::-1]
             low = np.flatnonzero(mid < float(o['kick_hz']))
             if len(low):
-                kick = depth * _kick_env(B8, low, px_per_s, n_frames, fps, float(o['kick_decay_s']))
+                kick = float(o['kick_pulse']) * _kick_env(B8, low, px_per_s, n_frames, fps, float(o['kick_decay_s']))
         mh = min(int(o['minimap']), Ht // 2)
         if mh:                                      # the whole clip, Wd columns and mh rows (row bands averaged)
             fb, fimg = levels[-1]

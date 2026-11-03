@@ -172,23 +172,5 @@ def test_cli_camera_keys(song, monkeypatch):
     monkeypatch.setattr(spectro, 'render', lambda src, out, **kw: seen.update(kw) or 'ok')
     cli.cmd_spectro([song, 'o.mp4', '--camera', '0:full,4:12,200:12,210:full', '--minimap', '72',
                      '--kick_pulse', '0.6'])
-    assert seen['minimap'] == 72 and spectro.keyed(seen['kick_pulse'], [0.0])[0] == 0.6
+    assert seen['minimap'] == 72 and seen['kick_pulse'] == 0.6
     assert spectro.parse_camera(seen['camera']) == [(0, None), (4, 12), (200, 12), (210, None)]
-
-
-def test_keyed_depths_say_when():
-    t = np.array([0, 100, 181, 190, 201, 250.0])
-    np.testing.assert_allclose(spectro.keyed('0:0,180:0,182:0.6,200:0.6,202:0', t), [0, 0, 0.3, 0.6, 0.3, 0])
-    np.testing.assert_allclose(spectro.keyed(0.5, t), 0.5)
-    np.testing.assert_allclose(spectro.keyed('0.25', t), 0.25)
-    np.testing.assert_allclose(spectro.keyed([(10, 1), (20, 0)], [0, 10, 30], t0=5), [1, 0.5, 0])  # file seconds
-    with pytest.raises(ValueError, match='keys like'):
-        spectro.keyed('0:x', t)
-
-
-@needs_ffmpeg
-def test_kick_pulse_keys_only_where_on(song, tmp_path):
-    plain = frame(song, tmp_path, 2.1, camera='0:2')
-    off = frame(song, tmp_path, 2.1, camera='0:2', kick_pulse='0:0,3:0,3.1:1')    # on only after 3 s
-    on = frame(song, tmp_path, 2.1, camera='0:2', kick_pulse='0:1,3:1')
-    assert (off == plain).all() and on.mean() > plain.mean() + 2
