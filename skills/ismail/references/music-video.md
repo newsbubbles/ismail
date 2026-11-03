@@ -31,7 +31,7 @@ python -m ismail.video posesheet -s songs/<slug> s04_foyer.py [f,f]   each chara
 python -m ismail.video render  -s songs/<slug> s04_foyer.py s05_insert.py ... [--wait 2h]   (refuses on clipping; -- --allowclip)
 python -m ismail.video contact -s songs/<slug> video/renders/shots/s04_foyer_v1.mp4 16
 python -m ismail.video edit    -s songs/<slug> [-- --sheet 33 41 16 | -- --range 33 41]
-python -m ismail.video spectro <audio> <out.mp4> [--mode scroll | --camera "0:full,4:12"] [--still 42.5]   spectrogram + playhead (below)
+python -m ismail.video spectro <audio> <out.mp4> [--mode scroll] [--still 42.5]   spectrogram + playhead (below)
 ```
 
 `render` waits for the machine's GPU slot (`ismail.machine`, SKILL.md "The machine is shared") before each shot, so the board's rules hold for it as for any Blender render: one GPU job on the machine, none while the GPU is hot or a drive is nearly full, and none while a live set is on air. It stands in line up to 4 hours by default, long enough to outlast a live set, because a render queue is work the person walks away from (`--wait 12h` longer, `--wait 0` refuses at once). When the slot is refused it says why, names the shots not rendered and exits 75: read the board with `python -m ismail.machine`, then run those shots again. Do not wrap it in `machine run`; it takes the slot itself. `still` and `posesheet` take no slot (seconds of work). Run the module from a directory that is not the repo's parent, or the source folder can shadow the installed package.
@@ -45,33 +45,15 @@ halo, and the halo grows and brightens where the music under it is bright, so lo
 
 ```
 python -m ismail.video spectro <audio> <out.mp4> [--mode static|scroll] [--start 30 --end 90]
-python -m ismail.video spectro <audio> <out.mp4> --camera "0:full,4:12,200:12,210:full" [--minimap 72 --kick_pulse 0.6]
 python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   one frame, seconds: check the look first
 ```
 
 - `static` (default): the clip's whole spectrogram fills the frame and the line sweeps across it, start to end.
   `scroll`: the picture moves right to left under a fixed line (`--at 0.5` of the width), `--window_s 12` seconds
   in view.
-- A camera path (supersedes `--mode`): `--camera "0:full,4:12,200:12,210:full"` is a list of keys, seconds in the
-  file (like `--start`) then the seconds in view (`full` is the whole clip). From Python: `camera=[(0, 'full'),
-  (4, 12)]`. Between keys the view eases (smoothstep) over the whole gap, or over the last `--ease_s` seconds
-  before the next key (0, the default: the whole gap). While zoomed the view stays inside the clip: the line rides
-  in from the left edge, rolls at `--at`, and drifts to the right edge at the end. No black padding.
-- Extras for a camera path, each 0 (off) by default:
-  - `--minimap 72`: a strip that many px high along the bottom with the whole clip and a box for the view. It
-    covers the picture's lowest rows, and it fades out as the view widens to the full clip.
-  - `--zoom_follow 0.3` (0 to 1): the view breathes with the loudness, smoothed over `--follow_s 4` seconds, wider
-    when loud and tighter when quiet, up to 2 to the power zoom_follow either way. None on a full view.
-  - `--kick_pulse 0.6` (0 to 1): on each low onset (below `--kick_hz 150`) the picture punches in about the line,
-    up to 5%, and brightens, up to 35%, then decays over `--kick_decay_s 0.15` seconds.
-  - For extras over the whole clip with no zoom: `--camera 0:full`.
-- A camera path computes the spectrogram once at its tightest view (the smallest window, less zoom_follow's
-  breath) and halves it for the wider views, so memory grows with the clip's length over that window: render an
-  album song by song (`--start --end`), not the whole album at a 12 s window in one clip.
 - The look's raw numbers: `--line_color --halo_color --line_width --bloom_px --glow --bloom_gain --accent --smooth_s`
   for the line (`--bloom_gain 0` gives the same glow everywhere), `--fmin --fmax --range_db --gamma --cscheme` for
-  the picture, `--width --height --fps --crf --preset` (libx264's: medium; `fast` encodes quicker for a slightly
-  larger file), `--audio false` for a silent clip. `--help` lists them with defaults.
+  the picture, `--width --height --fps --crf`, `--audio false` for a silent clip. `--help` lists them with defaults.
 - It renders on the CPU at about a third of real time on this machine (30 s of 1080p took 80 s), so run a whole
   song in a slot: `python -m ismail.machine run --cpu --est 15m --what "spectro" -- python -m ismail.video spectro ...`.
   Check one `--still` per mode before the full render.
