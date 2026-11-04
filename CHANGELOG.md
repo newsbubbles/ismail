@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Skill: live-set rules and where song tooling lives (Nate 11-04, ledger:S57)
+
+- live.md: measure a world before it goes on air (each named source in the mix, the set's own norms check as a
+  block, a silence scan, also on rendered chapters and assemblies); keep your own change-up clock; after a refused
+  command, one line and the next musical move in the same turn.
+- development.md: "Main or the song folder: who else uses it?": one piece's tooling stays in its song folder until a
+  second piece needs it or the user calls it engine; the ledger row records the placement at triage.
+
 ### The hub: the team reachable from Discord, one log for every place (Nate 11-02, ledger:M429)
 
 - `hub_*` ops: one numbered log for what people send from every place, each line stamped with who sent it (their
