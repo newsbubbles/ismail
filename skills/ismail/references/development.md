@@ -193,7 +193,8 @@ Each step ends in something you can point at:
    sections whole.
 2. **Triage** into `songs/_migration/LEDGER.md`, one row per item: where from, kind (bug, migrate, feature, skill,
    research, preset), status. Merge duplicates across songs: two songs building the same thing is the strongest
-   signal there is. Kinds that stay out of the engine say why: song-only, parked (with the reason), held (blocked on
+   signal there is. Each row records its placement, main or song-local, with the reason ("Main or the song
+   folder", below). Kinds that stay out of the engine say why: song-only, parked (with the reason), held (blocked on
    a decision, e.g. anything fitted to a commercial recording or named after a brand or a person). Then
    `python -m ismail.handoffs --mark`.
 3. **Report and decide.** Tell the user what is new, the verdict you propose for each item and an order, with
@@ -284,6 +285,18 @@ An **engine** (a song-local module with several functions, like a call-measuring
 plus: decide the module boundary (what is the engine, what stays song code), design its ops before porting its
 code (next section), keep its outputs bounded (a summary and a file, not a wall of numbers), and keep the song's
 version importable from the engine afterwards so a sibling project (lyrebird copies tambopata's) can drop its copy.
+
+## Main or the song folder: who else uses it?
+
+A song that asks for a tool has not yet given a reason to put the tool in main. Before you build, ask who else
+uses it. A tool that one piece needs stays in that song's folder (`songs/<slug>/`), next to the work, and imports
+ismail like any user's code would. Examples: a camera path for one music video, a check against one set's norms,
+a helper for one album. The studio agent builds it there, or a dev does. It moves to main only when a second piece
+needs it, or when the user says it is engine. That a file is already in main is no reason to grow it for one
+piece. Write the placement (main or song-local, and why) in the ledger row at triage, before any build. Think of
+every person who uses ismail with their own agents: if each song's tooling became an op, main would fill with one
+song's needs. 2026-11-03: a spectrogram camera path built for one album video was merged, then reverted. It now
+lives in that song's folder.
 
 ## API changes a song asks for
 
