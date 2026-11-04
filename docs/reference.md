@@ -441,6 +441,8 @@ Tested leave-one-out on violin, cello and double bass recordings, a mimic note r
 | Is every part in tune with the song's tuning and key (drums included) | `analyze_tuning` (per part: median cents off the grid, spread, notes beyond 15 c, the attack's cents over the steady pitch, the worst notes, a verdict; fast runs read too) |
 | Do two parts rub a semitone apart, or step out of key (read from the notes, no render) | `notes_clash` (semitone and minor 9th clashes between parts for at least `min_overlap` beats, and out-of-key notes, each with bar and beat, the two parts and notes, overlap and velocity, most audible first; the key is the project's or found from the notes; drums and fixed-pitch pads skipped) |
 | Rhythm of level (pumping, gating) | `analyze_envelope` |
+| Silent stretches in a render, a chapter or a whole assembly (any length, no project needed for a file) | `analyze_silence` (every stretch of `min_s` s or more under `floor_db`, with times and bars; `planned` windows do not fail) |
+| Before a render airs or goes to review: silence, each named source against the mix, your own rules script | `onair_check` (PASS or FAIL with what to do next; `onair_gate` in `ismail.api_onair` raises on a fail unless `force=True`) |
 | What a sound is | `analyze_timbre`, `analyze_spectrum`, `sound_compare` |
 | Vowels of a voice | `analyze_formants` |
 | Is the voice heard over the mix | `analyze_voice_heard` (per band, the voice stem over the other stems while it speaks, and the band and part that mask it) |

@@ -34,7 +34,7 @@ CATEGORIES = [
     ('listen', 'measuring audio as text (and pictures): notes, chords, drums, timbre, formants, structure, zooms '
                'and where two takes differ; and the arrangement checked for parts that clash',
      ('analyze_', 'spectrogram', 'stem_parts', 'separate', 'align', 'compare', 'sound_zoom', 'sound_zoom_diff',
-      'region_measure', 'notes_clash')),
+      'region_measure', 'notes_clash', 'onair_check')),
     ('transcribe', 'audio to notes', ('notes_from_audio', 'notes_from_audio_loop', 'melody_consensus')),
     ('compare', 'your render against the reference, stored and drilled into bar by bar, and the tells the person '
                'keeps hearing, measured every round', ('cmp_', 'ear_pass', 'tell_')),

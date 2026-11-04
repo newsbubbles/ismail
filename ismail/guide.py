@@ -67,6 +67,7 @@ HEAR (audio -> text), cheapest first
   sound_zoom          one window time-sharp + frequency-sharp sound_zoom_diff  where yours differs from >= 3 takes
   analyze_kit         drum kit pieces (NMF) + their patterns analyze_swing     how late swung hats land
   analyze_sections    loudness per section, dynamic range, a build as loud as its climax
+  analyze_silence     silent stretches with times, any length    onair_check  before it airs: silence, sources, rules
   analyze_feel        per-note timing and level on a followed beat line: why a draft sounds MIDI (against='ref')
   feel_from_ref       writes the reference's timing and level into a part's notes (dry_run first; undo)
 
