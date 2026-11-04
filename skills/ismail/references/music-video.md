@@ -66,7 +66,7 @@ python -m ismail.video spectro <audio> look.png --still 42.5 [same options]   on
 4. **One shot at a time:** write the script, run `posesheet` until every row says clean (see Animation below), then take stills at 2 or 3 frames at `--pct 25`, read them, fix, and repeat. For a black or empty frame, use `--top` (an ortho plan view with the camera as a red dot and its target as cyan) and `--dbg nofog`. Only a shot whose stills are right goes to `render`.
 5. **Render the queue** in the background (one `render` call with every approved shot). Contact-sheet each result as it lands.
 6. **Cut** in `cut.py` against the bar grid, then `edit -- --sheet a b n` on every section and read the sheets. Fix, then run the full `edit`.
-7. **Review the final** with `contact` over the whole render (about 40 frames), and report the file, its size and the sheet.
+7. **Review the final** with `contact` over the whole render (about 40 frames), and report the file, its size and the sheet. Before anyone reviews a chapter or a whole assembly, scan its audio: `analyze_silence(source=<the file>)` lists every stretch of 3 s or more under -50 dBFS with its times (a file of hours is read in blocks). An album video once went to review with a 3-minute silent chapter. Name the silences the plan calls for in `planned=[[start_s, end_s]]`.
 
 ## Sync math
 

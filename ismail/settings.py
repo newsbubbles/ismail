@@ -218,6 +218,7 @@ PLUMBING = {
     'ISMAIL_SESSION': "a process's own name on the machine board (`machine run --as <name>` sets it); one per "
                       "session, so not a machine-wide setting",
     'ISMAIL_PROJECT': "the CLI's default project for one shell (-p wins); per shell, so not a setting",
+    'ISMAIL_CHECK_MIX': "onair_check hands the mix's path to the caller's rules command it runs",
     'ISMAIL_WORKTREES_NOW': 'the tests fix the clock that ages worktree commits',
     'ISMAIL_FIRST_SESSION': "the tests move the first-session mark (~/.ismail/first_session_done)",
     # the old way to hand these to Blender, still read until 0.5; now sys.ismail_video_dir and sys.vr_job (M382)

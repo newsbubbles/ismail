@@ -2671,6 +2671,7 @@ from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell 
 from . import api_melody  # noqa: E402,F401  (registers melody_consensus: a lead over a backing, ledger:M314)
 from . import api_feel  # noqa: E402,F401  (registers analyze_feel, feel_from_ref: per-note feel, ledger:M364)
 from . import api_arp  # noqa: E402,F401  (registers track_arp: the arpeggiator at render, MIDI parity step 7)
+from . import api_onair  # noqa: E402,F401  (registers analyze_silence, onair_check: the on-air check, ledger:M432)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)
 from .phone import ops as _phone_ops  # noqa: E402,F401  (registers the phone_* ops)

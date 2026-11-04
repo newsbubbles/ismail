@@ -518,6 +518,7 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   more under -50 dBFS unless the plan calls for one. Run the same silence scan on every rendered chapter and on a
   whole assembly before anyone reviews it. Five worlds once went on air with their source too quiet to hear (a
   string theme at -39 dBFS) or made up. An album video once went to review with a 3-minute silent chapter.
+  `onair_check` reads all three in one call ("The on-air check", below).
 - **After a refused command, one line, then keep playing.** When a call is refused or the listener says no, say
   in one line what you will do instead ("no restart; I'll cover with the ambience bed and fix the guitar level").
   Then send the next musical move in the same turn. Ask only when the choice truly belongs to the listener. The
@@ -575,6 +576,17 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
   live track before the chain that reads it.
 - **Recording a long set** takes disk: 24-bit stereo is ~16 MB a minute (~480 MB for 30 minutes). Check free
   space first, or skip the take and use `live_listen` on the live output.
+
+### The on-air check: measure before it airs
+
+`onair_check(project, mix='render', sources=[...], rules=<your check>)` reads a render once and gives PASS, or FAIL
+with each reason and what to do next. It scans for silence (3 s or more under -50 dBFS, except the `planned`
+windows). It measures each named source (`track:<name>` after `render(stems=True)`, or a stem file) on its own and
+against the mix where it plays: it fails when the source is silent or more than 20 dB under the mix (`floor_db`). It
+runs your set's own rules file (a Python file, run with this Python; other programs are refused): a nonzero
+exit is a fail, and its output is shown. Your set's code calls `onair_gate` from `ismail.api_onair` with the same arguments: on a fail it raises `OnAirRefused` and the
+part does not go on air, unless the person chose `force=True`. The rules file and the list of named sources stay
+in your set's folder. `analyze_silence(source=<file>)` is the silence scan alone, for a file of any length.
 
 ## Streams and controls: the set inside a scene
 

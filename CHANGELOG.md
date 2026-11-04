@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
+
+- `analyze_silence(project=None, source='render', min_s=3.0, floor_db=-50.0, planned=None)`: every stretch of
+  `min_s` s or more under `floor_db` (rms per 100 ms), with start and end times, and bars for a project source.
+  It reads in blocks, so a file of hours works (about 1.4 s for 10 minutes of 48 kHz stereo). A file needs no
+  project. Silences in `planned` windows are listed and do not fail.
+- `onair_check(project=None, mix='render', sources=None, rules=None, floor_db=-20.0, ...)`: the silence scan, each
+  named source (`track:<name>` or a file lined up with the mix) on its own and against the mix where it plays,
+  with its share of the mix, and the caller's own rules file (a Python file run with this Python, never a shell; a
+  nonzero exit is a fail, its output shown). One
+  verdict, PASS or FAIL, each reason with what to do next.
+- `ismail.api_onair.onair_gate(..., force=False)`: the same check for a set's or a video's own code. It raises
+  `OnAirRefused` on a fail unless `force=True`. Five live set parts once aired with their named source too quiet
+  to hear or silent, and an album video went to review with a 3-minute silent chapter.
+
 ### Skill: live-set rules and where song tooling lives (Nate 11-04, ledger:S57)
 
 - live.md: measure a world before it goes on air (each named source in the mix, the set's own norms check as a
