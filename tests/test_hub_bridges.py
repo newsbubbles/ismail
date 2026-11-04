@@ -197,7 +197,7 @@ def test_say_to_the_owner_goes_where_they_were_last_and_the_panel_answer_comes_b
     wait_for(lambda: hub.bridges['phone'].state == 'reading')
     a.person_says('nate_acct', 'hi from the bot')
     assert 'sent on practice' in ops.hub_say(to='nate', text='on the bot', who='Maintainer')
-    time.sleep(0.05)
+    time.sleep(0.25)                                   # presence is kept to 0.1 s; a tie goes to the bot
     append(inbox, phone_line(2, 'voice_text', text='now on the phone'))
     wait_for(lambda: logged(hub, 'phone'))
     out = ops.hub_say(to='nate', text='Two takes\nwhich one?', buttons=['Keep 1', {'id': 'v2', 'label': 'Vary 2'}],
