@@ -3,16 +3,15 @@ api.OPS on import.
 
   analyze_silence  silent stretches in audio of any length (a render, a file, a whole assembly), read in blocks
   onair_check      the silence scan, each named source's level in the mix against a floor, and the caller's own
-                   rules command (a nonzero exit is a fail), with one verdict and what to do next on a fail
+                   rules file (a Python file; a nonzero exit is a fail), with one verdict and what to do next on a fail
   onair_gate       the same check for a set's or a video's own code: raises OnAirRefused on a fail unless force=True
 
-Nothing here knows what a set, a world or a chapter is. A set's own rules (its norms file) plug in as a command;
+Nothing here knows what a set, a world or a chapter is. A set's own rules (its norms file) plug in as a Python file;
 which sources a piece names, and what its plan calls silent, are the caller's arguments. Five live set parts once
 aired with their named source too quiet to hear (a string theme at -39 dBFS) or silent foley, while the set's
 norms check only warned; an album video went to review with a 3-minute silent chapter.
 """
 import os
-import shlex
 import subprocess
 import sys
 
@@ -26,7 +25,7 @@ SILENCE_WIN_S = 0.1         # the silence scan reads rms per 100 ms
 LEVEL_WIN_S = 0.4           # source levels per 400 ms, as analyze_sections
 ACTIVE_RANGE_DB = 30.0      # a source "plays" in a window within this many dB of its own loudest window
 GONE_DB = -70.0             # a source whose loudest window is under this is silent
-RULES_TAIL = 15             # lines of the rules command's output kept in the reply
+RULES_TAIL = 15             # lines of the rules file's output kept in the reply
 
 
 class OnAirRefused(OpError):
@@ -269,24 +268,20 @@ def source_levels(P, mix_path, named, floor_db=-20.0, mix_src='render'):
 # ------------------------------------------------------------------ the caller's own rules
 
 def _command(rules):
-    if isinstance(rules, (list, tuple)):
-        cmd = [str(c) for c in rules]
-    elif isinstance(rules, str) and os.path.isfile(rules):
-        cmd = [rules]
-    elif isinstance(rules, str) and rules.strip():
-        cmd = [c[1:-1] if len(c) > 1 and c[0] == c[-1] and c[0] in '"\'' else c
-               for c in shlex.split(rules, posix=os.name != 'nt')]
-    else:
-        raise OpError(f"rules={rules!r}: give a script path ('set/norms_check.py'), a command line, or a list "
-                      f"(['python', 'set/norms_check.py', 'part3'])")
-    if cmd and cmd[0].lower().endswith('.py'):
-        cmd = [sys.executable] + cmd
-    return cmd
+    """The rules check is a Python file (and its arguments), run with this Python: never a shell or another program,
+    since any agent connected to ismail can call this op."""
+    args = [str(c) for c in rules] if isinstance(rules, (list, tuple)) else [rules] if isinstance(rules, str) else []
+    path = args[0] if args else ''
+    if not (path.lower().endswith('.py') and os.path.isfile(path)):
+        raise OpError(f"rules={rules!r}: give a Python file that exists ('set/norms_check.py'), or a list of it and its "
+                      f"arguments (['set/norms_check.py', 'part3']); it runs with this Python and exits nonzero on a "
+                      f"fail. Other programs and command lines are not run")
+    return [sys.executable] + args
 
 
 def run_rules(rules, mix_path, timeout_s=300.0):
-    """(data, text): run the caller's rules command in the working directory, with ISMAIL_CHECK_MIX set to the mix's
-    path. Exit 0 passes; any other exit, a timeout or a command that cannot start fails. The output's last lines
+    """(data, text): run the caller's rules file in the working directory, with ISMAIL_CHECK_MIX set to the mix's
+    path. Exit 0 passes; any other exit or a timeout fails. The output's last lines
     are kept."""
     cmd = _command(rules)
     shown = ' '.join(cmd[1:] if cmd[0] == sys.executable else cmd)
@@ -373,7 +368,7 @@ def onair_check(project: str = None, mix: str = 'render', sources=None, rules=No
     list or a {label: source} dict): its own rms and peak, how much of the mix it plays in, its level against the
     mix where it plays, and its share of the mix's energy. It fails when silent, or more than floor_db (-20 dB)
     under the mix where it plays;
-    (3) rules: the caller's own check, a script path or command (a .py runs with this Python) run in the working
+    (3) rules: the caller's own check, a Python file, or a list of it and its arguments (run with this Python, never a shell or another program), run in the working
     directory with ISMAIL_CHECK_MIX set to the mix's path; a nonzero exit fails, and its last lines are shown.
     mix: render | a file path (no project needed for files). A set's or a video's code calls onair_gate, which
     raises on a fail unless force=True."""

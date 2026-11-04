@@ -565,7 +565,7 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 with each reason and what to do next. It scans for silence (3 s or more under -50 dBFS, except the `planned`
 windows). It measures each named source (`track:<name>` after `render(stems=True)`, or a stem file) on its own and
 against the mix where it plays: it fails when the source is silent or more than 20 dB under the mix (`floor_db`). It
-runs your set's own rules script or command: a nonzero exit is a fail, and its output is shown. Your set's code
+runs your set's own rules file (a Python file, run with this Python; other programs are refused): a nonzero exit is a fail, and its output is shown. Your set's code
 calls `onair_gate` from `ismail.api_onair` with the same arguments: on a fail it raises `OnAirRefused` and the
 part does not go on air, unless the person chose `force=True`. The rules file and the list of named sources stay
 in your set's folder. `analyze_silence(source=<file>)` is the silence scan alone, for a file of any length.

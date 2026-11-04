@@ -11,6 +11,7 @@ import pytest
 import soundfile as sf
 
 from ismail import api
+from ismail.api import OpError
 from ismail.api_onair import OnAirRefused, onair_gate
 
 SR = 22050
@@ -108,10 +109,16 @@ def test_rules_command_exit_code_is_the_verdict(tmp):
         f.write("import sys\nprint('lead: a square wave on part 3')\nsys.exit(2)\n")
     out = OPS['onair_check'](mix=mix, rules=good)
     assert 'PASS' in out.splitlines()[0] and 'rules exit 0' in out and '| checked mix.wav' in out, out
-    out = OPS['onair_check'](mix=mix, rules=[sys.executable, bad])
+    out = OPS['onair_check'](mix=mix, rules=[bad, 'part3'])
     assert ': FAIL (1 reason)' in out and 'exited 2' in out and '| lead: a square wave on part 3' in out, out
-    out = OPS['onair_check'](mix=mix, rules=os.path.join(tmp, 'missing_tool_xyz'))
-    assert 'FAIL' in out and 'did not run' in out, out
+
+
+def test_rules_runs_only_a_python_file(tmp):
+    mix, bed, theme, foley = stems(tmp)
+    for rules in ('echo hi', [sys.executable, '-c', 'print(1)'], os.path.join(tmp, 'missing.py')):
+        with pytest.raises(OpError) as e:
+            OPS['onair_check'](mix=mix, rules=rules)
+        assert 'give a Python file that exists' in str(e.value)
 
 
 def test_the_gate_refuses_on_a_fail_unless_forced(tmp):

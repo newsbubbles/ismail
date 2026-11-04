@@ -10,7 +10,7 @@
   project. Silences in `planned` windows are listed and do not fail.
 - `onair_check(project=None, mix='render', sources=None, rules=None, floor_db=-20.0, ...)`: the silence scan, each
   named source (`track:<name>` or a file lined up with the mix) on its own and against the mix where it plays,
-  with its share of the mix, and the caller's own rules command (a nonzero exit is a fail, its output shown). One
+  with its share of the mix, and the caller's own rules file (a Python file run with this Python, never a shell; a nonzero exit is a fail, its output shown). One
   verdict, PASS or FAIL, each reason with what to do next.
 - `ismail.api_onair.onair_gate(..., force=False)`: the same check for a set's or a video's own code. It raises
   `OnAirRefused` on a fail unless `force=True`. Five live set parts once aired with their named source too quiet
