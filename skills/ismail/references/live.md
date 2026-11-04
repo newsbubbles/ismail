@@ -144,6 +144,12 @@ camera, facial expression categories); treat it the same way.
   take minutes (a static loop ran 9 minutes once). Before asking, queue changes that keep moving for longer than
   you expect to wait, and near the end of a timed set queue a fallback ending, so the set lands on time without
   you. New clips replace queued ones on their tracks, so the runway costs nothing when you override it.
+- **Keep your own change-up clock.** The listener should not have to ask for change. At go-live, arm a
+  background timer that wakes you, and re-arm it each time it fires. Keep it armed when you stop other watchers.
+  Each time it fires, something they can hear changes: a new world, a break, a halftime, a part in or out, new ear
+  candy. The pace is theirs: ask once, or start at every few minutes. One listener asked to "keep it fresh" about
+  15 times in one set that had no clock. Finished material goes on air when it is ready. Never hold it back for a
+  later slot while replays play.
 - **Keep a control module, not one script**, laid out as in "A set's folder" below, and build it on the DJ kit
   (`ismail.live.djkit`): its `Set` logs every call with the clip ids per section, and its note and move builders
   replace the helpers every section used to rewrite.
@@ -505,6 +511,18 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 
 ## Rules
 
+- **Measure a world before it goes on air.** Render its first pass and read three things. Put the numbers in your
+  reply. (a) Each named source element (a theme, a film clip, a foley hit): its own level, and its level in the
+  mix, above a floor set from the world's loudness. A source you can't hear is not there. (b) The set's own norms
+  check, if it has one: a fail blocks the queue; it is not a warning. (c) A silence scan: no stretch of 3 s or
+  more under -50 dBFS unless the plan calls for one. Run the same silence scan on every rendered chapter and on a
+  whole assembly before anyone reviews it. Five worlds once went on air with their source too quiet to hear (a
+  string theme at -39 dBFS) or made up. An album video once went to review with a 3-minute silent chapter.
+  `onair_check` reads all three in one call ("The on-air check", below).
+- **After a refused command, one line, then keep playing.** When a call is refused or the listener says no, say
+  in one line what you will do instead ("no restart; I'll cover with the ambience bed and fix the guitar level").
+  Then send the next musical move in the same turn. Ask only when the choice truly belongs to the listener. The
+  set never waits for an answer.
 - **Runway before a slow job.** Before anything that takes time (`mimic_measure` 25 to 60 s, `instrument_fit` and
   `track_fit` minutes, a long think), queue an arc longer than the job, with change in it (a clip with a fill
   in its last bar, an evolving chain, a ramp), not one bar repeated.
@@ -565,8 +583,8 @@ hole at the bass swap. Pick `bars` so the section starts on its downbeat hit.
 with each reason and what to do next. It scans for silence (3 s or more under -50 dBFS, except the `planned`
 windows). It measures each named source (`track:<name>` after `render(stems=True)`, or a stem file) on its own and
 against the mix where it plays: it fails when the source is silent or more than 20 dB under the mix (`floor_db`). It
-runs your set's own rules file (a Python file, run with this Python; other programs are refused): a nonzero exit is a fail, and its output is shown. Your set's code
-calls `onair_gate` from `ismail.api_onair` with the same arguments: on a fail it raises `OnAirRefused` and the
+runs your set's own rules file (a Python file, run with this Python; other programs are refused): a nonzero
+exit is a fail, and its output is shown. Your set's code calls `onair_gate` from `ismail.api_onair` with the same arguments: on a fail it raises `OnAirRefused` and the
 part does not go on air, unless the person chose `force=True`. The rules file and the list of named sources stay
 in your set's folder. `analyze_silence(source=<file>)` is the silence scan alone, for a file of any length.
 
