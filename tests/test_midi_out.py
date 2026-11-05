@@ -331,3 +331,20 @@ def test_a_program_change_goes_out_before_the_notes_it_is_for(eng):
     assert [b for _, b in msgs(FakePort.opened['Test Loop'], 0xC0)] == [bytes([0xC0, 81])]
     with pytest.raises(LiveError, match='program: 1 to 128'):
         eng.cmd_midi_out(track='lead', program=0)
+
+
+def test_a_program_follows_a_channel_change_and_one_booked_for_later_keeps_its_bar_on_a_new_port(eng):
+    eng.cmd_track('lead', instrument='preset:pluck')
+    eng.cmd_midi_out(track='lead', port='Test Synth', audio=False, program=33)
+    eng.cmd_queue([{'track': 'lead', 'notes': '0 C4 1 100', 'beats': 4, 'loop': 8, 'at': 'next_bar'}])
+    run(eng, 2.5)
+    r = eng.cmd_midi_out(track='lead', channel=5)
+    assert 'program 33 sent again on channel 5' in r
+    run(eng, 3.0)
+    port = FakePort.opened['Test Synth']
+    assert [b for _, b in msgs(port, 0xC0)] == [bytes([0xC0, 32]), bytes([0xC4, 32])]
+    eng.cmd_midi_out(track='lead', program=34, at='bar:9')               # booked for later
+    r = eng.cmd_midi_out(track='lead', port='Test Loop')
+    assert 'program 34 at bar 9' in eng.cmd_status()
+    run(eng, 0.5)
+    assert msgs(FakePort.opened['Test Loop'], 0xC0) == []                # not at the new route's start

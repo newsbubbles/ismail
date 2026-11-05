@@ -170,11 +170,11 @@ class MidiOut:
             name = self.find(port) if port is not None else r['port']
             if channel is not None and not 1 <= int(channel) <= 16:
                 raise ValueError("channel: 1 to 16 (10 is drums)")
-            msg = []
+            msg, booked = [], None
             if r is not None and name != r['port']:
                 audio = r['audio'] if audio is None else audio
                 if program is None and r.get('program'):        # the new port's synth gets the same sound
-                    program = r['program'][1]
+                    booked = r['program']                       # (one booked for later stays at its bar)
                 self._unroute(track)
                 r = None
             p = self._port(name, offset_ms)
@@ -187,10 +187,18 @@ class MidiOut:
                 p['users'].add(('track', track))
                 msg.append(f"{track} -> {name!r} channel {ch + 1}" + (" (drums)" if ch == DRUM_CH else '')
                            + f" from {fmt_bar(start, e.bpb)}" + (f" ({note})" if note else ''))
+                if booked and booked[0] > start + EPS:
+                    r['program'] = [booked[0], booked[1], False]
+                elif booked:
+                    program = booked[1]
             elif channel is not None and int(channel) - 1 != r['ch']:
                 p['notes'].release(owner=track, all_off=False)
                 r['ch'] = int(channel) - 1
                 msg.append(f"{track}: now on channel {r['ch'] + 1}")
+                pg = r.get('program')
+                if program is None and pg and pg[2]:            # the new channel gets the sound too, now
+                    r['program'] = [max(e.beat(e.pos), r['from']), pg[1], False]
+                    msg.append(f"{track}: program {pg[1]} sent again on channel {r['ch'] + 1}")
             if audio is not None and bool(audio) != r['audio']:
                 r['audio'] = bool(audio)
                 self._audio(track, r)
