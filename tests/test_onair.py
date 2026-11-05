@@ -60,6 +60,27 @@ def test_silence_scan_reads_a_long_file_in_blocks_and_gives_hours(tmp):
     assert '1:00:05.0-1:00:11.0  6.0 s' in out and '(1:02:00.0, 8000 Hz)' in out, out
 
 
+def test_silence_scan_reads_a_video_through_ffmpeg(tmp):
+    from ismail import settings
+    ff = settings.get('ffmpeg')
+    if not ff:
+        pytest.skip('ffmpeg not installed')
+    import subprocess
+    y = np.concatenate([tone(4, -20), np.zeros(int(4 * SR)), tone(4, -20)])
+    wav = write(os.path.join(tmp, 'mix.wav'), y)
+    mp4 = os.path.join(tmp, 'chapter.mp4')
+    subprocess.run([ff, '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=5:d=12', '-i', wav,
+                    '-c:v', 'mpeg4', '-c:a', 'aac', '-shortest', mp4], check=True, timeout=60)
+    out = OPS['analyze_silence'](source=mp4)
+    assert 'FAIL 1 unplanned silent stretch' in out and '48000 Hz' in out, out
+    assert '0:04.' in out and '0:08.' in out, out        # aac pads a few ms, so the edges are read to the 0.1 s
+    novid = os.path.join(tmp, 'picture_only.mp4')
+    subprocess.run([ff, '-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=5:d=2', '-c:v', 'mpeg4',
+                    novid], check=True, timeout=60)
+    with pytest.raises(OpError, match='ffmpeg could not read'):
+        OPS['analyze_silence'](source=novid)
+
+
 def test_silence_scan_on_a_project_render_gives_bars(tmp):
     p = os.path.join(tmp, 'p')
     api.project_new(p, bpm=120, length_bars=8)            # 2 s a bar

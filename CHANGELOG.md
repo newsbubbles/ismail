@@ -8,6 +8,9 @@
   `min_s` s or more under `floor_db` (rms per 100 ms), with start and end times, and bars for a project source.
   It reads in blocks, so a file of hours works (about 1.4 s for 10 minutes of 48 kHz stereo). A file needs no
   project. Silences in `planned` windows are listed and do not fail.
+- A video or any file libsndfile cannot open (mp4, m4a, mp3) is read as it is, through an ffmpeg pipe in blocks
+  at 48 kHz: a 3:41:16 album video scans in about 49 s. Before, an mp4 failed with "Format not recognised" (the
+  Live DJ's handoff, 11-04).
 - `onair_check(project=None, mix='render', sources=None, rules=None, floor_db=-20.0, ...)`: the silence scan, each
   named source (`track:<name>` or a file lined up with the mix) on its own and against the mix where it plays,
   with its share of the mix, and the caller's own rules file (a Python file run with this Python, never a shell; a
