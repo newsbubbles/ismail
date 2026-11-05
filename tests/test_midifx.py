@@ -94,7 +94,13 @@ def test_the_chain_says_what_is_wrong_and_what_to_do():
                      ([{'type': 'length'}], "one of beats"), ([{'type': 'length', 'beats': 1, 'scale': 2}], "one of"),
                      ([{'type': 'random', 'chance': 2}], "chance: 0 to 1"),
                      ([{'type': 'random', 'key': 'A'}], "key and scale go together"),
-                     ([{'type': 'chord', 'intervals': [0, 4], 'velocity': [1]}], "one scale per interval")]:
+                     ([{'type': 'chord', 'intervals': [0, 4], 'velocity': [1]}], "one scale per interval"),
+                     ([{'type': 'scale', 'key': 'C', 'scale': {'a': 1}}], "scale a name"),
+                     ([{'type': 'scale', 'key': 'C', 'scale': [0, 'x']}], "list of whole semitones"),
+                     ([{'type': 'random', 'key': ['C'], 'scale': 'major'}], "a note name such as A"),
+                     ([{'type': 'pitch', 'fold': 'false'}], "fold True"),
+                     ([{'type': 'velocity', 'fixed': True}], "a number, not True"),
+                     ([{'type': 'pitch', 'lowest': True}], "a number, not True")]:
         with pytest.raises(MF.MidiFxError, match=msg):
             MF.configure(bad)
     c = MF.configure([{'type': 'chord', 'intervals': [0, 4, 7]}, {'type': 'scale', 'key': 'A', 'scale': 'minor'},
@@ -103,6 +109,7 @@ def test_the_chain_says_what_is_wrong_and_what_to_do():
     assert MF.describe(c) == ('chord +0 +4 +7 > scale A minor > velocity out 40-110 > length 0.5 beats > '
                               'random 25% up 1-1 x 12 st')
     assert MF.configure({'type': 'pitch', 'transpose': 2})[0]['transpose'] == 2   # one effect alone
+    assert MF.configure(c) == c                                                  # its stored form is taken back
 
 
 # ------------------------------------------------------------------ the studio

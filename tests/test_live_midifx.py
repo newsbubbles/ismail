@@ -198,3 +198,76 @@ def test_all_notes_off_ends_the_chains_notes_and_its_waiting_lengths(eng):
     assert len(eng.midi.fx_offs) == 1
     key(0xB0, 123, 0)                                               # all notes off
     assert all(v.rel is not None for v in eng.midi.voices) and eng.midi.fx_offs == []
+
+
+# ------------------------------------------------------------------ review fixes (adversarial pass, 11-05)
+def test_the_voice_cap_holds_for_chain_voices_and_plain_keys(eng, monkeypatch):
+    monkeypatch.setattr(MP, 'MAX_VOICES', 16)
+    monkeypatch.setattr(MP, 'FADE_ROOM', 4)
+    eng.cmd_midi_fx(source='test keys', chain=[{'type': 'chord', 'intervals': list(range(12))}], at='now')
+    for m in range(48, 60):                                         # 12 keys x 12 notes
+        key(0x90, m, 100)
+        assert len(eng.midi.voices) <= 16
+    assert sum(1 for v in eng.midi.voices if v.rel is None) <= 12
+    eng.cmd_midi_fx(source='test keys', off=True, at='now')
+    key(0xB0, 123, 0)
+    for m in range(48, 73):                                         # plain keys, never let go
+        key(0x90, m, 100)
+        assert len(eng.midi.voices) <= 16
+    assert sum(1 for v in eng.midi.voices if v.rel is None) <= 12
+
+
+@pytest.mark.parametrize('chain', [[{'type': 'length', 'beats': 4}], [{'type': 'length', 'scale': 4}],
+                                   [{'type': 'chord', 'intervals': [0]}]])
+def test_an_mpe_note_let_go_keeps_its_own_bend_whatever_ends_it(tmp_path, monkeypatch, chain):
+    from ismail import midilanes as ML
+    monkeypatch.setattr(MP, 'LO', 57)
+    monkeypatch.setattr(MP, 'HI', 69)
+    monkeypatch.setattr(MP.ML, 'voice_lanes', lambda inst, root=None: {'bend', 'vib', 'level'})
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+    e.inputs = ['test keys']
+    e.midi = MidiPlay(e, sources=lambda: list(e.inputs), opener=FakeInput)
+    e.cmd_midi(source='test keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, mpe=True)
+    e.cmd_midi_fx(source='test keys', chain=chain, at='now')
+
+    def bend(semis):
+        raw = ML.to_raw('bend', -48, 48, semis)[0]
+        key(0xE1, raw & 0x7F, raw >> 7)                             # channel 2
+    bend(12)
+    key(0x91, 60, 100)
+    v = e.midi.voices[0]
+    pulls(e, 0.05)
+    key(0x81, 60, 0)                                                # let go: its tail keeps channel 2's bend of now
+    assert bool(e.midi.fx_offs) == (chain[0]['type'] == 'length')   # a set or a later end, or now
+    bend(0)                                                         # the controller hands channel 2 to the next note
+    key(0x91, 64, 100)
+    pulls(e, 0.05)
+    assert v.rel is None or chain[0]['type'] == 'chord'
+    assert e.midi.xv[v].rate == pytest.approx(2.0, abs=1e-3)   # an octave up still, not the next note's bend
+
+
+def test_a_stored_chain_given_back_is_taken_as_it_is(eng, tmp_path):
+    import json
+    import os
+    from ismail import api
+    p = str(tmp_path / 'song')
+    api.project_new(p, bpm=120, length_bars=2, master_limiter=False)
+    api.track_add(p, 'lead', instrument={'type': 'synth'})
+    api.notes_write(p, 'lead', 1, '0 C4 1')
+    api.track_midi_fx(p, 'lead', chain=[{'type': 'velocity', 'fixed': 100}, {'type': 'length', 'beats': 0.5},
+                                        {'type': 'length', 'scale': 2}, {'type': 'pitch', 'transpose': 3},
+                                        {'type': 'random', 'chance': 0.5}, {'type': 'chord', 'intervals': [0, 7]},
+                                        {'type': 'scale', 'key': 'A', 'scale': 'minor'}])
+    with open(os.path.join(p, 'project.json'), encoding='utf8') as f:
+        stored = json.load(f)['tracks']['lead']['midi_fx']
+    assert 'MIDI effects unchanged' in api.track_midi_fx(p, 'lead', chain=stored)
+    assert 'on now' in eng.cmd_midi_fx(source='test keys', chain=stored, at='now')
+    assert eng.mfx.fx['test keys']['chain'] == stored
+
+
+def test_status_says_off_when_the_first_queued_change_is_an_off(eng):
+    pulls(eng, 0.3)
+    eng.cmd_midi_fx(source='test keys', chain=CHORD, at='bar:3')
+    eng.cmd_midi_fx(source='test keys', off=True, at='bar:2')
+    s = eng.cmd_status()
+    assert 'midi fx test keys: off at bar 2' in s and 'at bar 3: chord +0 +4 +7' in s

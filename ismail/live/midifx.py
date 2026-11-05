@@ -1,6 +1,7 @@
 """live_midi_fx: MIDI effects on played keys (MIDI parity step 7b). Each key of a patched input (live_midi) goes
 through a chain of chord, scale, pitch, velocity, length and random effects before it sounds, through the same core
-the studio renders with (ismail/midifx.py): same chain, same notes.
+the studio renders with (ismail/midifx.py): same chain, same key on the same beat, same notes. A take
+(live_played) keeps the keys, not the notes made, so its random effects roll again when it is rendered.
 
 This holds each input's chain and the changes queued for a bar line; the keys themselves are played in midi_play
 (_fx_on, _fx_off), which keeps, per key held, the notes it started, so its release ends exactly those notes even
@@ -145,9 +146,13 @@ class LiveMidiFx:
     def _line(self, name, f):
         bpb = self.e.bpb
         p = self.e.midi.patches.get(name)
-        bits = [f"midi fx {name}: " + (MF.describe(f['chain']) if f['chain'] is not None else "starts at "
-                                       + _bar(f['pending'][0][0], bpb) if f['pending'] else 'off'),
-                f"{f['keys']} keys through it"]
+        if f['chain'] is not None:
+            what = MF.describe(f['chain'])
+        elif f['pending']:
+            what = ("starts at " if f['pending'][0][1] is not None else "off at ") + _bar(f['pending'][0][0], bpb)
+        else:
+            what = 'off'
+        bits = [f"midi fx {name}: {what}", f"{f['keys']} keys through it"]
         if p is not None and p.get('fxon'):
             bits.append(f"{len(p['fxon'])} keys held")
         for b, c in f['pending'] if f['chain'] is not None else f['pending'][1:]:

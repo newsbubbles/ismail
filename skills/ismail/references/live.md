@@ -815,8 +815,10 @@ renders the same.
 ### MIDI effects, live and in the studio
 
 Ableton's Chord, Scale, Pitch, Velocity, Note Length and Random, as one chain of data. One core does both
-(`live_midi_fx` on played keys, `track_midi_fx` on a track's notes at render): the same chain gives the same notes,
-so a chain found in a jam renders the same. The arpeggiator is the seventh one, with its own ops (above).
+(`live_midi_fx` on played keys, `track_midi_fx` on a track's notes at render): the same key on the same beat makes
+the same notes live and rendered, dice included. A recorded take (`live_played`) keeps the keys played, not the
+notes the chain made, so a take rendered through the chain re-rolls its `random` and velocity `random`; the other
+effects come out the same. The arpeggiator is the seventh one, with its own ops (above).
 
 - **The chain** is a list, applied in order to every note a key (or a written note) starts; a new chain replaces
   the old one:
@@ -837,7 +839,8 @@ so a chain found in a jam renders the same. The arpeggiator is the seventh one, 
     note moves by 1 to `choices` times `interval` semitones (`'up'`, `'down'`, `'both'`). With `key` + `scale` the
     interval counts scale steps and the moved note stays on the scale.
 - **Dice** are a note's own: the seed, the effect's place, the note's pitch and the beat it starts on. A render is
-  the same every time; change `seed` for another roll.
+  the same every time; change `seed` for another roll. A take's keys land on other beats than they were played on
+  (fitted or rounded), so they roll again.
 - **Order with the arp.** On a source with both, the chain runs first: live its notes are the keys the arp holds,
   in the studio its notes are the chords the arp steps. `track_arp(write=True)` on a track with a chain is refused:
   `track_midi_fx(write=True)` writes the chain into the chords first.
@@ -865,7 +868,8 @@ so a chain found in a jam renders the same. The arpeggiator is the seventh one, 
   yet: tell them "About a third of the lead's notes now jump an octave, all inside C3 to C6. I'll render it so you
   can hear it" and render. To edit single notes, `track_midi_fx(track='lead', write=True)`: the processed notes
   become plain notes (`undo()` brings the written ones back). `off=True` takes the chain off.
-- Not yet: `live_played` logs the keys pressed, not the notes the chain made; with the arp on, a set length lets go
+- Not yet: `live_played` logs the keys pressed, not the notes the chain made (`live_played(into=)` writing the
+  chain's own notes, so a take keeps what its dice rolled); with the arp on, a set length lets go
   of the arp's key on its beat but a played key starts the chain on the buffer it arrives in, as keys always do.
 
 ## MIDI out: synths and other apps play with the set

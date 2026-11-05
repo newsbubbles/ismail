@@ -9,7 +9,7 @@ from .api import OpError, op, _load
 def track_midi_fx(project: str, track: str, chain: list = None, off: bool = False, write: bool = False) -> str:
     """MIDI effects on a track at render, Ableton's Chord, Scale, Pitch, Velocity, Note Length and Random as one
     chain: the track's notes stay as written (notes_read shows them) and the render plays what the chain makes of
-    them. The same core as live_midi_fx, so a chain sounds the same played live and rendered. chain: a list of
+    them. The same core as live_midi_fx: a key on a beat live makes what a note on that beat renders. chain: a list of
     effects, applied in order to every note; a new chain replaces the old one. Effects:
     {'type': 'chord', 'intervals': [0, 4, 7], 'velocity': 0.8} (each note plays these semitones from it, 0 = itself;
     velocity scales the added notes, or a list one per interval);

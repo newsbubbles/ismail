@@ -826,8 +826,10 @@ def live_midi_fx(project: str, source: str = None, chain: list = None, at: str =
                  off: bool = False) -> str:
     """MIDI effects on a patched input's keys (live_midi: a keyboard, a loopMIDI port or 'screen keys'): each key
     plays what a chain of Ableton-style effects makes of it, Chord, Scale, Pitch, Velocity, Note Length and Random.
-    The same core and chain as the studio's track_midi_fx, so a part played through it renders the same. chain: a
-    list of effects applied in order; a new chain replaces the old one. Effects (as track_midi_fx takes them):
+    The same core and chain as the studio's track_midi_fx: the same key on the same beat makes the same notes live
+    and rendered, dice included. A recorded take (live_played) keeps the keys played, not the notes made, so a
+    take rendered through the chain re-rolls its random effects. chain: a list of effects applied in order; a new
+    chain replaces the old one. Effects (as track_midi_fx takes them):
     {'type': 'chord', 'intervals': [0, 4, 7], 'velocity': 0.8}; {'type': 'scale', 'key': 'A', 'scale': 'minor',
     'mode': 'nearest' | 'up' | 'down' | 'drop'}; {'type': 'pitch', 'transpose': 12, 'lowest': 'C3', 'highest': 'C6',
     'fold': False}; {'type': 'velocity', 'out': [40, 110], 'curve': 0.5, 'random': 10} or {'fixed': 100};

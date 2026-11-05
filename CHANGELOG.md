@@ -5,7 +5,7 @@
 ### MIDI effects, live and in the studio (MIDI parity step 7b)
 
 - One core (`ismail/midifx.py`: pure, deterministic) for Ableton's Chord, Scale, Pitch, Velocity, Note Length and
-  Random, as a chain of data applied in order: the same chain gives the same notes played live and rendered.
+  Random, as a chain of data applied in order: the same key on the same beat makes the same notes played live and rendered.
   `chord` (intervals, a velocity scale for the added notes), `scale` (key + scale from the arp's tables, `nearest`,
   `up`, `down` or `drop`), `pitch` (transpose, a lowest..highest range that drops or folds by octaves), `velocity`
   (a curve, an out range, random, or fixed), `length` (fixed beats, or a multiple of the played length), `random`
@@ -23,7 +23,8 @@
 - The chain runs before the arp on a source with both: live its notes are the keys the arp holds (a pitch two keys'
   chords share stays held until both let go), in the studio the chords the arp steps. `track_arp(write=True)` on a
   track with a chain is refused and says to write the chain first.
-- Not yet: `live_played` logs the keys pressed, not the notes the chain made.
+- Not yet: `live_played` logs the keys pressed, not the notes the chain made, so a take re-rolls the chain's
+  random effects when rendered; `live_played(into=)` writing the chain's own notes.
 
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 

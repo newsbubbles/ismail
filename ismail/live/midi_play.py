@@ -50,6 +50,7 @@ LO, HI = 36, 96             # the notes rendered for a melodic instrument: C2 to
 NOTE_S = 2.5                # each note's gate: a key held longer ends with the note's own release
 ONESHOT_S = 0.2             # a drum's or a kit pad's gate (note-offs are ignored for those)
 MAX_VOICES = 48
+FADE_ROOM = 8               # of those, kept for voices fading out after a steal
 POLL_S = 2.0
 KNEE = 0.9                  # the keys plus the set above this are soft-clipped (they skip the safety limiter)
 SCREEN = 'screen keys'      # the on-screen keys page, an input that is always there (live_keys_page)
@@ -572,13 +573,23 @@ class MidiPlay:
             if old is not None:
                 old.release(int(0.02 * SR))
                 self._expr_off(p, old, ch)
-            if len(self.voices) >= MAX_VOICES:
-                self.voices[0].release(int(0.02 * SR))
+            self._make_room()
             self._expr_new(p, v, ch)             # before any buffer mixes it
             self.voices.append(v)
             if not p['oneshot']:
                 p['held'][self._hk(p, note, ch)] = v
         p['played'] += 1
+
+    def _make_room(self):
+        """Before a new voice (under the lock): with MAX_VOICES - FADE_ROOM sounding and not yet fading, the oldest of
+        them fades out over 20 ms; voices past MAX_VOICES (fading ones first, oldest first) are dropped. Never more
+        than MAX_VOICES (as the arp's voices, live/arp.py)."""
+        live = [v for v in self.voices if v.rel is None or v.left > v.rel]     # a set end still ahead: not fading
+        if len(live) >= MAX_VOICES - FADE_ROOM:
+            live[0].release(int(0.02 * SR))
+        while len(self.voices) >= MAX_VOICES:
+            self.voices.remove(next((v for v in self.voices if v.rel is not None and v.left <= v.rel),
+                                    self.voices[0]))
 
     @staticmethod
     def _hk(p, note, ch):
@@ -622,9 +633,10 @@ class MidiPlay:
         base, mult = MF.length_rule(chain)
         hk = self._hk(p, note, ch)
         ent = {'beat': beat, 'mult': mult, 'end': None if base is None else beat + base * mult, 'voices': [],
-               'arp': [], 'ch': ch}
+               'arp': [], 'ch': ch, 'started': []}
         old = p.setdefault('fxon', {}).pop(hk, None)
         if old is not None:                        # pressed again before its release: the old notes end first
+            self._fx_expr_off(p, old)
             self._fx_end(p, old, None)
         arp = self._arp()
         if arp is not None and p['source'] in arp.arps:
@@ -637,11 +649,11 @@ class MidiPlay:
                     voice = self._voice(p, m, v)
                     if voice is None:
                         continue
-                    if len(self.voices) >= MAX_VOICES:
-                        self.voices[0].release(int(0.02 * SR))
+                    self._make_room()
                     self._expr_new(p, voice, ch)
                     self.voices.append(voice)
                     ent['voices'].append(voice)
+                    ent['started'].append(voice)
         if ent['end'] is not None:
             self._fx_end(p, ent, ent['end'])       # its length is set: it ends there, whatever the key does
         if ent['end'] is not None or not (p['oneshot'] and not ent['arp']):
@@ -655,8 +667,9 @@ class MidiPlay:
         ent = p['fxon'].pop(self._hk(p, note, ch), None)
         if ent is None:
             return False
+        self._fx_expr_off(p, ent)                  # its notes keep the channel's values of now (MPE), as a key's
         if ent['end'] is not None:
-            return True                            # a set length: the key's release changes nothing
+            return True                            # a set length: the key's release changes nothing more
         now = self.sound_beat()
         end = ent['beat'] + (now - ent['beat']) * ent['mult']
         self._fx_end(p, ent, end if end > now + 1e-6 else None)
@@ -677,12 +690,17 @@ class MidiPlay:
                 self.fx_offs.append((beat, p, ent['voices']))
             else:
                 for v in ent['voices']:
-                    self._expr_off(p, v, ent['ch'])
                     if p['sustain']:
                         p['sustained'].append(v)
                     else:
                         v.release(int(p['rel_s'] * SR))
         ent['voices'] = []
+
+    def _fx_expr_off(self, p, ent):
+        """The key of an entry is let go: each note it started, ending now or later, keeps its channel's values
+        (MPE hands the channel to the next note)."""
+        for v in ent['started']:
+            self._expr_off(p, v, ent['ch'])
 
     def _fx_due(self, n):
         """The notes whose set end falls in the next n samples to the device: released on that sample (the beat's

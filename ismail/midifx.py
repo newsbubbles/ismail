@@ -32,6 +32,7 @@ import random
 
 from . import arp as A
 from .notation import NotationError, fmt_num, midi_to_name, pitch_to_midi
+from .tune import SCALES
 
 TYPES = ('chord', 'scale', 'pitch', 'velocity', 'length', 'random')
 FIELDS = {'chord': ('intervals', 'velocity'), 'scale': ('key', 'scale', 'mode'),
@@ -55,6 +56,8 @@ EXAMPLE = "[{'type': 'chord', 'intervals': [0, 4, 7]}, {'type': 'scale', 'key': 
 
 # ------------------------------------------------------------------ the chain as data
 def _num(x, what, lo, hi, whole=False):
+    if isinstance(x, bool):
+        raise MidiFxError(f"{what}: a number, not {x!r}")
     try:
         f = float(A._num(x, what))
     except A.ArpError as e:
@@ -75,6 +78,19 @@ def _pitch(x, what):
         except NotationError:
             raise MidiFxError(f"{what}: a note name such as C3, F#4, or a MIDI number 0 to 127 (got {x!r})")
     return _num(x, what, 0, 127, whole=True)
+
+
+def _key_scale(fx, w):
+    """Check an effect's key and scale; anything not a note name or a scale says what to give."""
+    try:
+        A._key_pc(fx['key'])
+        A.scale_steps(fx['scale'])
+    except A.ArpError as e:
+        raise MidiFxError(f"{w}: {e}")
+    except (TypeError, ValueError):
+        raise MidiFxError(f"{w}: key a note name such as 'A' or 'F#', scale a name ({', '.join(SCALES)}) or a list "
+                          f"of whole semitones from the key, e.g. [0, 2, 3, 5, 7, 8, 10] (got key {fx['key']!r}, "
+                          f"scale {fx['scale']!r})")
 
 
 def _one(fx, i):
@@ -113,8 +129,7 @@ def _one(fx, i):
         if t == 'scale':
             if fx.get('key') is None or fx.get('scale') is None:
                 raise MidiFxError(f"{w}: give key and scale, e.g. {{'type': 'scale', 'key': 'A', 'scale': 'minor'}}")
-            A._key_pc(fx['key'])
-            A.scale_steps(fx['scale'])
+            _key_scale(fx, w)
             mode = fx.get('mode', 'nearest')
             if mode not in SCALE_MODES:
                 raise MidiFxError(f"{w}: mode {mode!r}: 'nearest' (ties go down), 'up', 'down' or 'drop' (notes off "
@@ -122,6 +137,9 @@ def _one(fx, i):
             sc = list(fx['scale']) if isinstance(fx['scale'], (list, tuple)) else fx['scale']
             return {'type': t, 'key': str(fx['key']).strip(), 'scale': sc, 'mode': mode}
         if t == 'pitch':
+            if not isinstance(fx.get('fold', False), bool):
+                raise MidiFxError(f"{w}: fold True (move notes by octaves into the range) or False (drop them); got "
+                                  f"{fx['fold']!r}")
             out = {'type': t, 'transpose': _num(fx.get('transpose', 0), f"{w} transpose", -48, 48, whole=True),
                    'lowest': None if fx.get('lowest') is None else _pitch(fx['lowest'], f"{w} lowest"),
                    'highest': None if fx.get('highest') is None else _pitch(fx['highest'], f"{w} highest"),
@@ -141,24 +159,23 @@ def _one(fx, i):
             if lo > hi:
                 raise MidiFxError(f"{w}: out [lo, hi] with lo <= hi (got {list(o)})")
             fixed = fx.get('fixed')
-            if fixed is not None and 'curve' in fx:
+            if fixed is not None and fx.get('curve') not in (None, 0):
                 raise MidiFxError(f"{w}: fixed sets one velocity, a curve shapes the played ones: give one of them")
-            return {'type': t, 'out': [lo, hi], 'curve': _num(fx.get('curve', 0), f"{w} curve", -1, 1),
+            return {'type': t, 'out': [lo, hi], 'curve': _num(fx.get('curve') or 0, f"{w} curve", -1, 1),
                     'random': _num(fx.get('random', 0), f"{w} random", 0, 127, whole=True),
                     'fixed': None if fixed is None else _num(fixed, f"{w} fixed", 1, 127, whole=True)}
         if t == 'length':
-            if ('beats' in fx) == ('scale' in fx):
+            if (fx.get('beats') is None) == (fx.get('scale') is None):
                 raise MidiFxError(f"{w}: one of beats (a fixed length, e.g. 0.5) or scale (a multiple of the "
                                   f"played length, e.g. 2)")
-            if 'beats' in fx:
+            if fx.get('beats') is not None:
                 return {'type': t, 'beats': _num(fx['beats'], f"{w} beats", 1 / 64, 64), 'scale': None}
             return {'type': t, 'beats': None, 'scale': _num(fx['scale'], f"{w} scale", 0.05, 16)}
         # random
         if (fx.get('key') is None) != (fx.get('scale') is None):
             raise MidiFxError(f"{w}: key and scale go together (moves in scale steps), or neither (semitones)")
         if fx.get('key') is not None:
-            A._key_pc(fx['key'])
-            A.scale_steps(fx['scale'])
+            _key_scale(fx, w)
         sign = fx.get('sign', 'up')
         if sign not in SIGNS:
             raise MidiFxError(f"{w}: sign {sign!r}: 'up', 'down' or 'both'")
