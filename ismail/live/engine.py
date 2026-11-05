@@ -216,7 +216,8 @@ class Engine:
         self._out_tried = 0.0
         self.hub = O.StreamHub(SR)
         self.controls = O.Controls(os.path.join(self.root, 'live', 'controls.jsonl'))
-        self._ctl_q = collections.OrderedDict()   # MIDI moves for the control thread: control -> (map, value, via)
+        self._ctl_q = collections.OrderedDict()   # MIDI moves for the control thread: control -> (map, value, via,
+        #                                           seq, presses queued for an action map)
         self._ctl_lock = threading.Lock()
         self._ctl_wake = threading.Event()
         self._ctl_thread = False
@@ -2251,7 +2252,7 @@ class Engine:
             try:
                 loop = int(loop)
                 assert loop >= 1
-            except (ValueError, AssertionError):
+            except (TypeError, ValueError, AssertionError):
                 raise LiveError(f"clip [{i}]: loop={it.get('loop')!r}; use a count >= 1 or 'forever'")
         return track, notes, length, loop, expr
 
@@ -2789,22 +2790,70 @@ class Engine:
                 + ". A bound message is a control, not a key: it no longer plays or logs as a note")
 
     def _check_action(self, a):
-        """What an action names exists now (called under the lock): its clips parse onto live tracks, its tempo is
-        one the set can take, its decks are there. A press later still checks again, as the op it mirrors does."""
-        g = a['args']
-        if a['op'] == 'live_queue':
-            for i, it in enumerate(g.get('clips') or []):
+        """What an action names exists now and what it says parses (called under the lock): its clips parse onto
+        live tracks with their at, beat0 and context, its tempo is one the set can take, its decks are there and
+        its transition plans, every at= is one the queue knows. A press later still checks again, as the op it
+        mirrors does (a bar:<n> that has played by then, an after:<clip> that has gone)."""
+        g, op = a['args'], a['op']
+        if op == 'live_queue':
+            clips, cs = g.get('clips'), g.get('cancel_section')
+            if clips is None and cs:
+                clips = []
+            if not isinstance(clips, list) or not (clips or cs):
+                raise LiveError("action live_queue: clips, a list of {track, notes | lanes, bars, loop, at} (or "
+                                "{track, stop: true}); or cancel_section='<name>' alone to take a section back")
+            if g.get('cancel_at') is not None and not cs:
+                raise LiveError("action live_queue: cancel_at goes with cancel_section='<name>' (the section to "
+                                "take back from there)")
+            self._check_at("action live_queue cancel_at", g.get('cancel_at'))
+            for i, it in enumerate(clips):
                 self._parse_clip(i, it)
-        elif a['op'] == 'live_tempo':
+                self._check_at(f"action live_queue clip [{i}]", it.get('at'))
+                try:
+                    float(it.get('beat0') or 0.0)
+                    [tuple(float(x) for x in n) for n in it.get('context') or []]
+                except (TypeError, ValueError):
+                    raise LiveError(f"action live_queue clip [{i}]: beat0 is a number of beats and context a list "
+                                    f"of [beat, midi, dur, vel] notes; beat0={it.get('beat0')!r}, "
+                                    f"context={it.get('context')!r}")
+        elif op == 'live_tempo':
             try:
                 g['bpm'] = float(g['bpm'])
                 assert 20.0 <= g['bpm'] <= 400.0
             except (TypeError, ValueError, AssertionError):
                 raise LiveError(f"action live_tempo: bpm {g['bpm']!r}, a tempo from 20 to 400")
+            self._check_at("action live_tempo", g.get('at'))
         else:
             self._deck(g['to'])
             if g.get('from_deck') is not None:
                 self._deck(g['from_deck'])
+            self._check_at("action live_transition", g.get('at'))
+            if not isinstance(g.get('stop_from', True), bool):
+                raise LiveError(f"action live_transition: stop_from={g['stop_from']!r}, true (the old deck's tracks "
+                                f"stop at the end, the default) or false")
+            try:
+                bars = int(g.get('bars', 16))
+            except (TypeError, ValueError):
+                raise LiveError(f"action live_transition: bars={g.get('bars')!r}, a whole number of bars")
+            try:
+                D.plan(g.get('style', 'blend'), bars, self.bpb)
+            except D.DeckError as e:
+                raise LiveError(f"action live_transition: {e}")
+
+    def _check_at(self, what, at):
+        """An action's at= is one the queue knows (next_bar, bar:<n>, ...): checked when it is mapped, not only when
+        it is pressed. after:<clip> waits for the press (the clip may be queued by then)."""
+        if at is None:
+            return
+        if not isinstance(at, str):
+            raise LiveError(f"{what}: at={at!r}; use next_beat | next_bar | next_2 | next_4 | next_8 | next_16 | now | "
+                            f"bar:<n> | after:<clip id>")
+        if at.strip().startswith('after:'):
+            return
+        try:
+            self.tl.resolve_at(at, 0.0, 0.0)
+        except QueueError as e:
+            raise LiveError(f"{what}: {e}")
 
     def _fire(self, control, m, via=None):
         """A press of an action map: the command it mirrors, now (on the control thread, as a stage knob's move)."""
@@ -2812,7 +2861,13 @@ class Engine:
         g = json.loads(json.dumps(a['args']))           # a fresh copy each press
         fn = {'live_queue': self.cmd_queue, 'live_tempo': self.cmd_tempo,
               'live_transition': self.cmd_transition}[a['op']]
-        r = fn(**g)
+        try:
+            r = fn(**g)
+        except LiveError:
+            raise
+        except Exception as e:                          # one bad argument must not stop the other controls
+            raise LiveError(f"{a['op']} could not take this action's arguments ({type(e).__name__}: {e}): give "
+                            f"it the arguments {a['op']} takes")
         txt = r if isinstance(r, str) else json.dumps(r)
         self.news.append(f"{control}" + (f" ({via})" if via else '') + f" fired {a['op']}: " + txt.split('\n')[0])
         return txt
@@ -2883,15 +2938,17 @@ class Engine:
 
     def midi_control(self, source, st, d1, d2):
         """A message from a MIDI input, on the driver's thread: the moves of every map bound to it are queued for
-        the control thread (the latest per control wins; nothing here touches a file or rebuilds an effect). True
+        the control thread (the latest per control wins, and an action map counts its presses, so each fires;
+        nothing here touches a file or rebuilds an effect). True
         when a map is bound to it (then it is a control, not a key). With no control thread running (a test, a
         harness), the moves apply here."""
         moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now)
         if moves:
             with self._ctl_lock:
                 for control, m, v, via in moves:
-                    self._ctl_q.pop(control, None)
-                    self._ctl_q[control] = (m, v, via, m['st']['seq'])
+                    prev = self._ctl_q.pop(control, None)
+                    n = (prev[4] if prev and prev[0] is m else 0) + 1 if m.get('action') else 0
+                    self._ctl_q[control] = (m, v, via, m['st']['seq'], n)
             if self._ctl_thread:
                 self._ctl_wake.set()
             else:
@@ -2899,14 +2956,16 @@ class Engine:
         return hit
 
     def drain_controls(self):
-        """Apply the queued MIDI moves (one per control, its latest), then write the control log."""
+        """Apply the queued MIDI moves (one per control, its latest; an action map fires once per press queued),
+        then write the control log."""
         with self._ctl_lock:
             q, self._ctl_q = self._ctl_q, collections.OrderedDict()
-        for control, (m, v, via, seq) in q.items():
+        for control, (m, v, via, seq, n) in q.items():
             try:
                 if self.controls.maps.get(control) is not m:    # remapped or removed since: the move is dropped
                     continue
-                self._apply(control, m, v, via)
+                for _ in range(n or 1):                         # a failed press stops the rest (one news line)
+                    self._apply(control, m, v, via)
                 m.pop('err', None)
             except (LiveError, KeyError, ValueError) as e:
                 if not m.get('err'):

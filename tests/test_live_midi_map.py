@@ -522,6 +522,57 @@ def test_a_press_that_fails_says_so_in_the_news_once(eng):
     assert len(news) == 1 and "no live track 'pad'" in news[0] and 'live_map it again' in news[0]
 
 
+def test_an_action_is_checked_at_map_time_as_its_op_would_check_it(eng):
+    eng.cmd_deck('B')
+    clip = {'track': 'lead', 'notes': '0 C4 1', 'bars': 1}
+    for action, says in (
+            ({'op': 'live_tempo', 'bpm': 130, 'at': 'bogus'}, "action live_tempo: at='bogus': use next_beat"),
+            ({'op': 'live_queue', 'clips': [clip], 'cancel_at': 'next_bar'}, 'cancel_at goes with cancel_section'),
+            ({'op': 'live_queue', 'clips': [dict(clip, at='bogus')]}, r"clip \[0\]: at='bogus'"),
+            ({'op': 'live_queue', 'clips': [dict(clip, beat0='x')]}, 'beat0 is a number of beats'),
+            ({'op': 'live_queue', 'clips': [dict(clip, context=[5])]}, r'context a list of \[beat, midi, dur, vel\]'),
+            ({'op': 'live_queue', 'clips': [dict(clip, loop=[1])]}, r"loop=\[1\]; use a count >= 1 or 'forever'"),
+            ({'op': 'live_transition', 'to': 'B', 'style': 'bogus'}, "style='bogus': use one of blend"),
+            ({'op': 'live_transition', 'to': 'B', 'bars': 'x'}, "bars='x', a whole number of bars"),
+            ({'op': 'live_transition', 'to': 'B', 'at': 'whenever'}, "at='whenever'"),
+            ({'op': 'live_transition', 'to': 'B', 'stop_from': 'maybe'}, "stop_from='maybe', true")):
+        with pytest.raises(LiveError, match=says):
+            eng.cmd_map('x', action=action, midi='note:44', source='pad')
+    assert 'x' not in eng.controls.maps
+    eng.cmd_map('x', action={'op': 'live_queue', 'clips': [dict(clip, at='bar:9', beat0=0.5)]}, midi='note:44',
+                source='pad')                                  # what the op takes is mapped
+    assert 'x' in eng.controls.maps
+
+
+def test_a_press_whose_op_raises_anything_else_is_a_news_line_and_the_other_moves_still_apply(eng):
+    eng.cmd_map('ctx', action={'op': 'live_queue', 'clips': [{'track': 'lead', 'notes': '0 C4 1', 'bars': 1}]},
+                midi='note:50', source='pad')
+    eng.cmd_map('knob', target='lead', param='pan', range=[-1, 1], midi='cc:10', source='pad')
+    eng.controls.maps['ctx']['action']['args']['clips'][0]['context'] = [5]    # a press that fails late
+    send('pad grid', 0x90, 50, 100)                            # no control thread: applied on the driver's thread
+    news = [n for n in eng.drain_news() if n.startswith('control ctx')]
+    assert len(news) == 1 and 'live_queue could not take this action' in news[0] and 'TypeError' in news[0]
+    eng._ctl_thread = True                                     # a running set: the press and a knob, one drain
+    send('pad grid', 0x90, 50, 100)
+    send('pad grid', 0xB0, 10, 127)
+    eng.drain_controls()
+    assert eng.tracks['lead']['pan'] == pytest.approx(1.0) and not eng._ctl_q
+    with pytest.raises(LiveError, match='give it the arguments live_queue takes'):
+        eng.cmd_control('ctx', 1)
+
+
+def test_quick_presses_before_one_drain_each_fire(eng):
+    eng.cmd_map('hit', action={'op': 'live_queue', 'clips': [{'track': 'lead', 'notes': '0 C4 1', 'bars': 1,
+                                                                'at': 'now'}]}, midi='note:36', source='pad')
+    eng._ctl_thread = True
+    for _ in range(3):
+        send('pad grid', 0x90, 36, 100)
+        send('pad grid', 0x80, 36, 0)
+    eng.drain_controls()
+    assert len([n for n in eng.drain_news() if 'fired' in n]) == 3
+    assert 'hit fired live_queue 3 times' in eng.cmd_controls()
+
+
 def test_a_program_change_fires_an_action_or_flips_a_param(eng):
     eng.cmd_midi(source='pad grid', track='pad')
     send('pad grid', 0xC0, 4, 0)                               # program 5, nothing mapped: heard, numbered from 1
