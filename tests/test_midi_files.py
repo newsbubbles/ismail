@@ -127,3 +127,23 @@ def test_gm_programs_go_out_per_track_and_per_bar_and_list_back(tmp_path):
         OPS['midi_write'](p, programs={'bass': 0})
     with pytest.raises(api.OpError, match="programs: 'pads' is not one of the tracks written"):
         OPS['midi_write'](p, programs={'pads': 1})
+
+
+def test_programs_list_every_change_land_before_a_nudged_note_and_say_what_is_left_out(tmp_path):
+    p = str(tmp_path / 's')
+    api.project_new(p, bpm=100, length_bars=8)
+    api.track_add(p, 'lead', instrument='preset:pluck')
+    api.notes_write(p, 'lead', 1, '0 C4 1; 2 E4 1', repeat=8)
+    path = str(tmp_path / 'a.mid')
+    OPS['midi_write'](p, out=path, programs={'lead': {1: 81, 5: 82}})
+    assert 'GM program 81, 82 at bar 5' in OPS['midi_read'](p, path)    # every change, with its bar
+    api.track_set(p, 'lead', offset_ms=-20)                              # the track sounds early
+    OPS['midi_write'](p, out=path, programs={'lead': {1: 81, 5: 82}})
+    t = [x for x in MF.read(path)['tracks'] if x['notes']][0]
+    at = [b for b, _, pg in t['program_changes'] if pg == 81][0]
+    assert at <= min(n[0] for n in t['notes'] if n[0] > 15)              # bar 5's first note has its sound
+    out = OPS['midi_write'](p, out=path, programs={'lead': {1: 81, 40: 82}})
+    assert 'program 81 at bar 1' in out and 'left out: program 82 at bar 40, past the bars written (1-8)' in out
+    with pytest.raises(api.OpError, match='whole numbers'):
+        OPS['midi_write'](p, out=path, programs={'lead': {1.9: 81}})
+    OPS['midi_write'](p, out=path, programs={'lead': {'1': 81, 5.0: 82}})    # JSON keys and 5.0 are bars too

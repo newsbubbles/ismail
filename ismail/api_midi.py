@@ -88,11 +88,14 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
             chans[n] = ch
         part = {'name': n, 'channel': ch, 'notes': notes}
         lane_txt = _write_lanes(part, tr, lmaps[as_mpe], as_mpe, b0, b1, shift)
-        pg = _program_events(progs.get(n), ch, P, a, b, shift)
+        rows = progs.get(n) or []
+        pg = _program_events(rows, ch, P, a, b, shift, sel, notes)
         part['events'] = pg + part['events']             # first at their tick: the sound before the notes
-        if pg:
-            lane_txt = ["    program " + ', '.join(f"{data[1] + 1} at bar {a + int(t // bpb)}" for t, data in pg)
-                        ] + lane_txt
+        shown = [(a, p) for bar, p in rows if bar <= a][-1:] + [(bar, p) for bar, p in rows if a < bar <= b]
+        out_of = [(bar, p) for bar, p in rows if bar > b]
+        lane_txt = ((["    program " + ', '.join(f"{p} at bar {bar}" for bar, p in shown)] if pg else [])
+                    + ([f"    left out: program " + ', '.join(f"{p} at bar {bar}" for bar, p in out_of)
+                        + f", past the bars written ({a}-{b})"] if out_of else []) + lane_txt)
         parts.append(part)
         what = ''
         if _is_kit(tr):
@@ -137,23 +140,37 @@ def _programs(programs, names):
         if n not in names:
             raise OpError(f"programs: {n!r} is not one of the tracks written: {names}")
         try:
-            rows = sorted((int(b), int(p)) for b, p in (v.items() if isinstance(v, dict) else [(1, v)]))
+            rows = sorted((_whole(b), _whole(p)) for b, p in (v.items() if isinstance(v, dict) else [(1, v)]))
             assert rows and all(b >= 1 and 1 <= p <= 128 for b, p in rows)
         except (TypeError, ValueError, AssertionError):
             raise OpError(f"programs[{n!r}]: a program 1 to 128 (as a GM list numbers them; the file holds 0 to 127), "
-                          f"or {{bar: program}} from bar 1, e.g. {{1: 81, 17: 82}}")
+                          f"or {{bar: program}} from bar 1, e.g. {{1: 81, 17: 82}}; bars and programs are whole "
+                          f"numbers (a change goes on a bar line)")
         out[n] = rows
     return out
 
 
-def _program_events(rows, ch, P, a, b, shift):
+def _whole(x):
+    """A whole number from an int, a float like 17.0 or a string like '17' (a JSON key); else ValueError."""
+    f = float(x)
+    if f != int(f):
+        raise ValueError(x)
+    return int(f)
+
+
+def _program_events(rows, ch, P, a, b, shift, sel=(), notes=()):
     """A track's program changes in the bars written [a, b], as part events: the one in force at bar a at the
-    file's start, then each change inside the bars at its bar line."""
+    file's start, then each change inside the bars at its bar line, or at its bar's earliest note when a nudge
+    (offset_ms) places that note before the line. sel: the stored notes, notes: where each one was placed."""
     if not rows:
         return []
     first = [p for bar, p in rows if bar <= a]
     ev = [(0.0, bytes([0xC0 | ch, first[-1] - 1]))] if first else []
-    ev += [(P.bar_to_beat(bar) - shift, bytes([0xC0 | ch, p - 1])) for bar, p in rows if a < bar <= b]
+    for bar, p in rows:
+        if a < bar <= b:
+            b0, b1 = P.bar_to_beat(bar), P.bar_to_beat(bar + 1)
+            t = min([b0 - shift] + [n[0] for x, n in zip(sel, notes) if b0 <= x[0] < b1])
+            ev.append((max(0.0, t), bytes([0xC0 | ch, p - 1])))
     return ev
 
 
@@ -423,11 +440,15 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
                 continue
             chs = sorted({n[4] + 1 for n in ns})
             lo, hi = min(n[1] for n in ns), max(n[1] for n in ns)
-            pg = sorted({p + 1 for p in t['programs'].values()})
+            pg, last = [], {}
+            for beat, ch, p in t['program_changes']:         # each change with its bar, the first without
+                if last.get(ch) != p:
+                    pg.append(f"{p + 1}" + (f" at bar {fbar(beat)}" if pg else ''))
+                    last[ch] = p
             L.append(f"  #{t['index']} {t['name'] or '(no name)'}: {len(ns)} notes, channel {'/'.join(map(str, chs))}"
                      f"{' (drums)' if chs == [10] else ''}, {midi_to_name(lo)}-{midi_to_name(hi)}, bars "
                      f"{fbar(ns[0][0])}-{fbar(max(n[0] for n in ns))}"
-                     + (f", GM program {'/'.join(map(str, pg))}" if pg else '') + ctl_txt)
+                     + (f", GM program {', '.join(pg)}" if pg else '') + ctl_txt)
         L.append("write parts with into={'<name>' or '#<index>' or 'ch<n>': '<ismail track>'}, bar=..., quantize=...; "
                  "their bend and controllers become lanes (lanes=... maps them)")
         return '\n'.join(L)
