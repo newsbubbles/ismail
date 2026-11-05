@@ -612,7 +612,9 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   `live_map(control='tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log', midi='cc:74',
   source='knob box', channel=1)`. Sources: `'cc:<n>'` (a knob or fader, 0..127), `'cc14:<n>'` (a 14-bit pair, MSB
   n 0..31 and LSB n+32), `'bend'` (centre = the middle of the range), `'pressure'` (channel aftertouch),
-  `'note:<n>'` (a pad: held = the range's top, released = its bottom). `source` is optional when one input is
+  `'note:<n>'` (a pad: held = the range's top, released = its bottom), `'program:<n>'` (a program change, 1 to 128
+  as a GM list or the controller's screen numbers it: a footswitch, a preset button; it fires an action or, with
+  `mode='toggle'`, flips a param). `source` is optional when one input is
   plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
   give `[value at 0, value at the top]`; the curve is `'linear'` (default), `'log'` (Hz, ratios: both ends above 0)
   or `'switch'` (`'raw'` is refused for MIDI). The range, curve and `at` work as for any control, and every move is
@@ -620,7 +622,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   - **Modes.** `'absolute'` (default: the param jumps to the knob). `'pickup'`: the knob takes over only once it
     reaches the param's value or passes it, so nothing jumps after you or the stage moved the param; `live_status`
     says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
-    complement, or 64 = still), 1/128 of the range per step, from the param's value now (steps that arrive
+    complement, or 64 = still), 1/128 of the range per step (`step=1/32` on the map for a coarse encoder,
+    `step=1/512` for a fine one), from the param's value now (steps that arrive
     faster than the engine applies them add up). `'toggle'`: a pad or a button flips between the range's ends
     (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
     0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
@@ -650,8 +653,26 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        over once you turn it past where the filter is now, so nothing jumps." When they say it does nothing,
        `live_status` says `(waiting: the knob is at 0.16, the param at 1.00; it takes over there)`: ask them to
        turn it all the way up once.
-  - Not yet: notes as triggers for actions (queue a clip, a section), program change, polyphonic aftertouch and MPE
-    as controls, a per-map step size or acceleration for encoders, and a curve beyond linear, log and switch.
+  - **Pads and buttons as triggers.** A map with `action=` instead of `target` and `param` fires a command on each
+    press (a pad's note-on, a `'cc:<n>'` button reaching 64, or a `'program:<n>'` arriving; the release does
+    nothing), with no agent in the loop. A footswitch that steps through programs fires one action per program:
+    map `program:1`, `program:2` ... each to its scene. The action is data, with the arguments of the op it mirrors:
+    `{'op': 'live_queue', 'clips': [...], 'section': 'drop'}` (a scene or a part: its clips and stops queue on each
+    press, each at its own `at`, default the next bar; `cancel_section` cuts the last chapter over),
+    `{'op': 'live_tempo', 'bpm': 128, 'at': 'next_bar'}`, or `{'op': 'live_transition', 'to': 'B', 'bars': 16}`.
+    The tracks and decks it names are checked when it is mapped. The reply of each press comes in the engine's news;
+    `live_controls` lists the presses by bar (`drop fired live_queue 3 times, at bars 9, 17, 33`). A mute is a param
+    map, not an action: `target='bass', param='volume_db', range=[0, -120], curve='switch', mode='toggle'`.
+  - **Example.** The person says "when I hit the first pad, bring the drop in." Pads on input `'pad grid'` send
+    notes on channel 10 (`live_controls(source='pad grid')` finds the note, here 36).
+    1. `live_map(control='drop', action={'op': 'live_queue', 'section': 'drop', 'clips': [{'track': 'drums',
+       'notes': '0 C1 1; 1 C1 1; 2 C1 1; 3 C1 1', 'bars': 1}, {'track': 'bass', 'notes': '0 A1 4', 'bars': 1}]},
+       midi='note:36', source='pad grid', channel=10)`. The reply: `drop -> fires live_queue (2 clips, section
+       drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
+       engine's news) and is logged by bar (live_controls)`.
+    2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
+  - Not yet: polyphonic aftertouch and MPE as controls, acceleration for encoders (a fast turn moving further per
+    tick), and a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 
@@ -700,8 +721,8 @@ straight to the speakers.
     4. Tell them: "Ready: each finger bends its own note, up to 4 octaves, and pressure adds up to 6 dB." Without
        `mpe=True`, each note's channel still bends its note, but at +-2 and with no master channel: a slide
        across a few keys bends far too little.
-  - Not yet: the played bend and pressure written into the song as lanes by `live_played(into=...)` (the log keeps
-    them), MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release velocity.
+  - Not yet: MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release
+    velocity.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
 - **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
@@ -736,6 +757,18 @@ straight to the speakers.
   - Without `fit` it is written as it sounded: the player's own timing off the grid, velocities and lengths, the
     pedal's holds. That is right for a part that should breathe (a melody, a pad). For a loop or anything that must
     lock to the drums, `fit=True` writes the snapped notes, `placement='A'` or `'B'` as the player picked by ear.
+  - **The expression goes in too.** The take's pitch bend, pressure and controllers (the key log keeps them, even
+    when the live sound had no lanes) become the track's lanes over the take, by live_midi's map: `bend` from the
+    wheel (+-2, or +-48 per note with MPE), `vib` from the mod wheel, `level` from pressure (0..+6 dB), or the
+    patch's own `lanes=` while the input is patched. `lanes=` as data names others the song's voice has
+    (`{'breath': {'midi': 'cc:2', 'range': [0, 1]}}`); `lanes=False` writes notes only. Poly pressure goes onto the
+    channel's pressure, the newest key held winning (a key that sends none is at 0), and an MPE take follows the
+    newest note (a song's lanes are per track). The lanes run to the take's last bar line, so a wheel let go after
+    the last note springs back, and a bend or pressure still off rest there goes back to rest on that line. They
+    replace the track's points over the take's bars in both modes (and on to the last point when a note is held
+    past them; the song's point on the next bar line stays); with `fit` they move with the notes.
+    The reply has a line per lane, and says when the track's sound has no such lane (they sound once it plays a
+    performer voice that has them).
   - The reply names the bars written, the note count and range, and how to hear it. To try B after A, `undo()`
     first: a write that lands in fewer bars only clears its own bars. `undo()` takes back any write.
 - **A take recorded as audio** (an instrument on the mic) has no key log. Take its onset times in beats, unrounded
@@ -892,6 +925,10 @@ sound.
   routed part together and ask whether the synth is early or late; `offset_ms=` (per port, -500 to 2000) moves
   that port's messages later, or earlier when negative. Ask in their words ("does the bass sit on the kick, or
   just after it?"), change it in steps of 10 to 20 ms.
+- **Which sound the synth plays.** `program=33` sends a program change on the route's channel (1 to 128 as a GM
+  list or the synth's screen numbers them: 1 piano, 33 acoustic bass, 81 square lead in GM): with a new route at
+  its start, on a route already there at `at` (`at='next_bar'` for a sound change on the bar line), just before
+  the notes of that beat. A port change sends it to the new port too; `live_status` shows it.
 - `remove=True` stops the route: every held note gets its note-off and All Notes Off on its channel, and the
   track's audio comes back as its notes render again (a few seconds). A stop and the set's end do the same.
 - **Clock.** `live_midi_clock(port='ismail out')` sends 24 pulses per beat at the set's tempo at once (the other

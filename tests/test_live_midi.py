@@ -521,3 +521,117 @@ def test_recording_says_what_to_do_when_asked_wrong(song, tmp_path):
         LO.live_played(p, into='keys')
     assert 'into bars 1-1' in LO.live_played(p, source='screen_keys', into='keys')    # the log's own name works
     assert _track(p) == [[1.0, 64, 0.5, 90]]   # only the last call wrote
+
+
+def test_the_key_log_keeps_bend_pressure_and_controllers_the_sound_did_not_take(eng):
+    eng.cmd_midi(source='keys', instrument='preset:pluck')     # a synth with no lanes: nothing bends live
+    key('ismail keys', 0x90, 60, 100)
+    key('ismail keys', 0xE0, 0, 96)
+    key('ismail keys', 0xD0, 70, 0)
+    key('ismail keys', 0xB0, 2, 33)
+    key('ismail keys', 0x80, 60, 0)
+    eng.midi.flush()
+    recs = [json.loads(x) for x in open(os.path.join(eng.root, 'live', 'midi', 'ismail_keys.jsonl'))]
+    assert [r['st'] for r in recs] == [0x90, 0xE0, 0xD0, 0xB0, 0x80]
+    assert "'ismail keys' bend ch1" in eng.midi.heard_lines()[1]      # still listed: no lane takes it live
+
+
+def _expr(path, notes, ctl):
+    """A key log with expression: notes as _keys, ctl [(beat, status, d1, d2)]."""
+    _keys(path, notes)
+    recs = [json.loads(x) for x in open(path)]
+    recs += [{'wall': 0, 'beat': b, 'press': b - 0.09, 'st': st, 'd1': d1, 'd2': d2} for b, st, d1, d2 in ctl]
+    _log(path, sorted(recs, key=lambda r: r['beat']))
+
+
+def _auto(p, name='keys'):
+    with open(os.path.join(p, 'project.json'), encoding='utf8') as f:
+        return json.load(f)['tracks'][name].get('automation', {})
+
+
+def test_a_take_writes_its_bend_pressure_and_controllers_onto_the_tracks_lanes(song):
+    from ismail import api
+    from ismail.live import ops as LO
+    from ismail import midilanes as ML
+    p = song
+    log = os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl')
+    # bar 3: a bend up a semitone and back, pressure swelling, the breath controller; a bend in bar 1 is not taken
+    _expr(log, [(8.0, 60, 2.0, 90), (10.0, 62, 1.5, 90)],
+          [(1.0, 0xE0, 0, 127), (8.0, 0xE0, 0, 64), (8.5, 0xE0, 0, 96), (9.5, 0xE0, 0, 64), (8.0, 0xD0, 0, 0),
+           (9.0, 0xD0, 127, 0), (8.25, 0xB0, 2, 127)])
+    api.automation_set(p, 'keys', 'inst.lane.bend', [[5.125, 2.0], [11, -1.0]])   # bar 5 replaced, bar 11 kept
+    r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=5,
+                       lanes={'breath': {'midi': 'cc:2', 'range': [0, 1]}})
+    assert 'lane bend: ' in r and 'bend messages (bend range +-2)' in r and 'lane level: ' in r, r
+    assert 'lane breath: ' in r and 'keys plays a sound with no bend/level/breath lane' in r and 'lane vib' not in r
+    lanes = _auto(p)
+    bend = lanes['inst.lane.bend']
+    assert ML.value_at(bend, 16.0) == pytest.approx(0, abs=0.01)
+    assert ML.value_at(bend, 17.0) == pytest.approx(1.0, abs=0.01)     # up a semitone from beat 0.5 of the bar
+    assert ML.value_at(bend, 18.0) == pytest.approx(0, abs=0.01)
+    assert [16.5, 2.0] not in bend and [40.0, -1.0] in bend             # the take's bars replaced, the rest kept
+    assert ML.value_at(lanes['inst.lane.level'], 17.0) == pytest.approx(6.0, abs=0.05)   # pressure: 0..+6 dB
+    assert ML.value_at(lanes['inst.lane.breath'], 16.5) == pytest.approx(1.0)
+    api.undo(p)
+    assert 'inst.lane.level' not in _auto(p)
+    r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=5, lanes=False)
+    assert 'lane ' not in r and 'inst.lane.level' not in _auto(p)       # notes only
+
+
+def test_a_wheel_let_go_after_the_last_note_off_springs_back_in_the_song_and_a_held_one_ends_at_rest(song):
+    from ismail import api
+    from ismail.live import ops as LO
+    from ismail import midilanes as ML
+    p = song
+    log = os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl')
+    api.notes_write(p, 'keys', 6, '0 C4 1')                              # a later note the bend must not reach
+    _expr(log, [(8.0, 60, 1.0, 90)], [(8.5, 0xE0, 0, 96), (9.2, 0xE0, 0, 64)])    # back to centre after the key
+    LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=5)
+    bend = _auto(p)['inst.lane.bend']
+    assert ML.value_at(bend, 16.9) == pytest.approx(1.0, abs=0.01)
+    assert ML.value_at(bend, 17.3) == pytest.approx(0, abs=0.01) and ML.value_at(bend, 20.0) == 0
+    api.undo(p)
+    _expr(log, [(8.0, 60, 1.0, 90)], [(8.5, 0xE0, 0, 96), (8.5, 0xD0, 90, 0)])    # never let go in the take
+    LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=5)
+    lanes = _auto(p)
+    assert ML.value_at(lanes['inst.lane.bend'], 19.9) == pytest.approx(1.0, abs=0.01)
+    assert ML.value_at(lanes['inst.lane.bend'], 20.0) == 0            # at rest on the take's last bar line
+    assert ML.value_at(lanes['inst.lane.level'], 20.0) == 0
+
+
+def test_a_takes_lanes_replace_its_bars_and_a_held_note_past_them_but_not_the_bar_line_after(song, monkeypatch):
+    from ismail import api
+    from ismail.live import ops as LO
+    p = song
+    base = {'source': 'k', 'first_bar': 3, 'bpm': 120.0, 'bpb': 4, 'lines': []}
+    take = dict(base, notes=[[0.0, 60, 1.0, 90]], lanes={'bend': [[0.0, 0.0], [0.5, 1.0], [1.0, 1.0]]})
+    monkeypatch.setattr(LO, '_call', lambda project, op, **kw: take)
+    api.automation_set(p, 'keys', 'inst.lane.bend', [[4, 0], [6, -2], [8, 0]])     # beats 12, 20, 28
+    LO.live_played(p, source='k', bars=[3, 3], into='keys', bar=5)
+    assert [20, -2.0] in _auto(p)['inst.lane.bend'] or [20.0, -2.0] in _auto(p)['inst.lane.bend']
+    api.undo(p)
+    # the last note starts in bar 6 and is held into bar 7: its lane goes to beat 26, past the bar line at 24
+    take.update(notes=[[0.0, 60, 1.0, 90], [6.0, 62, 4.0, 90]], lanes={'bend': [[0.0, 0.0], [6.5, 1.0], [10.0, 1.0]]})
+    api.automation_set(p, 'keys', 'inst.lane.bend', [[7, -2], [7.25, -1], [8.5, 0]])  # beats 24, 25, 30
+    LO.live_played(p, source='k', bars=[3, 3], into='keys', bar=5)
+    beats = [q[0] for q in _auto(p)['inst.lane.bend']]
+    assert 24 not in beats and 25 not in beats and 30 in beats
+
+
+def test_poly_pressure_in_a_take_follows_the_newest_key_and_fit_moves_the_lanes_with_the_notes(song):
+    from ismail.live import ops as LO
+    from ismail import midilanes as ML
+    p = song
+    log = os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl')
+    true = [8.5 + 2 * h + s * 0.25 for h in range(2) for s in (0, 3, 6)]
+    notes = [(t + 0.06, 57 + i, 0.2, 80) for i, t in enumerate(true)]
+    _expr(log, notes, [(true[3] + 0.06, 0xE0, 0, 96)] + [(n[0], 0xA0, n[1], 20 * (i + 1)) for i, n in
+                                                          enumerate(notes)])
+    r = LO.live_played(p, bars=[3, 4], fit=True, into='keys', bar=1, placement='B')
+    assert "poly pressure: 6 per-key messages read as the channel's pressure" in r, r
+    lanes = _auto(p)
+    bend = lanes['inst.lane.bend']
+    start = true[3] - 8.5                                                # B moved the take half a beat earlier
+    assert ML.value_at(bend, start - 0.1) == pytest.approx(0, abs=0.01)
+    assert ML.value_at(bend, start + 0.05) == pytest.approx(1.0, abs=0.01)   # with its note, not 0.06 beat late
+    assert ML.value_at(lanes['inst.lane.level'], true[2] - 8.5 + 0.1) == pytest.approx(6 * 60 / 127, abs=0.05)

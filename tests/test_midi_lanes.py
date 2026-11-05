@@ -301,3 +301,56 @@ def test_an_mpe_configuration_in_a_conductor_track_counts_for_the_notes_track(tm
     assert _lane(q, 'solo', 'bend') == [[0.0, 48.0], [pytest.approx(1 - 1 / 960), 48.0], [1.0, 0.0]]
     out = OPS['midi_read'](q, path, into={'#1': 'solo'}, mpe=False)        # one plain part: +-2, channels merged
     assert 'MPE' not in out and '(bend range +-2)' in out
+
+
+def test_poly_pressure_follows_the_newest_key_held_onto_the_channels_pressure_lane(tmp_path):
+    path = str(tmp_path / 'poly.mid')
+    poly = [(0, 60, 40), (1, 64, 100), (1.5, 64, 110), (2.5, 60, 20)]          # (beat, key, pressure)
+    MF.write(path, [{'name': 'keys', 'channel': 0, 'notes': [(0, 60, 4, 100), (1, 64, 1, 100)],
+                     'events': [(b, bytes([0xA0, k, v])) for b, k, v in poly]}], bpm=120)
+    q = str(tmp_path / 'q')
+    api.project_new(q, bpm=120, length_bars=2)
+    api.track_add(q, 'keys', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]})
+    out = OPS['midi_read'](q, path, into={'keys': 'keys'})
+    assert "not read: poly pressure (4 messages); poly pressure goes onto the lane that takes pressure" in out
+    out = OPS['midi_read'](q, path, into={'keys': 'keys'}, lanes={'level': {'midi': 'pressure', 'range': [0, 127]}})
+    assert "poly pressure: 4 per-key messages read as their channel's pressure (the newest key still held wins" in out
+    lane = _lane(q, 'keys', 'level')
+    for beat, want in ((0.5, 40), (1.25, 100), (1.75, 110), (2.25, 40), (3, 20)):   # E4 lets go at 2: C4's again
+        assert ML.value_at(lane, beat) == pytest.approx(want, abs=0.6), beat
+
+
+def test_midi_read_replace_clears_a_lanes_old_points_over_the_notes_it_replaced_and_keeps_the_one_after(tmp_path):
+    path = str(tmp_path / 'bend.mid')
+    MF.write(path, [{'name': 'keys', 'channel': 0, 'notes': [(0, 60, 4, 100)],
+                     'events': [(0, bytes([0xE0, 0, 96])), (1, bytes([0xE0, 0, 64]))]}], bpm=120)
+    q = str(tmp_path / 'q')
+    api.project_new(q, bpm=120, length_bars=4)
+    api.track_add(q, 'keys', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]})
+    api.automation_set(q, 'keys', 'inst.lane.bend', [[1.5, -1], [2, -2], [2.5, 0]])   # beats 2, 4 and 6
+    OPS['midi_read'](q, path, into={'keys': 'keys'})
+    bend = _lane(q, 'keys', 'bend')
+    assert [2.0, -1.0] not in bend and [2, -1] not in bend              # under the file's note: replaced
+    assert ML.value_at(bend, 3.0) == pytest.approx(0, abs=0.01)
+    assert ML.value_at(bend, 4.0) == -2 and ML.value_at(bend, 6.0) == 0   # from the note's end on: the song's
+
+
+def test_poly_pressure_on_a_channel_with_channel_pressure_is_left_to_it():
+    notes = [(0, 60, 2, 100, 0), (0, 62, 2, 100, 1)]
+    ctl = [(0, 0, 'poly:60', 50), (0.5, 0, 'pressure', 70), (0, 1, 'poly:62', 30), (1, 1, 'poly:62', 90)]
+    out, read, kept = ML.poly_to_channel(notes, ctl)
+    assert (read, kept) == (2, 1)
+    assert [c for c in out if c[1] == 1] == [(0, 1, 'pressure', 30), (1, 1, 'pressure', 90)]
+    assert (0, 0, 'poly:60', 50) in out and (0.5, 0, 'pressure', 70) in out
+
+
+def test_poly_pressure_a_key_with_none_of_its_own_is_at_rest_even_struck_again():
+    # the newest key sends no pressure: the lane is at 0 under it, not the older key's value
+    notes = [(0.0, 60, 4.0, 90, 0), (1.0, 64, 2.0, 90, 0)]
+    out = ML.poly_to_channel(notes, [(0.5, 0, 'poly:60', 100)])[0]
+    assert out == [(0.0, 0, 'pressure', 0), (0.5, 0, 'pressure', 100), (1.0, 0, 'pressure', 0),
+                   (3.0, 0, 'pressure', 100)]
+    # a key struck again starts from nothing, not from its last strike's pressure
+    notes = [(0.0, 60, 1.0, 90, 0), (2.0, 60, 1.0, 90, 0)]
+    out = ML.poly_to_channel(notes, [(0.5, 0, 'poly:60', 90)])[0]
+    assert out[-1] == (2.0, 0, 'pressure', 0)

@@ -99,10 +99,11 @@ def _read_vlq(b, i):
 
 def read(path):
     """{'ppq', 'format', 'tempos': [(beat, bpm)], 'meters': [(beat, num, den)], 'markers': [(beat, text)],
-    'tracks': [{'index', 'name', 'channels': set, 'programs': {ch: prog}, 'notes': [(beat, pitch, dur, vel, ch)],
-    'ctl': [(beat, ch, 'bend' | 'pressure' | 'cc:<n>' | 'poly:<pitch>', value)], 'bend_range': {ch: semitones, the
-    last set}, 'bend_ranges': {ch: [(beat, semitones)]}, 'mpe': member channels or None (an MPE configuration with 0
-    members turns MPE off), 'mpe_master': the configuring zone's master channel (0 lower, 15 upper) or None}]}.
+    'tracks': [{'index', 'name', 'channels': set, 'programs': {ch: the first prog}, 'program_changes': [(beat, ch,
+    prog)], 'notes': [(beat, pitch, dur, vel, ch)], 'ctl': [(beat, ch, 'bend' | 'pressure' | 'cc:<n>' |
+    'poly:<pitch>', value)], 'bend_range': {ch: semitones, the last set}, 'bend_ranges': {ch: [(beat, semitones)]},
+    'mpe': member channels or None (an MPE configuration with 0 members turns MPE off), 'mpe_master': the
+    configuring zone's master channel (0 lower, 15 upper) or None}]}.
     Beats are quarter notes from the start of the file. A note-on with no note-off is held to the track's end. Bend
     values are 0..16383 (8192 the centre), the rest 0..127; RPN and data entry messages are read into bend_range
     and bend_ranges (RPN 0) and mpe (RPN 6, the MPE configuration) and not listed in ctl."""
@@ -125,8 +126,8 @@ def read(path):
         j, end = i + 8, i + 8 + ln
         i = end
         tick, status, held = 0, 0, {}
-        tr = {'index': k, 'name': '', 'channels': set(), 'programs': {}, 'notes': [], 'ctl': [], 'bend_range': {},
-              'bend_ranges': {}, 'mpe': None, 'mpe_master': None}
+        tr = {'index': k, 'name': '', 'channels': set(), 'programs': {}, 'program_changes': [], 'notes': [], 'ctl': [],
+              'bend_range': {}, 'bend_ranges': {}, 'mpe': None, 'mpe_master': None}
         rp = {}                                              # channel -> [RPN msb, lsb] selected
         while j < end:
             dt, j = _read_vlq(b, j)
@@ -170,6 +171,7 @@ def read(path):
                     tr['notes'].append((t0 / div, d[0], max(tick - t0, 1) / div, v, ch))
             elif typ == 0xC0:
                 tr['programs'].setdefault(ch, d[0])
+                tr['program_changes'].append((tick / div, ch, d[0]))
             elif typ == 0xE0:
                 tr['ctl'].append((tick / div, ch, 'bend', (d[1] << 7) | d[0]))
             elif typ == 0xD0:

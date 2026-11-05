@@ -59,6 +59,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('arpeggiator on the keys I play live', 'live_arp'),
     ('arpeggiate the chords of a track at render', 'track_arp'),
     ("use my MIDI controller's knobs", 'live_map'),
+    ('a pad on my controller launches the next scene', 'live_map'),
     ('what does my knob send, which cc number', 'live_controls'),
     ('my MPE keyboard', 'live_midi'),
     ('the bend wheel and pressure on my keyboard', 'live_midi'),

@@ -34,6 +34,7 @@ on its beat's sample (_fx_due). Then the arp: with live_arp on too, the chain's 
 """
 import collections
 import json
+import math
 import os
 import re
 import threading
@@ -284,7 +285,8 @@ class MidiPlay:
         if what is None or (st & 0xF0) == 0x80 or ((st & 0xF0) == 0x90 and not d2):
             return
         k = (name, what, (st & 0x0F) + 1)
-        val = ((d2 << 7) | d1) - 8192 if (st & 0xF0) == 0xE0 else d1 if (st & 0xF0) == 0xD0 else d2
+        kind = st & 0xF0
+        val = ((d2 << 7) | d1) - 8192 if kind == 0xE0 else d1 if kind == 0xD0 else d1 + 1 if kind == 0xC0 else d2
         with self.heard_lock:
             h = self.heard.pop(k, [0, 0])
             self.heard[k] = [val, h[1] + 1]
@@ -515,7 +517,8 @@ class MidiPlay:
                 pass
             else:
                 self._hear(name, st, d1, d2)
-                return
+                if kind not in (0xA0, 0xB0, 0xD0, 0xE0):    # bend, pressure and controllers stay in the log, for
+                    return                                   # live_played(into=) to write as lanes
             self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
                                          'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}))
         return on
@@ -924,12 +927,13 @@ class MidiPlay:
                          f"lower notes sit well under it (about 30 under sounded right in one jam).")
         return '\n'.join(L) or "no notes played yet (only pedal or controls)"
 
-    def take(self, source=None, bars=8, fit=False, from_bar=None, placement='A'):
+    def take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None):
         """One input's keys, ready to write into a song's track (live_played(into=...)): {'source', 'notes': [[beat
         from the start of the take's bar 1, midi, dur, vel]], 'first_bar': the engine's bar that is the take's bar 1
-        (from_bar, else the first bar with a note), 'bpm', 'bpb', 'lines': what to say about it}. Without fit the
-        notes are as they sounded (off the grid where they were played, the pedal's holds, the velocities); with fit,
-        the snapped placement A (as played) or B (the groups from beat 1) that fit=True prints."""
+        (from_bar, else the first bar with a note), 'bpm', 'bpb', 'lanes': {lane: [[beat, value]]}, 'lines': what to
+        say about it}. Without fit the notes are as they sounded (off the grid where they were played, the pedal's
+        holds, the velocities); with fit, the snapped placement A (as played) or B (the groups from beat 1) that
+        fit=True prints. The played bend, pressure and controllers come as lanes (_take_lanes)."""
         span = _bars_span(bars)
         place = str(placement or 'A').strip().upper()
         if place not in ('A', 'B'):
@@ -963,8 +967,9 @@ class MidiPlay:
                 L.append("B is the same as A here (the groups already start on the beat): wrote A")
                 pick = placings[0]
             L.append(f"wrote {pick[0]} ({pick[1]})")
-            out = pick[2]
+            out, warp = pick[2], pick[3]
         else:
+            warp = None
             L.append("as it sounded: each note where it was played (off the grid by the player's own timing), its "
                      "velocity and length, note-offs held while the pedal was down. fit=True writes it snapped to "
                      "16ths instead")
@@ -980,9 +985,77 @@ class MidiPlay:
         if len(vels) == 1 and len(keep) >= 4:
             L.append(f"velocity: every key came at v={vels.pop()} (this keyboard sends one velocity); written as "
                      f"played. An accent shape (downbeats loudest, offbeat 8ths softest) is a later edit")
+        lane_pts = {}
+        if lanes is not False:
+            end = max(st + du for st, _, du, _ in out)
+            lane_pts, lane_lines = self._take_lanes(os.path.join(d, fn), fn[:-6], lanes, mpe, warp, origin, end)
+            L += lane_lines
         return {'source': fn[:-6], 'first_bar': int(origin // bpb) + 1, 'bpm': float(self.e.bpm), 'bpb': bpb,
                 'notes': [[round(st - origin, 6), int(m), round(du, 6), int(v)] for st, m, du, v in sorted(out)],
-                'lines': L}
+                'lanes': lane_pts, 'lines': L}
+
+    def _take_lanes(self, path, name, lanes, mpe, warp, origin, end):
+        """The played bend, pressure and controllers in one input's log as lanes over the take [origin, end] (beats on
+        the engine's clock): ({lane: [[beat from origin, value]]}, lines). Messages count up to the take's last bar
+        line (the first after `end`), so a wheel let go after the last note-off springs back in the song too; a bend
+        or pressure still off rest there goes back to rest on that bar line. The map is live_midi's, the patch's own
+        while the input is patched (lanes= and mpe= override it), any lane name allowed (the song's voice plays
+        what the keys' rendered notes could not). Poly pressure goes onto the channel's pressure by the newest key
+        held; with MPE each note's own channel is read by last-note priority (the master channel is left out), as
+        midi_read reads a file."""
+        p = next((q for q in self.patches.values() if _slug(q['source']) == name), None)
+        mpe = bool(p and p['mpe']) if mpe is None else bool(mpe)
+        lmap = ML.resolve(lanes if lanes is not None else (p or {}).get('lanes'), ML.LIVE_MPE if mpe else ML.LIVE)
+        ctl, notes, down = [], [], {}
+        for r in (json.loads(x) for x in open(path, encoding='utf8') if x.strip()):
+            kind, ch, b = r['st'] & 0xF0, r['st'] & 0x0F, r['beat']
+            if kind == 0x90 and r['d2']:
+                down[(ch, r['d1'])] = b
+            elif kind in (0x80, 0x90) and (ch, r['d1']) in down:
+                b0 = down.pop((ch, r['d1']))
+                notes.append((b0, r['d1'], b - b0, 100, ch))
+            elif kind == 0xE0:
+                ctl.append((b, ch, 'bend', (r['d2'] << 7) | r['d1']))
+            elif kind == 0xD0:
+                ctl.append((b, ch, 'pressure', r['d1']))
+            elif kind == 0xA0:
+                ctl.append((b, ch, f"poly:{r['d1']}", r['d2']))
+            elif kind == 0xB0 and r['d1'] not in (64, 120, 121, 123):
+                ctl.append((b, ch, f"cc:{r['d1']}", r['d2']))
+        notes += [(b0, m, max(end - b0, 0.0), 100, ch) for (ch, m), b0 in down.items()]
+        if not ctl:
+            return {}, []
+        ctl, n_poly, _ = ML.poly_to_channel(notes, ctl)
+        warp = warp or (lambda t: t)
+        stop = math.ceil(end / self.e.bpb - 1e-9) * self.e.bpb      # the take's last bar line
+        out, L = {}, []
+        for lane, (kind, num, lo, hi) in lmap.items():
+            what = ML.midi_name(kind, num)
+            evs = (ML.mpe_merge(notes, ctl, what)[0] if mpe else [(b, raw) for b, _, w, raw in ctl if w == what])
+            inside = [(warp(b) - origin, ML.from_raw(kind, lo, hi, raw)) for b, raw in evs
+                      if origin + 1e-9 < warp(b) <= stop + 1e-9]
+            if not inside:                                   # nothing sent during the take: the lane is left alone
+                continue
+            before = [raw for b, raw in evs if warp(b) <= origin + 1e-9]
+            if not before and kind != 'cc':                  # bend and pressure at rest until the first message
+                before = [8192 if kind == 'bend' else 0]
+            vals = sorted(([(0.0, ML.from_raw(kind, lo, hi, before[-1]))] if before else []) + inside)
+            rest = None if kind == 'cc' else ML.from_raw(kind, lo, hi, 8192 if kind == 'bend' else 0)
+            last = stop - origin
+            if rest is not None and abs(vals[-1][1] - rest) > 1e-9:  # off rest at the end: back to rest there
+                if vals[-1][0] < last - 1 / 960:
+                    vals.append((last - 1 / 960, vals[-1][1]))
+                vals.append((last, rest))
+            elif vals[-1][0] < last:                         # held to the take's end, not ramped to what follows
+                vals.append((last, vals[-1][1]))
+            out[lane] = ML.value_points(vals, ML.tol(kind, lo, hi))
+            L.append(f"lane {lane}: {len(out[lane])} points from {len(inside)} {what} messages"
+                     + (f" (bend range +-{hi:g})" if kind == 'bend' else f" ({lo:g}..{hi:g})")
+                     + (", per note (MPE, the newest note still sounding)" if mpe else ''))
+        if n_poly and any(k == 'pressure' for k, _, _, _ in lmap.values()):
+            L.append(f"poly pressure: {n_poly} per-key messages read as the channel's pressure (the newest key still "
+                     f"held wins: a song's lanes are per track, not per note)")
+        return out, L
 
     def _clock_line(self, lag, old):
         """Which clock the times are on, in plain words, and the correction the log applied."""
@@ -1005,7 +1078,7 @@ class MidiPlay:
     def _fit(self, notes):
         """The fit behind fitted() and take(): the text when there are under 3 hits, else (lines: the fit, the rhythm
         and the placement advice, placings: [(label, why, snapped notes (start, midi, dur, vel) on the engine's
-        clock)], A as played first, then B when it differs)."""
+        clock, the map of a played beat onto that clock)], A as played first, then B when it differs)."""
         from ..notation import fmt_num
         bpb, ms = self.e.bpb, self.e.spb * 1000
         notes = sorted(notes)
@@ -1054,7 +1127,8 @@ class MidiPlay:
                     _, m, du, v = notes[i]
                     end = round(grid(notes[i][0] + du)) * STEP + mv
                     out.append((st, m, max(STEP, end - st), v))
-            out_all.append((label, why, sorted(out)))
+            # the same move the notes snapped by, unrounded: a lane's message lands where it was against its notes
+            out_all.append((label, why, sorted(out), lambda t, mv=mv: grid(t) * STEP + mv))
         return L, out_all
 
     def fitted(self, notes, from_bar=None):
@@ -1067,7 +1141,7 @@ class MidiPlay:
             return f
         L, placings = f
         bpb = self.e.bpb
-        for label, why, out in placings:
+        for label, why, out, _ in placings:
             origin = (int(from_bar) - 1) * bpb if from_bar is not None else (min(o[0] for o in out) // bpb) * bpb
             early = [o for o in out if o[0] < origin - 1e-9]
             out = [o for o in out if o[0] >= origin - 1e-9]

@@ -244,13 +244,16 @@ def voice_lanes(inst, root=None):
     return set()
 
 
-def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False):
+def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False, rest=None):
     """MPE: each note's own channel stream of one message ('bend', 'pressure', 'cc:<n>') joined into one lane by
     last-note priority. notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)]. At any time the lane
     belongs to the newest-started note still sounding; when that note ends it goes back to the newest older note
     still held, and while nothing sounds the last owner keeps it. In each owner's stretch the lane takes that
-    note's channel's value. master: the zone's master channel (0 lower, 15 upper). Returns (events [(beat, raw)],
-    or [(beat, raw, channel)] with with_ch, notes overlapped by a newer one, master-channel messages left out)."""
+    note's channel's value. master: the zone's master channel (0 lower, 15 upper). rest: a value each owner's
+    stretch starts at unless that note's channel sent one since the note began (poly pressure: a key that sends
+    none has none, and a key struck again starts from nothing); None keeps the channel's last value. Returns
+    (events [(beat, raw)], or [(beat, raw, channel)] with with_ch, notes overlapped by a newer one, master-channel
+    messages left out)."""
     by_ch = {}
     skipped = 0
     for b, ch, w, raw in ctl:
@@ -263,23 +266,25 @@ def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False):
     ns = sorted(n for n in notes if n[4] != master)
     overlapped = sum(1 for i, n in enumerate(ns) if any(m[0] < n[0] + n[2] - 1e-9 for m in ns[i + 1:]))
     cuts = sorted({n[0] for n in ns} | {n[0] + n[2] for n in ns})
-    stretches, owner = [], None                        # [(from, to, channel)]
+    stretches, owner = [], None                        # [(from, to, channel, the owner note's start)]
     for a, z in zip(cuts, cuts[1:] + [math.inf]):
         sounding = [n for n in ns if n[0] <= a + 1e-9 and a < n[0] + n[2] - 1e-9]
         if sounding:
-            owner = max(sounding, key=lambda n: n[0])[4]
+            owner = max(sounding, key=lambda n: n[0])
         if owner is None:
             continue
-        if stretches and stretches[-1][2] == owner:
-            stretches[-1] = (stretches[-1][0], z, owner)
+        if stretches and stretches[-1][2] == owner[4] and (rest is None or stretches[-1][3] == owner[0]):
+            stretches[-1] = (stretches[-1][0], z, owner[4], stretches[-1][3])
         else:
-            stretches.append((a, z, owner))
+            stretches.append((a, z, owner[4], owner[0]))
     out = []
-    for a, z, ch in stretches:
+    for a, z, ch, n0 in stretches:
         evs = by_ch.get(ch, [])
-        before = [r for b, r in evs if b <= a + 1e-9]
+        before = [r for b, r in evs if b <= a + 1e-9 and (rest is None or b >= n0 - 1e-9)]
         if before:
             out.append((a, before[-1], ch))
+        elif rest is not None:
+            out.append((a, rest, ch))
         out += [(b, r, ch) for b, r in evs if a + 1e-9 < b < z - 1e-9]
     out.sort(key=lambda e: e[0])
     dedup = []
@@ -288,3 +293,41 @@ def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False):
             continue
         dedup.append((b, r, ch))
     return (dedup if with_ch else [(b, r) for b, r, _ in dedup]), overlapped, skipped
+
+
+def poly_to_channel(notes, ctl):
+    """Polyphonic aftertouch (one key's own pressure) onto its channel's pressure, since ismail's lanes are per track,
+    not per note: on each channel that sends poly pressure and no channel pressure, the channel's pressure follows
+    the newest key still sounding (last-note priority, as an MPE part is read; when it lets go, the newest older key
+    held). A key that has sent no pressure since its own note-on is at 0 while it holds the lane. notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)] with 'poly:<pitch>' messages. Returns
+    (ctl with those channels' poly pressure as 'pressure', poly messages read that way, poly messages left as they
+    were because their channel sends channel pressure too)."""
+    poly = {}
+    for b, ch, w, raw in ctl:
+        if w.startswith('poly:'):
+            poly.setdefault(ch, []).append((b, int(w[5:]), 'pressure', raw))
+    chans = {ch for _, ch, w, _ in ctl if w == 'pressure'}
+    out = [c for c in ctl if not (c[2].startswith('poly:') and c[1] in poly and c[1] not in chans)]
+    read = kept = 0
+    for ch, msgs in poly.items():
+        if ch in chans:
+            kept += len(msgs)
+            continue
+        keys = [(n[0], n[1], n[2], n[3], n[1]) for n in notes if n[4] == ch]    # each key as its own "channel"
+        evs, _, _ = mpe_merge(keys, msgs, 'pressure', master=-1, rest=0)     # a key with no pressure has none
+        out += [(b, ch, 'pressure', raw) for b, raw in evs]
+        read += len(msgs)
+    out.sort(key=lambda c: c[0])
+    return out, read, kept
+
+
+def splice(old, new, a, z):
+    """A lane's points [[beat, value]] with `new` written over the beats [a, z): the old points there go, an old
+    point on z itself stays (the song's own value from there on) and a new point on that beat gives way to it.
+    When the song has a point from z on, the new last value is held to z rather than ramped toward it."""
+    keep = [q for q in old if not a - 1e-9 <= q[0] < z - 1e-9]
+    at = {round(q[0], 6) for q in keep}
+    new = [q for q in new if round(q[0], 6) not in at]
+    if new and any(q[0] >= z - 1e-9 for q in keep) and new[-1][0] < z - 2 / 960:
+        new = new + [[round(z - 1 / 960, 6), new[-1][1]]]
+    return sorted(keep + new)

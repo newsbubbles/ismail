@@ -24,7 +24,7 @@ def _is_kit(tr):
 
 @op()
 def midi_write(project: str, out: str = None, tracks: list = None, bars: list = None, markers: dict = None,
-               lanes: dict = None, mpe=None) -> str:
+               lanes: dict = None, mpe=None, programs: dict = None) -> str:
     """Write the song's notes to a Standard MIDI File (type 1) that Ableton, FL Studio, Logic, Reaper, MuseScore
     and any hardware sequencer open: one MIDI track per ismail track that has notes (named after it), the tempo,
     the meter, and markers. tracks: names to include (default every track with notes, muted ones too). bars:
@@ -41,9 +41,15 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     {lane: None} to leave one out; e.g. {'bend': {'range': 12}, 'mute': {'midi': 'cc:20', 'range': [0, 1]}}. The
     reply names lanes with no message and values clamped to a range. mpe: True (every melodic track) or a list of
     track names written as MPE: channel 1 the master, each note on its own member channel 2 to 16 with the track's
-    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth. Reach for it when
-    the person wants to export or write the song or a part as MIDI for their DAW, a hardware sequencer or an MPE
-    synth, its lanes as pitch bend and controllers."""
+    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth. No poly pressure goes
+    out: a song's lanes are per track, with no per-note pressure to carry (mpe= gives each note its own channel
+    pressure instead).
+    programs: a GM program change per track, 1 to 128 as a GM list numbers them (1 piano, 33 acoustic bass, 81
+    square lead), so a GM synth or a DAW's GM player picks the sound: {'bass': 33}, or a program per bar where the
+    sound changes, {'lead': {1: 81, 17: 82}}. With bars=, the program in force at the first bar goes at the file's
+    start. A track has no program of its own in ismail (its sound is its instrument), so a track left out has none.
+    Reach for it when the person wants to export or write the song or a part as MIDI for their DAW, a hardware
+    sequencer or an MPE synth, its lanes as pitch bend and controllers, its program changes."""
     P = _load(project)
     P.d = expand_project(P.d)                    # a track's arp goes out as its steps
     names = tracks or [n for n, t in P.d['tracks'].items() if t.get('notes')]
@@ -59,6 +65,7 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
         raise OpError(str(e))
     if mpe not in (None, False, True) and not (isinstance(mpe, (list, tuple)) and all(m in names for m in mpe)):
         raise OpError(f"mpe: True (every melodic track) or a list of the tracks written: {names}")
+    progs = _programs(programs, names)
     bpb, bpm = P.bpb, P.d['bpm']
     a, b = bars or [1, P.d['length_bars']]
     b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
@@ -81,6 +88,14 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
             chans[n] = ch
         part = {'name': n, 'channel': ch, 'notes': notes}
         lane_txt = _write_lanes(part, tr, lmaps[as_mpe], as_mpe, b0, b1, shift)
+        rows = progs.get(n) or []
+        pg = _program_events(rows, ch, P, a, b, shift, sel, notes)
+        part['events'] = pg + part['events']             # first at their tick: the sound before the notes
+        shown = [(a, p) for bar, p in rows if bar <= a][-1:] + [(bar, p) for bar, p in rows if a < bar <= b]
+        out_of = [(bar, p) for bar, p in rows if bar > b]
+        lane_txt = ((["    program " + ', '.join(f"{p} at bar {bar}" for bar, p in shown)] if pg else [])
+                    + ([f"    left out: program " + ', '.join(f"{p} at bar {bar}" for bar, p in out_of)
+                        + f", past the bars written ({a}-{b})"] if out_of else []) + lane_txt)
         parts.append(part)
         what = ''
         if _is_kit(tr):
@@ -111,6 +126,52 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
         tail.append(f"WARNING {len(chans)} melodic tracks share 15 channels: some share a channel, which is fine "
                     f"in a DAW (each MIDI track keeps its own notes) but not on one hardware synth")
     return '\n'.join([head] + lines + tail)
+
+
+def _programs(programs, names):
+    """midi_write's programs= -> {track: [(bar, program 1-128)]}, checked."""
+    if programs is None:
+        return {}
+    if not isinstance(programs, dict):
+        raise OpError("programs: {track: program 1-128} or {track: {bar: program}}, e.g. {'bass': 33, 'lead': {1: 81, "
+                      "17: 82}}")
+    out = {}
+    for n, v in programs.items():
+        if n not in names:
+            raise OpError(f"programs: {n!r} is not one of the tracks written: {names}")
+        try:
+            rows = sorted((_whole(b), _whole(p)) for b, p in (v.items() if isinstance(v, dict) else [(1, v)]))
+            assert rows and all(b >= 1 and 1 <= p <= 128 for b, p in rows)
+        except (TypeError, ValueError, AssertionError):
+            raise OpError(f"programs[{n!r}]: a program 1 to 128 (as a GM list numbers them; the file holds 0 to 127), "
+                          f"or {{bar: program}} from bar 1, e.g. {{1: 81, 17: 82}}; bars and programs are whole "
+                          f"numbers (a change goes on a bar line)")
+        out[n] = rows
+    return out
+
+
+def _whole(x):
+    """A whole number from an int, a float like 17.0 or a string like '17' (a JSON key); else ValueError."""
+    f = float(x)
+    if f != int(f):
+        raise ValueError(x)
+    return int(f)
+
+
+def _program_events(rows, ch, P, a, b, shift, sel=(), notes=()):
+    """A track's program changes in the bars written [a, b], as part events: the one in force at bar a at the
+    file's start, then each change inside the bars at its bar line, or at its bar's earliest note when a nudge
+    (offset_ms) places that note before the line. sel: the stored notes, notes: where each one was placed."""
+    if not rows:
+        return []
+    first = [p for bar, p in rows if bar <= a]
+    ev = [(0.0, bytes([0xC0 | ch, first[-1] - 1]))] if first else []
+    for bar, p in rows:
+        if a < bar <= b:
+            b0, b1 = P.bar_to_beat(bar), P.bar_to_beat(bar + 1)
+            t = min([b0 - shift] + [n[0] for x, n in zip(sel, notes) if b0 <= x[0] < b1])
+            ev.append((max(0.0, t), bytes([0xC0 | ch, p - 1])))
+    return ev
 
 
 def _lane_desc(lane, kind, num, lo, hi):
@@ -237,9 +298,11 @@ def _ctl_counts(ctl):
     return out
 
 
-def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None):
+def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None, span=None):
     """The lanes a part's controller messages carry, written into tr's automation (inst.lane.<name>, beats from
-    base): (lines for the reply, warnings). A bend is read at the range in force on its channel at its time."""
+    base): (lines for the reply, warnings). A bend is read at the range in force on its channel at its time. span:
+    the beats [a, z) the notes replaced (mode='replace'): a lane's old points there go too, and on to its last new
+    point; an old point on the end itself stays."""
     mpe = _is_mpe(zone, asked)
     master = zone if zone is not None else ML.MPE_MASTER
     try:
@@ -249,6 +312,8 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
     chs = {n[4] for n in notes}
     if not mpe and chs:
         ctl = [c for c in ctl if c[1] in chs]
+    counts = _ctl_counts(ctl)
+    ctl, n_poly, n_kept = ML.poly_to_channel(notes, ctl)     # per-key pressure: onto the channel's (lanes per track)
     given = {str(k)[10:] if str(k).startswith('inst.lane.') else str(k): v for k, v in (lanes or {}).items()}
     L, W, wrote = [], [], []
     for lane, (kind, num, lo, hi) in lmap.items():
@@ -281,21 +346,32 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
         pts = [[round(base + b, 6), v] for b, v in ML.value_points(vals, ML.tol(kind, lo, hi))]
         key = 'inst.lane.' + lane
         auto = tr.setdefault('automation', {})
-        a, z = pts[0][0], pts[-1][0]
-        auto[key] = sorted([p for p in auto.get(key, []) if not a <= p[0] <= z] + pts)
+        if span:
+            auto[key] = ML.splice(auto.get(key, []), pts, min(span[0], pts[0][0]), max(span[1], pts[-1][0]))
+        else:
+            a, z = pts[0][0], pts[-1][0]
+            auto[key] = sorted([p for p in auto.get(key, []) if not a <= p[0] <= z] + pts)
         wrote.append(lane)
         L.append(f"    lane {lane}: {len(pts)} points from {len(evs)} {what} messages"
                  + ((f" (bend range +-{'/'.join(fmt_num(r) for r in sorted(used_r))})" if not fixed else
                      f" (bend range +-{fmt_num(hi)})") if kind == 'bend' else f" ({fmt_num(lo)}..{fmt_num(hi)})")
                  + (", per note (MPE)" if mpe else ''))
     used = {ML.midi_name(k, n) for k, n, _, _ in lmap.values()}
-    left = {w: c for w, c in _ctl_counts(ctl).items() if w not in used}
+    if n_poly and 'pressure' in used:
+        L.append(f"    poly pressure: {n_poly} per-key messages read as their channel's pressure (the newest key still "
+                 f"held wins: ismail's lanes are per track, not per note)")
+        counts['poly pressure'] = n_kept
+    left = {w: c for w, c in counts.items() if w not in used and c}
     if left:
         other = sorted(w for w in left if w != 'poly pressure')
+        pl = next((x for x, (k, _, _, _) in lmap.items() if k == 'pressure'), None)
         L.append("    not read: "
                  + ', '.join(f"{w} ({c} message{'s' if c != 1 else ''})" for w, c in sorted(left.items()))
                  + (f"; lanes={{'<lane>': {{'midi': '{other[0]}', 'range': [lo, hi]}}}} reads one" if other else '')
-                 + ("; poly pressure (per key) is not read yet" if 'poly pressure' in left else ''))
+                 + (("; poly pressure goes onto the lane that takes pressure, by the newest key held: lanes={'level': "
+                     "{'midi': 'pressure', 'range': [-40, 0]}} reads it" if pl is None else
+                     "; poly pressure on a channel that sends channel pressure too is left out (the "
+                     f"{pl} lane reads that channel's own)") if 'poly pressure' in left else ''))
     have = ML.voice_lanes(tr.get('instrument'), P.root)
     miss = [x for x in wrote if x not in have]
     if miss:
@@ -324,9 +400,12 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     configures MPE with RPN 6 in any track, lower or upper zone, or mpe=True; mpe=False reads it as one plain part,
     every channel's messages into one lane) is read per note: bend at +-48
     unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
-    ismail's lanes are per track. Lanes replace the target's points over the span they cover; quantize moves notes
-    only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
-    import into a song, its pitch bend, mod wheel, other controllers and MPE included."""
+    ismail's lanes are per track. Poly pressure (one key's own) is read the same way, as its channel's pressure
+    following the newest key still held, onto the lane that takes pressure (lanes={'level': {'midi': 'pressure',
+    'range': [-40, 0]}} on a plain part; a channel that sends channel pressure too keeps its own); the reply says
+    so. Lanes replace the target's points over the span they cover; quantize moves notes only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
+    import into a song, its pitch bend, mod wheel, other controllers and MPE included. The listing names each
+    track's GM program (1 to 128); into= writes notes and lanes, not programs (a track's sound is its instrument)."""
     path = os.path.abspath(file)
     if not os.path.exists(path):
         raise OpError(f"no file {path}")
@@ -361,9 +440,15 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
                 continue
             chs = sorted({n[4] + 1 for n in ns})
             lo, hi = min(n[1] for n in ns), max(n[1] for n in ns)
+            pg, last = [], {}
+            for beat, ch, p in t['program_changes']:         # each change with its bar, the first without
+                if last.get(ch) != p:
+                    pg.append(f"{p + 1}" + (f" at bar {fbar(beat)}" if pg else ''))
+                    last[ch] = p
             L.append(f"  #{t['index']} {t['name'] or '(no name)'}: {len(ns)} notes, channel {'/'.join(map(str, chs))}"
                      f"{' (drums)' if chs == [10] else ''}, {midi_to_name(lo)}-{midi_to_name(hi)}, bars "
-                     f"{fbar(ns[0][0])}-{fbar(max(n[0] for n in ns))}" + ctl_txt)
+                     f"{fbar(ns[0][0])}-{fbar(max(n[0] for n in ns))}"
+                     + (f", GM program {', '.join(pg)}" if pg else '') + ctl_txt)
         L.append("write parts with into={'<name>' or '#<index>' or 'ch<n>': '<ismail track>'}, bar=..., quantize=...; "
                  "their bend and controllers become lanes (lanes=... maps them)")
         return '\n'.join(L)
@@ -381,12 +466,13 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
                 s = round(s / quantize) * quantize
                 d = max(quantize, round(d / quantize) * quantize)
             rows.append([round(base + s, 6), p, round(d, 6), int(v)])
-        if mode == 'replace':
-            _clear(tr, min(r[0] for r in rows), max(r[0] + r[2] for r in rows))
+        span = (min(r[0] for r in rows), max(r[0] + r[2] for r in rows)) if mode == 'replace' else None
+        if span:
+            _clear(tr, *span)
         tr['notes'] = sorted(tr['notes'] + rows)
         out.append(f"  {spec} -> {target}: {len(rows)} notes, bars {bar + int(min(r[0] for r in rows) - base) // bpb}"
                    f"-{bar + int(max(r[0] for r in rows) - base) // bpb}")
-        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, mpe)
+        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, mpe, span)
         out += lt
         warn += lw
         if _is_kit(tr):

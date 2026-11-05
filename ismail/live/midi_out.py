@@ -11,7 +11,9 @@ The engine's scheduler pass (every 20 ms) plans the messages that fall within LO
 (ismail.midisend.Scheduler), which puts each on its port at its time from its own thread.
 
 A routed track sends every note its clips play from the route's start, transposed with its deck (kits never are),
-the way its audio plays them: a clip cut by the next keeps the notes it started. audio=False keeps its notes off
+the way its audio plays them: a clip cut by the next keeps the notes it started. A program change (program=, 1 to
+128 as GM numbers them) goes out on the route's channel at its beat, just before that beat's notes, so the synth
+has the sound by then. audio=False keeps its notes off
 the speakers (and off the render workers): the synth is its sound. Note-offs on unroute, a removed track, a stop
 and the set's end: each held note's own note-off, then All Notes Off (CC 123) on its channel; closing a port resets
 it too.
@@ -42,6 +44,7 @@ JUMP_S = 0.5                # an anchor this much later than the last (the devic
 DRUM_CH = 9                 # channel 10: drums, as every GM synth and DAW expects
 MIN_DUR = 1 / 64            # beats: a shorter note still gets a gap between its note-on and note-off
 OFFSET_MS = (-500.0, 2000.0)
+PROGRAM_LEAD_S = 0.001      # a program change leaves this long before the notes of its beat
 
 
 def _is_drum(inst):
@@ -137,10 +140,18 @@ class MidiOut:
             self.sched.start()
 
     # ------------------------------------------------------------------ routes: a track's notes to a port
-    def route(self, track=None, port=None, channel=None, audio=None, offset_ms=None, at='now', remove=False):
+    def route(self, track=None, port=None, channel=None, audio=None, offset_ms=None, at='now', remove=False,
+              program=None):
         e = self.e
         if track is None:
             return self.describe()
+        if program is not None:
+            try:
+                program = int(program)
+                assert 1 <= program <= 128 and not remove
+            except (TypeError, ValueError, AssertionError):
+                raise ValueError("program: 1 to 128, as a GM list or the synth's screen numbers them (1 is the first "
+                                 "sound; ismail sends 0 to 127), on a route that stays (not with remove=True)")
         with e.lock, self.lock:
             r = self.routes.get(track)
             if remove:
@@ -159,12 +170,15 @@ class MidiOut:
             name = self.find(port) if port is not None else r['port']
             if channel is not None and not 1 <= int(channel) <= 16:
                 raise ValueError("channel: 1 to 16 (10 is drums)")
-            msg = []
+            msg, booked = [], None
             if r is not None and name != r['port']:
                 audio = r['audio'] if audio is None else audio
+                if program is None and r.get('program'):        # the new port's synth gets the same sound
+                    booked = r['program']                       # (one booked for later stays at its bar)
                 self._unroute(track)
                 r = None
             p = self._port(name, offset_ms)
+            fresh = r is None
             if r is None:
                 ch = int(channel) - 1 if channel is not None else self._free_channel(name, e.tracks[track]['inst'])
                 start, note = e.tl.resolve_at(at, e.beat(e.pos), e.beat(e.pos))
@@ -173,14 +187,27 @@ class MidiOut:
                 p['users'].add(('track', track))
                 msg.append(f"{track} -> {name!r} channel {ch + 1}" + (" (drums)" if ch == DRUM_CH else '')
                            + f" from {fmt_bar(start, e.bpb)}" + (f" ({note})" if note else ''))
+                if booked and booked[0] > start + EPS:
+                    r['program'] = [booked[0], booked[1], False]
+                elif booked:
+                    program = booked[1]
             elif channel is not None and int(channel) - 1 != r['ch']:
                 p['notes'].release(owner=track, all_off=False)
                 r['ch'] = int(channel) - 1
                 msg.append(f"{track}: now on channel {r['ch'] + 1}")
+                pg = r.get('program')
+                if program is None and pg and pg[2]:            # the new channel gets the sound too, now
+                    r['program'] = [max(e.beat(e.pos), r['from']), pg[1], False]
+                    msg.append(f"{track}: program {pg[1]} sent again on channel {r['ch'] + 1}")
             if audio is not None and bool(audio) != r['audio']:
                 r['audio'] = bool(audio)
                 self._audio(track, r)
                 msg.append(f"{track}: audio {'on' if r['audio'] else 'off (the synth is its sound)'}")
+            if program is not None:          # a new route: from its start; a route that was there: at `at`
+                beat = r['from'] if fresh else e.tl.resolve_at(at, e.beat(e.pos), e.beat(e.pos))[0]
+                r['program'] = [beat, program, False]
+                msg.append(f"{track}: program {program} on channel {r['ch'] + 1} at {fmt_bar(beat, e.bpb)}, before "
+                           f"its notes there")
             self._start()
             return '\n'.join(msg + [self.line(track, r)])
 
@@ -293,6 +320,13 @@ class MidiOut:
                     continue
                 if not r['audio'] and not e.tracks[track].get('midi_only'):      # a deck reloaded the track
                     self._audio(track, r)
+                pg = r.get('program')
+                if pg and not pg[2] and pg[0] < hi + EPS:
+                    pg[2] = True
+                    p = self.ports[r['port']]
+                    self.sched.at(self.wall(pg[0], p['offset'], a) - PROGRAM_LEAD_S,
+                                  lambda o=p['out'], m=bytes([0xC0 | r['ch'], pg[1] - 1]): o.send(m),
+                                  tag=('track', track))
                 if hi > r['planned']:
                     self._plan_notes(track, r, r['planned'], hi, a)
                     r['planned'] = hi
@@ -421,7 +455,10 @@ class MidiOut:
     def line(self, track, r):
         p = self.ports.get(r['port'])
         off = p['offset'] * 1000 if p else 0.0
-        return (f"midi out {track} -> {r['port']!r} ch {r['ch'] + 1} | {r['sent']} notes sent | audio "
+        pg = r.get('program')
+        return (f"midi out {track} -> {r['port']!r} ch {r['ch'] + 1}"
+                + ((f" | program {pg[1]}" + ('' if pg[2] else f" at {fmt_bar(pg[0], self.e.bpb)}")) if pg else '')
+                + f" | {r['sent']} notes sent | audio "
                 + ("on" if r['audio'] else "OFF") + (f" | offset {off:+.0f} ms" if off else '') + self._late())
 
     def clock_line(self):

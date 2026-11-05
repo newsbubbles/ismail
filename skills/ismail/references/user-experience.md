@@ -85,6 +85,10 @@ Tell them at the right moment, once, without being asked:
   carries and the values clamped to a range.
 - **MPE:** `mpe=True` (every melodic track) or `mpe=['lead']`: channel 1 the master, each note on its own channel
   2 to 16, bend +-48, `level` as per-note pressure. Tell them to set their synth's MPE bend range to 48.
+- **GM programs:** `programs={'bass': 33}` puts a program change on a track's channel (1 to 128 as a GM list
+  numbers them), so a GM synth or a DAW's GM player starts on that sound; `{'lead': {1: 81, 17: 82}}` changes it on
+  bar 17. ismail's tracks have no program of their own (a sound is an instrument), so it is only there when you
+  give it. `midi_read`'s listing names a file's programs; `into=` does not keep them.
 - **In:** `midi_read(project, file)` without `into` only lists the file (tempo, meter, markers, each track with its
   channel, notes, range, bars and expression messages). Ask which parts they want, `track_add` each target with
   the sound to keep, then `midi_read(project, file, into={'#1': 'lead', 'ch10': 'drums'})` (a file track by name,
@@ -92,7 +96,10 @@ Tell them at the right moment, once, without being asked:
   clears the span first, `'add'` merges; `quantize=0.25` snaps starts to 16ths (default: as played). Positions are
   read in beats, so a file at another tempo keeps its bars at the song's tempo. Its pitch bend, cc:1, cc:11 and
   cc:2 become the target's lanes by the same map (`lanes=` changes it); an MPE file (RPN 6, or `mpe=True`) is read
-  per note.
+  per note. Poly pressure (one key's own) is read as its channel's pressure, the newest key still held winning,
+  onto the lane that takes pressure: on a plain part none does by default, so the reply says to add
+  `lanes={'level': {'midi': 'pressure', 'range': [-40, 0]}}`. A channel that sends channel pressure too keeps its
+  own, and its poly pressure is listed as not read.
 - **Example, out.** The person says "can I have the flute line with its bends in my DAW? I play it on an MPE
   synth." `midi_write(project, tracks=['lead'], mpe=True)`. The reply:
   `wrote <project>/exports/<name>.mid: 2 notes on 1 tracks, 128 BPM, 4/4, bars 1-8`, then
@@ -106,8 +113,8 @@ Tell them at the right moment, once, without being asked:
   `#1 -> lead: 2 notes, bars 1-1` and `lane bend: 86 points from 171 bend messages (bend range +-48), per note
   (MPE)`. Tell them what landed where, then render and say before it plays.
 - Not yet: per-note lanes inside ismail (an MPE file's chord shares one lane per track, the newest note still
-  sounding wins, and the reply counts the overlaps), poly pressure read from a file, MPE's upper zone, and track
-  volume or pan automation written as MIDI.
+  sounding wins, and the reply counts the overlaps; poly pressure the same way), poly pressure written to a file
+  (no per-note pressure in a song), MPE's upper zone, and track volume or pan automation written as MIDI.
 
 ## The lexicon: their words, our terms
 
