@@ -241,7 +241,9 @@ Find any tool by what you need or by role with `ops_find`.
   absolute, pickup, relative encoders, toggles, one control on several params), every move logged as automation.
   An arpeggiator steps the keys a person holds on the set's beat (`live_arp`: patterns, scale degrees, exact step
   lists switching on bar lines, per-step velocity, gate, accent, slide, octave, cutoff and pan), and the same core
-  arps a track's chords at render (`track_arp`, `write=True` for plain notes).
+  arps a track's chords at render (`track_arp`, `write=True` for plain notes). MIDI effects (chord, scale,
+  pitch, velocity, note length, random) run as one chain on played keys (`live_midi_fx`) or a track's notes at
+  render (`track_midi_fx`), before the arp.
 - **What a deck costs.** `deck_cost(song, bars=, bpm=)` renders the deck's first bar offline the way the live engine
   does and times it, without starting or touching an engine: each track's render seconds and real-time factor, the
   wait for the first bar with the engine's render workers, and the mixer's load per block. It says which deck

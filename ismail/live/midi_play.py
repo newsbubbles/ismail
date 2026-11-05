@@ -27,6 +27,10 @@ maps them (live_midi(lanes=...)). A key's note was rendered ahead, so a lane mov
 bend, and vib as a sine on the pitch) and as gain (level); lanes that change the sound itself need a new render and
 are not taken live. The channel's values apply to the notes on that channel; with mpe=True channel 1 is the master
 (its values add to every note) and each note's own channel (2-16) is its own bend and pressure.
+
+MIDI effects (MIDI parity step 7b, live_midi_fx, live/midifx.py): with a chain on the input, a key plays the notes the
+chain makes of it (_fx_on), kept under the key so its release ends exactly those (_fx_off); a set length ends them
+on its beat's sample (_fx_due). Then the arp: with live_arp on too, the chain's notes are the keys the arp holds.
 """
 import collections
 import json
@@ -47,6 +51,7 @@ LO, HI = 36, 96             # the notes rendered for a melodic instrument: C2 to
 NOTE_S = 2.5                # each note's gate: a key held longer ends with the note's own release
 ONESHOT_S = 0.2             # a drum's or a kit pad's gate (note-offs are ignored for those)
 MAX_VOICES = 48
+FADE_ROOM = 8               # of those, kept for voices fading out after a steal
 POLL_S = 2.0
 KNEE = 0.9                  # the keys plus the set above this are soft-clipped (they skip the safety limiter)
 SCREEN = 'screen keys'      # the on-screen keys page, an input that is always there (live_keys_page)
@@ -78,9 +83,14 @@ class Voice:
     def __init__(self, y, g):
         self.y, self.i, self.g, self.rel, self.left = y, 0, g, None, None
 
-    def release(self, n):
-        if self.rel is None:
-            self.rel = self.left = max(1, n)
+    def release(self, n, at=0):
+        """Fade out over n samples, starting `at` samples into the next buffer mixed (a length live_midi_fx set: the
+        fade's gain holds at 1 until then). A voice already fading keeps its fade; one waiting for a later end ends
+        at the earlier one."""
+        n = max(1, int(n))
+        end = n + max(0, int(at))
+        if self.rel is None or (self.left > self.rel and end < self.left):
+            self.rel, self.left = n, end
 
 
 def fit_grid(t, step=STEP, min_span=4.0):
@@ -172,6 +182,7 @@ class MidiPlay:
         self.retrying = set()               # lost inputs that are back but did not open (said once)
         self.heard_lock = threading.Lock()  # the driver's thread writes `heard`, a command reads it
         self.xv = {}                        # a sounding voice -> its expression (_X), for patches with lanes
+        self.fx_offs = []                   # [(beat, patch, voices)]: notes a live_midi_fx length ends on a beat
 
     # ------------------------------------------------------------------ inputs: one handle per input
     def _open(self, name):
@@ -347,7 +358,7 @@ class MidiPlay:
                  'sustained': [], 'played': 0, 'missed': 0, 'errors': [], 'lost': False, 'rel_s': 0.1,
                  'log': os.path.join(e.root, 'live', 'midi', _slug(name) + '.jsonl'),
                  'lanes': None, 'mpe': False, 'xlanes': set(), 'xhz': VIB_HZ, 'xs': {}, 'xmap': {}, 'xmsg': {},
-                 'xmaster': None}
+                 'xmaster': None, 'fxon': {}}
         if volume_db is not None:
             p['vol'] = float(volume_db)
         if transpose is not None:
@@ -534,10 +545,11 @@ class MidiPlay:
     def _arp(self):
         return getattr(self.e, 'arp', None)        # live_arp (live/arp.py): it takes the keys of an arped input
 
-    def note_on(self, p, note, vel, ch=1):
-        if self._arp() is not None and self._arp().key(p, note, vel):
-            return                                 # an arp step has no channel expression yet (live/arp.py)
-        m = note + p['transpose']
+    def _mfx(self):
+        return getattr(self.e, 'mfx', None)        # live_midi_fx (live/midifx.py): its chain plays a key's notes
+
+    def _voice(self, p, m, vel):
+        """A new voice of patch p for sounding note m (a drum's one hit for any key), or None when it is not ready."""
         if p['oneshot'] and len(p['want']) == 1:
             m = p['want'][0]
         y = p['bank'].get(m)
@@ -545,20 +557,42 @@ class MidiPlay:
             y = p['prev'].get(m)
         if y is None:
             p['missed'] += 1
+            return None
+        return Voice(y, 10 ** (p['vol'] / 20) * (vel / 100.0) ** 1.3)
+
+    def note_on(self, p, note, vel, ch=1):
+        mfx = self._mfx()
+        if mfx is not None and mfx.fx:
+            chain = mfx.chain_at(p['source'], self.sound_beat())
+            if chain is not None:
+                return self._fx_on(p, note, vel, ch, chain)
+        if self._arp() is not None and self._arp().key(p, note, vel):
+            return                                 # an arp step has no channel expression yet (live/arp.py)
+        v = self._voice(p, note + p['transpose'], vel)
+        if v is None:
             return
-        v = Voice(y, 10 ** (p['vol'] / 20) * (vel / 100.0) ** 1.3)
         with self.lock:
             old = p['held'].pop(self._hk(p, note, ch), None)
             if old is not None:
                 old.release(int(0.02 * SR))
                 self._expr_off(p, old, ch)
-            if len(self.voices) >= MAX_VOICES:
-                self.voices[0].release(int(0.02 * SR))
+            self._make_room()
             self._expr_new(p, v, ch)             # before any buffer mixes it
             self.voices.append(v)
             if not p['oneshot']:
                 p['held'][self._hk(p, note, ch)] = v
         p['played'] += 1
+
+    def _make_room(self):
+        """Before a new voice (under the lock): with MAX_VOICES - FADE_ROOM sounding and not yet fading, the oldest of
+        them fades out over 20 ms; voices past MAX_VOICES (fading ones first, oldest first) are dropped. Never more
+        than MAX_VOICES (as the arp's voices, live/arp.py)."""
+        live = [v for v in self.voices if v.rel is None or v.left > v.rel]     # a set end still ahead: not fading
+        if len(live) >= MAX_VOICES - FADE_ROOM:
+            live[0].release(int(0.02 * SR))
+        while len(self.voices) >= MAX_VOICES:
+            self.voices.remove(next((v for v in self.voices if v.rel is not None and v.left <= v.rel),
+                                    self.voices[0]))
 
     @staticmethod
     def _hk(p, note, ch):
@@ -567,6 +601,8 @@ class MidiPlay:
         return (ch, note) if p.get('mpe') else note
 
     def note_off(self, p, note, ch=1):
+        if p.get('fxon') and self._fx_off(p, note, ch):
+            return                                 # the key started its notes through live_midi_fx: it ends those
         if self._arp() is not None and self._arp().key(p, note, 0):
             return
         with self.lock:
@@ -582,9 +618,114 @@ class MidiPlay:
         if self._arp() is not None:
             self._arp().clear(p)
         with self.lock:
-            for v in list(p['held'].values()) + p['sustained']:
+            fxv = [v for ent in p.get('fxon', {}).values() for v in ent['voices']]
+            fxv += [v for _, q, vs in self.fx_offs if q is p for v in vs]
+            for v in list(p['held'].values()) + p['sustained'] + fxv:
                 v.release(int(0.05 * SR))
-            p['held'], p['sustained'] = {}, []
+            p['held'], p['sustained'], p['fxon'] = {}, [], {}
+            self.fx_offs = [x for x in self.fx_offs if x[1] is not p]
+
+    # ------------------------------------------------------------------ keys through live_midi_fx
+    def _fx_on(self, p, note, vel, ch, chain):
+        """A key through the chain: the notes it starts sound (or, with live_arp on the input, are keys the arp
+        holds), kept under the key so that its release ends exactly those, whatever the chain is by then."""
+        from .. import midifx as MF
+        beat = self.sound_beat()
+        t = p['transpose']
+        outs = MF.notes_on(chain, note + t, vel, beat)
+        base, mult = MF.length_rule(chain)
+        hk = self._hk(p, note, ch)
+        ent = {'beat': beat, 'mult': mult, 'end': None if base is None else beat + base * mult, 'voices': [],
+               'arp': [], 'ch': ch, 'started': []}
+        old = p.setdefault('fxon', {}).pop(hk, None)
+        if old is not None:                        # pressed again before its release: the old notes end first
+            self._fx_expr_off(p, old)
+            self._fx_end(p, old, None)
+        arp = self._arp()
+        if arp is not None and p['source'] in arp.arps:
+            for m, v in outs:
+                if arp.key(p, m - t, v, fx=True):  # the arp adds the patch's transpose back, as for a key
+                    ent['arp'].append(m - t)
+        else:
+            with self.lock:
+                for m, v in outs:
+                    voice = self._voice(p, m, v)
+                    if voice is None:
+                        continue
+                    self._make_room()
+                    self._expr_new(p, voice, ch)
+                    self.voices.append(voice)
+                    ent['voices'].append(voice)
+                    ent['started'].append(voice)
+        if ent['end'] is not None:
+            self._fx_end(p, ent, ent['end'])       # its length is set: it ends there, whatever the key does
+        if ent['end'] is not None or not (p['oneshot'] and not ent['arp']):
+            p['fxon'][hk] = ent                    # (a drum's hit rings out, its key's release ignored, as before)
+        p['played'] += 1
+        self._mfx().played(p['source'], beat, note + t, vel, outs)
+
+    def _fx_off(self, p, note, ch):
+        """A key let go whose notes the chain started (True when it was one): they end now, or with a length scale
+        above 1 at start + scale x the time held."""
+        ent = p['fxon'].pop(self._hk(p, note, ch), None)
+        if ent is None:
+            return False
+        self._fx_expr_off(p, ent)                  # its notes keep the channel's values of now (MPE), as a key's
+        if ent['end'] is not None:
+            return True                            # a set length: the key's release changes nothing more
+        now = self.sound_beat()
+        end = ent['beat'] + (now - ent['beat']) * ent['mult']
+        self._fx_end(p, ent, end if end > now + 1e-6 else None)
+        return True
+
+    def _fx_end(self, p, ent, beat):
+        """End an entry's notes on `beat` (None: now). Voices are released on their sample by mix; the arp gets its
+        keys' releases queued at that beat."""
+        arp = self._arp()
+        for m in ent['arp']:
+            if arp is not None:
+                arp.key(p, m, 0, at=beat, fx=True)
+        ent['arp'] = []
+        if not ent['voices']:
+            return
+        with self.lock:
+            if beat is not None:
+                self.fx_offs.append((beat, p, ent['voices']))
+            else:
+                for v in ent['voices']:
+                    if p['sustain']:
+                        p['sustained'].append(v)
+                    else:
+                        v.release(int(p['rel_s'] * SR))
+        ent['voices'] = []
+
+    def _fx_expr_off(self, p, ent):
+        """The key of an entry is let go: each note it started, ending now or later, keeps its channel's values
+        (MPE hands the channel to the next note)."""
+        for v in ent['started']:
+            self._expr_off(p, v, ent['ch'])
+
+    def _fx_due(self, n):
+        """The notes whose set end falls in the next n samples to the device: released on that sample (the beat's
+        sample plus the path lookahead, where that beat's music plays), or held by the pedal. Under the lock."""
+        from . import graph as G
+        e = self.e
+        lag = e.safety.la + G.LAT_BUDGET
+        keep, live = [], set(self.voices)
+        for beat, p, vs in self.fx_offs:
+            vs = [v for v in vs if v in live]       # a note that rang out on its own needs no end
+            if not vs:
+                continue
+            s = e.sample(beat) + lag - e.played
+            if s >= n:
+                keep.append((beat, p, vs))
+                continue
+            for v in vs:
+                if p['sustain']:
+                    p['sustained'].append(v)
+                else:
+                    v.release(int(p['rel_s'] * SR), at=max(0, s))
+        self.fx_offs = keep
 
     # ------------------------------------------------------------------ audio (the device's thread)
     def mix(self, out, extra=None):
@@ -595,6 +736,8 @@ class MidiPlay:
         n = out.shape[0]
         acc = np.zeros((n, 2), dtype=np.float32) if extra is None else extra
         with self.lock:
+            if self.fx_offs:
+                self._fx_due(n)
             keep = []
             for v in self.voices:
                 x = self.xv.get(v) if self.xv else None
@@ -608,7 +751,8 @@ class MidiPlay:
                 if k > 0:
                     seg = v.y[:, v.i:v.i + k].T * v.g
                     if v.left is not None:
-                        seg = seg * (np.arange(v.left, v.left - k, -1, dtype=np.float32) / v.rel)[:, None]
+                        seg = seg * np.minimum(1.0, np.arange(v.left, v.left - k, -1, dtype=np.float32)
+                                               / v.rel)[:, None]
                         v.left -= k
                     acc[:k] += seg
                     v.i += k
@@ -1119,7 +1263,7 @@ class MidiPlay:
             seg = (y[:, i0] * (1 - fr) + y[:, np.minimum(i0 + 1, last)] * fr).T
             seg = seg * (v.g * gain[:k, None]).astype(np.float32)
             if v.left is not None:
-                seg = seg * (np.arange(v.left, v.left - k, -1, dtype=np.float32) / v.rel)[:, None]
+                seg = seg * np.minimum(1.0, np.arange(v.left, v.left - k, -1, dtype=np.float32) / v.rel)[:, None]
                 v.left -= k
             acc[:k] += seg
             x.pos = float(pos[k - 1] + r[k - 1])

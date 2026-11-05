@@ -141,7 +141,7 @@ class LiveArps:
             a = {'source': name, 'cfg': new_cfg, 'latch': bool(latch), 'down': collections.OrderedDict(),
                  'held': collections.OrderedDict(), 'latched': [], 'restart': False, 'origin': (start // bpb) * bpb, 'anchor': start,
                  'start': start, 'done': start, 'stop': None, 'pending': [], 'steps': 0, 'missed': 0,
-                 'recent': collections.deque(maxlen=64)}
+                 'recent': collections.deque(maxlen=64), 'keyq': [], 'fxn': {}}
             p = self.e.midi.patches[name]
             with self.lock:
                 self.arps[name] = a
@@ -219,28 +219,48 @@ class LiveArps:
                 a['origin'] = (b // self.e.bpb) * self.e.bpb
 
     # ------------------------------------------------------------------ keys (the driver's thread)
-    def key(self, p, note, vel):
-        """A key of patch p: True when an arp takes it (then it does not sound as a key)."""
+    def key(self, p, note, vel, at=None, fx=False):
+        """A key of patch p: True when an arp takes it (then it does not sound as a key). fx: a note live_midi_fx's
+        chain started (two keys' chains may start one pitch: it is held until both let it go); at: the beat it
+        lands on, for a release a chain's length sets (None: now)."""
         a = self.arps.get(p['source'])
         if a is None:
             return False
-        m = note                                  # by the key itself: a transpose change never strands a key
         with self.lock:
-            self._prune(a, p)
-            if vel:
-                if a['latch'] and not a['held']:
-                    a['latched'] = []             # a new chord after all keys were let go replaces the latched one
-                a['down'][m] = vel
-                a['held'].pop(m, None)            # pressed again: it moves to the end of the order
-                a['held'][m] = vel
-                if a['latch'] and m not in [x for x, _ in a['latched']]:
-                    a['latched'].append((m, vel))
-                a['restart'] = True
+            if at is not None and at > a['done'] + A.EPS:
+                a['keyq'].append((at, note, vel, fx))
+                a['keyq'].sort(key=lambda x: x[0])
             else:
-                a['down'].pop(m, None)
-                if not p['sustain']:
-                    a['held'].pop(m, None)        # under the pedal it stays held, in its place
+                self._key(a, p, note, vel, fx)
         return True
+
+    def _key(self, a, p, note, vel, fx=False):
+        """A key reaches the arp (under the lock)."""
+        m = note                                  # by the key itself: a transpose change never strands a key
+        if fx:
+            n = a['fxn'].get(m, 0)
+            if vel:
+                a['fxn'][m] = n + 1
+            elif n > 1:
+                a['fxn'][m] = n - 1
+            else:
+                a['fxn'].pop(m, None)
+            if (vel and n > 0) or (not vel and n > 1):
+                return                            # another chain note holds this pitch too
+        self._prune(a, p)
+        if vel:
+            if a['latch'] and not a['held']:
+                a['latched'] = []                 # a new chord after all keys were let go replaces the latched one
+            a['down'][m] = vel
+            a['held'].pop(m, None)                # pressed again: it moves to the end of the order
+            a['held'][m] = vel
+            if a['latch'] and m not in [x for x, _ in a['latched']]:
+                a['latched'].append((m, vel))
+            a['restart'] = True
+        else:
+            a['down'].pop(m, None)
+            if not p['sustain']:
+                a['held'].pop(m, None)            # under the pedal it stays held, in its place
 
     def clear(self, p):
         """Every key of patch p let go (all notes off, unplugged, unpatched)."""
@@ -250,6 +270,7 @@ class LiveArps:
                 a['down'].clear()
                 a['held'].clear()
                 a['latched'] = []
+                a['keyq'], a['fxn'] = [], {}
 
     @staticmethod
     def _prune(a, p):
@@ -304,11 +325,14 @@ class LiveArps:
         if hi <= lo + A.EPS:
             a['done'] = max(a['done'], hi)
             return
-        cuts = [lo] + [x[0] for x in a['pending'] if lo < x[0] < hi] + [hi]
+        cuts = sorted({lo, hi} | {x[0] for x in a['pending'] + a['keyq'] if lo < x[0] < hi})
         for s, t in zip(cuts, cuts[1:]):
             while a['pending'] and a['pending'][0][0] <= s + A.EPS:
                 beat, delta = a['pending'].pop(0)
                 self._land(a, beat, delta)
+            while a['keyq'] and a['keyq'][0][0] <= s + A.EPS:
+                _, note, vel, fx = a['keyq'].pop(0)    # a chain's note ends on its beat (live_midi_fx length)
+                self._key(a, p, note, vel, fx)
             if a['restart']:
                 a['restart'] = False
                 if a['cfg']['restart'] == 'key' and a['cfg']['notes'] is None:

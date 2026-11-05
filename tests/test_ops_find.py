@@ -64,6 +64,8 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('my MPE keyboard', 'live_midi'),
     ('the bend wheel and pressure on my keyboard', 'live_midi'),
     ('arpeggiate this', 'track_arp'),
+    ('midi effects on the keys I play live', 'live_midi_fx'),
+    ('chords from single notes at render, forced into a key', 'track_midi_fx'),
     ("follow my drum machine's tempo", 'live_midi_clock_in'),
     ('send clock to my drum machine', 'live_midi_clock'),
     ('read the pitch bend and mod wheel from a midi file', 'midi_read'),
