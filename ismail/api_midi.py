@@ -281,9 +281,11 @@ def _ctl_counts(ctl):
     return out
 
 
-def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None):
+def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None, span=None):
     """The lanes a part's controller messages carry, written into tr's automation (inst.lane.<name>, beats from
-    base): (lines for the reply, warnings). A bend is read at the range in force on its channel at its time."""
+    base): (lines for the reply, warnings). A bend is read at the range in force on its channel at its time. span:
+    the beats [a, z) the notes replaced (mode='replace'): a lane's old points there go too, and on to its last new
+    point; an old point on the end itself stays."""
     mpe = _is_mpe(zone, asked)
     master = zone if zone is not None else ML.MPE_MASTER
     try:
@@ -327,8 +329,11 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
         pts = [[round(base + b, 6), v] for b, v in ML.value_points(vals, ML.tol(kind, lo, hi))]
         key = 'inst.lane.' + lane
         auto = tr.setdefault('automation', {})
-        a, z = pts[0][0], pts[-1][0]
-        auto[key] = sorted([p for p in auto.get(key, []) if not a <= p[0] <= z] + pts)
+        if span:
+            auto[key] = ML.splice(auto.get(key, []), pts, min(span[0], pts[0][0]), max(span[1], pts[-1][0]))
+        else:
+            a, z = pts[0][0], pts[-1][0]
+            auto[key] = sorted([p for p in auto.get(key, []) if not a <= p[0] <= z] + pts)
         wrote.append(lane)
         L.append(f"    lane {lane}: {len(pts)} points from {len(evs)} {what} messages"
                  + ((f" (bend range +-{'/'.join(fmt_num(r) for r in sorted(used_r))})" if not fixed else
@@ -440,12 +445,13 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
                 s = round(s / quantize) * quantize
                 d = max(quantize, round(d / quantize) * quantize)
             rows.append([round(base + s, 6), p, round(d, 6), int(v)])
-        if mode == 'replace':
-            _clear(tr, min(r[0] for r in rows), max(r[0] + r[2] for r in rows))
+        span = (min(r[0] for r in rows), max(r[0] + r[2] for r in rows)) if mode == 'replace' else None
+        if span:
+            _clear(tr, *span)
         tr['notes'] = sorted(tr['notes'] + rows)
         out.append(f"  {spec} -> {target}: {len(rows)} notes, bars {bar + int(min(r[0] for r in rows) - base) // bpb}"
                    f"-{bar + int(max(r[0] for r in rows) - base) // bpb}")
-        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, mpe)
+        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, mpe, span)
         out += lt
         warn += lw
         if _is_kit(tr):

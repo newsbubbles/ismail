@@ -320,3 +320,14 @@ def poly_to_channel(notes, ctl):
     out.sort(key=lambda c: c[0])
     return out, read, kept
 
+
+def splice(old, new, a, z):
+    """A lane's points [[beat, value]] with `new` written over the beats [a, z): the old points there go, an old
+    point on z itself stays (the song's own value from there on) and a new point on that beat gives way to it.
+    When the song has a point from z on, the new last value is held to z rather than ramped toward it."""
+    keep = [q for q in old if not a - 1e-9 <= q[0] < z - 1e-9]
+    at = {round(q[0], 6) for q in keep}
+    new = [q for q in new if round(q[0], 6) not in at]
+    if new and any(q[0] >= z - 1e-9 for q in keep) and new[-1][0] < z - 2 / 960:
+        new = new + [[round(z - 1 / 960, 6), new[-1][1]]]
+    return sorted(keep + new)

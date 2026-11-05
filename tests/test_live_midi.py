@@ -599,6 +599,25 @@ def test_a_wheel_let_go_after_the_last_note_off_springs_back_in_the_song_and_a_h
     assert ML.value_at(lanes['inst.lane.level'], 20.0) == 0
 
 
+def test_a_takes_lanes_replace_its_bars_and_a_held_note_past_them_but_not_the_bar_line_after(song, monkeypatch):
+    from ismail import api
+    from ismail.live import ops as LO
+    p = song
+    base = {'source': 'k', 'first_bar': 3, 'bpm': 120.0, 'bpb': 4, 'lines': []}
+    take = dict(base, notes=[[0.0, 60, 1.0, 90]], lanes={'bend': [[0.0, 0.0], [0.5, 1.0], [1.0, 1.0]]})
+    monkeypatch.setattr(LO, '_call', lambda project, op, **kw: take)
+    api.automation_set(p, 'keys', 'inst.lane.bend', [[4, 0], [6, -2], [8, 0]])     # beats 12, 20, 28
+    LO.live_played(p, source='k', bars=[3, 3], into='keys', bar=5)
+    assert [20, -2.0] in _auto(p)['inst.lane.bend'] or [20.0, -2.0] in _auto(p)['inst.lane.bend']
+    api.undo(p)
+    # the last note starts in bar 6 and is held into bar 7: its lane goes to beat 26, past the bar line at 24
+    take.update(notes=[[0.0, 60, 1.0, 90], [6.0, 62, 4.0, 90]], lanes={'bend': [[0.0, 0.0], [6.5, 1.0], [10.0, 1.0]]})
+    api.automation_set(p, 'keys', 'inst.lane.bend', [[7, -2], [7.25, -1], [8.5, 0]])  # beats 24, 25, 30
+    LO.live_played(p, source='k', bars=[3, 3], into='keys', bar=5)
+    beats = [q[0] for q in _auto(p)['inst.lane.bend']]
+    assert 24 not in beats and 25 not in beats and 30 in beats
+
+
 def test_poly_pressure_in_a_take_follows_the_newest_key_and_fit_moves_the_lanes_with_the_notes(song):
     from ismail.live import ops as LO
     from ismail import midilanes as ML

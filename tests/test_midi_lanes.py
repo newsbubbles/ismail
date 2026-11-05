@@ -320,6 +320,21 @@ def test_poly_pressure_follows_the_newest_key_held_onto_the_channels_pressure_la
         assert ML.value_at(lane, beat) == pytest.approx(want, abs=0.6), beat
 
 
+def test_midi_read_replace_clears_a_lanes_old_points_over_the_notes_it_replaced_and_keeps_the_one_after(tmp_path):
+    path = str(tmp_path / 'bend.mid')
+    MF.write(path, [{'name': 'keys', 'channel': 0, 'notes': [(0, 60, 4, 100)],
+                     'events': [(0, bytes([0xE0, 0, 96])), (1, bytes([0xE0, 0, 64]))]}], bpm=120)
+    q = str(tmp_path / 'q')
+    api.project_new(q, bpm=120, length_bars=4)
+    api.track_add(q, 'keys', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]})
+    api.automation_set(q, 'keys', 'inst.lane.bend', [[1.5, -1], [2, -2], [2.5, 0]])   # beats 2, 4 and 6
+    OPS['midi_read'](q, path, into={'keys': 'keys'})
+    bend = _lane(q, 'keys', 'bend')
+    assert [2.0, -1.0] not in bend and [2, -1] not in bend              # under the file's note: replaced
+    assert ML.value_at(bend, 3.0) == pytest.approx(0, abs=0.01)
+    assert ML.value_at(bend, 4.0) == -2 and ML.value_at(bend, 6.0) == 0   # from the note's end on: the song's
+
+
 def test_poly_pressure_on_a_channel_with_channel_pressure_is_left_to_it():
     notes = [(0, 60, 2, 100, 0), (0, 62, 2, 100, 1)]
     ctl = [(0, 0, 'poly:60', 50), (0.5, 0, 'pressure', 70), (0, 1, 'poly:62', 30), (1, 1, 'poly:62', 90)]

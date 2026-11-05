@@ -983,9 +983,12 @@ def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, la
     auto = tr.setdefault('automation', {}) if t.get('lanes') else {}
     for lane, pts in (t.get('lanes') or {}).items():
         pts = [[round(base + b, 6), v] for b, v in pts]
-        a, z = (base, P.bar_to_beat(last + 1)) if mode == 'replace' else (pts[0][0], pts[-1][0])
         key = 'inst.lane.' + lane
-        auto[key] = sorted([q for q in auto.get(key, []) if not a <= q[0] <= z] + pts)
+        if mode == 'replace':        # the take's bars, and on to its last point when a note is held past them
+            auto[key] = ML.splice(auto.get(key, []), pts, base, max(P.bar_to_beat(last + 1), pts[-1][0]))
+        else:
+            a, z = pts[0][0], pts[-1][0]
+            auto[key] = sorted([q for q in auto.get(key, []) if not a <= q[0] <= z] + pts)
     P.save()
     pitches, vels = [r[1] for r in rows], [r[3] for r in rows]
     eng = (t['first_bar'], t['first_bar'] + last - bar)
