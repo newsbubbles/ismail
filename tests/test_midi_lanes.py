@@ -327,3 +327,15 @@ def test_poly_pressure_on_a_channel_with_channel_pressure_is_left_to_it():
     assert (read, kept) == (2, 1)
     assert [c for c in out if c[1] == 1] == [(0, 1, 'pressure', 30), (1, 1, 'pressure', 90)]
     assert (0, 0, 'poly:60', 50) in out and (0.5, 0, 'pressure', 70) in out
+
+
+def test_poly_pressure_a_key_with_none_of_its_own_is_at_rest_even_struck_again():
+    # the newest key sends no pressure: the lane is at 0 under it, not the older key's value
+    notes = [(0.0, 60, 4.0, 90, 0), (1.0, 64, 2.0, 90, 0)]
+    out = ML.poly_to_channel(notes, [(0.5, 0, 'poly:60', 100)])[0]
+    assert out == [(0.0, 0, 'pressure', 0), (0.5, 0, 'pressure', 100), (1.0, 0, 'pressure', 0),
+                   (3.0, 0, 'pressure', 100)]
+    # a key struck again starts from nothing, not from its last strike's pressure
+    notes = [(0.0, 60, 1.0, 90, 0), (2.0, 60, 1.0, 90, 0)]
+    out = ML.poly_to_channel(notes, [(0.5, 0, 'poly:60', 90)])[0]
+    assert out[-1] == (2.0, 0, 'pressure', 0)
