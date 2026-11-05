@@ -38,24 +38,69 @@ class OnAirRefused(OpError):
 
 # ------------------------------------------------------------------ reading audio in blocks
 
+PIPE_SR = 48000             # a file libsndfile cannot open (mp4, m4a, mp3) is decoded through ffmpeg at this rate
+
+
+def _pipe_blocks(path, frames_per_block, ch=2):
+    """float32 blocks (frames x ch) of any file ffmpeg reads, streamed from a pipe: a video of hours never sits in
+    memory whole."""
+    from . import settings
+    exe = settings.get('ffmpeg')
+    if not exe:
+        raise OpError(f"{path!r} is not a file libsndfile reads (wav, flac, ogg) and ffmpeg is not found to decode it: "
+                      f"install ffmpeg or config_set('ffmpeg', <its path>), or check an audio copy of it")
+    proc = subprocess.Popen([exe, '-nostdin', '-v', 'error', '-i', str(path), '-vn', '-ac', str(ch), '-ar', str(PIPE_SR),
+                             '-f', 'f32le', '-'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    step = frames_per_block * ch * 4
+    try:
+        while True:
+            buf = proc.stdout.read(step)
+            if not buf:
+                break
+            buf = buf[:len(buf) - len(buf) % (ch * 4)]
+            if buf:
+                yield np.frombuffer(buf, dtype='<f4').reshape(-1, ch)
+    finally:
+        proc.stdout.close()
+        err = proc.stderr.read().decode('utf8', 'replace').strip()
+        proc.stderr.close()
+        code = proc.wait()
+    if code:
+        raise OpError(f"ffmpeg could not read {path!r}: {err[-300:] or 'it has no audio stream?'}")
+
+
+def _blocks(path, frames_per_block):
+    """(sample rate, an iterator of float32 blocks, frames x channels). A file libsndfile reads (wav, flac, ogg) is
+    read in place; any other (a video, m4a, mp3) goes through ffmpeg."""
+    try:
+        f = sf.SoundFile(path)
+    except (sf.LibsndfileError, RuntimeError):
+        return PIPE_SR, _pipe_blocks(path, frames_per_block)
+
+    def read():
+        with f:
+            yield from f.blocks(blocksize=frames_per_block, dtype='float32', always_2d=True)
+    return f.samplerate, read()
+
+
 def _powers(path, win_s):
     """(mean square per window across channels, sample rate, seconds, peak dBFS), read in blocks so a file of hours
     never sits in memory whole. The last part window counts when it holds a tenth of a window or more."""
-    with sf.SoundFile(path) as f:
-        sr, frames = f.samplerate, f.frames
-        n = max(1, int(round(win_s * sr)))
-        out, peak = [], 0.0
-        for blk in f.blocks(blocksize=n * 600, dtype='float32', always_2d=True):
-            if not len(blk):
-                continue
-            peak = max(peak, float(np.abs(blk).max()))
-            sq = (blk.astype(np.float64) ** 2).mean(axis=1)
-            full = len(sq) // n
-            if full:
-                out.append(sq[:full * n].reshape(full, n).mean(axis=1))
-            rest = sq[full * n:]
-            if len(rest) >= max(1, n // 10):
-                out.append(np.array([rest.mean()]))
+    sr, it = _blocks(path, 1 << 16)
+    n = max(1, int(round(win_s * sr)))
+    out, peak, frames, carry = [], 0.0, 0, np.zeros(0)
+    for blk in it:
+        if not len(blk):
+            continue
+        frames += len(blk)
+        peak = max(peak, float(np.abs(blk).max()))
+        sq = np.concatenate([carry, (blk.astype(np.float64) ** 2).mean(axis=1)])
+        full = len(sq) // n
+        if full:
+            out.append(sq[:full * n].reshape(full, n).mean(axis=1))
+        carry = sq[full * n:]
+    if len(carry) >= max(1, n // 10):
+        out.append(np.array([carry.mean()]))
     p = np.concatenate(out) if out else np.zeros(0)
     return p, sr, frames / sr, 20 * np.log10(peak + 1e-12)
 
