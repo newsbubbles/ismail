@@ -543,3 +543,24 @@ def test_a_program_change_fires_an_action_or_flips_a_param(eng):
         eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 100}, midi='program:0', source='pad grid')
     with pytest.raises(LiveError, match="a 'program:<n>' is one message, with no release"):
         eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='program:3', source='pad grid')
+
+
+def test_an_encoder_map_takes_its_own_step_size(eng):
+    r = eng.cmd_map('coarse', target='lead', param='pan', range=[-1, 1], midi='cc:20', source='knob',
+                    mode='relative', step=1 / 32)
+    assert 'relative, a tick 0.03125 of the range' in r
+    eng.cmd_map('fine', target='pad', param='pan', range=[-1, 1], midi='cc:21', source='knob', mode='relative64',
+                step=1 / 512)
+    eng.cmd_track('lead', pan=0.0)
+    eng.cmd_track('pad', pan=0.0)
+    send('knob box', 0xB0, 20, 2)                              # two ticks up: 2/32 of the range
+    send('knob box', 0xB0, 21, 63)                             # one tick down: 1/512
+    assert eng.tracks['lead']['pan'] == pytest.approx(2 * 2 / 32)
+    assert eng.tracks['pad']['pan'] == pytest.approx(-2 / 512)
+    with pytest.raises(LiveError, match="step is how far one tick of an endless encoder moves"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:22', source='knob', step=0.1)
+    with pytest.raises(LiveError, match=r"step 0: a fraction of the range per tick, above 0 and at most 1"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:22', source='knob', mode='relative',
+                    step=0)
+    with pytest.raises(LiveError, match="add midi='cc:<n>'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], step=0.1)

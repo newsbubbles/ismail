@@ -622,7 +622,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   - **Modes.** `'absolute'` (default: the param jumps to the knob). `'pickup'`: the knob takes over only once it
     reaches the param's value or passes it, so nothing jumps after you or the stage moved the param; `live_status`
     says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
-    complement, or 64 = still), 1/128 of the range per step, from the param's value now (steps that arrive
+    complement, or 64 = still), 1/128 of the range per step (`step=1/32` on the map for a coarse encoder,
+    `step=1/512` for a fine one), from the param's value now (steps that arrive
     faster than the engine applies them add up). `'toggle'`: a pad or a button flips between the range's ends
     (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
     0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
@@ -670,8 +671,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
        engine's news) and is logged by bar (live_controls)`.
     2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
-  - Not yet: polyphonic aftertouch and MPE as controls, a per-map step size or acceleration for encoders, and a
-    curve beyond linear, log and switch.
+  - Not yet: polyphonic aftertouch and MPE as controls, acceleration for encoders (a fast turn moving further per
+    tick), and a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 

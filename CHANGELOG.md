@@ -24,6 +24,11 @@
   patch's own, `lanes=` as data for others (any lane the song's voice has), `lanes=False` for notes only. With
   `fit=True` the lanes move with the snapped notes. The key log now keeps bend, pressure and controllers on a
   patched input even when the live sound took none of them.
+- Encoder step size per map: `live_map(..., mode='relative' | 'relative64', step=1/32)` sets how far one tick of an
+  endless encoder moves, as a fraction of the range (default 1/128); `live_status` shows it.
+- Not yet: MPE's upper zone, per-note lanes for an MPE chord (it shares one lane per track), poly pressure written
+  to a file, polyphonic aftertouch and MPE as live_map controls, encoder acceleration, Ableton Link, MIDI Time
+  Code.
 
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 

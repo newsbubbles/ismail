@@ -178,8 +178,9 @@ REL_STEP = 1 / 128          # one tick of a relative encoder: 128 ticks cover th
 TOGGLE_REPEAT_S = 0.1       # a toggle button's 64-or-more repeated this long after the last, with no release, is a new press
 
 
-def parse_midi(midi, channel=None, mode='absolute'):
-    """live_map's midi= text -> {'kind', 'num', 'lsb', 'channel', 'mode', 'text'}, checked."""
+def parse_midi(midi, channel=None, mode='absolute', step=None):
+    """live_map's midi= text -> {'kind', 'num', 'lsb', 'channel', 'mode', 'text', 'step'}, checked. step: a relative
+    encoder's tick as a fraction of the range (default REL_STEP)."""
     from ..notation import NotationError, pitch_to_midi
     kind, _, arg = str(midi).strip().partition(':')
     kind, arg = kind.lower(), arg.strip()
@@ -215,9 +216,19 @@ def parse_midi(midi, channel=None, mode='absolute'):
                          f"not {mode!r}")
     if channel is not None and not 0 <= int(channel) <= 16:
         raise ValueError("channel: 1 to 16, or 0 for every channel (the default)")
+    if step is not None:
+        if mode not in ('relative', 'relative64'):
+            raise ValueError(f"step is how far one tick of an endless encoder moves (mode 'relative' or "
+                             f"'relative64'); mode {mode!r} sends positions: leave step out")
+        try:
+            assert 0 < float(step) <= 1
+            step = float(step)
+        except (TypeError, ValueError, AssertionError):
+            raise ValueError(f"step {step!r}: a fraction of the range per tick, above 0 and at most 1 (default "
+                             f"1/128 = {REL_STEP:g}: 128 ticks end to end; 1/32 moves 4 times as far)")
     text = f"{kind}:{num}" if num is not None else kind
     return {'kind': kind, 'num': num, 'lsb': lsb, 'channel': int(channel) if channel else None, 'mode': mode,
-            'text': text}
+            'text': text, 'step': step}
 
 
 def parse_action(action):
@@ -327,7 +338,8 @@ class Controls:
                     step = (d2 - 128 if d2 >= 64 else d2) if b['mode'] == 'relative' else d2 - 64
                     if step:
                         base = self._here(m, now)
-                        v = min(1.0, max(0.0, (base if base is not None else 0.0) + step * REL_STEP))
+                        tick = b.get('step') or REL_STEP          # the map's own step, else 1/128
+                        v = min(1.0, max(0.0, (base if base is not None else 0.0) + step * tick))
                 elif b['mode'] in ('toggle', 'trigger'):
                     down, t = d2 >= 64, self.clock()
                     # a press: a value of 64 or more after a release, or after TOGGLE_REPEAT_S with no release
@@ -477,7 +489,8 @@ def describe(m):
     b = m.get('midi')
     if b:
         out += (f" <- MIDI {b['text']}" + (f" (LSB cc:{b['lsb']})" if b['lsb'] is not None else '')
-                + (f" ch{b['channel']}" if b['channel'] else ', any channel') + f", on {b['source']!r}, {b['mode']}")
+                + (f" ch{b['channel']}" if b['channel'] else ', any channel') + f", on {b['source']!r}, {b['mode']}"
+                + (f", a tick {b['step']:g} of the range" if b.get('step') else ''))
         w = m['st'].get('waiting')
         if b['mode'] == 'pickup' and w:
             out += f" (waiting: the knob is at {w[0]:.2f}, the param at {w[1]:.2f}; it takes over there)"

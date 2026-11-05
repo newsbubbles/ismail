@@ -2714,7 +2714,7 @@ class Engine:
         return {'path': f"/stream?name={name}", 'rate': SR, **O.FORMAT, 'listening': self.hub.names().get(name, 0)}
 
     def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False,
-                midi=None, source=None, channel=None, mode='absolute', action=None):
+                midi=None, source=None, channel=None, mode='absolute', action=None, step=None):
         old_map = self.controls.maps.get(control)
         old = (old_map or {}).get('midi')
         if remove:
@@ -2737,7 +2737,8 @@ class Engine:
         elif not target:
             raise LiveError("target: the track, 'bus:<name>' or 'deck:<name>' the control drives (or action=... "
                             "for a pad that queues a scene, changes the tempo or starts a transition)")
-        if midi is None and (source is not None or channel is not None or mode not in ('absolute', 'trigger')):
+        if midi is None and (source is not None or channel is not None or mode not in ('absolute', 'trigger')
+                             or step is not None):
             raise LiveError("source, channel and mode bind a MIDI controller: add midi='cc:<n>' (or 'cc14:<n>', "
                             "'bend', 'pressure', 'note:<n>'); live_controls(source=<input>) shows what a knob sends")
         kept = (f"; {control} keeps its old map ({O.describe(old_map)})" if old_map else
@@ -2747,7 +2748,7 @@ class Engine:
             kind, name = (None, None) if action is not None else O.parse_param(target, param)[:2]
             binding = None
             if midi is not None:
-                binding = O.parse_midi(midi, channel, mode)
+                binding = O.parse_midi(midi, channel, mode, step)
                 binding['source'] = self.midi.input_for(source)
             m = (self.controls.build_action(action, midi=binding) if action is not None else
                  self.controls.build(target, param, range, curve, at, midi=binding))
