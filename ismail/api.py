@@ -389,6 +389,8 @@ def project_info(project: str) -> str:
         inst = tr.get('instrument') or {}
         bars_used = sorted({int(n[0] // P.bpb) + 1 for n in ns})
         flags = ' '.join(f for f, on in (('MUTE', tr.get('mute')), ('SOLO', tr.get('solo')),
+                                          ('MIDI FX (track_midi_fx: the render plays the processed notes)',
+                                           tr.get('midi_fx')),
                                           ('ARP (track_arp: the render plays its steps)', tr.get('arp'))) if on)
         fxs = ', '.join(f"{i}:{f['type']}" for i, f in enumerate(tr.get('fx', [])))
         L.append(f"  {name:<14} {inst.get('type', 'audio'):<8} {len(ns):>4} notes bars {_ranges(bars_used) or '-'}"
@@ -2671,6 +2673,7 @@ from . import api_tells  # noqa: E402,F401  (registers the tell_* ops: the tell 
 from . import api_melody  # noqa: E402,F401  (registers melody_consensus: a lead over a backing, ledger:M314)
 from . import api_feel  # noqa: E402,F401  (registers analyze_feel, feel_from_ref: per-note feel, ledger:M364)
 from . import api_arp  # noqa: E402,F401  (registers track_arp: the arpeggiator at render, MIDI parity step 7)
+from . import api_midifx  # noqa: E402,F401  (registers track_midi_fx: MIDI effects at render, MIDI parity step 7b)
 from . import api_onair  # noqa: E402,F401  (registers analyze_silence, onair_check: the on-air check, ledger:M432)
 from .live import ops as _live_ops  # noqa: E402,F401  (registers the live_* ops)
 from .stage import ops as _stage_ops  # noqa: E402,F401  (registers the stage_* ops)

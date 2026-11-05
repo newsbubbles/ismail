@@ -812,6 +812,62 @@ renders the same.
 - Not yet: live slide re-attacks (the studio's mono synths with glide glide), decks leave the per-step pan out, and
   an arped input's pitch bend, pressure and mod wheel (its `live_midi(lanes=)` expression) do not move the steps.
 
+### MIDI effects, live and in the studio
+
+Ableton's Chord, Scale, Pitch, Velocity, Note Length and Random, as one chain of data. One core does both
+(`live_midi_fx` on played keys, `track_midi_fx` on a track's notes at render): the same chain gives the same notes,
+so a chain found in a jam renders the same. The arpeggiator is the seventh one, with its own ops (above).
+
+- **The chain** is a list, applied in order to every note a key (or a written note) starts; a new chain replaces
+  the old one:
+  - `{'type': 'chord', 'intervals': [0, 4, 7], 'velocity': 0.8}`: each key plays these semitones from it (0 is the
+    key itself; leave 0 out and only the added notes sound). `velocity` scales the added notes, or a list gives one
+    scale per interval.
+  - `{'type': 'scale', 'key': 'A', 'scale': 'minor', 'mode': 'nearest'}`: notes off the scale move onto it,
+    `'nearest'` (ties go down), `'up'`, `'down'`, or `'drop'` (they are not played). The scales are the arp's
+    (`'major'`, `'dorian'`, `'minor_pentatonic'`, `'blues'` ... or semitones `[0, 2, 3, 5, 7, 8, 10]`).
+  - `{'type': 'pitch', 'transpose': 12, 'lowest': 'C3', 'highest': 'C6', 'fold': False}`: semitones, then a range;
+    outside it notes are dropped, or with `fold=True` moved by octaves into it (give at least 11 semitones).
+  - `{'type': 'velocity', 'out': [40, 110], 'curve': 0.5, 'random': 10}`: `curve` -1 to 1 (above 0 lifts soft
+    notes, below 0 pushes them down), mapped into `out`, then plus or minus `random`. `{'fixed': 100}` gives one
+    velocity.
+  - `{'type': 'length', 'beats': 0.5}` (every note that long) or `{'type': 'length', 'scale': 2}` (that multiple of
+    how long the key was held, or of the written length).
+  - `{'type': 'random', 'chance': 0.5, 'choices': 2, 'interval': 12, 'sign': 'up', 'seed': 0}`: with that chance a
+    note moves by 1 to `choices` times `interval` semitones (`'up'`, `'down'`, `'both'`). With `key` + `scale` the
+    interval counts scale steps and the moved note stays on the scale.
+- **Dice** are a note's own: the seed, the effect's place, the note's pitch and the beat it starts on. A render is
+  the same every time; change `seed` for another roll.
+- **Order with the arp.** On a source with both, the chain runs first: live its notes are the keys the arp holds,
+  in the studio its notes are the chords the arp steps. `track_arp(write=True)` on a track with a chain is refused:
+  `track_midi_fx(write=True)` writes the chain into the chords first.
+- **Live length.** A note starts on the beat its key sounded against. `beats` ends it that many beats later on the
+  set's clock, sample exact, whatever the key does. `scale` above 1 delays the end to start + scale x the time
+  held; below 1 a note cannot end before its key is let go, so live it ends at the release (the reply says so;
+  the studio shortens it). The sustain pedal still holds a note past its end.
+- **Note-offs.** A key's release ends exactly the notes it started, also when the chain changed while it was held.
+  Two keys whose chords share a pitch under the arp: the pitch stays held until both are let go.
+- **Example, live.** Their keys are patched to the pad (`live_midi(source='keys', track='pad')`). The person says
+  "make every key I press a minor chord, and keep it in A minor."
+  1. Tell them first: "From the next bar, each key you press plays a minor triad from it, kept in A minor."
+  2. `live_midi_fx(source='keys', chain=[{'type': 'chord', 'intervals': [0, 3, 7]}, {'type': 'scale', 'key':
+     'A', 'scale': 'minor'}])`. The reply: `midi fx keys: on at bar 33: chord +0 +3 +7 > scale A minor` and
+     `keys pressed from then play through it; keys held now end the notes they started`.
+  3. "Shorter, more staccato": the same chain plus `{'type': 'length', 'beats': 0.25}`. Tell them: "From the next
+     bar, every chord lasts a 16th, however long you hold the key."
+  4. "Back to normal": `live_midi_fx(source='keys', off=True)`; their keys play as pressed from that bar line.
+     `live_status` shows the chain, keys held and any change queued.
+- **Example, studio.** The person says "give the lead random octave jumps, and keep it between C3 and C6."
+  `track_midi_fx(track='lead', chain=[{'type': 'random', 'chance': 0.3, 'choices': 1, 'interval': 12, 'sign':
+  'both'}, {'type': 'pitch', 'lowest': 'C3', 'highest': 'C6', 'fold': True}])`. The reply:
+  `lead: MIDI effects on: random 30% both 1-1 x 12 st > pitch C3 to C6 folded | 32 notes as written play as 32`,
+  a line per bar of the notes it plays, and `the notes stay as written; render plays the effects`. Nothing plays
+  yet: tell them "About a third of the lead's notes now jump an octave, all inside C3 to C6. I'll render it so you
+  can hear it" and render. To edit single notes, `track_midi_fx(track='lead', write=True)`: the processed notes
+  become plain notes (`undo()` brings the written ones back). `off=True` takes the chain off.
+- Not yet: `live_played` logs the keys pressed, not the notes the chain made; with the arp on, a set length lets go
+  of the arp's key on its beat but a played key starts the chain on the buffer it arrives in, as keys always do.
+
 ## MIDI out: synths and other apps play with the set
 
 When the person wants a part played by their own synth, or by a plugin in their DAW, or wants Ableton, FL Studio or

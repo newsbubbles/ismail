@@ -567,7 +567,10 @@ def expand(tr, bpb):
 
 
 def expand_project(d):
-    """A project dict with every arp track expanded (a shallow copy); the same dict when no track has an arp."""
+    """A project dict with every arp track expanded (a shallow copy); the same dict when no track has an arp. A
+    track's MIDI effects (midifx.py, track_midi_fx) run first: the arp steps the notes they make."""
+    from . import midifx
+    d = midifx.expand_project(d)
     tracks = d.get('tracks') or {}
     if not any(t.get('arp') for t in tracks.values()):
         return d

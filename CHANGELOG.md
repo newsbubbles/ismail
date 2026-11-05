@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### MIDI effects, live and in the studio (MIDI parity step 7b)
+
+- One core (`ismail/midifx.py`: pure, deterministic) for Ableton's Chord, Scale, Pitch, Velocity, Note Length and
+  Random, as a chain of data applied in order: the same chain gives the same notes played live and rendered.
+  `chord` (intervals, a velocity scale for the added notes), `scale` (key + scale from the arp's tables, `nearest`,
+  `up`, `down` or `drop`), `pitch` (transpose, a lowest..highest range that drops or folds by octaves), `velocity`
+  (a curve, an out range, random, or fixed), `length` (fixed beats, or a multiple of the played length), `random`
+  (chance, choices x interval, up, down or both, scale-aware with key + scale). Dice are each note's own (seed,
+  place in the chain, pitch, start beat), so a render repeats.
+- `live_midi_fx(project, source, chain=None, at='next_bar', off=False)`: a chain on a patched input's keys (the
+  `source` names `live_midi` and `live_arp` use). A change or `off=True` lands on a bar line by default. A key's
+  release ends exactly the notes it started, also after the chain changed. A `length` in beats ends notes on that
+  beat on the set's clock, sample exact; a `scale` above 1 delays the end, below 1 ends at the key's release live
+  (the reply says so). `live_status` shows each chain, keys held and changes queued.
+- `track_midi_fx(project, track, chain=None, off=False, write=False)`: the chain on a track's notes at render. The
+  notes stay as written; the renderer, decks (`live_load`) and `midi_write` / `midi_play` play the processed notes.
+  `write=True` writes them into the track as plain notes (`undo` brings the written ones back). `project_info`
+  flags the track.
+- The chain runs before the arp on a source with both: live its notes are the keys the arp holds (a pitch two keys'
+  chords share stays held until both let go), in the studio the chords the arp steps. `track_arp(write=True)` on a
+  track with a chain is refused and says to write the chain first.
+- Not yet: `live_played` logs the keys pressed, not the notes the chain made.
+
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 
 - `analyze_silence(project=None, source='render', min_s=3.0, floor_db=-50.0, planned=None)`: every stretch of

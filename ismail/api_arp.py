@@ -2,6 +2,7 @@
 A track's held chords, or a step list over its bars, go through the arp at render; write=True writes the result
 into the track as plain notes to edit. Registered into api.OPS on import."""
 from . import arp as A
+from . import midifx as MF
 from .api import OpError, op, _load
 
 
@@ -65,7 +66,7 @@ def track_arp(project: str, track: str, pattern=None, degrees: list = None, note
     if cfg.get('notes') is not None and not cfg.get('bars') and not tr.get('notes'):
         raise OpError("a step list on a track with no notes needs bars=[a, b]: where it plays")
     full = dict(A.DEFAULTS, **cfg)
-    st, sp = A.track_steps(tr, full, bpb)
+    st, sp = A.track_steps(MF.expand(tr, bpb), full, bpb)      # a track's MIDI effects run before the arp
     L = []
     target = A.cutoff_target(tr)
     if full.get('cutoff') is not None and target is None:
@@ -74,6 +75,10 @@ def track_arp(project: str, track: str, pattern=None, degrees: list = None, note
                  "'mode': 'lp', 'cutoff': 2000}) and the steps move it")
     span = f"bars {int(sp[0] // bpb) + 1}-{int((sp[1] - 1e-6) // bpb) + 1}" if sp else "no bars"
     if write:
+        if tr.get('midi_fx'):
+            raise OpError(f"track {track!r} has MIDI effects that run before the arp ({MF.describe(tr['midi_fx'])}): "
+                          f"track_midi_fx(project, {track!r}, write=True) writes them into the chords first, then "
+                          f"track_arp(project, {track!r}, write=True) writes the steps")
         had = set(tr.get('automation') or {})
         tr['arp'] = cfg
         ex = A.expand(tr, bpb)
