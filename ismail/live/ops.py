@@ -26,7 +26,9 @@ def _call(project, name, /, timeout=30, **args):     # positional-only: an op ar
             port = json.load(f)['port']
     except (OSError, ValueError, KeyError):
         raise OpError(f"no live engine for {project}; start one with live_start(project='{project}', bpm=...)")
-    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=json.dumps({'op': name, 'args': args}).encode(),
+    # agent=True: the engine's news is for these calls, not for the pages and listeners that poll it
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=json.dumps({'op': name, 'args': args,
+                                                                              'agent': True}).encode(),
                                  headers={'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -814,11 +816,12 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     named here is driven even when the sound does not have it (e.g. {'bend': {'midi': 'bend', 'range': 12}} on a
     synth). Live, a key plays a note rendered ahead, so lanes move it only as pitch and gain: bend, vib and level.
     mpe: an MPE controller, each note on its own channel with its own bend (+-48) and pressure, and a master channel
-    whose values add to every note of its zone. True or 'lower': the lower zone (channel 1 the master, 2-16 a note
-    each); 'upper': the upper zone (channel 16 the master, 15 down to 1). The controller's own MPE Configuration
-    Message (RPN 6, sent when it connects) sets the zones and their sizes, both zones of a split keyboard included,
-    and the news says so; mpe=False plays each channel as its own part and ignores it. A message bound with
-    live_map stays that map's control.
+    whose values add to every note of its zone. True: the zones the controller configured, else the lower zone;
+    'lower': the lower zone (channel 1 the master, 2-16 a note each); 'upper': the upper zone (channel 16 the
+    master, 15 down to 1). The controller's own MPE Configuration Message (RPN 6, sent when it connects) sets the zones and
+    their sizes, both zones of a split keyboard included (a zone you named shrinks to make room, as the MPE spec
+    says), and the news says so; mpe=False plays each channel as its own part and ignores it, and so does a patch
+    on one channel (channel=). A message bound with live_map stays that map's control.
     Tell the person before their keys first sound. Reach for it when the person wants to play their MIDI keyboard,
     pads or MPE keyboard through the set, its pitch bend wheel, pressure and mod wheel included."""
     if instrument is not None:

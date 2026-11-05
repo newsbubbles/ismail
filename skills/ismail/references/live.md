@@ -617,8 +617,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   `mode='toggle'`, flips a param), `'poly'` (poly pressure: the hardest-pressed key held, so letting go of it falls
   back to the next) or `'poly:<n>'` (one key's pressure, `'poly:C4'`), and `'mpe:pressure'`, `'mpe:bend'`,
   `'mpe:timbre'` (an MPE note's own pressure, bend or cc:74, the newest note held winning: when it lets go, the
-  next newest takes over). `source` is optional when one input is
-  plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
+  next newest takes over; All Notes Off, an unpatch or an unplugged input lets go of every key they held).
+  `source` is optional when one input is plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
   give `[value at 0, value at the top]`; the curve is `'linear'` (default), `'log'` (Hz, ratios: both ends above 0)
   or `'switch'` (`'raw'` is refused for MIDI). The range, curve and `at` work as for any control, and every move is
   logged for `live_controls` (its `via` says which MIDI control moved it).
@@ -650,7 +650,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
     master channel is never a note's own. A new note moves the map to its own value at once (its bend and timbre are
     sent just before it), and a channel handed to a new note starts without the old note's pressure. Unmapped, they
     are listed by `live_controls` as other inputs are: `'keys' poly ch1: last 90 (key C#4)`, and on an input whose
-    zone is known, `'keys' mpe:timbre member channels: last 30` (one row for every member channel).
+    zone is known, `'keys' mpe:timbre member channels: last 30` (one row for every member channel). The bend range
+    and MPE settings (RPN 0 and 6) are not listed; an NRPN knob is, as its `cc:99`, `cc:98` and `cc:6` rows.
   - **Finding the numbers.** Ask the person what the controller is, or listen: `live_controls(source='knob box')`
     opens the input for 2 minutes (each call restarts it; a map on it keeps it open); ask them to move the knob,
     then call it again. It lists what came in that no map takes
@@ -714,7 +715,9 @@ straight to the speakers.
   values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure. `mpe='upper'` for
   one set to the upper zone: channel 16 the master, notes from channel 15 down. Most MPE controllers send an MPE
   Configuration Message when they connect: it sets the zones and their sizes by itself (a split keyboard's two
-  zones too), and the news says so. `mpe=False` keeps each channel its own part and ignores it. Two fingers on one
+  zones too, and a zone you named shrinks to make room, as the MPE spec says), and the news says so; `mpe=True`
+  after that takes the zones it configured. `mpe=False` keeps each channel its own part and ignores it, and so
+  does a patch on one channel (`channel=1`): the news names the call that follows it instead. Two fingers on one
   pitch are two keys. When the controller hands a channel to a new note, the old note's tail keeps its own bend,
   and the new note starts without the old note's pressure and mod (a bend sent just before its note-on is kept).
   - A key plays a note rendered ahead, so lanes move it as pitch and gain only: `bend` and `vib` as a resampled read
@@ -922,8 +925,9 @@ what was heard and does not roll the dice again. The arpeggiator is the seventh 
   can hear it" and render. To edit single notes, `track_midi_fx(track='lead', write=True)`: the processed notes
   become plain notes (`undo()` brings the written ones back). `off=True` takes the chain off.
 - **A take keeps the chain's notes.** `live_played(source='keys')` reads them, and `live_played(into='lead')`
-  writes them: each key's notes are kept with it in the key log as the chain made them. The reply says so (`midi
-  fx: 12 keys went through live_midi_fx: these are the notes its chain made of them`). With the arp on too, they are
+  writes them: each key's notes are kept with it in the key log as the chain made them and as they sounded (a note
+  outside the sound's range never did, so it is not in the take). The reply says so for the keys of the bars
+  taken (`midi fx: 12 keys went through live_midi_fx: these are the notes its chain made of them`). With the arp on too, they are
   the notes the arp held, not its steps. `raw=True` gives the keys pressed instead: for a track whose own
   `track_midi_fx` makes the notes at render. Writing the chain's notes into a track that has its own chain runs the
   effects twice, so the reply says so and names both ways out (`raw=True`, or `track_midi_fx(..., off=True)`).

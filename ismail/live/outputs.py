@@ -11,9 +11,10 @@ Controls: a named control (a knob, a switch, a slider on the VR stage) is mapped
 model in the loop, and every move is logged with the bar it happened at, so a take's knob moves read back as
 automation points. A MIDI controller's CC, 14-bit CC pair, pitch bend, channel pressure, a pad's note, a key's poly
 pressure or an MPE note's own bend, pressure or timbre can be the source of a map (live_map(midi=...)), in modes
-absolute, pickup, relative and toggle: Controls.midi_in turns its messages into moves. A map can fire an action instead of moving a param (live_map(action=...)): each press of a pad
-or a button, or a program change, then queues a scene (a batch of clips), changes the tempo or starts a deck
-transition, the same commands live_queue, live_tempo and live_transition send.
+absolute, pickup, relative and toggle: Controls.midi_in turns its messages into moves. A map can fire an action
+instead of moving a param (live_map(action=...)): each press of a pad or a button, or a program change, then queues
+a scene (a batch of clips), changes the tempo or starts a deck transition, the same commands live_queue, live_tempo
+and live_transition send.
 
 The default output: a speaker that connects after the engine started is not in this process's device list, so the
 current default is asked of a fresh process.
@@ -373,6 +374,14 @@ class Controls:
                        'down': False, 't_down': 0.0, 't_tick': 0.0, 'way': 0}
         return m
 
+    def drop_held(self, source):
+        """The keys a poly or mpe map on input `source` thought held are let go (All Notes Off by the patch, an
+        unpatch, the input closed or back): a key no longer down never drives the control again. Its value stays."""
+        for _, m in self.bound(source):
+            if m['midi']['kind'] in ('poly', 'mpe'):
+                m['st'].pop('keys', None)
+                m['st'].pop('mpe', None)
+
     def bound(self, source):
         """The maps a MIDI input drives: [(control, map)]."""
         return [(c, m) for c, m in list(self.maps.items()) if (m.get('midi') or {}).get('source') == source]
@@ -465,6 +474,14 @@ class Controls:
         hardest-pressed key held, so letting go of it falls back to the next. A key let go, or struck again, has no
         pressure until it sends some."""
         keys = s.setdefault('keys', {})
+        if kind == 0xB0 and d1 in (120, 123):           # All Sound Off, All Notes Off: no key on the channel is held
+            gone = [k for k in keys if k[0] == ch]
+            for k in gone:
+                del keys[k]
+            if not gone:
+                return False, None
+            v = (max(keys.values(), default=0) if b['num'] is None else 0) / 127.0
+            return False, None if v == s['applied'] else v
         if kind == 0xA0 and (b['num'] is None or d1 == b['num']):
             keys[(ch, d1)] = d2
             return True, (d2 if b['num'] is not None else max(keys.values())) / 127.0
@@ -481,10 +498,19 @@ class Controls:
         control to its channel's value (MPE sends a note's bend and timbre just before it); a channel handed to a new
         note starts without the last note's pressure. Bend is 0.5 at rest, as for 'bend'."""
         c = ch - 1
-        zm = ML.zone_of(zones or {ML.MPE_MASTER: 15}, c)
-        if zm is None or zm == c:
-            return False, None                     # a master channel, or no zone's: not a note's own
+        zones = zones or {ML.MPE_MASTER: 15}
+        zm = ML.zone_of(zones, c)
+        if zm is None:
+            return False, None                     # no zone's channel: not a note's own
         x = s.setdefault('mpe', {'held': [], 'vals': {}, 'owner': None, 'stale': set()})
+        if kind == 0xB0 and d1 in (120, 123):      # All Notes Off: on the master, every note of its zone
+            chs = set(ML.zone_members(zm, zones[zm])) if zm == c else {c}
+            x['held'] = [h for h in x['held'] if h[0] not in chs]
+            x['stale'] |= chs
+            x['owner'] = x['held'][-1][0] if x['held'] else x['owner']
+            return False, None                     # with no note held the value stays, as at a release
+        if zm == c:
+            return False, None                     # the master channel: not a note's own
         sub = b['num']
 
         def pos(raw):

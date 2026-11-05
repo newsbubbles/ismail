@@ -314,3 +314,46 @@ def test_the_controllers_mpe_configuration_sets_the_zones_unless_patched_with_mp
     eng.cmd_midi(source='keys', remove=True)
     eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]})
     assert eng.midi.patches['keys in']['mpe'] == {0: 15}  # what the controller said before it was patched
+
+
+def test_mpe_true_follows_the_zones_the_controller_configured_and_an_mcm_shrinks_the_patchs_own(eng, lanes_voice):
+    syn = {'type': 'synth', 'oscs': [{'wave': 'sine'}]}
+    eng.cmd_controls(source='keys')                     # only listening: nothing patched yet
+    mcm(16, 15)
+    eng.cmd_midi(source='keys', instrument=syn, mpe=True)
+    p = eng.midi.patches['keys in']
+    assert p['mpe'] == {15: 15}                         # mpe=True: the controller's upper zone, not the lower
+    eng.cmd_midi(source='keys', mpe=False)
+    eng.drain_news()
+    mcm(16, 7)
+    assert p['mpe'] == {} and any("mpe=False, so each channel stays its own part. live_midi(source='keys in', "
+                                  "mpe=True) follows the controller" in n for n in eng.drain_news())
+    eng.cmd_midi(source='keys', mpe=True)               # as the news says
+    assert p['mpe'] == {15: 7}
+    eng.midi.zones_heard.clear()
+    eng.cmd_midi(source='keys', mpe='upper')            # a zone the agent names
+    assert p['mpe'] == {15: 15}
+    mcm(1, 7)                                           # a lower zone of 7: the agent's upper zone shrinks to 7
+    assert p['mpe'] == {15: 7, 0: 7} and eng.midi.zones_heard['keys in'] == {0: 7}
+
+
+def test_a_patch_on_one_channel_stays_plain_when_the_controller_configures_mpe_and_a_take_reads_it_so(eng):
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, channel=1)
+    eng.drain_news()
+    mcm(1, 15)
+    p = eng.midi.patches['keys in']
+    assert p['mpe'] == {} and p['channel'] == 1
+    assert any("patched to channel 1 only, so it stays one part on that channel. live_midi(source='keys in', "
+               "channel=0, mpe=True) follows the controller" in n for n in eng.drain_news())
+    n = len(eng.midi.voices)
+    msg(0x91, 60, 100)                                  # channel 2: not this patch's
+    assert len(eng.midi.voices) == n
+    eng.cmd_midi(source='keys', remove=True)
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, mpe=False)
+    mcm(1, 15)                                          # logged, and marked: the patch did not follow it
+    eng.midi.flush()
+    path = os.path.join(eng.root, 'live', 'midi', 'keys_in.jsonl')
+    assert any(json.loads(x).get('mcm') == 'ignored' for x in open(path))
+    eng.cmd_midi(source='keys', remove=True)
+    assert eng.midi._take_zones(path, None, None) == {}  # a take after unpatching does not read it as MPE
+    assert eng.midi._take_zones(path, None, True) == {0: 15}

@@ -672,7 +672,8 @@ def test_a_take_through_midi_effects_writes_the_chains_notes_into_the_song(song,
         pulls(eng, 0.1)
         key('ismail keys', 0x80, m, 0)
         pulls(eng, 0.1)
-    made = sorted(n for *_, outs in eng.mfx.fx['ismail keys']['recent'] for n, _ in outs)
+    made = sorted(n for *_, outs in eng.mfx.fx['ismail keys']['recent'] for n, _ in outs
+                  if MP.LO <= n <= MP.HI)                      # the notes that sounded
     r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1)
     assert 'these are the notes its chain made of them' in r and sorted(n[1] for n in _track(p)) == made
     assert '\nNEW since your last call:\n  ' in r            # the engine's news rides beside a take, said once
@@ -684,3 +685,19 @@ def test_a_take_through_midi_effects_writes_the_chains_notes_into_the_song(song,
     r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1, raw=True)
     assert sorted(n[1] for n in _track(p)) == [60, 62, 64, 67] and 'raw: the keys pressed' in r
     assert 'raw=True' in LO.live_played(p, source='ismail keys', bars=[1, 1])
+
+
+def test_the_engines_news_waits_for_the_agent_while_the_phone_and_the_stream_poll(song, eng):
+    import urllib.request
+    from ismail.live import ops as LO
+    port = json.load(open(os.path.join(song, 'live', 'engine.json')))['port']
+
+    def post(op, **body):
+        req = urllib.request.Request(f'http://127.0.0.1:{port}/', data=json.dumps(dict({'op': op, 'args': {}},
+                                     **body)).encode(), headers={'Content-Type': 'application/json'})
+        return json.loads(urllib.request.urlopen(req, timeout=10).read())
+    eng.news.append('keys X: the controller configured MPE')
+    assert 'news' not in post('onsets')                         # a poller that does not say: its op never takes it
+    assert 'NEW since' not in post('status', agent=False)['result']   # the phone's status poll
+    assert 'NEW since your last call:\n  keys X: the controller configured MPE' in LO.live_status(song)
+    assert 'NEW since' not in LO.live_status(song)              # said once

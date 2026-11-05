@@ -752,3 +752,52 @@ def test_mpe_controls_follow_the_inputs_zone_and_unmapped_ones_are_listed(eng):
     assert "'pad grid' poly ch2: last 90 (key C#4), 1 messages" in eng.cmd_controls()
     eng.cmd_map('tone', target='pad', param='pan', range=[0, 1], midi='mpe:timbre', source='knob')
     assert 'mpe:timbre' not in eng.cmd_controls()              # mapped: off the unmapped list
+
+
+def test_a_poly_or_mpe_map_lets_go_of_its_keys_on_all_notes_off_an_unpatch_and_an_unplug(eng):
+    eng.midi.poll()                                             # the inputs there are, known
+    for how in ('cc123', 'cc120', 'repatch', 'unplug'):
+        eng.cmd_midi(source='pad grid', instrument={'type': 'kick'})
+        eng.cmd_map('press', target='lead', param='pan', range=[0, 1], midi='poly', source='pad grid')
+        send('pad grid', 0x90, 60, 100)
+        send('pad grid', 0xA0, 60, 127)                         # C4 pressed hard
+        if how == 'cc123':
+            send('pad grid', 0xB0, 123, 0)
+        elif how == 'cc120':
+            send('pad grid', 0xB0, 120, 0)
+        elif how == 'repatch':
+            eng.cmd_midi(source='pad grid', remove=True)
+            eng.cmd_midi(source='pad grid', instrument={'type': 'kick'})
+        else:
+            eng.inputs.remove('pad grid')
+            eng.midi.poll()
+            eng.inputs.append('pad grid')
+            eng.midi.poll()
+        send('pad grid', 0x90, 64, 100)
+        send('pad grid', 0xA0, 64, 20)                          # the only key held now, pressed softly
+        assert eng.tracks['lead']['pan'] == pytest.approx(20 / 127), how
+        eng.cmd_map('press', remove=True)
+        eng.cmd_midi(source='pad grid', remove=True)
+    eng.cmd_map('slide', target='lead', param='pan', range=[-1, 1], midi='mpe:bend', source='pad grid')
+    send('pad grid', 0x91, 60, 100)                             # a note on channel 2
+    send('pad grid', 0xE1, 0x7F, 0x7F)                          # bent to the top
+    send('pad grid', 0xB0, 123, 0)                              # All Notes Off on the master: every note of the zone
+    send('pad grid', 0x92, 64, 100)                             # a new note on channel 3, at rest
+    send('pad grid', 0x82, 64, 0)                               # it ends, and no older note is held
+    assert eng.tracks['lead']['pan'] == pytest.approx(0, abs=1e-3)
+
+
+def test_live_controls_lists_an_nrpn_knob_and_hides_only_bend_range_and_mpe_settings(eng):
+    eng.cmd_controls(source='knob')
+    for v in (10, 40):                                          # an NRPN knob: select 1/16, data entry
+        for d1, d2 in ((99, 1), (98, 16), (6, v), (38, 0)):
+            send('knob box', 0xB0, d1, d2)
+    for d1, d2 in ((101, 0), (100, 0), (6, 12), (38, 0)):       # RPN 0, the bend range: a setting
+        send('knob box', 0xB1, d1, d2)
+    out = eng.cmd_controls()
+    assert "'knob box' cc:99 ch1" in out and "'knob box' cc:6 ch1: last 40" in out and "cc:38 ch1" in out
+    assert 'ch2' not in out
+    eng.cmd_map('k', target='lead', param='pan', range=[0, 1], midi='poly:60', source='pad grid')
+    send('pad grid', 0xA0, 62, 30)                              # another key's pressure: heard, then the map takes
+    eng.cmd_map('k2', target='lead', param='pan', range=[0, 1], midi='poly:C4', source='pad grid')
+    assert 'poly' not in eng.cmd_controls(source='pad grid')    # the poly row, by any key's map

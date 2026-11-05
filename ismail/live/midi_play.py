@@ -197,6 +197,7 @@ class MidiPlay:
         return self.ins.get(name)
 
     def _shut(self, name):
+        self.e.controls.drop_held(name)                     # no key is held on an input that is closed
         inp = self.ins.pop(name, None)
         if inp is not None:
             try:
@@ -284,21 +285,25 @@ class MidiPlay:
             return False
         if b['kind'] == 'cc14':
             return what in (f"cc:{b['num']}", f"cc:{b['lsb']}")
+        if b['kind'] == 'poly':
+            return what == 'poly'                           # heard per channel, one row for every key
         return what == b['text']
 
     def _hear(self, name, st, d1, d2):
         what = O.midi_text(st, d1)
         if what is None or (st & 0xF0) == 0x80 or ((st & 0xF0) == 0x90 and not d2):
             return
-        if (st & 0xF0) == 0xB0 and d1 in (6, 38, 98, 99, 100, 101):
-            return                                          # RPN settings (bend range, MPE zones): not a knob
+        if (st & 0xF0) == 0xB0 and (d1 in (100, 101) or (d1 in (6, 38) and self.rpns.get((name, st & 0x0F)) in
+                                                           ([0, 0], [0, 6]))):
+            return                      # an RPN selected, the bend range or the MPE zones set: settings, not a knob
         kind, ch = st & 0xF0, (st & 0x0F) + 1
         k = (name, what, ch)
         p = self.patches.get(name)
         zones = (p['mpe'] if p is not None and p['mpe'] else None) or self.zones_heard.get(name)
         if zones and O.mpe_text(st, d1) and ML.zone_of(zones, ch - 1) not in (None, ch - 1):
             k = (name, O.mpe_text(st, d1), 0)               # an MPE note's own: one row for every member channel
-        val = ((d2 << 7) | d1) - 8192 if kind == 0xE0 else d1 if kind == 0xD0 else d1 + 1 if kind == 0xC0 else             f"{d2} (key {M.note_name(d1)})" if kind == 0xA0 else d2
+        val = (((d2 << 7) | d1) - 8192 if kind == 0xE0 else d1 if kind == 0xD0 else d1 + 1 if kind == 0xC0 else
+               f"{d2} (key {M.note_name(d1)})" if kind == 0xA0 else d2)
         with self.heard_lock:
             h = self.heard.pop(k, [0, 0])
             self.heard[k] = [val, h[1] + 1]
@@ -370,8 +375,8 @@ class MidiPlay:
                  'oneshot': False, 'vol': -6.0, 'transpose': 0, 'channel': None, 'held': {}, 'sustain': False,
                  'sustained': [], 'played': 0, 'missed': 0, 'errors': [], 'lost': False, 'rel_s': 0.1,
                  'log': os.path.join(e.root, 'live', 'midi', _slug(name) + '.jsonl'),
-                 'lanes': None, 'mpe': {}, 'mpe_lock': False, 'xlanes': set(), 'xhz': VIB_HZ, 'xs': {}, 'xmap': {}, 'xmsg': {},
-                 'xmaster': None, 'fxon': {}}
+                 'lanes': None, 'mpe': {}, 'mpe_lock': False, 'xlanes': set(), 'xhz': VIB_HZ, 'xs': {}, 'xmap': {},
+                 'xmsg': {}, 'xmaster': None, 'fxon': {}}
         if volume_db is not None:
             p['vol'] = float(volume_db)
         if transpose is not None:
@@ -397,8 +402,10 @@ class MidiPlay:
         if lanes is not None:
             p['lanes'] = lanes or None
         z = ML.mpe_zone(mpe)
+        if ML.is_true(mpe) and self.zones_heard.get(name):
+            z = dict(self.zones_heard[name])     # mpe=True: the zones the controller configured, else the lower
         if z is not None:
-            p['mpe_lock'] = mpe is False         # mpe=False: the controller's own MPE configuration is not followed
+            p['mpe_lock'] = z == {}              # mpe=False: the controller's own MPE configuration is not followed
             if z != p['mpe']:
                 self.release_all(p)              # held keys are named per channel with MPE: let go of them first
                 p['mpe'] = z
@@ -507,8 +514,9 @@ class MidiPlay:
                 if cin is not None and cin.source == name:
                     cin.msg(t, st, d1, d2)
                 return
+            ignored = False
             if (st & 0xF0) == 0xB0 and d1 in (6, 98, 99, 100, 101):
-                self._rpn(name, st & 0x0F, d1, d2)           # an MPE configuration (RPN 6) sets the zones
+                ignored = self._rpn(name, st & 0x0F, d1, d2)  # an MPE configuration (RPN 6) sets the zones
             if self.e.midi_control(name, st, d1, d2):        # bound by live_map: a control move, not a key
                 return
             p = self.patches.get(name)
@@ -545,6 +553,8 @@ class MidiPlay:
             if p.get('fxlog'):
                 rec.update(p['fxlog'])
                 p['fxlog'] = None
+            if ignored:
+                rec['mcm'] = 'ignored'                       # the patch did not follow it: a take does not either
             self._log.append((p['log'], rec))
         return on
 
@@ -645,32 +655,41 @@ class MidiPlay:
 
     def _rpn(self, name, ch, d1, d2):
         """RPN selection and data entry (the driver's thread): an MPE Configuration Message (RPN 6 on channel 1 or 16)
-        sets the input's zones, and its patch's unless it was patched with mpe=False; the news says so."""
+        sets the input's zones, and its patch's (applied to the patch's own zones, so a zone the agent set shrinks
+        as the spec says) unless it was patched with mpe=False or to one channel; the news says so. True when it is
+        an MCM the patch does not follow (the key log marks it, so a take does not read it either)."""
         sel = self.rpns.setdefault((name, ch), [127, 127])
         if d1 in (101, 100):
             sel[0 if d1 == 101 else 1] = d2
-            return
+            return False
         if d1 in (98, 99):                                   # an NRPN: data entry is not an RPN's any more
             sel[:] = [127, 127]
-            return
+            return False
         if sel != [0, 6] or ch not in (ML.MPE_MASTER, ML.MPE_UPPER):
-            return
-        z = ML.mcm(self.zones_heard.get(name) or {}, ch, d2)
-        self.zones_heard[name] = z
+            return False
+        heard = ML.mcm(self.zones_heard.get(name) or {}, ch, d2)
+        self.zones_heard[name] = heard
         p = self.patches.get(name)
-        if p is None or z == p['mpe']:
-            return
-        if p['mpe_lock']:
-            self.e.news.append(f"keys {name}: the controller configures MPE ({ML.zone_text(z) or 'off'}); patched "
-                               f"with mpe=False, so each channel stays its own part. live_midi(source={name!r}, "
-                               f"mpe=True) follows the controller")
-            return
+        if p is None:
+            return False
+        if p['mpe_lock'] or p['channel'] is not None:
+            why = ("patched with mpe=False, so each channel stays its own part. live_midi(source={n!r}, mpe=True) "
+                   "follows the controller" if p['mpe_lock'] else
+                   f"patched to channel {p['channel']} only, so it stays one part on that channel. "
+                   "live_midi(source={n!r}, channel=0, mpe=True) follows the controller")
+            self.e.news.append(f"keys {name}: the controller configures MPE ({ML.zone_text(heard) or 'off'}); "
+                               + why.format(n=name))
+            return True
+        z = ML.mcm(p['mpe'], ch, d2)
+        if z == p['mpe']:
+            return False
         self.release_all(p)
         p['mpe'] = dict(z)
         self._expr_setup(p)
         self.e.news.append(f"keys {name}: the controller configured " + (f"MPE ({ML.zone_text(z)})" if z else
                            "MPE off (each channel its own part)") + " with its MPE Configuration Message; "
                            f"live_midi(source={name!r}, mpe=False) ignores it")
+        return False
 
     def note_off(self, p, note, ch=1):
         if p.get('fxon') and self._fx_off(p, note, ch):
@@ -687,6 +706,7 @@ class MidiPlay:
                 v.release(int(p['rel_s'] * SR))
 
     def release_all(self, p):
+        self.e.controls.drop_held(p['source'])              # a poly or mpe map lets go of the keys too
         if self._arp() is not None:
             self._arp().clear(p)
         with self.lock:
@@ -713,25 +733,27 @@ class MidiPlay:
         if old is not None:                        # pressed again before its release: the old notes end first
             self._fx_expr_off(p, old)
             self._fx_end(p, old, None)
-        arp = self._arp()
+        arp, made = self._arp(), []
         if arp is not None and p['source'] in arp.arps:
             for m, v in outs:
                 if arp.key(p, m - t, v, fx=True):  # the arp adds the patch's transpose back, as for a key
                     ent['arp'].append(m - t)
+                    made.append((m, v))
         else:
             with self.lock:
                 for m, v in outs:
                     voice = self._voice(p, m, v)
                     if voice is None:
-                        continue
+                        continue                   # not in the patch's range, or not rendered: it did not sound
+                    made.append((m, v))
                     self._make_room()
                     self._expr_new(p, voice, ch)
                     self.voices.append(voice)
                     ent['voices'].append(voice)
                     ent['started'].append(voice)
-        # for the key log: the notes made (as keys, the patch's transpose taken back off as a key's d1 is), how long
-        # they last, and whether the arp took them as its keys
-        p['fxlog'] = {'fx': [[int(m - t), int(v)] for m, v in outs], 'fxlen': [base, mult]}
+        # for the key log: the notes made that sounded (as keys, the patch's transpose taken back off as a key's d1
+        # is), how long they last, and whether the arp took them as its keys
+        p['fxlog'] = {'fx': [[int(m - t), int(v)] for m, v in made], 'fxlen': [base, mult]}
         if ent['arp']:
             p['fxlog']['fxarp'] = True
         if ent['end'] is not None:
@@ -860,6 +882,7 @@ class MidiPlay:
                     self.lost.discard(n)
                     try:
                         self._open(n)
+                        self.e.controls.drop_held(n)
                         if p is not None:
                             p['lost'] = False
                         self.e.news.append(f"keys {n}: plugged back in, playing {p['what']} again" if p is not None
@@ -920,8 +943,8 @@ class MidiPlay:
         was down; a key still down lasts until now. A key that went through live_midi_fx gives the notes its chain
         made (kept with the key in the log: the dice as rolled live), each lasting as it did live (_fx_len); raw=True
         gives the keys pressed instead. Returns (notes, keys still down, key delays in beats, how many notes came from
-        a log written before the heard clock, {'keys': keys that went through a chain, 'arp': whether live_arp
-        stepped their notes})."""
+        a log written before the heard clock, {'starts': [(beat, whether live_arp stepped its notes)] for each key
+        that went through a chain}: _fx_in counts them over the notes a take keeps)."""
         recs = [json.loads(x) for x in open(path, encoding='utf8') if x.strip()]
         now = self.sound_beat()
         peds, offs, dn = [], [], None              # the pedal's down stretches, the all-notes-offs: for _fx_len
@@ -937,7 +960,7 @@ class MidiPlay:
         if dn is not None:
             peds.append((dn, math.inf))
         notes, down, held, ped, old, lag = [], {}, {}, False, 0, []
-        fx = {'keys': 0, 'arp': False}
+        fx = {'starts': []}
 
         def end(m, b, rel=None, again=False):
             """Key m's notes end: the key itself at b, or the chain's notes as _fx_len says (rel: when the key was
@@ -960,8 +983,7 @@ class MidiPlay:
                     end(r['d1'], b, held.get(r['d1']), again=r['d1'] not in held)
                 made = {'fx': r['fx'], 'fxlen': r.get('fxlen')} if 'fx' in r else None
                 if made is not None:
-                    fx['keys'] += 1
-                    fx['arp'] = fx['arp'] or bool(r.get('fxarp'))
+                    fx['starts'].append((b, bool(r.get('fxarp'))))
                 down[r['d1']] = (b, r['d2'], made)
             elif kind in (0x80, 0x90):
                 if ped and r['d1'] in down:
@@ -1049,7 +1071,7 @@ class MidiPlay:
                 L.append(self._none_in(fn, notes, span))
                 continue
             L.append(self._head(fn, keep, notes, down))
-            L += self._fx_lines(fx, raw)
+            L += self._fx_lines(self._fx_in(fx, keep), raw)
             L.append(self._clock_line(lag, old))
             L.append(self.fitted(keep, from_bar) if fit else format_notes(keep, bpb))
             vels = {k[3] for k in keep}
@@ -1059,6 +1081,15 @@ class MidiPlay:
                          f"the beats, then pushed 16ths, offbeat 8ths softest; in a chord the top note leads and the "
                          f"lower notes sit well under it (about 30 under sounded right in one jam).")
         return '\n'.join(L) or "no notes played yet (only pedal or controls)"
+
+    @staticmethod
+    def _fx_in(fx, keep):
+        """_read's chain keys counted over the notes kept (the bars taken): {'keys': how many, 'arp': whether live_arp
+        stepped any of them}. A key and the notes its chain made start on the same beat; a key whose chain made no
+        note that sounded is not in the take."""
+        starts = {k[0] for k in keep}
+        got = [arp for b, arp in fx['starts'] if round(b, 3) in starts]
+        return {'keys': len(got), 'arp': any(got)}
 
     def _fx_lines(self, fx, raw):
         """What a log's keys through live_midi_fx mean for the notes given, in plain words."""
@@ -1103,6 +1134,7 @@ class MidiPlay:
         if not keep:
             raise ValueError(self._none_in(fn, notes, span))
         bpb = self.e.bpb
+        fx = self._fx_in(fx, keep)
         L = [self._head(fn, keep, notes, down)] + self._fx_lines(fx, raw)
         if fit:
             f = self._fit(keep)
@@ -1215,13 +1247,13 @@ class MidiPlay:
         """The MPE zones a take is read in: mpe= when given (True or 'lower', 'upper', False), else the patch's while
         the input is patched, else the last MPE configuration its log holds (RPN 6 on channel 1 or 16)."""
         z = ML.mpe_zone(mpe)
-        if z is not None:
+        if z is not None and not ML.is_true(mpe):
             return z
-        if p is not None:
+        if p is not None and z is None:
             return p['mpe']
         zones, sel = {}, {}
         for r in (json.loads(x) for x in open(path, encoding='utf8') if x.strip()):
-            if r['st'] & 0xF0 != 0xB0 or r['d1'] not in (6, 98, 99, 100, 101):
+            if r['st'] & 0xF0 != 0xB0 or r['d1'] not in (6, 98, 99, 100, 101) or r.get('mcm') == 'ignored':
                 continue
             ch = r['st'] & 0x0F
             s = sel.setdefault(ch, [127, 127])
@@ -1231,7 +1263,7 @@ class MidiPlay:
                 s[:] = [127, 127]
             elif s == [0, 6]:
                 zones = ML.mcm(zones, ch, r['d2'])
-        return zones
+        return zones or z or {}                              # mpe=True and no MPE in the log: the lower zone
 
     def _clock_line(self, lag, old):
         """Which clock the times are on, in plain words, and the correction the log applied."""

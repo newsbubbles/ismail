@@ -9,24 +9,35 @@
   `live_played`. `midi_write(mpe={'bass': 'lower', 'lead': 'upper'})` writes a split synth's two zones, 7 channels
   each (2-8 and 9-15). `midi_read` reads a part in the zone its file configures, of the size the file's MPE
   Configuration Message (RPN 6) gives, and only that zone's member channels; with both zones, the one that holds
-  the part's notes. A played controller's own MPE Configuration Message sets the patch's zones and sizes (both
-  zones of a split keyboard, the other zone shrinking when one grows, as the MPE spec says) and the news says so;
-  `live_midi(mpe=False)` ignores it. A take with no patch is read in the zone its key log configured.
+  the part's notes, in the configuration in force at its first note (a change while it plays is warned; a format
+  1 file's configurations count in time order). A part on a zone's master channel, or outside every zone, reads as
+  a plain part, its lanes kept. `midi_write` gives the tracks not in MPE channels outside the zones: a kit keeps
+  channel 10 and a zone that held it shrinks, then a zone gives up members (down to 4) so each other track has a
+  channel of its own, and the reply says how far. The zones written are those of the tracks with notes in the
+  bars. `mpe=1` and `mpe=0` work as True and False, and `{track: True}` as `'lower'`. A played controller's own MPE
+  Configuration Message sets the patch's zones and sizes (both zones of a split keyboard; a zone the agent set
+  shrinks as the MPE spec says) and the news says so; `live_midi(mpe=True)` takes the zones the controller
+  configured, else the lower. `live_midi(mpe=False)` and a patch on one channel ignore it, and the news names the
+  call that follows it; a take reads the key log's configurations the patch followed, not those it ignored.
 - Polyphonic aftertouch and MPE expression as controls: `live_map(midi='poly')` (the hardest-pressed key held;
   letting go of it falls back to the next), `'poly:<n>'` (one key's), and `'mpe:pressure'`, `'mpe:bend'`,
   `'mpe:timbre'` (cc:74): an MPE note's own, the newest note held winning, on the member channels of the zone the
   input plays in. They watch the keys but never take them: the keys still play, and only that expression becomes
   the map's. Absolute or pickup. Unmapped, `live_controls` lists them as other inputs: `poly ch1: last 90 (key
-  C#4)`, and `mpe:timbre member channels` on an input whose zone is known. RPN messages (bend range, MPE
-  configuration) are no longer listed as unmapped knobs.
+  C#4)`, and `mpe:timbre member channels` on an input whose zone is known; a `'poly:<n>'` map takes that row too.
+  The bend range and MPE settings (RPN 0 and 6) are no longer listed as unmapped knobs; an NRPN knob still is. All
+  Notes Off (cc:123 or cc:120 on a key's channel, or on an MPE master for its whole zone), an unpatch and an unplugged
+  input let go of the keys a poly or MPE map held, so a key no longer down never drives it again.
 - A take keeps the notes the MIDI effects chain made: `live_played` reads, and `live_played(into=)` writes, each
-  key's notes as `live_midi_fx` made them live (its random choices as rolled, its lengths as heard), so a take in a
-  song plays what was heard and does not roll the dice again. With the arp on, they are the notes the arp held.
+  key's notes as `live_midi_fx` made them live (its random choices as rolled, its lengths as heard; a note outside
+  the sound's range never sounded, so it is not kept), so a take in a song plays what was heard and does not roll
+  the dice again. With the arp on, they are the notes the arp held. The reply counts the keys of the bars taken.
   `live_played(raw=True)` gives the keys pressed; the reply says which it gave. Writing the chain's notes into a
   track with its own `track_midi_fx` says the effects would run twice and names `raw=True` or
   `track_midi_fx(..., off=True)`.
 - The engine's news no longer turns a reply that is data into text: a take (and `live_control`, `live_listen`,
-  `live_stream`) gives its news after its own reply. A take with news pending failed before.
+  `live_stream`) gives its news after its own reply. A take with news pending failed before. The news waits for
+  the agent's own calls: the phone page's and the stream's polls (status, onsets, clock) no longer take it.
 - Encoder acceleration: `live_map(..., mode='relative' | 'relative64', accel=8)` makes a fast turn move further.
   A tick 0.1 s or more after the last is one step; a faster one moves more (twice as fast, twice as far), up to
   `accel` steps (above 1, at most 16; `True` is 4). A turn back starts slow again. Off by default; `live_status`

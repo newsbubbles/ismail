@@ -46,6 +46,7 @@ from .trouble import Trouble
 from .. import settings
 
 BLOCK = 1024
+POLL_OPS = ('keys', 'clock', 'onsets')   # ops pages and listeners poll: they never take the agent's news
 QUIET = 1e-6            # a path whose input stops and whose output stays below this goes dormant
 DORMANT_S = 0.5
 SOUND_FLOOR = 1e-4      # -80 dBFS: the mix made a sound (silence on air is measured against it)
@@ -3530,9 +3531,11 @@ def serve(engine, port=0, idle_min=None):
             except Exception as e:
                 traceback.print_exc()
                 res = {'ok': False, 'error': f"engine error {type(e).__name__}: {e}"}
-            # news is for the agent's calls: a key from the page or a listener reading the clock must not
-            # take it (nor carry it)
-            news = None if isinstance(req, dict) and req.get('op') in ('keys', 'clock') else engine.drain_news()
+            # news is for the agent's calls (live ops send agent=True): a key from the page, a listener reading the
+            # clock, the phone or the stream polling status and onsets (agent=False) must not take it (nor carry it).
+            # A caller that does not say: everything but the pollers' own ops
+            agent = req.get('agent', req.get('op') not in POLL_OPS) if isinstance(req, dict) else False
+            news = engine.drain_news() if agent else None
             if news:
                 k = 'result' if res['ok'] else 'error'
                 if isinstance(res[k], str):
