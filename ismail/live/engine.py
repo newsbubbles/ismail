@@ -2714,7 +2714,7 @@ class Engine:
         return {'path': f"/stream?name={name}", 'rate': SR, **O.FORMAT, 'listening': self.hub.names().get(name, 0)}
 
     def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False,
-                midi=None, source=None, channel=None, mode='absolute'):
+                midi=None, source=None, channel=None, mode='absolute', action=None):
         old_map = self.controls.maps.get(control)
         old = (old_map or {}).get('midi')
         if remove:
@@ -2723,26 +2723,41 @@ class Engine:
             if old:
                 self.midi.release(old['source'])
             return f"{control}: unmapped"
-        if not target:
-            raise LiveError("target: the track, 'bus:<name>' or 'deck:<name>' the control drives")
-        if midi is None and (source is not None or channel is not None or mode != 'absolute'):
+        if action is not None:
+            if target is not None or range is not None or param != 'volume_db' or at != 'now':
+                raise LiveError("action= fires a command on each press; target, param, range and at belong to a map "
+                                "that moves a param. Leave them out (the action's own 'at' says when it lands)")
+            if mode not in ('absolute', 'trigger'):
+                raise LiveError(f"an action fires on each press of its pad or button; mode {mode!r} is for a map "
+                                f"that moves a param: leave mode out")
+            mode = 'trigger'
+        elif mode == 'trigger':
+            raise LiveError("mode 'trigger' fires an action: give action={'op': 'live_queue', ...} (or live_tempo, "
+                            "live_transition), or use mode 'toggle' to flip a param")
+        elif not target:
+            raise LiveError("target: the track, 'bus:<name>' or 'deck:<name>' the control drives (or action=... "
+                            "for a pad that queues a scene, changes the tempo or starts a transition)")
+        if midi is None and (source is not None or channel is not None or mode not in ('absolute', 'trigger')):
             raise LiveError("source, channel and mode bind a MIDI controller: add midi='cc:<n>' (or 'cc14:<n>', "
                             "'bend', 'pressure', 'note:<n>'); live_controls(source=<input>) shows what a knob sends")
         kept = (f"; {control} keeps its old map ({O.describe(old_map)})" if old_map else
                 f"; {control} is not mapped")
         # every check before anything changes: a failed remap leaves the old map working
         try:
-            kind, name, _, _ = O.parse_param(target, param)
+            kind, name = (None, None) if action is not None else O.parse_param(target, param)[:2]
             binding = None
             if midi is not None:
                 binding = O.parse_midi(midi, channel, mode)
                 binding['source'] = self.midi.input_for(source)
-            m = self.controls.build(target, param, range, curve, at, midi=binding)
+            m = (self.controls.build_action(action, midi=binding) if action is not None else
+                 self.controls.build(target, param, range, curve, at, midi=binding))
         except ValueError as e:
             raise LiveError(f"{e}{kept}")
         with self.lock:
             try:
-                if kind == 'track':
+                if action is not None:
+                    self._check_action(m['action'])
+                elif kind == 'track':
                     self._target(name)
                 elif kind == 'bus' and name not in self.buses:
                     raise LiveError(f"no bus {name!r}; buses: {list(self.buses) or 'none'} (live_bus adds one)")
@@ -2759,14 +2774,47 @@ class Engine:
         self.controls.maps[control] = m
         if old and old['source'] != (binding or {}).get('source'):
             self.midi.release(old['source'])
+        what = ("each press fires it at once (its reply comes in the engine's news) and is logged by bar"
+                if action is not None else None)
         if binding is None:
-            return f"{control} -> {O.describe(m)}: its moves apply in the engine at once and are logged by bar"
+            return (f"{control} -> {O.describe(m)}: " + (what.replace('each press', 'live_control(value=1)')
+                    if what else "its moves apply in the engine at once and are logged by bar"))
         self.midi.bound_now(binding['source'], binding)
         same = [c for c, x in self.controls.bound(binding['source']) if c != control and
                 x['midi']['text'] == binding['text'] and x['midi']['channel'] == binding['channel']]
-        return (f"{control} -> {O.describe(m)}: each move applies in the engine at once and is logged by bar "
-                f"(live_controls)" + (f"; the same MIDI control also drives {', '.join(same)}" if same else '')
+        return (f"{control} -> {O.describe(m)}: " + (what or "each move applies in the engine at once and is logged "
+                                                             "by bar") + " (live_controls)"
+                + (f"; the same MIDI control also drives {', '.join(same)}" if same else '')
                 + ". A bound message is a control, not a key: it no longer plays or logs as a note")
+
+    def _check_action(self, a):
+        """What an action names exists now (called under the lock): its clips parse onto live tracks, its tempo is
+        one the set can take, its decks are there. A press later still checks again, as the op it mirrors does."""
+        g = a['args']
+        if a['op'] == 'live_queue':
+            for i, it in enumerate(g.get('clips') or []):
+                self._parse_clip(i, it)
+        elif a['op'] == 'live_tempo':
+            try:
+                g['bpm'] = float(g['bpm'])
+                assert 20.0 <= g['bpm'] <= 400.0
+            except (TypeError, ValueError, AssertionError):
+                raise LiveError(f"action live_tempo: bpm {g['bpm']!r}, a tempo from 20 to 400")
+        else:
+            self._deck(g['to'])
+            if g.get('from_deck') is not None:
+                self._deck(g['from_deck'])
+
+    def _fire(self, control, m, via=None):
+        """A press of an action map: the command it mirrors, now (on the control thread, as a stage knob's move)."""
+        a = m['action']
+        g = json.loads(json.dumps(a['args']))           # a fresh copy each press
+        fn = {'live_queue': self.cmd_queue, 'live_tempo': self.cmd_tempo,
+              'live_transition': self.cmd_transition}[a['op']]
+        r = fn(**g)
+        txt = r if isinstance(r, str) else json.dumps(r)
+        self.news.append(f"{control}" + (f" ({via})" if via else '') + f" fired {a['op']}: " + txt.split('\n')[0])
+        return txt
 
     def cmd_control(self, control, value):
         """A control moved (a knob turned on the stage): apply its mapping now and log it by bar."""
@@ -2777,7 +2825,19 @@ class Engine:
 
     def _apply(self, control, m, value, via=None):
         """Apply a move of map m (value 0..1, or the param's units for a raw map) and log it with its bar. m is the
-        map the move was made for, so a move in flight never lands on the target of a map that replaced it."""
+        map the move was made for, so a move in flight never lands on the target of a map that replaced it. An
+        action map fires its action on a value of 0.5 or more."""
+        if m.get('action'):
+            beat = self.beat(self.played if (self.stream is not None or self._null_on) else self.pos)
+            if float(value) < 0.5:
+                return {'applied': 0.0, 'bar': fmt_bar(beat, self.bpb)}
+            fired = self._fire(control, m, via)
+            rec = {'t': round(time.time(), 3), 'beat': round(beat, 4), 'control': control, 'value': float(value),
+                   'action': m['action']['op']}
+            if via:
+                rec['via'] = via
+            self.controls.log(rec)
+            return {'applied': 1.0, 'bar': fmt_bar(beat, self.bpb), 'fired': fired}
         x = O.scale(value, m['range'], m['curve'])
         kind, name, what, detail = m['spec']
         if what == 'volume_db':
@@ -2879,14 +2939,20 @@ class Engine:
             out = "no control moves logged" + (f" for {control!r}" if control else '') + \
                 (f"; mapped: {sorted(self.controls.maps)}" if self.controls.maps else '; live_map one first')
             return '\n'.join([out] + heard)
-        out = collections.OrderedDict()
+        out, fired = collections.OrderedDict(), collections.OrderedDict()
         for r in rec:
+            if 'action' in r:                            # a press that fired an action: not automation
+                fired.setdefault((r['control'], r['action']), []).append(round(r['beat'] / self.bpb + 1, 2))
+                continue
             out.setdefault((r['control'], r['target'], r['param']), []).append(
                 [round(r['beat'] / self.bpb + 1, 4), round(r['applied'], 4)])
         L = []
         for (c, t, p), pts in out.items():
             L.append(f"{c} -> {t} {p}: {len(pts)} moves, bars {pts[0][0]:g}-{pts[-1][0]:g}")
             L.append(f"  automation points [bar, value]: {json.dumps(pts[-int(last):])}")
+        for (c, op), bars in fired.items():
+            L.append(f"{c} fired {op} {len(bars)} time{'s' if len(bars) != 1 else ''}, at bars "
+                     f"{', '.join(f'{b:g}' for b in bars[-int(last):])}")
         return '\n'.join(L + heard)
 
     def cmd_onsets(self, ahead_s=12.0, behind_s=2.0, limit=400):

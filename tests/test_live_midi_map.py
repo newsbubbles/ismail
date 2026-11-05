@@ -448,3 +448,75 @@ def test_an_input_that_fails_to_reopen_is_tried_again(eng):
     assert any('controls on knob box: plugged back in' in n for n in eng.drain_news())
     send('knob box', 0xB0, 74, 127)
     assert cutoff(eng) == pytest.approx(8000)
+
+
+def test_a_pad_fires_a_scene_on_each_press_and_never_plays(eng):
+    eng.cmd_midi(source='pad grid', track='pad')
+    scene = {'op': 'live_queue', 'section': 'drop',
+             'clips': [{'track': 'lead', 'notes': '0 C4 1 100', 'bars': 1}, {'track': 'pad', 'stop': True}]}
+    r = eng.cmd_map('drop', action=scene, midi='note:C2', source='pad grid', channel=10)
+    assert "drop -> fires live_queue (2 clips, section drop) <- MIDI note:36 ch10, on 'pad grid', trigger" in r
+    assert 'each press fires it at once' in r
+    played = eng.midi.patches['pad grid']['played']
+    send('pad grid', 0x99, 36, 100)                            # the press: the scene queues at the next bar
+    send('pad grid', 0x89, 36, 0)                              # the release does nothing
+    assert eng.midi.patches['pad grid']['played'] == played    # a bound pad is a control, never a key
+    clips = [c for c in eng.tl.clips.values() if c.section == 'drop']
+    assert [c.track for c in clips] == ['lead'] and clips[0].start == 4.0
+    news = eng.drain_news()
+    assert any(n.startswith('drop (midi note:36 ch10) fired live_queue: ') for n in news)
+    send('pad grid', 0x99, 36, 100)                            # a second press queues it again (the same bar:
+    assert any('fired live_queue' in n for n in eng.drain_news())    # its clip replaces the first)
+    assert 'drop fired live_queue 2 times, at bars 1, 1' in eng.cmd_controls()
+    assert 'drop -> fires live_queue' in eng.cmd_status()
+    assert scene['clips'][0] == {'track': 'lead', 'notes': '0 C4 1 100', 'bars': 1}   # the map keeps its own copy
+
+
+def test_a_button_and_the_agent_fire_a_tempo_change(eng):
+    eng.cmd_map('faster', action={'op': 'live_tempo', 'bpm': 128, 'at': 'next_bar'}, midi='cc:80', source='knob')
+    send('knob box', 0xB0, 80, 127)
+    send('knob box', 0xB0, 80, 0)
+    news = [n for n in eng.drain_news() if 'fired live_tempo' in n]
+    assert len(news) == 1 and 'tempo 120 -> 128 BPM at bar 2' in news[0]      # the release fires nothing
+    assert eng.tmap.segs[-1][2] == 128
+    eng.cmd_map('slower', action={'op': 'live_tempo', 'bpm': 100})   # no MIDI: the stage or the agent fires it
+    r = eng.cmd_control('slower', 1)
+    assert r['applied'] == 1.0 and 'fired' in r
+    assert eng.cmd_control('slower', 0)['applied'] == 0.0      # below 0.5: nothing fires
+
+
+def test_an_action_map_says_what_is_wrong_and_keeps_the_old_map(eng):
+    with pytest.raises(LiveError, match=r"action: \{'op': one of live_queue, live_tempo, live_transition"):
+        eng.cmd_map('x', action={'op': 'live_mute'}, midi='note:36', source='pad')
+    with pytest.raises(LiveError, match=r"action live_queue: unknown arguments \['bpm'\]"):
+        eng.cmd_map('x', action={'op': 'live_queue', 'bpm': 1}, midi='note:36', source='pad')
+    with pytest.raises(LiveError, match="no live track 'nope'"):
+        eng.cmd_map('x', action={'op': 'live_queue', 'clips': [{'track': 'nope', 'stop': True}]}, midi='note:36',
+                    source='pad')
+    with pytest.raises(LiveError, match='a tempo from 20 to 400'):
+        eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 900}, midi='note:36', source='pad')
+    with pytest.raises(LiveError, match='deck'):
+        eng.cmd_map('x', action={'op': 'live_transition', 'to': 'Z'}, midi='note:36', source='pad')
+    with pytest.raises(LiveError, match="fires on a button press: a 'note:<n>' pad or a 'cc:<n>' button"):
+        eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 100}, midi='bend', source='knob')
+    with pytest.raises(LiveError, match="target, param, range and at belong to a map that moves a param"):
+        eng.cmd_map('x', target='lead', action={'op': 'live_tempo', 'bpm': 100}, midi='note:36', source='pad')
+    with pytest.raises(LiveError, match="mode 'toggle' is for a map that moves a param"):
+        eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 100}, midi='note:36', source='pad', mode='toggle')
+    with pytest.raises(LiveError, match="mode 'trigger' fires an action"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='note:36', source='pad', mode='trigger')
+    assert 'x' not in eng.controls.maps and 'pad grid' not in FakeInput.opened
+    eng.cmd_map('hit', action={'op': 'live_tempo', 'bpm': 100}, midi='note:36', source='pad')
+    with pytest.raises(LiveError, match=r"hit keeps its old map \(fires live_tempo \(100 BPM\)"):
+        eng.cmd_map('hit', action={'op': 'live_queue', 'clips': [{'track': 'nope', 'stop': True}]},
+                    midi='note:36', source='pad')
+
+
+def test_a_press_that_fails_says_so_in_the_news_once(eng):
+    eng.cmd_map('go', action={'op': 'live_queue', 'clips': [{'track': 'pad', 'notes': '0 C2 1', 'bars': 1}]},
+                midi='note:40', source='pad')
+    eng.cmd_track('pad', remove=True)                          # the scene's track went away after the map
+    send('pad grid', 0x90, 40, 100)
+    send('pad grid', 0x90, 40, 100)
+    news = [n for n in eng.drain_news() if n.startswith('control go')]
+    assert len(news) == 1 and "no live track 'pad'" in news[0] and 'live_map it again' in news[0]

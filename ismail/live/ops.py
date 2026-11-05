@@ -688,7 +688,7 @@ def live_stream(project: str, name: str = 'master') -> str:
 @op()
 def live_map(project: str, control: str, target: str = None, param: str = 'volume_db', range: list = None,
              curve: str = 'linear', at: str = 'now', remove: bool = False, midi: str = None, source: str = None,
-             channel: int = None, mode: str = 'absolute') -> str:
+             channel: int = None, mode: str = 'absolute', action: dict = None) -> str:
     """Map a named control (a knob, slider or switch on the VR stage, any client, or a MIDI controller's knob, fader,
     pad or bend wheel) to a live parameter, so its moves apply in the engine at once with no agent in the loop.
     target: a track, 'bus:<name>' or 'deck:<name>'. param: 'volume_db', 'pan' (tracks), a deck's
@@ -707,16 +707,29 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     (a pad or a button flips between the range's ends on each press: 64 or more after a release, or a repeat 0.1 s
     or more after the last with no release). Several maps may share one MIDI control (one
     knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
-    is not played or logged by live_midi. Not sure what a knob sends? live_controls(source=<input>) listens."""
+    is not played or logged by live_midi. Not sure what a knob sends? live_controls(source=<input>) listens.
+    A pad or a button as a trigger: action= instead of target and param fires a command on each press (a note-on, or
+    a 'cc:<n>' button reaching 64; the release does nothing), with no agent in the loop. The actions, as data with
+    the arguments of the op they mirror: {'op': 'live_queue', 'clips': [...], 'section': ..., 'cancel_section': ...}
+    (a scene or a part: the clips, stops and section cut-over queue on each press, each clip at its own 'at',
+    default the next bar), {'op': 'live_tempo', 'bpm': 128, 'at': 'next_bar'}, {'op': 'live_transition', 'to':
+    'B', 'bars': 16, 'style': 'blend'}. The tracks and decks it names are checked when it is mapped; the reply of
+    each press comes in the engine's news, and live_controls lists the presses by bar. Mute a track from a pad with
+    a param map: target=<track>, param='volume_db', range=[0, -120], curve='switch', mode='toggle'. live_control
+    (value=1) fires an action map too."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
-                 remove=remove, midi=midi, source=source, channel=channel, mode=mode)
+                 remove=remove, midi=midi, source=source, channel=channel, mode=mode,
+                 **({'action': action} if action is not None else {}))
 
 
 @op()
 def live_control(project: str, control: str, value: float) -> str:
     """Move a mapped control (what the stage sends when a knob turns; an agent can turn one too, the same way).
-    value: 0..1, or the param's own units for a 'raw' map. Applies at once and is logged with its bar."""
+    value: 0..1, or the param's own units for a 'raw' map. Applies at once and is logged with its bar. A map with an
+    action fires it on 0.5 or more; the reply is the action's."""
     r = _call(project, 'control', control=control, value=value)
+    if 'fired' in r:
+        return f"{control} fired at {r['bar']}: {r['fired']}"
     return f"{control} = {value:g} -> {r['applied']:g} at {r['bar']}"
 
 

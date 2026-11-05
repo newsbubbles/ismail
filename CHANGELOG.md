@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### MIDI: pads as triggers, program change, poly pressure, played expression, encoder steps (Nate 10-23)
+
+- `live_map(control, action={'op': 'live_queue' | 'live_tempo' | 'live_transition', ...}, midi='note:<n>' |
+  'cc:<n>', ...)`: a pad or a button fires a command on each press (a note-on, or a CC button reaching 64), with the
+  arguments of the op it mirrors: a scene or a part (a batch of clips, stops, a section cut-over), a tempo change, a
+  deck transition. What it names is checked when it is mapped; each press's reply comes in the engine's news and
+  `live_controls` lists the presses by bar. A bound pad does not play. `live_control(value=1)` fires one too.
+
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 
 - `analyze_silence(project=None, source='render', min_s=3.0, floor_db=-50.0, planned=None)`: every stretch of

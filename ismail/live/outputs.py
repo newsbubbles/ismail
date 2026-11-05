@@ -11,7 +11,9 @@ Controls: a named control (a knob, a switch, a slider on the VR stage) is mapped
 model in the loop, and every move is logged with the bar it happened at, so a take's knob moves read back as
 automation points. A MIDI controller's CC, 14-bit CC pair, pitch bend, channel pressure or a pad's note can be the
 source of a map (live_map(midi=...)), in modes absolute, pickup, relative and toggle: Controls.midi_in turns its
-messages into moves.
+messages into moves. A map can fire an action instead of moving a param (live_map(action=...)): each press of a pad
+or a button then queues a scene (a batch of clips), changes the tempo or starts a deck transition, the same commands
+live_queue, live_tempo and live_transition send.
 
 The default output: a speaker that connects after the engine started is not in this process's device list, so the
 current default is asked of a fresh process.
@@ -165,7 +167,11 @@ def unscale(x, rng, curve):
 # ------------------------------------------------------------------ MIDI as a control source (live_map(midi=...))
 
 MIDI_KINDS = "'cc:<0-127>', 'cc14:<0-31>' (MSB n with LSB n+32), 'bend', 'pressure', or 'note:<36 or C2>'"
-MODES = ('absolute', 'pickup', 'relative', 'relative64', 'toggle')
+MODES = ('absolute', 'pickup', 'relative', 'relative64', 'toggle', 'trigger')
+# what a map may fire (live_map(action=...)): the live op it mirrors -> the arguments it takes, as that op takes them
+ACTIONS = {'live_queue': ('clips', 'section', 'cancel_section', 'cancel_at'),
+           'live_tempo': ('bpm', 'at'),
+           'live_transition': ('to', 'from_deck', 'at', 'bars', 'style', 'stop_from')}
 PICKUP_TOL = 2 / 127        # pickup takes over when the knob comes this close to the param, or crosses it
 REL_STEP = 1 / 128          # one tick of a relative encoder: 128 ticks cover the range
 TOGGLE_REPEAT_S = 0.1       # a toggle button's 64-or-more repeated this long after the last, with no release, is a new press
@@ -196,9 +202,10 @@ def parse_midi(midi, channel=None, mode='absolute'):
     if mode in ('relative', 'relative64') and kind != 'cc':
         raise ValueError(f"mode {mode!r} reads an endless encoder's steps on a 'cc:<n>'; {kind} sends positions: "
                          f"mode 'absolute' or 'pickup'")
-    if mode == 'toggle' and kind not in ('cc', 'note'):
-        raise ValueError("mode 'toggle' flips on a button press: a 'note:<n>' pad or a 'cc:<n>' button")
-    if kind == 'note' and mode not in ('absolute', 'toggle'):
+    if mode in ('toggle', 'trigger') and kind not in ('cc', 'note'):
+        raise ValueError(f"mode {mode!r} {'flips' if mode == 'toggle' else 'fires'} on a button press: a 'note:<n>' "
+                         f"pad or a 'cc:<n>' button")
+    if kind == 'note' and mode not in ('absolute', 'toggle', 'trigger'):
         raise ValueError(f"a 'note:<n>' pad is 'absolute' (held = 1, released = 0) or 'toggle' (each press flips), "
                          f"not {mode!r}")
     if channel is not None and not 0 <= int(channel) <= 16:
@@ -206,6 +213,34 @@ def parse_midi(midi, channel=None, mode='absolute'):
     text = {'cc': f"cc:{num}", 'cc14': f"cc14:{num}", 'note': f"note:{num}"}.get(kind, kind)
     return {'kind': kind, 'num': num, 'lsb': lsb, 'channel': int(channel) if channel else None, 'mode': mode,
             'text': text}
+
+
+def parse_action(action):
+    """live_map's action= -> {'op': a live op of ACTIONS, 'args': its arguments}, its shape checked (the tracks and
+    decks it names are the engine's to check)."""
+    if isinstance(action, str):
+        action = {'op': action}
+    if not isinstance(action, dict) or action.get('op') not in ACTIONS:
+        raise ValueError(f"action: {{'op': one of {', '.join(ACTIONS)}, then that op's own arguments}}, e.g. "
+                         f"{{'op': 'live_queue', 'clips': [...], 'section': 'drop'}} (a scene: its clips queue on "
+                         f"each press), {{'op': 'live_tempo', 'bpm': 128}}, {{'op': 'live_transition', 'to': 'B'}}")
+    args = {k: v for k, v in action.items() if k != 'op'}
+    extra = sorted(set(args) - set(ACTIONS[action['op']]))
+    if extra:
+        raise ValueError(f"action {action['op']}: unknown arguments {extra}; it takes {list(ACTIONS[action['op']])}")
+    if action['op'] == 'live_queue' and not ((isinstance(args.get('clips'), list) and args['clips'])
+                                             or args.get('cancel_section')):
+        raise ValueError("action live_queue: 'clips', a list of {track, notes | lanes, bars, loop, at} as live_queue "
+                         "takes them (or {track, stop: true}), or 'cancel_section' alone")
+    if action['op'] == 'live_tempo' and 'bpm' not in args:
+        raise ValueError("action live_tempo: 'bpm', the tempo it changes to (and 'at', default 'next_bar')")
+    if action['op'] == 'live_transition' and not args.get('to'):
+        raise ValueError("action live_transition: 'to', the deck it mixes to (and live_transition's other arguments)")
+    try:
+        args = json.loads(json.dumps(args))          # its own copy: a press never shares lists with the caller
+    except (TypeError, ValueError):
+        raise ValueError(f"action {action['op']}: its arguments are plain data (text, numbers, lists, dicts)")
+    return {'op': action['op'], 'args': args}
 
 
 def midi_text(st, d1):
@@ -245,6 +280,17 @@ class Controls:
                              "at the top] with curve 'linear', 'log' or 'switch'")
         spec = parse_param(target, param)
         m = {'target': target, 'param': param, 'spec': spec, 'range': rng, 'curve': curve, 'at': at}
+        return Controls._bind(m, midi)
+
+    @staticmethod
+    def build_action(action, midi=None):
+        """A checked map that fires an action (parse_action's) on each press, not stored."""
+        m = {'target': None, 'param': None, 'spec': None, 'range': None, 'curve': 'raw', 'at': None,
+             'action': parse_action(action)}
+        return Controls._bind(m, midi)
+
+    @staticmethod
+    def _bind(m, midi):
         if midi is not None:
             m['midi'] = dict(midi)
             # applied: the last position this map sent; seq/done: sent and applied counts (moves wait in the
@@ -276,12 +322,12 @@ class Controls:
                     if step:
                         base = self._here(m, now)
                         v = min(1.0, max(0.0, (base if base is not None else 0.0) + step * REL_STEP))
-                elif b['mode'] == 'toggle':
+                elif b['mode'] in ('toggle', 'trigger'):
                     down, t = d2 >= 64, self.clock()
                     # a press: a value of 64 or more after a release, or after TOGGLE_REPEAT_S with no release
                     # (a trigger button that sends 127 on every press and never 0)
                     if down and (not s['down'] or t - s['t_down'] >= TOGGLE_REPEAT_S):
-                        v = self._flip(m, now)
+                        v = 1.0 if b['mode'] == 'trigger' else self._flip(m, now)
                     if down:
                         s['t_down'] = t
                     s['down'] = down
@@ -310,6 +356,8 @@ class Controls:
                 on = kind == 0x90 and d2 > 0
                 if b['mode'] == 'toggle':
                     v = self._flip(m, now) if on else None
+                elif b['mode'] == 'trigger':
+                    v = 1.0 if on else None                # fires on the press; the release does nothing
                 else:
                     v = 1.0 if on else 0.0
             if v is None or (b['mode'] == 'pickup' and not self._caught(m, v, now)):
@@ -394,9 +442,29 @@ class Controls:
         return out
 
 
+def action_text(a):
+    """An action in a few words: 'live_queue (2 clips, section drop)'."""
+    from ..notation import fmt_num
+    g = a['args']
+    if a['op'] == 'live_queue':
+        n = len(g.get('clips') or [])
+        bits = ([f"{n} clip{'s' if n != 1 else ''}"] if n else []) + \
+            ([f"section {g['section']}"] if g.get('section') else []) + \
+            ([f"cancels section {g['cancel_section']}"] if g.get('cancel_section') else [])
+    elif a['op'] == 'live_tempo':
+        bits = [f"{fmt_num(g['bpm'])} BPM"] + ([f"at {g['at']}"] if g.get('at') else [])
+    else:
+        bits = [f"to deck {g['to']}"] + [f"{k} {g[k]}" for k in ('from_deck', 'style', 'bars', 'at') if k in g]
+    return f"{a['op']} ({', '.join(bits)})"
+
+
 def describe(m):
-    rng = '' if m['curve'] == 'raw' else f" {m['range'][0]:g}..{m['range'][1]:g}"
-    out = f"{m['target']} {m['param']} ({m['curve']}{rng}" + (f", at {m['at']}" if m['at'] not in ('now', None) else '') + ')'
+    if m.get('action'):
+        out = f"fires {action_text(m['action'])}"
+    else:
+        rng = '' if m['curve'] == 'raw' else f" {m['range'][0]:g}..{m['range'][1]:g}"
+        out = (f"{m['target']} {m['param']} ({m['curve']}{rng}" + (f", at {m['at']}" if m['at'] not in ('now', None)
+                                                                   else '') + ')')
     b = m.get('midi')
     if b:
         out += (f" <- MIDI {b['text']}" + (f" (LSB cc:{b['lsb']})" if b['lsb'] is not None else '')

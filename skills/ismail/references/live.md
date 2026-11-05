@@ -650,8 +650,25 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        over once you turn it past where the filter is now, so nothing jumps." When they say it does nothing,
        `live_status` says `(waiting: the knob is at 0.16, the param at 1.00; it takes over there)`: ask them to
        turn it all the way up once.
-  - Not yet: notes as triggers for actions (queue a clip, a section), program change, polyphonic aftertouch and MPE
-    as controls, a per-map step size or acceleration for encoders, and a curve beyond linear, log and switch.
+  - **Pads and buttons as triggers.** A map with `action=` instead of `target` and `param` fires a command on each
+    press (a pad's note-on, or a `'cc:<n>'` button reaching 64; the release does nothing), with no agent in the
+    loop. The action is data, with the arguments of the op it mirrors:
+    `{'op': 'live_queue', 'clips': [...], 'section': 'drop'}` (a scene or a part: its clips and stops queue on each
+    press, each at its own `at`, default the next bar; `cancel_section` cuts the last chapter over),
+    `{'op': 'live_tempo', 'bpm': 128, 'at': 'next_bar'}`, or `{'op': 'live_transition', 'to': 'B', 'bars': 16}`.
+    The tracks and decks it names are checked when it is mapped. The reply of each press comes in the engine's news;
+    `live_controls` lists the presses by bar (`drop fired live_queue 3 times, at bars 9, 17, 33`). A mute is a param
+    map, not an action: `target='bass', param='volume_db', range=[0, -120], curve='switch', mode='toggle'`.
+  - **Example.** The person says "when I hit the first pad, bring the drop in." Pads on input `'pad grid'` send
+    notes on channel 10 (`live_controls(source='pad grid')` finds the note, here 36).
+    1. `live_map(control='drop', action={'op': 'live_queue', 'section': 'drop', 'clips': [{'track': 'drums',
+       'notes': '0 C1 1; 1 C1 1; 2 C1 1; 3 C1 1', 'bars': 1}, {'track': 'bass', 'notes': '0 A1 4', 'bars': 1}]},
+       midi='note:36', source='pad grid', channel=10)`. The reply: `drop -> fires live_queue (2 clips, section
+       drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
+       engine's news) and is logged by bar (live_controls)`.
+    2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
+  - Not yet: program change, polyphonic aftertouch and MPE as controls, a per-map step size or acceleration for
+    encoders, and a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 
