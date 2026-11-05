@@ -30,6 +30,7 @@ are not taken live. The channel's values apply to the notes on that channel; wit
 """
 import collections
 import json
+import math
 import os
 import re
 import threading
@@ -851,7 +852,9 @@ class MidiPlay:
 
     def _take_lanes(self, path, name, lanes, mpe, warp, origin, end):
         """The played bend, pressure and controllers in one input's log as lanes over the take [origin, end] (beats on
-        the engine's clock): ({lane: [[beat from origin, value]]}, lines). The map is live_midi's, the patch's own
+        the engine's clock): ({lane: [[beat from origin, value]]}, lines). Messages count up to the take's last bar
+        line (the first after `end`), so a wheel let go after the last note-off springs back in the song too; a bend
+        or pressure still off rest there goes back to rest on that bar line. The map is live_midi's, the patch's own
         while the input is patched (lanes= and mpe= override it), any lane name allowed (the song's voice plays
         what the keys' rendered notes could not). Poly pressure goes onto the channel's pressure by the newest key
         held; with MPE each note's own channel is read by last-note priority (the master channel is left out), as
@@ -880,20 +883,27 @@ class MidiPlay:
             return {}, []
         ctl, n_poly, _ = ML.poly_to_channel(notes, ctl)
         warp = warp or (lambda t: t)
+        stop = math.ceil(end / self.e.bpb - 1e-9) * self.e.bpb      # the take's last bar line
         out, L = {}, []
         for lane, (kind, num, lo, hi) in lmap.items():
             what = ML.midi_name(kind, num)
             evs = (ML.mpe_merge(notes, ctl, what)[0] if mpe else [(b, raw) for b, _, w, raw in ctl if w == what])
             inside = [(warp(b) - origin, ML.from_raw(kind, lo, hi, raw)) for b, raw in evs
-                      if origin + 1e-9 < warp(b) <= end]
+                      if origin + 1e-9 < warp(b) <= stop + 1e-9]
             if not inside:                                   # nothing sent during the take: the lane is left alone
                 continue
             before = [raw for b, raw in evs if warp(b) <= origin + 1e-9]
             if not before and kind != 'cc':                  # bend and pressure at rest until the first message
                 before = [8192 if kind == 'bend' else 0]
             vals = sorted(([(0.0, ML.from_raw(kind, lo, hi, before[-1]))] if before else []) + inside)
-            if vals[-1][0] < end - origin:                   # held to the take's end, not ramped to what follows
-                vals.append((end - origin, vals[-1][1]))
+            rest = None if kind == 'cc' else ML.from_raw(kind, lo, hi, 8192 if kind == 'bend' else 0)
+            last = stop - origin
+            if rest is not None and abs(vals[-1][1] - rest) > 1e-9:  # off rest at the end: back to rest there
+                if vals[-1][0] < last - 1 / 960:
+                    vals.append((last - 1 / 960, vals[-1][1]))
+                vals.append((last, rest))
+            elif vals[-1][0] < last:                         # held to the take's end, not ramped to what follows
+                vals.append((last, vals[-1][1]))
             out[lane] = ML.value_points(vals, ML.tol(kind, lo, hi))
             L.append(f"lane {lane}: {len(out[lane])} points from {len(inside)} {what} messages"
                      + (f" (bend range +-{hi:g})" if kind == 'bend' else f" ({lo:g}..{hi:g})")

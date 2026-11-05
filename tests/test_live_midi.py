@@ -578,6 +578,27 @@ def test_a_take_writes_its_bend_pressure_and_controllers_onto_the_tracks_lanes(s
     assert 'lane ' not in r and 'inst.lane.level' not in _auto(p)       # notes only
 
 
+def test_a_wheel_let_go_after_the_last_note_off_springs_back_in_the_song_and_a_held_one_ends_at_rest(song):
+    from ismail import api
+    from ismail.live import ops as LO
+    from ismail import midilanes as ML
+    p = song
+    log = os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl')
+    api.notes_write(p, 'keys', 6, '0 C4 1')                              # a later note the bend must not reach
+    _expr(log, [(8.0, 60, 1.0, 90)], [(8.5, 0xE0, 0, 96), (9.2, 0xE0, 0, 64)])    # back to centre after the key
+    LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=5)
+    bend = _auto(p)['inst.lane.bend']
+    assert ML.value_at(bend, 16.9) == pytest.approx(1.0, abs=0.01)
+    assert ML.value_at(bend, 17.3) == pytest.approx(0, abs=0.01) and ML.value_at(bend, 20.0) == 0
+    api.undo(p)
+    _expr(log, [(8.0, 60, 1.0, 90)], [(8.5, 0xE0, 0, 96), (8.5, 0xD0, 90, 0)])    # never let go in the take
+    LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=5)
+    lanes = _auto(p)
+    assert ML.value_at(lanes['inst.lane.bend'], 19.9) == pytest.approx(1.0, abs=0.01)
+    assert ML.value_at(lanes['inst.lane.bend'], 20.0) == 0            # at rest on the take's last bar line
+    assert ML.value_at(lanes['inst.lane.level'], 20.0) == 0
+
+
 def test_poly_pressure_in_a_take_follows_the_newest_key_and_fit_moves_the_lanes_with_the_notes(song):
     from ismail.live import ops as LO
     from ismail import midilanes as ML
