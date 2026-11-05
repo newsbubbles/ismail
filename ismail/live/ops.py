@@ -822,6 +822,30 @@ def live_arp(project: str, source: str = None, pattern=None, degrees: list = Non
 
 
 @op()
+def live_midi_fx(project: str, source: str = None, chain: list = None, at: str = 'next_bar',
+                 off: bool = False) -> str:
+    """MIDI effects on a patched input's keys (live_midi: a keyboard, a loopMIDI port or 'screen keys'): each key
+    plays what a chain of Ableton-style effects makes of it, Chord, Scale, Pitch, Velocity, Note Length and Random.
+    The same core and chain as the studio's track_midi_fx: the same key on the same beat makes the same notes live
+    and rendered, dice included. A recorded take (live_played) keeps the keys played, not the notes made, so a
+    take rendered through the chain re-rolls its random effects. chain: a list of effects applied in order; a new
+    chain replaces the old one. Effects (as track_midi_fx takes them):
+    {'type': 'chord', 'intervals': [0, 4, 7], 'velocity': 0.8}; {'type': 'scale', 'key': 'A', 'scale': 'minor',
+    'mode': 'nearest' | 'up' | 'down' | 'drop'}; {'type': 'pitch', 'transpose': 12, 'lowest': 'C3', 'highest': 'C6',
+    'fold': False}; {'type': 'velocity', 'out': [40, 110], 'curve': 0.5, 'random': 10} or {'fixed': 100};
+    {'type': 'length', 'beats': 0.5} (every note the key starts ends that many beats after it sounded, on the set's
+    clock, whatever the key does) or {'scale': 2} (that multiple of how long the key was held; below 1 a note
+    ends at its key's release live, since the length is known only then); {'type': 'random', 'chance': 0.5,
+    'choices': 2, 'interval': 12, 'sign': 'up' | 'down' | 'both', 'seed': 0} (key + scale makes the moves scale
+    steps). A key's release ends exactly the notes it started, even when the chain changed while it was held. With
+    live_arp on the same input the chain runs first: the arp steps the notes it makes. at: when it starts, changes
+    or stops ('next_bar' default, 'now', 'next_4', 'bar:17'): keys pressed from that beat use it. off=True takes it
+    off. source alone: that input's chain; nothing: every chain on. live_status shows them. live_played still logs
+    the keys pressed, not the notes made. Tell the person what their keys will do before it lands."""
+    return _call(project, 'midi_fx', source=source, chain=chain, at=at, off=off)
+
+
+@op()
 def live_midi_out(project: str, track: str = None, port: str = None, channel: int = None, audio: bool = None,
                   offset_ms: float = None, at: str = 'now', remove: bool = False) -> str:
     """Send a live track's notes out as MIDI to a port: a hardware synth, or a loopMIDI port (Windows) or the IAC

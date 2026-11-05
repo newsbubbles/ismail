@@ -39,6 +39,7 @@ from . import outputs as O
 from .midi_out import MidiOut
 from .midi_play import MidiPlay
 from .arp import LiveArps
+from .midifx import LiveMidiFx
 from .clock_in import ClockIn
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 from .trouble import Trouble
@@ -282,6 +283,7 @@ class Engine:
         self.midi = MidiPlay(self)      # played keys: MIDI inputs patched to instruments (live_midi)
         self.mout = MidiOut(self)       # tracks' notes and clock to MIDI outputs (live_midi_out, live_midi_clock)
         self.arp = LiveArps(self)       # arpeggiators on played keys (live_arp)
+        self.mfx = LiveMidiFx(self)     # MIDI effect chains on played keys, before the arp (live_midi_fx)
         self.cin = ClockIn(self)        # the set follows another app's MIDI clock (live_midi_clock_in)
         if self.n_workers > 0:
             import multiprocessing as mp
@@ -2959,6 +2961,12 @@ class Engine:
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
+    def cmd_midi_fx(self, source=None, chain=None, at=None, off=False):
+        try:
+            return self.mfx.cmd(source, chain, at, off)
+        except (ValueError, OSError) as e:
+            raise LiveError(str(e))
+
     def cmd_played(self, source=None, bars=8, fit=False, from_bar=None):
         try:
             return self.midi.played(source, bars, fit, from_bar)
@@ -2992,6 +3000,7 @@ class Engine:
                 lines.append("streams: " + ', '.join(f"{k} ({v} listening" + (f", {self.hub.dropped[k]} blocks dropped" if self.hub.dropped[k] else '') + ")" for k, v in sn.items()))
             if self.midi.patches:
                 lines += [self.midi.line(p) for p in self.midi.patches.values()]
+            lines += self.mfx.lines()
             lines += self.arp.lines()
             lines += self.mout.status_lines()
             lines += self.cin.status_lines()
@@ -3309,7 +3318,7 @@ def serve(engine, port=0, idle_min=None):
            'stream': engine.cmd_stream, 'map': engine.cmd_map, 'control': engine.cmd_control,
            'controls': engine.cmd_controls, 'onsets': engine.cmd_onsets,
            'midi': engine.cmd_midi, 'played': engine.cmd_played, 'take': engine.cmd_take,
-           'keys': engine.cmd_keys, 'arp': engine.cmd_arp,
+           'keys': engine.cmd_keys, 'arp': engine.cmd_arp, 'midi_fx': engine.cmd_midi_fx,
            'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
            'midi_clock_in': engine.cmd_midi_clock_in,
            'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo, 'rejects': engine.cmd_rejects}
