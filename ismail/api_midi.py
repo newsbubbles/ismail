@@ -24,7 +24,7 @@ def _is_kit(tr):
 
 @op()
 def midi_write(project: str, out: str = None, tracks: list = None, bars: list = None, markers: dict = None,
-               lanes: dict = None, mpe=None) -> str:
+               lanes: dict = None, mpe=None, programs: dict = None) -> str:
     """Write the song's notes to a Standard MIDI File (type 1) that Ableton, FL Studio, Logic, Reaper, MuseScore
     and any hardware sequencer open: one MIDI track per ismail track that has notes (named after it), the tempo,
     the meter, and markers. tracks: names to include (default every track with notes, muted ones too). bars:
@@ -41,9 +41,13 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     {lane: None} to leave one out; e.g. {'bend': {'range': 12}, 'mute': {'midi': 'cc:20', 'range': [0, 1]}}. The
     reply names lanes with no message and values clamped to a range. mpe: True (every melodic track) or a list of
     track names written as MPE: channel 1 the master, each note on its own member channel 2 to 16 with the track's
-    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth. Reach for it when
-    the person wants to export or write the song or a part as MIDI for their DAW, a hardware sequencer or an MPE
-    synth, its lanes as pitch bend and controllers."""
+    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth.
+    programs: a GM program change per track, 1 to 128 as a GM list numbers them (1 piano, 33 acoustic bass, 81
+    square lead), so a GM synth or a DAW's GM player picks the sound: {'bass': 33}, or a program per bar where the
+    sound changes, {'lead': {1: 81, 17: 82}}. With bars=, the program in force at the first bar goes at the file's
+    start. A track has no program of its own in ismail (its sound is its instrument), so a track left out has none.
+    Reach for it when the person wants to export or write the song or a part as MIDI for their DAW, a hardware
+    sequencer or an MPE synth, its lanes as pitch bend and controllers, its program changes."""
     P = _load(project)
     P.d = expand_project(P.d)                    # a track's arp goes out as its steps
     names = tracks or [n for n, t in P.d['tracks'].items() if t.get('notes')]
@@ -59,6 +63,7 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
         raise OpError(str(e))
     if mpe not in (None, False, True) and not (isinstance(mpe, (list, tuple)) and all(m in names for m in mpe)):
         raise OpError(f"mpe: True (every melodic track) or a list of the tracks written: {names}")
+    progs = _programs(programs, names)
     bpb, bpm = P.bpb, P.d['bpm']
     a, b = bars or [1, P.d['length_bars']]
     b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
@@ -81,6 +86,11 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
             chans[n] = ch
         part = {'name': n, 'channel': ch, 'notes': notes}
         lane_txt = _write_lanes(part, tr, lmaps[as_mpe], as_mpe, b0, b1, shift)
+        pg = _program_events(progs.get(n), ch, P, a, b, shift)
+        part['events'] = pg + part['events']             # first at their tick: the sound before the notes
+        if pg:
+            lane_txt = ["    program " + ', '.join(f"{data[1] + 1} at bar {a + int(t // bpb)}" for t, data in pg)
+                        ] + lane_txt
         parts.append(part)
         what = ''
         if _is_kit(tr):
@@ -111,6 +121,38 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
         tail.append(f"WARNING {len(chans)} melodic tracks share 15 channels: some share a channel, which is fine "
                     f"in a DAW (each MIDI track keeps its own notes) but not on one hardware synth")
     return '\n'.join([head] + lines + tail)
+
+
+def _programs(programs, names):
+    """midi_write's programs= -> {track: [(bar, program 1-128)]}, checked."""
+    if programs is None:
+        return {}
+    if not isinstance(programs, dict):
+        raise OpError("programs: {track: program 1-128} or {track: {bar: program}}, e.g. {'bass': 33, 'lead': {1: 81, "
+                      "17: 82}}")
+    out = {}
+    for n, v in programs.items():
+        if n not in names:
+            raise OpError(f"programs: {n!r} is not one of the tracks written: {names}")
+        try:
+            rows = sorted((int(b), int(p)) for b, p in (v.items() if isinstance(v, dict) else [(1, v)]))
+            assert rows and all(b >= 1 and 1 <= p <= 128 for b, p in rows)
+        except (TypeError, ValueError, AssertionError):
+            raise OpError(f"programs[{n!r}]: a program 1 to 128 (as a GM list numbers them; the file holds 0 to 127), "
+                          f"or {{bar: program}} from bar 1, e.g. {{1: 81, 17: 82}}")
+        out[n] = rows
+    return out
+
+
+def _program_events(rows, ch, P, a, b, shift):
+    """A track's program changes in the bars written [a, b], as part events: the one in force at bar a at the
+    file's start, then each change inside the bars at its bar line."""
+    if not rows:
+        return []
+    first = [p for bar, p in rows if bar <= a]
+    ev = [(0.0, bytes([0xC0 | ch, first[-1] - 1]))] if first else []
+    ev += [(P.bar_to_beat(bar) - shift, bytes([0xC0 | ch, p - 1])) for bar, p in rows if a < bar <= b]
+    return ev
 
 
 def _lane_desc(lane, kind, num, lo, hi):
@@ -326,7 +368,8 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
     ismail's lanes are per track. Lanes replace the target's points over the span they cover; quantize moves notes
     only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
-    import into a song, its pitch bend, mod wheel, other controllers and MPE included."""
+    import into a song, its pitch bend, mod wheel, other controllers and MPE included. The listing names each
+    track's GM program (1 to 128); into= writes notes and lanes, not programs (a track's sound is its instrument)."""
     path = os.path.abspath(file)
     if not os.path.exists(path):
         raise OpError(f"no file {path}")
@@ -361,9 +404,11 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
                 continue
             chs = sorted({n[4] + 1 for n in ns})
             lo, hi = min(n[1] for n in ns), max(n[1] for n in ns)
+            pg = sorted({p + 1 for p in t['programs'].values()})
             L.append(f"  #{t['index']} {t['name'] or '(no name)'}: {len(ns)} notes, channel {'/'.join(map(str, chs))}"
                      f"{' (drums)' if chs == [10] else ''}, {midi_to_name(lo)}-{midi_to_name(hi)}, bars "
-                     f"{fbar(ns[0][0])}-{fbar(max(n[0] for n in ns))}" + ctl_txt)
+                     f"{fbar(ns[0][0])}-{fbar(max(n[0] for n in ns))}"
+                     + (f", GM program {'/'.join(map(str, pg))}" if pg else '') + ctl_txt)
         L.append("write parts with into={'<name>' or '#<index>' or 'ch<n>': '<ismail track>'}, bar=..., quantize=...; "
                  "their bend and controllers become lanes (lanes=... maps them)")
         return '\n'.join(L)

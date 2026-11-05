@@ -12,8 +12,8 @@ model in the loop, and every move is logged with the bar it happened at, so a ta
 automation points. A MIDI controller's CC, 14-bit CC pair, pitch bend, channel pressure or a pad's note can be the
 source of a map (live_map(midi=...)), in modes absolute, pickup, relative and toggle: Controls.midi_in turns its
 messages into moves. A map can fire an action instead of moving a param (live_map(action=...)): each press of a pad
-or a button then queues a scene (a batch of clips), changes the tempo or starts a deck transition, the same commands
-live_queue, live_tempo and live_transition send.
+or a button, or a program change, then queues a scene (a batch of clips), changes the tempo or starts a deck
+transition, the same commands live_queue, live_tempo and live_transition send.
 
 The default output: a speaker that connects after the engine started is not in this process's device list, so the
 current default is asked of a fresh process.
@@ -166,7 +166,8 @@ def unscale(x, rng, curve):
 
 # ------------------------------------------------------------------ MIDI as a control source (live_map(midi=...))
 
-MIDI_KINDS = "'cc:<0-127>', 'cc14:<0-31>' (MSB n with LSB n+32), 'bend', 'pressure', or 'note:<36 or C2>'"
+MIDI_KINDS = ("'cc:<0-127>', 'cc14:<0-31>' (MSB n with LSB n+32), 'bend', 'pressure', 'note:<36 or C2>', or "
+              "'program:<1-128>'")
 MODES = ('absolute', 'pickup', 'relative', 'relative64', 'toggle', 'trigger')
 # what a map may fire (live_map(action=...)): the live op it mirrors -> the arguments it takes, as that op takes them
 ACTIONS = {'live_queue': ('clips', 'section', 'cancel_section', 'cancel_at'),
@@ -183,15 +184,16 @@ def parse_midi(midi, channel=None, mode='absolute'):
     kind, _, arg = str(midi).strip().partition(':')
     kind, arg = kind.lower(), arg.strip()
     num = lsb = None
-    if kind in ('cc', 'cc14', 'note'):
+    if kind in ('cc', 'cc14', 'note', 'program'):
         try:
             num = pitch_to_midi(arg) if kind == 'note' else int(arg)
         except (ValueError, NotationError):
             num = None
-        top = 31 if kind == 'cc14' else 127
-        if num is None or not 0 <= num <= top:
-            raise ValueError(f"midi {midi!r}: {kind}:<0-{top}{' or a name like C2' if kind == 'note' else ''}>; "
-                             f"sources: {MIDI_KINDS}")
+        bot, top = (1, 128) if kind == 'program' else (0, 31 if kind == 'cc14' else 127)
+        if num is None or not bot <= num <= top:
+            raise ValueError(f"midi {midi!r}: {kind}:<{bot}-{top}{' or a name like C2' if kind == 'note' else ''}>"
+                             + (", numbered as a GM list or the controller's screen shows them (the first is 1)"
+                                if kind == 'program' else '') + f"; sources: {MIDI_KINDS}")
         if kind == 'cc14':
             lsb = num + 32
     elif kind not in ('bend', 'pressure') or arg:
@@ -202,15 +204,18 @@ def parse_midi(midi, channel=None, mode='absolute'):
     if mode in ('relative', 'relative64') and kind != 'cc':
         raise ValueError(f"mode {mode!r} reads an endless encoder's steps on a 'cc:<n>'; {kind} sends positions: "
                          f"mode 'absolute' or 'pickup'")
-    if mode in ('toggle', 'trigger') and kind not in ('cc', 'note'):
+    if mode in ('toggle', 'trigger') and kind not in ('cc', 'note', 'program'):
         raise ValueError(f"mode {mode!r} {'flips' if mode == 'toggle' else 'fires'} on a button press: a 'note:<n>' "
-                         f"pad or a 'cc:<n>' button")
+                         f"pad, a 'cc:<n>' button or a 'program:<n>'")
+    if kind == 'program' and mode not in ('toggle', 'trigger'):
+        raise ValueError("a 'program:<n>' is one message, with no release: it fires an action (action=...) or flips "
+                         "a param (mode='toggle')")
     if kind == 'note' and mode not in ('absolute', 'toggle', 'trigger'):
         raise ValueError(f"a 'note:<n>' pad is 'absolute' (held = 1, released = 0) or 'toggle' (each press flips), "
                          f"not {mode!r}")
     if channel is not None and not 0 <= int(channel) <= 16:
         raise ValueError("channel: 1 to 16, or 0 for every channel (the default)")
-    text = {'cc': f"cc:{num}", 'cc14': f"cc14:{num}", 'note': f"note:{num}"}.get(kind, kind)
+    text = f"{kind}:{num}" if num is not None else kind
     return {'kind': kind, 'num': num, 'lsb': lsb, 'channel': int(channel) if channel else None, 'mode': mode,
             'text': text}
 
@@ -244,9 +249,10 @@ def parse_action(action):
 
 
 def midi_text(st, d1):
-    """What a message is, in live_map's words: 'cc:74', 'note:36', 'bend', 'pressure'; None for the rest."""
+    """What a message is, in live_map's words: 'cc:74', 'note:36', 'bend', 'pressure', 'program:5' (numbered from
+    1); None for the rest."""
     return {0xB0: f"cc:{d1}", 0x90: f"note:{d1}", 0x80: f"note:{d1}", 0xE0: 'bend',
-            0xD0: 'pressure'}.get(st & 0xF0)
+            0xD0: 'pressure', 0xC0: f"program:{d1 + 1}"}.get(st & 0xF0)
 
 
 class Controls:
@@ -360,6 +366,9 @@ class Controls:
                     v = 1.0 if on else None                # fires on the press; the release does nothing
                 else:
                     v = 1.0 if on else 0.0
+            elif b['kind'] == 'program' and kind == 0xC0 and d1 + 1 == b['num']:
+                hit = True
+                v = 1.0 if b['mode'] == 'trigger' else self._flip(m, now)
             if v is None or (b['mode'] == 'pickup' and not self._caught(m, v, now)):
                 continue
             s['applied'] = v

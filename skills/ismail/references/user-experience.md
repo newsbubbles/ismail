@@ -85,6 +85,10 @@ Tell them at the right moment, once, without being asked:
   carries and the values clamped to a range.
 - **MPE:** `mpe=True` (every melodic track) or `mpe=['lead']`: channel 1 the master, each note on its own channel
   2 to 16, bend +-48, `level` as per-note pressure. Tell them to set their synth's MPE bend range to 48.
+- **GM programs:** `programs={'bass': 33}` puts a program change on a track's channel (1 to 128 as a GM list
+  numbers them), so a GM synth or a DAW's GM player starts on that sound; `{'lead': {1: 81, 17: 82}}` changes it on
+  bar 17. ismail's tracks have no program of their own (a sound is an instrument), so it is only there when you
+  give it. `midi_read`'s listing names a file's programs; `into=` does not keep them.
 - **In:** `midi_read(project, file)` without `into` only lists the file (tempo, meter, markers, each track with its
   channel, notes, range, bars and expression messages). Ask which parts they want, `track_add` each target with
   the sound to keep, then `midi_read(project, file, into={'#1': 'lead', 'ch10': 'drums'})` (a file track by name,

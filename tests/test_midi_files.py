@@ -108,3 +108,22 @@ def test_errors_point_forward(tmp_path):
     (tmp_path / 'bad.mid').write_bytes(b'nope')
     with pytest.raises(api.OpError, match='not a MIDI file'):
         OPS['midi_read'](p, str(tmp_path / 'bad.mid'))
+
+
+def test_gm_programs_go_out_per_track_and_per_bar_and_list_back(tmp_path):
+    p = _song(str(tmp_path / 'song'))
+    path = str(tmp_path / 'g.mid')
+    out = OPS['midi_write'](p, out=path, programs={'bass': 33, 'lead': {1: 81, 5: 82}})
+    assert 'program 33 at bar 1' in out and 'program 81 at bar 1, 82 at bar 5' in out
+    by = {t['name']: t for t in MF.read(path)['tracks'][1:]}
+    ch = next(iter(by['lead']['channels']))
+    assert by['lead']['program_changes'] == [(0.0, ch, 80), (16.0, ch, 81)]     # the file holds 0 to 127
+    assert by['bass']['program_changes'][0][2] == 32 and by['drums']['program_changes'] == []
+    assert 'GM program 33' in OPS['midi_read'](p, path)
+    OPS['midi_write'](p, out=path, tracks=['bass'], bars=[6, 8], programs={'bass': {1: 81, 5: 82, 7: 90}})
+    bass = MF.read(path)['tracks'][1]
+    assert [(b, pg) for b, _, pg in bass['program_changes']] == [(0.0, 81), (4.0, 89)]   # in force at bar 6, then 7
+    with pytest.raises(api.OpError, match=r"programs\['bass'\]: a program 1 to 128"):
+        OPS['midi_write'](p, programs={'bass': 0})
+    with pytest.raises(api.OpError, match="programs: 'pads' is not one of the tracks written"):
+        OPS['midi_write'](p, programs={'pads': 1})

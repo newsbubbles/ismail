@@ -308,3 +308,26 @@ def test_a_change_queued_now_never_moves_pulses_already_planned(tmp_path):
     pulses = np.array([t for t, b in msgs(FakePort.opened['Test Loop'], MS.PULSE)])
     g = np.diff(pulses)
     assert np.all(g > 0) and np.all((np.abs(g - 60 / 120 / 24) < 1.5 / SR) | (np.abs(g - 60 / 90 / 24) < 1.5 / SR))
+
+
+def test_a_program_change_goes_out_before_the_notes_it_is_for(eng):
+    eng.cmd_track('lead', instrument='preset:pluck')
+    r = eng.cmd_midi_out(track='lead', port='Test Synth', audio=False, program=81, at='bar:2')
+    assert 'lead: program 81 on channel 1 at bar 2' in r
+    eng.cmd_queue([{'track': 'lead', 'notes': '0 C4 1 100', 'beats': 4, 'loop': 2, 'at': 'bar:2'}])
+    run(eng, 2.5)
+    port = FakePort.opened['Test Synth']
+    (t_pc, b_pc), = msgs(port, 0xC0)
+    t_on = msgs(port, 0x90)[0][0]
+    assert b_pc == bytes([0xC0, 80]) and t_on - 0.002 < t_pc < t_on      # just before the first note
+    assert 'program 81 |' in eng.cmd_status()
+    r = eng.cmd_midi_out(track='lead', program=82, at='bar:3')           # a route already there: at its `at`
+    assert 'program 82 on channel 1 at bar 3' in r
+    run(eng, 2.5)
+    (t2, b2), = msgs(port, 0xC0)[1:]
+    assert b2 == bytes([0xC0, 81]) and t2 == pytest.approx(speaker_time(eng, 8) - 0.001, abs=1e-9)
+    eng.cmd_midi_out(track='lead', port='Test Loop')                     # another port gets the same sound
+    run(eng, 0.5)
+    assert [b for _, b in msgs(FakePort.opened['Test Loop'], 0xC0)] == [bytes([0xC0, 81])]
+    with pytest.raises(LiveError, match='program: 1 to 128'):
+        eng.cmd_midi_out(track='lead', program=0)

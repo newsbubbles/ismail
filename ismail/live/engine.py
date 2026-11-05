@@ -2990,9 +2990,10 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
-    def cmd_midi_out(self, track=None, port=None, channel=None, audio=None, offset_ms=None, at='now', remove=False):
+    def cmd_midi_out(self, track=None, port=None, channel=None, audio=None, offset_ms=None, at='now', remove=False,
+                     program=None):
         try:
-            return self.mout.route(track, port, channel, audio, offset_ms, at, remove)
+            return self.mout.route(track, port, channel, audio, offset_ms, at, remove, program=program)
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 

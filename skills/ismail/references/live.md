@@ -612,7 +612,9 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   `live_map(control='tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log', midi='cc:74',
   source='knob box', channel=1)`. Sources: `'cc:<n>'` (a knob or fader, 0..127), `'cc14:<n>'` (a 14-bit pair, MSB
   n 0..31 and LSB n+32), `'bend'` (centre = the middle of the range), `'pressure'` (channel aftertouch),
-  `'note:<n>'` (a pad: held = the range's top, released = its bottom). `source` is optional when one input is
+  `'note:<n>'` (a pad: held = the range's top, released = its bottom), `'program:<n>'` (a program change, 1 to 128
+  as a GM list or the controller's screen numbers it: a footswitch, a preset button; it fires an action or, with
+  `mode='toggle'`, flips a param). `source` is optional when one input is
   plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
   give `[value at 0, value at the top]`; the curve is `'linear'` (default), `'log'` (Hz, ratios: both ends above 0)
   or `'switch'` (`'raw'` is refused for MIDI). The range, curve and `at` work as for any control, and every move is
@@ -651,8 +653,9 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        `live_status` says `(waiting: the knob is at 0.16, the param at 1.00; it takes over there)`: ask them to
        turn it all the way up once.
   - **Pads and buttons as triggers.** A map with `action=` instead of `target` and `param` fires a command on each
-    press (a pad's note-on, or a `'cc:<n>'` button reaching 64; the release does nothing), with no agent in the
-    loop. The action is data, with the arguments of the op it mirrors:
+    press (a pad's note-on, a `'cc:<n>'` button reaching 64, or a `'program:<n>'` arriving; the release does
+    nothing), with no agent in the loop. A footswitch that steps through programs fires one action per program:
+    map `program:1`, `program:2` ... each to its scene. The action is data, with the arguments of the op it mirrors:
     `{'op': 'live_queue', 'clips': [...], 'section': 'drop'}` (a scene or a part: its clips and stops queue on each
     press, each at its own `at`, default the next bar; `cancel_section` cuts the last chapter over),
     `{'op': 'live_tempo', 'bpm': 128, 'at': 'next_bar'}`, or `{'op': 'live_transition', 'to': 'B', 'bars': 16}`.
@@ -667,8 +670,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
        engine's news) and is logged by bar (live_controls)`.
     2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
-  - Not yet: program change, polyphonic aftertouch and MPE as controls, a per-map step size or acceleration for
-    encoders, and a curve beyond linear, log and switch.
+  - Not yet: polyphonic aftertouch and MPE as controls, a per-map step size or acceleration for encoders, and a
+    curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 
@@ -849,6 +852,10 @@ sound.
   routed part together and ask whether the synth is early or late; `offset_ms=` (per port, -500 to 2000) moves
   that port's messages later, or earlier when negative. Ask in their words ("does the bass sit on the kick, or
   just after it?"), change it in steps of 10 to 20 ms.
+- **Which sound the synth plays.** `program=33` sends a program change on the route's channel (1 to 128 as a GM
+  list or the synth's screen numbers them: 1 piano, 33 acoustic bass, 81 square lead in GM): with a new route at
+  its start, on a route already there at `at` (`at='next_bar'` for a sound change on the bar line), just before
+  the notes of that beat. A port change sends it to the new port too; `live_status` shows it.
 - `remove=True` stops the route: every held note gets its note-off and All Notes Off on its channel, and the
   track's audio comes back as its notes render again (a few seconds). A stop and the set's end do the same.
 - **Clock.** `live_midi_clock(port='ismail out')` sends 24 pulses per beat at the set's tempo at once (the other

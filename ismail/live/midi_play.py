@@ -273,7 +273,8 @@ class MidiPlay:
         if what is None or (st & 0xF0) == 0x80 or ((st & 0xF0) == 0x90 and not d2):
             return
         k = (name, what, (st & 0x0F) + 1)
-        val = ((d2 << 7) | d1) - 8192 if (st & 0xF0) == 0xE0 else d1 if (st & 0xF0) == 0xD0 else d2
+        kind = st & 0xF0
+        val = ((d2 << 7) | d1) - 8192 if kind == 0xE0 else d1 if kind == 0xD0 else d1 + 1 if kind == 0xC0 else d2
         with self.heard_lock:
             h = self.heard.pop(k, [0, 0])
             self.heard[k] = [val, h[1] + 1]

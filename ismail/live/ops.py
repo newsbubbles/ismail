@@ -698,8 +698,10 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     not for MIDI). at: when a move lands for effect and deck params ('now', 'next_bar'). Every move is logged by bar:
     live_controls reads them back as automation. remove=True unmaps.
     MIDI as the source: midi='cc:<0-127>' (a knob or fader, 0..127 as 0..1), 'cc14:<0-31>' (a 14-bit pair, MSB n
-    and LSB n+32), 'bend' (the wheel; centre = 0.5), 'pressure' (channel aftertouch) or 'note:<36 or C2>' (a pad:
-    held = 1, released = 0). source: the MIDI input (midi_sources; optional when there is one), opened by the map
+    and LSB n+32), 'bend' (the wheel; centre = 0.5), 'pressure' (channel aftertouch), 'note:<36 or C2>' (a pad:
+    held = 1, released = 0) or 'program:<1-128>' (a program change, numbered from 1 as a GM list or the
+    controller's screen shows it: a footswitch or a preset button; it fires an action, or with mode='toggle' flips
+    a param). source: the MIDI input (midi_sources; optional when there is one), opened by the map
     even when no keys are patched; channel: 1 to 16 (default every channel). mode: 'absolute' (the param jumps to the
     knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
     stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
@@ -708,9 +710,9 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     or more after the last with no release). Several maps may share one MIDI control (one
     knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
     is not played or logged by live_midi. Not sure what a knob sends? live_controls(source=<input>) listens.
-    A pad or a button as a trigger: action= instead of target and param fires a command on each press (a note-on, or
-    a 'cc:<n>' button reaching 64; the release does nothing), with no agent in the loop. The actions, as data with
-    the arguments of the op they mirror: {'op': 'live_queue', 'clips': [...], 'section': ..., 'cancel_section': ...}
+    A pad or a button as a trigger: action= instead of target and param fires a command on each press (a note-on, a
+    'cc:<n>' button reaching 64, or that program change; the release does nothing), with no agent in the loop. The
+    actions, as data with the arguments of the op they mirror: {'op': 'live_queue', 'clips': [...], 'section': ..., 'cancel_section': ...}
     (a scene or a part: the clips, stops and section cut-over queue on each press, each clip at its own 'at',
     default the next bar), {'op': 'live_tempo', 'bpm': 128, 'at': 'next_bar'}, {'op': 'live_transition', 'to':
     'B', 'bars': 16, 'style': 'blend'}. The tracks and decks it names are checked when it is mapped; the reply of
@@ -836,7 +838,7 @@ def live_arp(project: str, source: str = None, pattern=None, degrees: list = Non
 
 @op()
 def live_midi_out(project: str, track: str = None, port: str = None, channel: int = None, audio: bool = None,
-                  offset_ms: float = None, at: str = 'now', remove: bool = False) -> str:
+                  offset_ms: float = None, at: str = 'now', remove: bool = False, program: int = None) -> str:
     """Send a live track's notes out as MIDI to a port: a hardware synth, or a loopMIDI port (Windows) or the IAC
     bus (Mac) into Ableton, FL Studio or any DAW, whose instrument then plays the part. Reach for it when the person
     wants a set's part played by their own synth or plugin, or ismail's notes in their DAW while the set plays.
@@ -849,9 +851,13 @@ def live_midi_out(project: str, track: str = None, port: str = None, channel: in
     earlier when negative, to meet a synth's or a DAW's own delay (-500 to 2000; set it by ear against the kick).
     Call again to change channel, audio or offset; another port moves it. remove=True stops it: each held note gets
     its note-off, then All Notes Off (CC 123) on its channel. A stop or the set's end does the same. With no track:
-    the outputs, the routes and the clock. Clock out: live_midi_clock."""
+    the outputs, the routes and the clock. Clock out: live_midi_clock.
+    program: a program change on the route's channel, 1 to 128 as a GM list or the synth's screen numbers them
+    (1 piano, 33 acoustic bass, 81 square lead in GM), so the synth picks that sound: on a new route at its start,
+    on a route already there at `at` (a sound change on the next bar line), just before the notes of that beat. A
+    port change sends it again to the new port."""
     return _call(project, 'midi_out', track=track, port=port, channel=channel, audio=audio, offset_ms=offset_ms,
-                 at=at, remove=remove)
+                 at=at, remove=remove, **({'program': program} if program is not None else {}))
 
 
 @op()

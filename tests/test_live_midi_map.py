@@ -497,7 +497,7 @@ def test_an_action_map_says_what_is_wrong_and_keeps_the_old_map(eng):
         eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 900}, midi='note:36', source='pad')
     with pytest.raises(LiveError, match='deck'):
         eng.cmd_map('x', action={'op': 'live_transition', 'to': 'Z'}, midi='note:36', source='pad')
-    with pytest.raises(LiveError, match="fires on a button press: a 'note:<n>' pad or a 'cc:<n>' button"):
+    with pytest.raises(LiveError, match="fires on a button press: a 'note:<n>' pad, a 'cc:<n>' button or a 'program"):
         eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 100}, midi='bend', source='knob')
     with pytest.raises(LiveError, match="target, param, range and at belong to a map that moves a param"):
         eng.cmd_map('x', target='lead', action={'op': 'live_tempo', 'bpm': 100}, midi='note:36', source='pad')
@@ -520,3 +520,26 @@ def test_a_press_that_fails_says_so_in_the_news_once(eng):
     send('pad grid', 0x90, 40, 100)
     news = [n for n in eng.drain_news() if n.startswith('control go')]
     assert len(news) == 1 and "no live track 'pad'" in news[0] and 'live_map it again' in news[0]
+
+
+def test_a_program_change_fires_an_action_or_flips_a_param(eng):
+    eng.cmd_midi(source='pad grid', track='pad')
+    send('pad grid', 0xC0, 4, 0)                               # program 5, nothing mapped: heard, numbered from 1
+    assert "'pad grid' program:5 ch1: last 5, 1 messages" in eng.cmd_controls()
+    r = eng.cmd_map('verse', action={'op': 'live_tempo', 'bpm': 100}, midi='program:5', source='pad grid')
+    assert "fires live_tempo (100 BPM) <- MIDI program:5, any channel, on 'pad grid', trigger" in r
+    assert 'program:5' not in eng.cmd_controls()
+    send('pad grid', 0xC0, 5, 0)                               # program 6: not this map's
+    assert not any('fired' in n for n in eng.drain_news())
+    send('pad grid', 0xC0, 4, 0)
+    assert any(n.startswith('verse (midi program:5 ch1) fired live_tempo') for n in eng.drain_news())
+    eng.cmd_map('mute', target='lead', param='volume_db', range=[0, -120], curve='switch', midi='program:6',
+                source='pad grid', mode='toggle')
+    send('pad grid', 0xC0, 5, 0)
+    assert eng.tracks['lead']['volume_db'] == -120
+    send('pad grid', 0xC0, 5, 0)
+    assert eng.tracks['lead']['volume_db'] == 0
+    with pytest.raises(LiveError, match=r"program:<1-128>, numbered as a GM list"):
+        eng.cmd_map('x', action={'op': 'live_tempo', 'bpm': 100}, midi='program:0', source='pad grid')
+    with pytest.raises(LiveError, match="a 'program:<n>' is one message, with no release"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='program:3', source='pad grid')

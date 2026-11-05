@@ -9,6 +9,12 @@
   arguments of the op it mirrors: a scene or a part (a batch of clips, stops, a section cut-over), a tempo change, a
   deck transition. What it names is checked when it is mapped; each press's reply comes in the engine's news and
   `live_controls` lists the presses by bar. A bound pad does not play. `live_control(value=1)` fires one too.
+- Program change: `live_map(midi='program:<1-128>', action=... or mode='toggle')` takes a program change (a
+  footswitch, a preset button) as a trigger or a toggle, numbered from 1 as GM lists are; an unmapped one is listed
+  by `live_controls`. `live_midi_out(..., program=<1-128>)` sends one on the route's channel, at the route's start or
+  at `at`, just before that beat's notes (and again to a new port). `midi_write(programs={'bass': 33, 'lead': {1:
+  81, 17: 82}})` writes GM program changes per track and per bar (none before: a track has no program of its own);
+  `midi_read`'s listing names a file's programs.
 
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 
