@@ -106,7 +106,8 @@ def read(path):
     'poly:<pitch>', value)], 'bend_range': {ch: semitones, the last set}, 'bend_ranges': {ch: [(beat, semitones)]},
     'mpe': member channels or None (an MPE configuration with 0 members turns MPE off), 'mpe_master': the
     configuring zone's master channel (0 lower, 15 upper) or None (both from the last configuration), 'mpe_zones':
-    {master channel: members} for every zone configured on channel 1 or 16, as midilanes.mcm keeps them}]}.
+    {master channel: members} for every zone configured on channel 1 or 16, as midilanes.mcm keeps them (after the
+    last configuration), 'mpe_history': [(beat, master channel, members)], each configuration where it comes}]}.
     Beats are quarter notes from the start of the file. A note-on with no note-off is held to the track's end. Bend
     values are 0..16383 (8192 the centre), the rest 0..127; RPN and data entry messages are read into bend_range
     and bend_ranges (RPN 0) and mpe (RPN 6, the MPE configuration) and not listed in ctl."""
@@ -130,7 +131,8 @@ def read(path):
         i = end
         tick, status, held = 0, 0, {}
         tr = {'index': k, 'name': '', 'channels': set(), 'programs': {}, 'program_changes': [], 'notes': [], 'ctl': [],
-              'bend_range': {}, 'bend_ranges': {}, 'mpe': None, 'mpe_master': None, 'mpe_zones': {}}
+              'bend_range': {}, 'bend_ranges': {}, 'mpe': None, 'mpe_master': None, 'mpe_zones': {},
+              'mpe_history': []}
         rp = {}                                              # channel -> [RPN msb, lsb] selected
         while j < end:
             dt, j = _read_vlq(b, j)
@@ -197,6 +199,8 @@ def read(path):
                 elif d[0] == 6 and sel == [0, 6]:
                     tr['mpe'], tr['mpe_master'] = (d[1], ch) if d[1] else (None, None)
                     tr['mpe_zones'] = ML.mcm(tr['mpe_zones'], ch, d[1])
+                    if ch in (ML.MPE_MASTER, ML.MPE_UPPER):
+                        tr['mpe_history'].append((tick / div, ch, d[1]))
                 elif d[0] not in (6, 38):
                     tr['ctl'].append((tick / div, ch, f"cc:{d[0]}", d[1]))
         for (ch, p), ons in held.items():                    # never released: held to the track's end

@@ -204,9 +204,11 @@ Find any tool by what you need or by role with `ops_find`.
   as MIDI: `bend` as pitch bend (+-2 semitones, said with RPN 0; a file's own RPN range is read), `vib` as cc:1,
   `level` as cc:11, `breath` as cc:2, any other lane by a map the agent gives
   (`lanes={'mute': {'midi': 'cc:20', 'range': [0, 1]}}`). `midi_write(mpe=True)` puts each note on its own channel
-  for an MPE synth (`mpe='upper'` the upper zone, `{'bass': 'lower', 'lead': 'upper'}` a split synth);
-  `midi_read` reads an MPE part (RPN 6 in the file, lower or upper zone, or `mpe=True`) per note (bend +-48, pressure
-  as level), and since lanes are per track the lane follows the newest note still sounding. Live MIDI from a
+  for an MPE synth (`mpe='upper'` the upper zone, `{'bass': 'lower', 'lead': 'upper'}` a split synth); the other
+  tracks get channels outside the zones (a kit keeps 10, and a zone shrinks to make room, as the reply says);
+  `midi_read` reads an MPE part (RPN 6 in the file, lower or upper zone, as configured at its first note, or
+  `mpe=True`) per note (bend +-48, pressure as level), and since lanes are per track the lane follows the newest
+  note still sounding. A part on a zone's master channel, or outside every zone, reads as a plain part. Live MIDI from a
   keyboard: `live_midi` (Playing live; its bend, pressure, mod wheel and MPE drive the playing voice's lanes);
   `live_played(into='<track>', bar=...)` records what was played into a song track, as it sounded or snapped to 16ths
   (`fit=True`), and `undo()` takes it back. Keys played through `live_midi_fx` come as the notes its chain made,

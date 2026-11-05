@@ -248,15 +248,20 @@ def voice_lanes(inst, root=None):
     return set()
 
 
+def is_true(mpe):
+    """mpe=True (or 1): MPE, in the zones the controller or the file configures, else the lower zone."""
+    return mpe is True or (type(mpe) is int and mpe == 1)
+
+
 def mpe_zone(mpe):
     """mpe= as the ops take it -> None (not given), {} (off) or {master channel: member count} (channels from 0):
     True or 'lower' the lower zone (master channel 1, members 2 to 16), 'upper' the upper zone (master channel 16,
     members 15 down to 1). A LaneMapError says what it takes."""
     if mpe is None:
         return None
-    if mpe is False:
+    if mpe is False or (type(mpe) is int and mpe == 0):
         return {}
-    if mpe is True:
+    if is_true(mpe):
         return {MPE_MASTER: 15}
     s = str(mpe).strip().lower()
     if s in ZONES:
@@ -301,12 +306,24 @@ def zone_of(zones, ch):
 
 
 def pick_zone(zones, notes):
-    """The zone a part is read in: the only one configured, or with both the one whose channels hold most of its
-    notes ([(beat, pitch, dur, vel, ch)]). (master, member channels) or None."""
+    """The zone a part is read in: the one whose member channels hold most of its notes ([(beat, pitch, dur, vel,
+    ch)]), (master, member channels); None when no note is on a member channel (a part on a zone's master channel, or
+    outside every zone, is a plain part)."""
     if not zones:
         return None
-    best = max(sorted(zones), key=lambda m: sum(1 for n in notes if zone_of({m: zones[m]}, n[4]) is not None))
-    return best, zone_members(best, zones[best])
+    count = {m: sum(1 for n in notes if n[4] in zone_members(m, zones[m])) for m in sorted(zones)}
+    best = max(count, key=count.get)
+    return (best, zone_members(best, zones[best])) if count[best] else None
+
+
+def zones_at(history, beat):
+    """The zones in force at a beat: every configuration [(beat, master, members)] at or before it, in time order
+    (a format 1 file may keep them in several tracks)."""
+    z = {}
+    for b, master, n in sorted(history, key=lambda h: h[0]):
+        if b <= beat + 1e-9:
+            z = mcm(z, master, n)
+    return z
 
 
 def _span(chs):

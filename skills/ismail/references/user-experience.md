@@ -87,7 +87,10 @@ Tell them at the right moment, once, without being asked:
   2 to 16, bend +-48, `level` as per-note pressure. Tell them to set their synth's MPE bend range to 48.
   `mpe='upper'` writes the upper zone (channel 16 the master, notes from channel 15 down), for a synth set to it.
   A split synth (one sound low, one high) takes `mpe={'bass': 'lower', 'lead': 'upper'}`: with both zones in the
-  file each has 7 channels (2-8 and 9-15), and each track's MPE configuration says so.
+  file each has 7 channels (2-8 and 9-15), and each track's MPE configuration says so. Tracks not in MPE get
+  channels outside the zones: a kit keeps channel 10, and a zone gives up members (down to 4) to leave each other
+  track a channel of its own. The reply says so (`MPE lower zone: 14 members, not 15, so bass gets a channel
+  outside it`): tell them their synth's zone is that size.
 - **GM programs:** `programs={'bass': 33}` puts a program change on a track's channel (1 to 128 as a GM list
   numbers them), so a GM synth or a DAW's GM player starts on that sound; `{'lead': {1: 81, 17: 82}}` changes it on
   bar 17. ismail's tracks have no program of their own (a sound is an instrument), so it is only there when you
