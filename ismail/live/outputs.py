@@ -178,12 +178,27 @@ ACTIONS = {'live_queue': ('clips', 'section', 'cancel_section', 'cancel_at'),
            'live_transition': ('to', 'from_deck', 'at', 'bars', 'style', 'stop_from')}
 PICKUP_TOL = 2 / 127        # pickup takes over when the knob comes this close to the param, or crosses it
 REL_STEP = 1 / 128          # one tick of a relative encoder: 128 ticks cover the range
+ACCEL_TICK_S = 0.1          # encoder acceleration: ticks this far apart (10 a second) or slower move one step each
+ACCEL_TRUE = 4              # accel=True: up to 4 steps a tick
+ACCEL_MAX = 16
 TOGGLE_REPEAT_S = 0.1       # a toggle button's 64-or-more repeated this long after the last, with no release, is a new press
 
 
-def parse_midi(midi, channel=None, mode='absolute', step=None):
-    """live_map's midi= text -> {'kind', 'num', 'lsb', 'channel', 'mode', 'text', 'step'}, checked. step: a relative
-    encoder's tick as a fraction of the range (default REL_STEP)."""
+def accel_factor(gap_s, ticks, accel):
+    """How many steps one tick of a relative encoder moves: 1 for a slow turn, up to accel for a fast one. gap_s:
+    seconds since the encoder's last message the same way (None: the first, or it turned back); ticks: this
+    message's ticks. A tick every ACCEL_TICK_S or slower is 1 step; faster, the steps grow with the speed (twice as
+    fast, twice as far), up to accel. accel None: always 1."""
+    if not accel or gap_s is None:
+        return 1.0
+    per = max(float(gap_s), 1e-4) / max(1, abs(ticks))
+    return min(float(accel), max(1.0, ACCEL_TICK_S / per))
+
+
+def parse_midi(midi, channel=None, mode='absolute', step=None, accel=None):
+    """live_map's midi= text -> {'kind', 'num', 'lsb', 'channel', 'mode', 'text', 'step', 'accel'}, checked. step: a
+    relative encoder's tick as a fraction of the range (default REL_STEP); accel: the most steps a fast tick moves
+    (True = ACCEL_TRUE; None or False: off)."""
     from ..notation import NotationError, pitch_to_midi
     kind, _, arg = str(midi).strip().partition(':')
     kind, arg = kind.lower(), arg.strip()
@@ -247,9 +262,22 @@ def parse_midi(midi, channel=None, mode='absolute', step=None):
         except (TypeError, ValueError, AssertionError):
             raise ValueError(f"step {step!r}: a fraction of the range per tick, above 0 and at most 1 (default "
                              f"1/128 = {REL_STEP:g}: 128 ticks end to end; 1/32 moves 4 times as far)")
+    if accel is False:
+        accel = None
+    if accel is not None:
+        if mode not in ('relative', 'relative64'):
+            raise ValueError(f"accel makes a fast turn of an endless encoder move further (mode 'relative' or "
+                             f"'relative64'); mode {mode!r} sends positions: leave accel out")
+        try:
+            a = float(ACCEL_TRUE if accel is True else accel)
+            assert 1 < a <= ACCEL_MAX
+            accel = a
+        except (TypeError, ValueError, AssertionError):
+            raise ValueError(f"accel {accel!r}: the most steps one tick moves when turned fast, above 1 and at most "
+                             f"{ACCEL_MAX} (True = {ACCEL_TRUE}), or leave it out for every tick the same")
     text = f"{kind}:{num}" if num is not None else f"mpe:{arg}" if kind == 'mpe' else kind
     return {'kind': kind, 'num': arg if kind == 'mpe' else num, 'lsb': lsb,
-            'channel': int(channel) if channel else None, 'mode': mode, 'text': text, 'step': step}
+            'channel': int(channel) if channel else None, 'mode': mode, 'text': text, 'step': step, 'accel': accel}
 
 
 def parse_action(action):
@@ -339,9 +367,10 @@ class Controls:
         if midi is not None:
             m['midi'] = dict(midi)
             # applied: the last position this map sent; seq/done: sent and applied counts (moves wait in the
-            # engine's queue); pair: a cc14 pair's MSB and LSB per channel; down/t_down: a toggle button's state
+            # engine's queue); pair: a cc14 pair's MSB and LSB per channel; down/t_down: a toggle button's state;
+            # t_tick/way: when an encoder last ticked and which way (accel)
             m['st'] = {'caught': False, 'last_in': None, 'applied': None, 'seq': 0, 'done': 0, 'pair': {},
-                       'down': False, 't_down': 0.0}
+                       'down': False, 't_down': 0.0, 't_tick': 0.0, 'way': 0}
         return m
 
     def bound(self, source):
@@ -369,6 +398,10 @@ class Controls:
                     if step:
                         base = self._here(m, now)
                         tick = b.get('step') or REL_STEP          # the map's own step, else 1/128
+                        t, way = self.clock(), 1 if step > 0 else -1
+                        gap = t - s['t_tick'] if s.get('way') == way else None   # turned back: a slow start
+                        s['t_tick'], s['way'] = t, way
+                        tick *= accel_factor(gap, step, b.get('accel'))
                         v = min(1.0, max(0.0, (base if base is not None else 0.0) + step * tick))
                 elif b['mode'] in ('toggle', 'trigger'):
                     down, t = d2 >= 64, self.clock()
@@ -594,7 +627,8 @@ def describe(m):
                    (" (the hardest-pressed key held)" if b['kind'] == 'poly' and b['num'] is None else '')
                    + (f" ch{b['channel']}" if b['channel'] else ', any channel'))
                 + f", on {b['source']!r}, {b['mode']}"
-                + (f", a tick {b['step']:g} of the range" if b.get('step') else ''))
+                + (f", a tick {b['step']:g} of the range" if b.get('step') else '')
+                + (f", accel up to x{b['accel']:g} when turned fast" if b.get('accel') else ''))
         w = m['st'].get('waiting')
         if b['mode'] == 'pickup' and w:
             out += f" (waiting: the knob is at {w[0]:.2f}, the param at {w[1]:.2f}; it takes over there)"

@@ -697,7 +697,8 @@ def live_stream(project: str, name: str = 'master') -> str:
 @op()
 def live_map(project: str, control: str, target: str = None, param: str = 'volume_db', range: list = None,
              curve: str = 'linear', at: str = 'now', remove: bool = False, midi: str = None, source: str = None,
-             channel: int = None, mode: str = 'absolute', action: dict = None, step: float = None) -> str:
+             channel: int = None, mode: str = 'absolute', action: dict = None, step: float = None,
+             accel=None) -> str:
     """Map a named control (a knob, slider or switch on the VR stage, any client, or a MIDI controller's knob, fader,
     pad or bend wheel) to a live parameter, so its moves apply in the engine at once with no agent in the loop.
     target: a track, 'bus:<name>' or 'deck:<name>'. param: 'volume_db', 'pan' (tracks), a deck's
@@ -719,7 +720,10 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
     stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
     'relative64' (64 = still, 65 up, 63 down), each step 1/128 of the range (step= sets it per map: 1/32 for a
-    coarse encoder, 1/512 for a fine one), from the param's value now (fast steps add up); 'toggle'
+    coarse encoder, 1/512 for a fine one), from the param's value now (fast steps add up). accel: a fast turn moves
+    further, as on a hardware synth's encoder: a tick 0.1 s or more after the last moves one step, a faster one more
+    (twice as fast, twice as far), up to accel steps (above 1, at most 16; True = 4). Off by default; live_status
+    shows it. Use it when one encoder must both sweep the range quickly and set it finely. 'toggle'
     (a pad or a button flips between the range's ends on each press: 64 or more after a release, or a repeat 0.1 s
     or more after the last with no release). Several maps may share one MIDI control (one
     knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
@@ -737,7 +741,7 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     the set."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
                  remove=remove, midi=midi, source=source, channel=channel, mode=mode,
-                 **{k: v for k, v in (('action', action), ('step', step)) if v is not None})
+                 **{k: v for k, v in (('action', action), ('step', step), ('accel', accel)) if v is not None})
 
 
 @op()

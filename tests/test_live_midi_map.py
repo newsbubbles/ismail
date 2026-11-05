@@ -617,6 +617,54 @@ def test_an_encoder_map_takes_its_own_step_size(eng):
         eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], step=0.1)
 
 
+# ------------------------------------------------------------------ encoder acceleration (D-244)
+def test_acceleration_is_one_step_a_tick_when_slow_and_grows_with_speed_up_to_its_cap():
+    f = O.accel_factor
+    assert f(None, 1, 4) == 1 and f(0.01, 1, None) == 1        # the first tick (or a turn back), and off
+    assert f(O.ACCEL_TICK_S, 1, 4) == 1 and f(0.5, 1, 4) == 1    # 10 ticks a second or slower: one step each
+    assert f(0.05, 1, 4) == pytest.approx(2)                     # twice as fast, twice as far
+    assert f(0.05, 2, 4) == pytest.approx(4)                     # two ticks in one message: faster still
+    assert f(0.001, 1, 4) == 4 and f(0.001, 1, 16) == 16         # never past the cap
+
+
+def test_an_encoder_with_accel_moves_further_when_turned_fast_and_one_without_does_not(eng, monkeypatch):
+    t = [100.0]
+    monkeypatch.setattr(O.Controls, 'clock', staticmethod(lambda: t[0]))
+    r = eng.cmd_map('sweep', target='lead', param='pan', range=[-1, 1], midi='cc:20', source='knob',
+                    mode='relative', accel=8)
+    assert 'relative, accel up to x8 when turned fast' in r
+    eng.cmd_map('plain', target='pad', param='pan', range=[-1, 1], midi='cc:21', source='knob', mode='relative')
+    status = eng.cmd_status()
+    assert 'sweep -> lead pan' in status and 'accel up to x8 when turned fast' in status
+    assert status.count('accel up to') == 1                     # off by default
+    eng.cmd_track('lead', pan=0.0)
+    eng.cmd_track('pad', pan=0.0)
+    for _ in range(5):                                          # a fast turn: a tick every 25 ms
+        t[0] += 0.025
+        send('knob box', 0xB0, 20, 1)
+        send('knob box', 0xB0, 21, 1)
+    # the first tick is one step, the next four 4 steps each (0.1 s / 25 ms); each step 1/128 of a range 2 wide
+    assert eng.tracks['lead']['pan'] == pytest.approx((1 + 4 * 4) * 2 / 128)
+    assert eng.tracks['pad']['pan'] == pytest.approx(5 * 2 / 128)
+    lead = eng.tracks['lead']['pan']
+    t[0] += 0.5
+    send('knob box', 0xB0, 20, 1)                               # slow again: one step
+    assert eng.tracks['lead']['pan'] == pytest.approx(lead + 2 / 128)
+    t[0] += 0.01
+    send('knob box', 0xB0, 20, 127)                             # turned back: it starts slow, one step down
+    assert eng.tracks['lead']['pan'] == pytest.approx(lead)
+    assert 'accel up to x4' in eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:22',
+                                           source='knob', mode='relative64', accel=True)
+    with pytest.raises(LiveError, match="accel makes a fast turn of an endless encoder move further"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:22', source='knob', accel=4)
+    with pytest.raises(LiveError, match=r"accel 20: the most steps one tick moves when turned fast, above 1 and at "
+                                        r"most 16 \(True = 4\)"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='cc:22', source='knob', mode='relative',
+                    accel=20)
+    with pytest.raises(LiveError, match="add midi='cc:<n>'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], accel=4)
+
+
 # ------------------------------------------------------------------ poly pressure and MPE expression as controls (D-244)
 def test_poly_pressure_drives_a_control_by_one_key_or_the_hardest_pressed_key(eng):
     r = eng.cmd_map('press', target='lead', param='pan', range=[-1, 1], midi='poly', source='pad grid')

@@ -627,7 +627,11 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
     says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
     complement, or 64 = still), 1/128 of the range per step (`step=1/32` on the map for a coarse encoder,
     `step=1/512` for a fine one), from the param's value now (steps that arrive
-    faster than the engine applies them add up). `'toggle'`: a pad or a button flips between the range's ends
+    faster than the engine applies them add up). `accel=` makes a fast turn move further, as a hardware synth's
+    encoder does: a tick 0.1 s or more after the last is one step, a faster one more (twice as fast, twice as far),
+    up to `accel` steps a tick (above 1, at most 16; `True` is 4). Off by default; `live_status` shows it
+    (`, accel up to x8 when turned fast`). A turn back starts slow again. Use it when one encoder must both sweep
+    a filter quickly and set it finely: `live_map(..., midi='cc:20', mode='relative', accel=8)`. `'toggle'`: a pad or a button flips between the range's ends
     (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
     0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
     which source: `relative` and `relative64` only on `'cc:<n>'`; `toggle` on `'cc:<n>'` or `'note:<n>'`; a
@@ -685,8 +689,7 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
        engine's news) and is logged by bar (live_controls)`.
     2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
-  - Not yet: acceleration for encoders (a fast turn moving further per tick), and a curve beyond linear, log and
-    switch.
+  - Not yet: a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 

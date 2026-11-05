@@ -240,7 +240,8 @@ Find any tool by what you need or by role with `ops_find`.
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`). A MIDI controller's knobs, faders, pads, bend wheel and
   pressure drive the same maps (`live_map(midi='cc:74', source=..., channel=, mode=)`: 7-bit and 14-bit CC,
-  absolute, pickup, relative encoders, toggles, one control on several params), and so do a key's poly pressure
+  absolute, pickup, relative encoders with their own step and acceleration (`step=`, `accel=`), toggles, one
+  control on several params), and so do a key's poly pressure
   (`midi='poly'`, `'poly:C4'`) and an MPE note's own pressure, bend or timbre (`'mpe:pressure'`, `'mpe:bend'`,
   `'mpe:timbre'`), every move logged as automation.
   An arpeggiator steps the keys a person holds on the set's beat (`live_arp`: patterns, scale degrees, exact step

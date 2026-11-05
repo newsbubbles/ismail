@@ -27,6 +27,10 @@
   `track_midi_fx(..., off=True)`.
 - The engine's news no longer turns a reply that is data into text: a take (and `live_control`, `live_listen`,
   `live_stream`) gives its news after its own reply. A take with news pending failed before.
+- Encoder acceleration: `live_map(..., mode='relative' | 'relative64', accel=8)` makes a fast turn move further.
+  A tick 0.1 s or more after the last is one step; a faster one moves more (twice as fast, twice as far), up to
+  `accel` steps (above 1, at most 16; `True` is 4). A turn back starts slow again. Off by default; `live_status`
+  shows it. Another mode with `accel` is refused and says to leave it out.
 - Not yet: per-note lanes for an MPE chord (a song has one lane per track), poly pressure written to a file, a
   member channel's own bend range (RPN 0) taken live, Ableton Link, MIDI Time Code.
 
@@ -60,7 +64,7 @@
 - Encoder step size per map: `live_map(..., mode='relative' | 'relative64', step=1/32)` sets how far one tick of an
   endless encoder moves, as a fraction of the range (default 1/128); `live_status` shows it.
 - Not yet: per-note lanes for an MPE chord (it shares one lane per track), poly pressure written to a file,
-  encoder acceleration, Ableton Link, MIDI Time Code.
+  Ableton Link, MIDI Time Code.
 
 ### MIDI effects, live and in the studio (MIDI parity step 7b)
 
