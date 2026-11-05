@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### MIDI: MPE's upper zone, pressure and MPE as controls, takes that keep the chain's notes, encoder acceleration (MIDI parity steps 5 to 7, hq:D-244)
+
+- MPE's upper zone: `mpe=` takes True or `'lower'` (as before: channel 1 the master, notes on 2 to 16) and
+  `'upper'` (channel 16 the master, notes from channel 15 down) in `midi_write`, `midi_read`, `live_midi` and
+  `live_played`. `midi_write(mpe={'bass': 'lower', 'lead': 'upper'})` writes a split synth's two zones, 7 channels
+  each (2-8 and 9-15). `midi_read` reads a part in the zone its file configures, of the size the file's MPE
+  Configuration Message (RPN 6) gives, and only that zone's member channels; with both zones, the one that holds
+  the part's notes. A played controller's own MPE Configuration Message sets the patch's zones and sizes (both
+  zones of a split keyboard, the other zone shrinking when one grows, as the MPE spec says) and the news says so;
+  `live_midi(mpe=False)` ignores it. A take with no patch is read in the zone its key log configured.
+- Not yet: per-note lanes for an MPE chord (a song has one lane per track), poly pressure written to a file, a
+  member channel's own bend range (RPN 0) taken live, Ableton Link, MIDI Time Code.
+
 ### MIDI: pads as triggers, program change, poly pressure, played expression, encoder steps (Nate 10-23)
 
 - `live_map(control, action={'op': 'live_queue' | 'live_tempo' | 'live_transition', ...}, midi='note:<n>' |
@@ -31,9 +44,8 @@
   patched input even when the live sound took none of them.
 - Encoder step size per map: `live_map(..., mode='relative' | 'relative64', step=1/32)` sets how far one tick of an
   endless encoder moves, as a fraction of the range (default 1/128); `live_status` shows it.
-- Not yet: MPE's upper zone, per-note lanes for an MPE chord (it shares one lane per track), poly pressure written
-  to a file, polyphonic aftertouch and MPE as live_map controls, encoder acceleration, Ableton Link, MIDI Time
-  Code.
+- Not yet: per-note lanes for an MPE chord (it shares one lane per track), poly pressure written to a file,
+  polyphonic aftertouch and MPE as live_map controls, encoder acceleration, Ableton Link, MIDI Time Code.
 
 ### MIDI effects, live and in the studio (MIDI parity step 7b)
 

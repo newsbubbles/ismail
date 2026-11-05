@@ -776,7 +776,7 @@ def midi_sources() -> str:
 @op()
 def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
               transpose: int = None, channel: int = None, remove: bool = False, lanes: dict = None,
-              mpe: bool = None) -> str:
+              mpe=None) -> str:
     """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
     same speakers. source: the input's name or a unique part of it (midi_sources), or 'screen keys' (the on-screen
     keys page, live_keys_page); with no source, says what is plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
@@ -794,8 +794,12 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     {lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}} or {lane: None} to turn one off; a lane
     named here is driven even when the sound does not have it (e.g. {'bend': {'midi': 'bend', 'range': 12}} on a
     synth). Live, a key plays a note rendered ahead, so lanes move it only as pitch and gain: bend, vib and level.
-    mpe=True: an MPE controller (lower zone): channel 1 the master, whose values add to every note, and each note's
-    own channel 2-16 its own bend (+-48) and pressure. A message bound with live_map stays that map's control.
+    mpe: an MPE controller, each note on its own channel with its own bend (+-48) and pressure, and a master channel
+    whose values add to every note of its zone. True or 'lower': the lower zone (channel 1 the master, 2-16 a note
+    each); 'upper': the upper zone (channel 16 the master, 15 down to 1). The controller's own MPE Configuration
+    Message (RPN 6, sent when it connects) sets the zones and their sizes, both zones of a split keyboard included,
+    and the news says so; mpe=False plays each channel as its own part and ignores it. A message bound with
+    live_map stays that map's control.
     Tell the person before their keys first sound. Reach for it when the person wants to play their MIDI keyboard,
     pads or MPE keyboard through the set, its pitch bend wheel, pressure and mod wheel included."""
     if instrument is not None:
@@ -937,7 +941,7 @@ def live_midi_clock_in(project: str, source: str = None, on: bool = True, transp
 
 @op(mutates=True)
 def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None, into: str = None,
-                bar: int = 1, mode: str = 'replace', placement: str = 'A', lanes=None, mpe: bool = None) -> str:
+                bar: int = 1, mode: str = 'replace', placement: str = 'A', lanes=None, mpe=None) -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
     bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last
     `bars` bars that had keys, or [a, b] for those bars (ask the player which part; never guess). Per input
@@ -966,7 +970,8 @@ def live_played(project: str, source: str = None, bars=8, fit: bool = False, fro
     pressure (0..+6 dB), or the patch's own lanes= while the input is patched. lanes: the map as data, as live_midi
     and midi_write take it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}}, any lane the
     song's voice has, e.g. {'breath': {'midi': 'cc:2', 'range': [0, 1]}}; {lane: None} leaves one out), or
-    lanes=False for notes only. mpe: read each note's own channel (default: as the input is patched). Poly pressure
+    lanes=False for notes only. mpe: read each note's own channel, True or 'lower', 'upper' or False (default: as
+    the input is patched, else the MPE configuration the log holds). Poly pressure
     goes onto the channel's pressure by the newest key held (a key that sends none is at 0), since a song's lanes
     are per track. The lanes run to the take's last bar line, so a wheel let go after the last note springs back,
     and a bend or pressure still off rest there goes back to rest on that line. They replace the track's points

@@ -85,6 +85,9 @@ Tell them at the right moment, once, without being asked:
   carries and the values clamped to a range.
 - **MPE:** `mpe=True` (every melodic track) or `mpe=['lead']`: channel 1 the master, each note on its own channel
   2 to 16, bend +-48, `level` as per-note pressure. Tell them to set their synth's MPE bend range to 48.
+  `mpe='upper'` writes the upper zone (channel 16 the master, notes from channel 15 down), for a synth set to it.
+  A split synth (one sound low, one high) takes `mpe={'bass': 'lower', 'lead': 'upper'}`: with both zones in the
+  file each has 7 channels (2-8 and 9-15), and each track's MPE configuration says so.
 - **GM programs:** `programs={'bass': 33}` puts a program change on a track's channel (1 to 128 as a GM list
   numbers them), so a GM synth or a DAW's GM player starts on that sound; `{'lead': {1: 81, 17: 82}}` changes it on
   bar 17. ismail's tracks have no program of their own (a sound is an instrument), so it is only there when you
@@ -96,7 +99,8 @@ Tell them at the right moment, once, without being asked:
   clears the span first, `'add'` merges; `quantize=0.25` snaps starts to 16ths (default: as played). Positions are
   read in beats, so a file at another tempo keeps its bars at the song's tempo. Its pitch bend, cc:1, cc:11 and
   cc:2 become the target's lanes by the same map (`lanes=` changes it); an MPE file (RPN 6, or `mpe=True`) is read
-  per note. Poly pressure (one key's own) is read as its channel's pressure, the newest key still held winning,
+  per note, in the zone the file configures (lower or upper, of the size it says; with both, the one that holds
+  the part's notes). A file that does not say: `mpe='lower'` or `mpe='upper'`. Poly pressure (one key's own) is read as its channel's pressure, the newest key still held winning,
   onto the lane that takes pressure: on a plain part none does by default, so the reply says to add
   `lanes={'level': {'midi': 'pressure', 'range': [-40, 0]}}`. A channel that sends channel pressure too keeps its
   own, and its poly pressure is listed as not read.
@@ -114,7 +118,7 @@ Tell them at the right moment, once, without being asked:
   (MPE)`. Tell them what landed where, then render and say before it plays.
 - Not yet: per-note lanes inside ismail (an MPE file's chord shares one lane per track, the newest note still
   sounding wins, and the reply counts the overlaps; poly pressure the same way), poly pressure written to a file
-  (no per-note pressure in a song), MPE's upper zone, and track volume or pan automation written as MIDI.
+  (no per-note pressure in a song), and track volume or pan automation written as MIDI.
 
 ## The lexicon: their words, our terms
 

@@ -259,3 +259,58 @@ def test_an_mpe_channel_reused_drops_the_old_notes_pressure_but_keeps_a_fresh_be
     msg(0xD2, 64, 0)                                   # a pressure sent before the next note-on is that note's
     msg(0x92, 67, 100)
     assert eng.midi.xv[eng.midi.voices[2]].val('level') == pytest.approx(6 * 64 / 127)
+
+
+def mcm(master_ch, members):
+    """An MPE Configuration Message: RPN 6 on the zone's master channel (from 1), members in its data entry."""
+    c = 0xB0 | (master_ch - 1)
+    msg(c, 101, 0)
+    msg(c, 100, 6)
+    msg(c, 6, members)
+
+
+def test_the_upper_zone_has_channel_16_as_its_master_and_each_member_its_own_note(eng, lanes_voice):
+    r = eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]}, mpe='upper')
+    assert 'bend <- bend -48..48' in r and 'MPE: upper zone, channel 16 the master, 1-15 a note each' in r
+    bend(12, rng=48, ch=15)
+    msg(0x9E, 60, 100)                                  # channel 15: the first member
+    msg(0x90, 64, 100)                                  # channel 1 is a member here, not the master
+    c, d = eng.midi.voices
+    assert eng.midi.xv[c].rate == pytest.approx(2.0, abs=1e-3) and eng.midi.xv[d].rate == 1.0
+    bend(2, rng=2, ch=16)                               # the master's +-2 adds to every note of the zone
+    msg(0xD0, 127, 0)                                   # note d's own pressure, on channel 1
+    play(eng, 0.05)
+    assert eng.midi.xv[c].rate == pytest.approx(2 ** (14 / 12), abs=1e-3)
+    assert eng.midi.xv[d].rate == pytest.approx(2 ** (2 / 12), abs=1e-3)
+    assert eng.midi.xv[d].g == pytest.approx(2.0, abs=0.01) and eng.midi.xv[c].g == 1.0
+    msg(0xBF, 121, 0)                                   # reset all controllers on the master: the whole zone
+    play(eng, 0.05)
+    assert eng.midi.xv[c].rate == 1.0 and eng.midi.xv[d].rate == 1.0
+    with pytest.raises(LiveError, match="mpe 'both': True or 'lower'"):
+        eng.cmd_midi(source='keys', mpe='both')
+
+
+def test_the_controllers_mpe_configuration_sets_the_zones_unless_patched_with_mpe_false(eng, lanes_voice):
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]})
+    eng.drain_news()
+    mcm(16, 15)                                         # the controller says: upper zone, 15 members
+    p = eng.midi.patches['keys in']
+    assert p['mpe'] == {15: 15}
+    assert any('the controller configured MPE (upper zone, channel 16 the master, 1-15 a note each)' in n
+               for n in eng.drain_news())
+    assert 'MPE: upper zone' in eng.cmd_midi() and 'cc:101' not in '\n'.join(eng.midi.heard_lines())
+    bend(24, rng=48, ch=15)
+    msg(0x9E, 60, 100)
+    assert eng.midi.xv[eng.midi.voices[0]].rate == pytest.approx(2 ** 2, abs=1e-3)   # +-48 per note
+    mcm(1, 7)                                           # a lower zone of 7: the upper one shrinks to 7
+    assert p['mpe'] == {15: 7, 0: 7} and 'lower zone, channel 1 the master, 2-8 a note each; upper zone, ' \
+        'channel 16 the master, 9-15 a note each' in eng.cmd_midi()
+    mcm(16, 0)                                          # 0 members: the upper zone is off
+    assert p['mpe'] == {0: 7}
+    eng.cmd_midi(source='keys', mpe=False)
+    eng.drain_news()
+    mcm(1, 15)
+    assert p['mpe'] == {} and any('patched with mpe=False' in n for n in eng.drain_news())
+    eng.cmd_midi(source='keys', remove=True)
+    eng.cmd_midi(source='keys', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]})
+    assert eng.midi.patches['keys in']['mpe'] == {0: 15}  # what the controller said before it was patched

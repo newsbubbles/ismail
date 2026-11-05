@@ -635,3 +635,24 @@ def test_poly_pressure_in_a_take_follows_the_newest_key_and_fit_moves_the_lanes_
     assert ML.value_at(bend, start - 0.1) == pytest.approx(0, abs=0.01)
     assert ML.value_at(bend, start + 0.05) == pytest.approx(1.0, abs=0.01)   # with its note, not 0.06 beat late
     assert ML.value_at(lanes['inst.lane.level'], true[2] - 8.5 + 0.1) == pytest.approx(6 * 60 / 127, abs=0.05)
+
+
+def test_a_take_from_an_upper_zone_controller_reads_each_members_bend_and_leaves_the_master_out(song):
+    from ismail.live import ops as LO
+    from ismail import midilanes as ML
+    p = song
+    log = os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl')
+    recs = [{'wall': 0, 'beat': 7.0, 'press': 6.91, 'st': 0xBF, 'd1': d1, 'd2': d2} for d1, d2 in
+            ((101, 0), (100, 6), (6, 15))]                         # the controller's MPE configuration: upper zone
+    for b, st, d1, d2 in ((8.0, 0xEE, 0, 96), (8.0, 0x9E, 60, 90), (8.5, 0xEF, 0x7F, 0x7F), (9.0, 0x8E, 60, 0),
+                          (9.0, 0xED, 0, 32), (9.0, 0x9D, 62, 90), (10.0, 0x8D, 62, 0)):
+        recs.append({'wall': 0, 'beat': b, 'press': b - 0.09, 'st': st, 'd1': d1, 'd2': d2})
+    _log(log, recs)
+    r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=1)
+    assert 'per note (MPE, upper zone, channel 16 the master, 1-15 a note each, the newest note still sounding)' \
+        in r, r
+    bend = _auto(p)['inst.lane.bend']
+    assert ML.value_at(bend, 0.75) == pytest.approx(24, abs=0.05)    # channel 15's own +24; the master's top is out
+    assert ML.value_at(bend, 1.5) == pytest.approx(-24, abs=0.05)    # channel 14's note
+    r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=1, mpe=False)
+    assert 'per note' not in r and 'bend range +-2' in r
