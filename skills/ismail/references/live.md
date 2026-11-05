@@ -866,9 +866,9 @@ renders the same.
 
 Ableton's Chord, Scale, Pitch, Velocity, Note Length and Random, as one chain of data. One core does both
 (`live_midi_fx` on played keys, `track_midi_fx` on a track's notes at render): the same key on the same beat makes
-the same notes live and rendered, dice included. A recorded take (`live_played`) keeps the keys played, not the
-notes the chain made, so a take rendered through the chain re-rolls its `random` and velocity `random`; the other
-effects come out the same. The arpeggiator is the seventh one, with its own ops (above).
+the same notes live and rendered, dice included. A recorded take (`live_played`) gives the notes the chain made,
+as they sounded: its `random` as rolled live, its lengths as they were heard. So a take written into a song plays
+what was heard and does not roll the dice again. The arpeggiator is the seventh one, with its own ops (above).
 
 - **The chain** is a list, applied in order to every note a key (or a written note) starts; a new chain replaces
   the old one:
@@ -918,9 +918,14 @@ effects come out the same. The arpeggiator is the seventh one, with its own ops 
   yet: tell them "About a third of the lead's notes now jump an octave, all inside C3 to C6. I'll render it so you
   can hear it" and render. To edit single notes, `track_midi_fx(track='lead', write=True)`: the processed notes
   become plain notes (`undo()` brings the written ones back). `off=True` takes the chain off.
-- Not yet: `live_played` logs the keys pressed, not the notes the chain made (`live_played(into=)` writing the
-  chain's own notes, so a take keeps what its dice rolled); with the arp on, a set length lets go
-  of the arp's key on its beat but a played key starts the chain on the buffer it arrives in, as keys always do.
+- **A take keeps the chain's notes.** `live_played(source='keys')` reads them, and `live_played(into='lead')`
+  writes them: each key's notes are kept with it in the key log as the chain made them. The reply says so (`midi
+  fx: 12 keys went through live_midi_fx: these are the notes its chain made of them`). With the arp on too, they are
+  the notes the arp held, not its steps. `raw=True` gives the keys pressed instead: for a track whose own
+  `track_midi_fx` makes the notes at render. Writing the chain's notes into a track that has its own chain runs the
+  effects twice, so the reply says so and names both ways out (`raw=True`, or `track_midi_fx(..., off=True)`).
+- Not yet: with the arp on, a set length lets go of the arp's key on its beat but a played key starts the chain
+  on the buffer it arrives in, as keys always do.
 
 ## MIDI out: synths and other apps play with the set
 

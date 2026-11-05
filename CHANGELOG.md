@@ -19,6 +19,14 @@
   the map's. Absolute or pickup. Unmapped, `live_controls` lists them as other inputs: `poly ch1: last 90 (key
   C#4)`, and `mpe:timbre member channels` on an input whose zone is known. RPN messages (bend range, MPE
   configuration) are no longer listed as unmapped knobs.
+- A take keeps the notes the MIDI effects chain made: `live_played` reads, and `live_played(into=)` writes, each
+  key's notes as `live_midi_fx` made them live (its random choices as rolled, its lengths as heard), so a take in a
+  song plays what was heard and does not roll the dice again. With the arp on, they are the notes the arp held.
+  `live_played(raw=True)` gives the keys pressed; the reply says which it gave. Writing the chain's notes into a
+  track with its own `track_midi_fx` says the effects would run twice and names `raw=True` or
+  `track_midi_fx(..., off=True)`.
+- The engine's news no longer turns a reply that is data into text: a take (and `live_control`, `live_listen`,
+  `live_stream`) gives its news after its own reply. A take with news pending failed before.
 - Not yet: per-note lanes for an MPE chord (a song has one lane per track), poly pressure written to a file, a
   member channel's own bend range (RPN 0) taken live, Ableton Link, MIDI Time Code.
 
@@ -75,8 +83,6 @@
 - The chain runs before the arp on a source with both: live its notes are the keys the arp holds (a pitch two keys'
   chords share stays held until both let go), in the studio the chords the arp steps. `track_arp(write=True)` on a
   track with a chain is refused and says to write the chain first.
-- Not yet: `live_played` logs the keys pressed, not the notes the chain made, so a take re-rolls the chain's
-  random effects when rendered; `live_played(into=)` writing the chain's own notes.
 
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 

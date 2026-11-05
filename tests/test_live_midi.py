@@ -656,3 +656,31 @@ def test_a_take_from_an_upper_zone_controller_reads_each_members_bend_and_leaves
     assert ML.value_at(bend, 1.5) == pytest.approx(-24, abs=0.05)    # channel 14's note
     r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=1, mpe=False)
     assert 'per note' not in r and 'bend range +-2' in r
+
+
+def test_a_take_through_midi_effects_writes_the_chains_notes_into_the_song(song, eng):
+    from ismail import api
+    from ismail.live import ops as LO
+    p = song
+    chain = [{'type': 'chord', 'intervals': [0, 4]},
+             {'type': 'random', 'chance': 0.5, 'choices': 1, 'interval': 12, 'sign': 'up', 'seed': 2}]
+    eng.cmd_midi(source='ismail keys', instrument='preset:pluck')
+    eng.cmd_midi_fx(source='ismail keys', chain=chain, at='now')
+    pulls(eng, 0.3)
+    for m in (60, 62, 64, 67):
+        key('ismail keys', 0x90, m, 100)
+        pulls(eng, 0.1)
+        key('ismail keys', 0x80, m, 0)
+        pulls(eng, 0.1)
+    made = sorted(n for *_, outs in eng.mfx.fx['ismail keys']['recent'] for n, _ in outs)
+    r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1)
+    assert 'these are the notes its chain made of them' in r and sorted(n[1] for n in _track(p)) == made
+    assert '\nNEW since your last call:\n  ' in r            # the engine's news rides beside a take, said once
+    assert 'NEW since' not in LO.live_played(p, source='ismail keys', bars=[1, 1])
+    api.undo(p)
+    api.OPS['track_midi_fx'](p, 'keys', chain=chain)
+    r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1)
+    assert 'keys has its own MIDI effects (track_midi_fx): they run again on these notes at render' in r
+    r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1, raw=True)
+    assert sorted(n[1] for n in _track(p)) == [60, 62, 64, 67] and 'raw: the keys pressed' in r
+    assert 'raw=True' in LO.live_played(p, source='ismail keys', bars=[1, 1])

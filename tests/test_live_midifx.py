@@ -271,3 +271,68 @@ def test_status_says_off_when_the_first_queued_change_is_an_off(eng):
     eng.cmd_midi_fx(source='test keys', off=True, at='bar:2')
     s = eng.cmd_status()
     assert 'midi fx test keys: off at bar 2' in s and 'at bar 3: chord +0 +4 +7' in s
+
+
+# ------------------------------------------------------------------ a take keeps the chain's notes (D-244)
+RANDOM = [{'type': 'chord', 'intervals': [0, 7]},
+          {'type': 'random', 'chance': 0.5, 'choices': 2, 'interval': 12, 'sign': 'both', 'seed': 5}]
+
+
+def test_a_take_is_the_notes_the_chain_made_as_rolled_live_and_raw_gives_the_keys(eng):
+    eng.cmd_midi(source='test keys', transpose=2)               # the chain sees the transposed key
+    eng.cmd_midi_fx(source='test keys', chain=RANDOM, at='now')
+    pulls(eng, 0.3)                                                 # into bar 1
+    for m in (60, 62, 64, 65, 67, 69):
+        key(0x90, m, 90)
+        pulls(eng, 0.12)
+        key(0x80, m, 0)
+        pulls(eng, 0.05)
+    live = recent(eng)
+    t = eng.midi.take(source='test keys', bars=[1, 2])
+    want = sorted((b, n - 2, v) for b, _, _, outs in live for n, v in outs)    # as keys: the transpose off
+    got = sorted((n[0], n[1], n[3]) for n in t['notes'])
+    assert t['first_bar'] == 1 and [g[1:] for g in got] == [w[1:] for w in want]
+    assert [g[0] for g in got] == pytest.approx([w[0] for w in want], abs=2e-3)
+    assert t['fx'] == {'keys': 6, 'arp': False, 'raw': False}
+    assert any(x.startswith('midi fx: 6 keys went through live_midi_fx: these are the notes its chain made')
+               for x in t['lines'])
+    assert len(t['notes']) > 6 and {n[1] for n in t['notes']} != {60, 62, 64, 65, 67, 69}
+    keys = eng.midi.take(source='test keys', bars=[1, 2], raw=True)
+    assert [n[1] for n in keys['notes']] == [60, 62, 64, 65, 67, 69] and keys['fx']['raw']
+    assert any(x.startswith('raw: the keys pressed. 6 of them went through live_midi_fx') for x in keys['lines'])
+    # the take read again gives the same notes: nothing is rolled at reading
+    assert eng.midi.take(source='test keys', bars=[1, 2])['notes'] == t['notes']
+    assert 'midi fx: 6 keys went through' in eng.cmd_played(source='test keys', bars=[1, 2])
+
+
+def test_a_takes_chain_notes_last_as_they_did_live():
+    peds, offs, now = [(5.0, 6.0)], [9.0], 20.0
+    L = MP.MidiPlay._fx_len
+    assert L(0.0, 3.0, None, [0.5, 1.0], [], [], now) == 0.5        # a set length, whatever the key did
+    assert L(4.0, 5.5, None, [1.5, 1.0], peds, [], now) == 6.0      # its end under the pedal: held to its release
+    assert L(0.0, 1.0, None, [None, 3.0], [], [], now) == 3.0       # 3 x how long the key was held
+    assert L(0.0, 1.0, None, [None, 0.5], [], [], now) == 1.0       # never before the key's release
+    assert L(0.0, None, None, [None, 2.0], [], [], now) == now      # still held: until now
+    assert L(0.0, 1.0, 0.5, [None, 1.0], [], [], now) == 0.5        # pressed again first: it ends then
+    assert L(8.0, None, None, [4.0, 1.0], [], offs, now) == 9.0     # All Notes Off ends it
+    assert L(0.0, 1.0, None, None, [], [], now) == 1.0              # no length rule: to the release
+
+
+def test_a_take_with_a_length_effect_and_the_arp_says_what_it_gave(eng):
+    eng.cmd_midi_fx(source='test keys', chain=[{'type': 'length', 'beats': 0.5}], at='now')
+    pulls(eng, 0.3)
+    key(0x90, 60, 100)
+    pulls(eng, 1.0)                                                 # held 2 beats: the note lasted half a beat
+    key(0x80, 60, 0)
+    t = eng.midi.take(source='test keys', bars=[1, 2])
+    assert [n[1:] for n in t['notes']] == [[60, 0.5, 100]]
+    assert eng.midi.take(source='test keys', bars=[1, 2], raw=True)['notes'][0][2] == pytest.approx(2.0, abs=0.05)
+    eng.cmd_arp(source='test keys', at='now', pattern='up', rate=0.5)
+    eng.cmd_midi_fx(source='test keys', chain=CHORD, at='now')
+    key(0x90, 62, 100)
+    pulls(eng, 0.5)
+    key(0x80, 62, 0)
+    t = eng.midi.take(source='test keys', bars=[1, 3])
+    assert {n[1] for n in t['notes'] if n[0] > 1} == {62, 66, 69}  # the chord the arp held, not its steps
+    assert any('live_arp stepped these notes live: they are the notes it held, not its steps' in x
+               for x in t['lines'])

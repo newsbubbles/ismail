@@ -33,6 +33,8 @@ sizes, unless the agent said mpe=False.
 MIDI effects (MIDI parity step 7b, live_midi_fx, live/midifx.py): with a chain on the input, a key plays the notes the
 chain makes of it (_fx_on), kept under the key so its release ends exactly those (_fx_off); a set length ends them
 on its beat's sample (_fx_due). Then the arp: with live_arp on too, the chain's notes are the keys the arp holds.
+The key log keeps, with each such key, the notes the chain made of it and their length rule, so live_played gives
+those notes (dice as rolled live) and a take rendered later plays what was heard; raw=True gives the keys.
 """
 import collections
 import json
@@ -517,8 +519,9 @@ class MidiPlay:
             if p['channel'] is not None and ch != p['channel']:
                 self._hear(name, st, d1, d2)
                 return
+            p['fxlog'] = None
             if kind == 0x90 and d2:
-                self.note_on(p, d1, d2, ch)
+                self.note_on(p, d1, d2, ch)          # through a chain, _fx_on leaves the notes it made in fxlog
             elif kind == 0x80 or kind == 0x90:
                 self._expr_off(p, p['held'].get(self._hk(p, d1, ch)), ch)
                 self.note_off(p, d1, ch)
@@ -537,8 +540,12 @@ class MidiPlay:
                 self._hear(name, st, d1, d2)
                 if kind not in (0xA0, 0xB0, 0xD0, 0xE0):    # bend, pressure and controllers stay in the log, for
                     return                                   # live_played(into=) to write as lanes
-            self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
-                                         'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}))
+            rec = {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
+                   'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}
+            if p.get('fxlog'):
+                rec.update(p['fxlog'])
+                p['fxlog'] = None
+            self._log.append((p['log'], rec))
         return on
 
     def heard_beat(self):
@@ -722,6 +729,11 @@ class MidiPlay:
                     self.voices.append(voice)
                     ent['voices'].append(voice)
                     ent['started'].append(voice)
+        # for the key log: the notes made (as keys, the patch's transpose taken back off as a key's d1 is), how long
+        # they last, and whether the arp took them as its keys
+        p['fxlog'] = {'fx': [[int(m - t), int(v)] for m, v in outs], 'fxlen': [base, mult]}
+        if ent['arp']:
+            p['fxlog']['fxarp'] = True
         if ent['end'] is not None:
             self._fx_end(p, ent, ent['end'])       # its length is set: it ends there, whatever the key does
         if ent['end'] is not None or not (p['oneshot'] and not ent['arp']):
@@ -903,12 +915,41 @@ class MidiPlay:
             names = [direct] if direct in names else [n for n in names if n == _slug(self.find(source)) + '.jsonl']
         return d, sorted(names)
 
-    def _read(self, path):
+    def _read(self, path, raw=False):
         """One input's log as notes (start, midi, dur, vel) on the heard clock, note-offs held while the sustain pedal
-        was down; a key still down lasts until now. Returns (notes, keys still down, key delays in beats, how many
-        notes came from a log written before the heard clock)."""
-        notes, down, held, ped, old, lag = [], {}, set(), False, 0, []
-        for r in (json.loads(x) for x in open(path, encoding='utf8') if x.strip()):
+        was down; a key still down lasts until now. A key that went through live_midi_fx gives the notes its chain
+        made (kept with the key in the log: the dice as rolled live), each lasting as it did live (_fx_len); raw=True
+        gives the keys pressed instead. Returns (notes, keys still down, key delays in beats, how many notes came from
+        a log written before the heard clock, {'keys': keys that went through a chain, 'arp': whether live_arp
+        stepped their notes})."""
+        recs = [json.loads(x) for x in open(path, encoding='utf8') if x.strip()]
+        now = self.sound_beat()
+        peds, offs, dn = [], [], None              # the pedal's down stretches, the all-notes-offs: for _fx_len
+        for r in recs:
+            if r['st'] & 0xF0 == 0xB0 and r['d1'] == 64:
+                if r['d2'] >= 64 and dn is None:
+                    dn = r['beat']
+                elif r['d2'] < 64 and dn is not None:
+                    peds.append((dn, r['beat']))
+                    dn = None
+            elif r['st'] & 0xF0 == 0xB0 and r['d1'] in (120, 123):
+                offs.append(r['beat'])
+        if dn is not None:
+            peds.append((dn, math.inf))
+        notes, down, held, ped, old, lag = [], {}, {}, False, 0, []
+        fx = {'keys': 0, 'arp': False}
+
+        def end(m, b, rel=None, again=False):
+            """Key m's notes end: the key itself at b, or the chain's notes as _fx_len says (rel: when the key was
+            let go, None while it is held; again: pressed again before its release)."""
+            st, v, made = down.pop(m)
+            held.pop(m, None)
+            if raw or made is None:
+                notes.append((st, m, b - st, v))
+                return
+            e = self._fx_len(st, rel, b if again else None, made.get('fxlen'), peds, offs, now)
+            notes.extend((st, int(n), max(e - st, 0.0), int(vv)) for n, vv in made['fx'])
+        for r in recs:
             kind, b = r['st'] & 0xF0, r['beat']
             if kind == 0x90 and r['d2']:
                 if 'press' in r:
@@ -916,27 +957,52 @@ class MidiPlay:
                 else:
                     old += 1
                 if r['d1'] in down:
-                    st, v = down.pop(r['d1'])
-                    notes.append((st, r['d1'], b - st, v))
-                down[r['d1']] = (b, r['d2'])
-                held.discard(r['d1'])
+                    end(r['d1'], b, held.get(r['d1']), again=r['d1'] not in held)
+                made = {'fx': r['fx'], 'fxlen': r.get('fxlen')} if 'fx' in r else None
+                if made is not None:
+                    fx['keys'] += 1
+                    fx['arp'] = fx['arp'] or bool(r.get('fxarp'))
+                down[r['d1']] = (b, r['d2'], made)
             elif kind in (0x80, 0x90):
                 if ped and r['d1'] in down:
-                    held.add(r['d1'])
+                    held[r['d1']] = b
                 elif r['d1'] in down:
-                    st, v = down.pop(r['d1'])
-                    notes.append((st, r['d1'], b - st, v))
+                    end(r['d1'], b, b)
             elif kind == 0xB0 and (r['d1'] in (120, 123) or (r['d1'] == 64 and r['d2'] < 64)):
                 for m in list(held if r['d1'] == 64 else down):
-                    st, v = down.pop(m)
-                    notes.append((st, m, b - st, v))
+                    end(m, b, held.get(m, b))
                 held.clear()
                 ped = False if r['d1'] == 64 else ped
             elif kind == 0xB0 and r['d1'] == 64:
                 ped = True
-        now = self.sound_beat()
-        notes += [(st, m, max(now - st, 0.0), v) for m, (st, v) in down.items()]
-        return notes, down, lag, old
+        still = dict(down)
+        for m in list(down):
+            end(m, max(now, down[m][0]), held.get(m))
+        return notes, still, lag, old, fx
+
+    @staticmethod
+    def _fx_len(st, rel, again, rule, peds, offs, now):
+        """Where the notes a key made through live_midi_fx ended live (_fx_on, _fx_off, _fx_end): a set length
+        (beats, times its scale) from the key's start, whatever the key did; else that scale times how long the key
+        was held, never before its release; a key pressed again before its release ends them then; one still held
+        lasts until now. The pedal holds a note past its end until it comes up, and All Notes Off ends every note."""
+        base, mult = rule or (None, 1.0)
+        if base is not None:
+            e = st + base * mult
+        elif again is not None:
+            e = again
+        elif rel is None:
+            e = now
+        else:
+            e = max(rel, st + (rel - st) * mult)
+        for a, z in peds:
+            if a <= e < z:
+                e = z
+                break
+        cut = [o for o in offs if o >= st]
+        if cut:
+            e = min(e, cut[0])
+        return e if math.isfinite(e) else max(now, st)
 
     def _choose(self, notes, bars, span):
         """The notes in the bars asked for: the last `bars` bars that had keys, or span (a, b), inclusive. Rounded as
@@ -960,11 +1026,12 @@ class MidiPlay:
         return (f"{fn[:-6]}: {len(keep)} of {len(notes)} notes, bars {b0}-{b1}"
                 + (f" ({len(down)} still held)" if down else ''))
 
-    def played(self, source=None, bars=8, fit=False, from_bar=None):
+    def played(self, source=None, bars=8, fit=False, from_bar=None, raw=False):
         """The keys played, as notes text in this engine's bars: 'bar | +beat | pitch | d= | v=' lines (the format
         notes take everywhere), note-offs held by the pedal while it was down. bars: the last `bars` bars that had
         keys, or [a, b] (those bars, inclusive). fit=True fits a 16th grid to the hits and prints two placements as
-        live_queue notes (fitted())."""
+        live_queue notes (fitted()). Keys through live_midi_fx come as the notes the chain made; raw=True gives the
+        keys."""
         from ..notation import format_notes
         if from_bar is not None and not fit:
             raise ValueError("from_bar says which bar the fitted notes count as bar 1; use it with fit=True")
@@ -974,7 +1041,7 @@ class MidiPlay:
             return "no keys played yet" + (f" on {source!r}" if source else '')
         bpb, L = self.e.bpb, []
         for fn in names:
-            notes, down, lag, old = self._read(os.path.join(d, fn))
+            notes, down, lag, old, fx = self._read(os.path.join(d, fn), raw)
             if not notes:
                 continue
             keep = self._choose(notes, bars, span)
@@ -982,6 +1049,7 @@ class MidiPlay:
                 L.append(self._none_in(fn, notes, span))
                 continue
             L.append(self._head(fn, keep, notes, down))
+            L += self._fx_lines(fx, raw)
             L.append(self._clock_line(lag, old))
             L.append(self.fitted(keep, from_bar) if fit else format_notes(keep, bpb))
             vels = {k[3] for k in keep}
@@ -992,13 +1060,27 @@ class MidiPlay:
                          f"lower notes sit well under it (about 30 under sounded right in one jam).")
         return '\n'.join(L) or "no notes played yet (only pedal or controls)"
 
-    def take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None):
+    def _fx_lines(self, fx, raw):
+        """What a log's keys through live_midi_fx mean for the notes given, in plain words."""
+        if not fx['keys']:
+            return []
+        if raw:
+            return [f"raw: the keys pressed. {fx['keys']} of them went through live_midi_fx live; leave raw out for "
+                    f"the notes its chain made of them"]
+        return [f"midi fx: {fx['keys']} keys went through live_midi_fx: these are the notes its chain made of them, "
+                f"as they sounded (its random choices as rolled live, its lengths), not the keys pressed. raw=True "
+                f"gives the keys"
+                + ("; live_arp stepped these notes live: they are the notes it held, not its steps" if fx['arp']
+                   else '')]
+
+    def take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None, raw=False):
         """One input's keys, ready to write into a song's track (live_played(into=...)): {'source', 'notes': [[beat
         from the start of the take's bar 1, midi, dur, vel]], 'first_bar': the engine's bar that is the take's bar 1
         (from_bar, else the first bar with a note), 'bpm', 'bpb', 'lanes': {lane: [[beat, value]]}, 'lines': what to
         say about it}. Without fit the notes are as they sounded (off the grid where they were played, the pedal's
         holds, the velocities); with fit, the snapped placement A (as played) or B (the groups from beat 1) that
-        fit=True prints. The played bend, pressure and controllers come as lanes (_take_lanes)."""
+        fit=True prints. The played bend, pressure and controllers come as lanes (_take_lanes). Keys through
+        live_midi_fx are the notes the chain made (raw=True: the keys); 'fx': {'keys', 'arp', 'raw'}."""
         span = _bars_span(bars)
         place = str(placement or 'A').strip().upper()
         if place not in ('A', 'B'):
@@ -1013,14 +1095,15 @@ class MidiPlay:
             raise ValueError(f"keys from {len(names)} inputs ({', '.join(repr(n[:-6]) for n in names)}): name the "
                              f"one to write with source=...")
         fn = names[0]
-        notes, down, lag, old = self._read(os.path.join(d, fn))
+        notes, down, lag, old, fx = self._read(os.path.join(d, fn), raw)
         if not notes:
-            raise ValueError(f"{fn[:-6]}: no notes played yet (only pedal or controls)")
+            raise ValueError(f"{fn[:-6]}: no notes played yet (only pedal or controls, or a chain that dropped "
+                             f"every key" + ("" if raw else ": raw=True gives the keys") + ")")
         keep = self._choose(notes, bars, span)
         if not keep:
             raise ValueError(self._none_in(fn, notes, span))
         bpb = self.e.bpb
-        L = [self._head(fn, keep, notes, down)]
+        L = [self._head(fn, keep, notes, down)] + self._fx_lines(fx, raw)
         if fit:
             f = self._fit(keep)
             if isinstance(f, str):
@@ -1057,7 +1140,7 @@ class MidiPlay:
             L += lane_lines
         return {'source': fn[:-6], 'first_bar': int(origin // bpb) + 1, 'bpm': float(self.e.bpm), 'bpb': bpb,
                 'notes': [[round(st - origin, 6), int(m), round(du, 6), int(v)] for st, m, du, v in sorted(out)],
-                'lanes': lane_pts, 'lines': L}
+                'lanes': lane_pts, 'lines': L, 'fx': dict(fx, raw=bool(raw))}
 
     def _take_lanes(self, path, name, lanes, mpe, warp, origin, end):
         """The played bend, pressure and controllers in one input's log as lanes over the take [origin, end] (beats on

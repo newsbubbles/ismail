@@ -209,7 +209,8 @@ Find any tool by what you need or by role with `ops_find`.
   as level), and since lanes are per track the lane follows the newest note still sounding. Live MIDI from a
   keyboard: `live_midi` (Playing live; its bend, pressure, mod wheel and MPE drive the playing voice's lanes);
   `live_played(into='<track>', bar=...)` records what was played into a song track, as it sounded or snapped to 16ths
-  (`fit=True`), and `undo()` takes it back.
+  (`fit=True`), and `undo()` takes it back. Keys played through `live_midi_fx` come as the notes its chain made,
+  dice as rolled live (`raw=True` gives the keys).
 - **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
   woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
   tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with

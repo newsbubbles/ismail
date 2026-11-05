@@ -3099,15 +3099,16 @@ class Engine:
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
-    def cmd_played(self, source=None, bars=8, fit=False, from_bar=None):
+    def cmd_played(self, source=None, bars=8, fit=False, from_bar=None, raw=False):
         try:
-            return self.midi.played(source, bars, fit, from_bar)
+            return self.midi.played(source, bars, fit, from_bar, raw=raw)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
-    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None):
+    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None,
+                 raw=False):
         try:
-            return self.midi.take(source, bars, fit, from_bar, placement, lanes=lanes, mpe=mpe)
+            return self.midi.take(source, bars, fit, from_bar, placement, lanes=lanes, mpe=mpe, raw=raw)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
@@ -3534,7 +3535,10 @@ def serve(engine, port=0, idle_min=None):
             news = None if isinstance(req, dict) and req.get('op') in ('keys', 'clock') else engine.drain_news()
             if news:
                 k = 'result' if res['ok'] else 'error'
-                res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)
+                if isinstance(res[k], str):
+                    res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)
+                else:                           # data (a take): its news beside it, the data kept as data
+                    res['news'] = news
             body = json.dumps(res).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

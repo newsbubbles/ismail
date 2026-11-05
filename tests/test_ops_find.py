@@ -54,6 +54,7 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('sync the set to an external midi clock, my drum machine leads', 'live_midi_clock_in'),
     ('ismail plays in time with my drum machine, which leads', 'live_midi_clock_in'),
     ('record what I played on my keyboard into a track', 'live_played'),
+    ('keep a take with the random rolls as played', 'live_played'),
     ('the knobs on my midi controller move the filter cutoff', 'live_map'),
     ('aftertouch on my keyboard moves the filter', 'live_map'),
     ('the slide of my mpe note moves a param', 'live_map'),

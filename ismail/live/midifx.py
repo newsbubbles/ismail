@@ -1,7 +1,8 @@
 """live_midi_fx: MIDI effects on played keys (MIDI parity step 7b). Each key of a patched input (live_midi) goes
 through a chain of chord, scale, pitch, velocity, length and random effects before it sounds, through the same core
 the studio renders with (ismail/midifx.py): same chain, same key on the same beat, same notes. A take
-(live_played) keeps the keys, not the notes made, so its random effects roll again when it is rendered.
+(live_played) gives the notes made, kept with each key in the key log (midi_play._fx_on), so a take rendered later
+plays what was heard; raw=True gives the keys.
 
 This holds each input's chain and the changes queued for a bar line; the keys themselves are played in midi_play
 (_fx_on, _fx_off), which keeps, per key held, the notes it started, so its release ends exactly those notes even
