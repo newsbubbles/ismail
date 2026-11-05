@@ -41,7 +41,9 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     {lane: None} to leave one out; e.g. {'bend': {'range': 12}, 'mute': {'midi': 'cc:20', 'range': [0, 1]}}. The
     reply names lanes with no message and values clamped to a range. mpe: True (every melodic track) or a list of
     track names written as MPE: channel 1 the master, each note on its own member channel 2 to 16 with the track's
-    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth.
+    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth. No poly pressure goes
+    out: a song's lanes are per track, with no per-note pressure to carry (mpe= gives each note its own channel
+    pressure instead).
     programs: a GM program change per track, 1 to 128 as a GM list numbers them (1 piano, 33 acoustic bass, 81
     square lead), so a GM synth or a DAW's GM player picks the sound: {'bass': 33}, or a program per bar where the
     sound changes, {'lead': {1: 81, 17: 82}}. With bars=, the program in force at the first bar goes at the file's
@@ -291,6 +293,8 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
     chs = {n[4] for n in notes}
     if not mpe and chs:
         ctl = [c for c in ctl if c[1] in chs]
+    counts = _ctl_counts(ctl)
+    ctl, n_poly, n_kept = ML.poly_to_channel(notes, ctl)     # per-key pressure: onto the channel's (lanes per track)
     given = {str(k)[10:] if str(k).startswith('inst.lane.') else str(k): v for k, v in (lanes or {}).items()}
     L, W, wrote = [], [], []
     for lane, (kind, num, lo, hi) in lmap.items():
@@ -331,13 +335,21 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
                      f" (bend range +-{fmt_num(hi)})") if kind == 'bend' else f" ({fmt_num(lo)}..{fmt_num(hi)})")
                  + (", per note (MPE)" if mpe else ''))
     used = {ML.midi_name(k, n) for k, n, _, _ in lmap.values()}
-    left = {w: c for w, c in _ctl_counts(ctl).items() if w not in used}
+    if n_poly and 'pressure' in used:
+        L.append(f"    poly pressure: {n_poly} per-key messages read as their channel's pressure (the newest key still "
+                 f"held wins: ismail's lanes are per track, not per note)")
+        counts['poly pressure'] = n_kept
+    left = {w: c for w, c in counts.items() if w not in used and c}
     if left:
         other = sorted(w for w in left if w != 'poly pressure')
+        pl = next((x for x, (k, _, _, _) in lmap.items() if k == 'pressure'), None)
         L.append("    not read: "
                  + ', '.join(f"{w} ({c} message{'s' if c != 1 else ''})" for w, c in sorted(left.items()))
                  + (f"; lanes={{'<lane>': {{'midi': '{other[0]}', 'range': [lo, hi]}}}} reads one" if other else '')
-                 + ("; poly pressure (per key) is not read yet" if 'poly pressure' in left else ''))
+                 + (("; poly pressure goes onto the lane that takes pressure, by the newest key held: lanes={'level': "
+                     "{'midi': 'pressure', 'range': [-40, 0]}} reads it" if pl is None else
+                     "; poly pressure on a channel that sends channel pressure too is left out (the "
+                     f"{pl} lane reads that channel's own)") if 'poly pressure' in left else ''))
     have = ML.voice_lanes(tr.get('instrument'), P.root)
     miss = [x for x in wrote if x not in have]
     if miss:
@@ -366,8 +378,10 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     configures MPE with RPN 6 in any track, lower or upper zone, or mpe=True; mpe=False reads it as one plain part,
     every channel's messages into one lane) is read per note: bend at +-48
     unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
-    ismail's lanes are per track. Lanes replace the target's points over the span they cover; quantize moves notes
-    only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
+    ismail's lanes are per track. Poly pressure (one key's own) is read the same way, as its channel's pressure
+    following the newest key still held, onto the lane that takes pressure (lanes={'level': {'midi': 'pressure',
+    'range': [-40, 0]}} on a plain part; a channel that sends channel pressure too keeps its own); the reply says
+    so. Lanes replace the target's points over the span they cover; quantize moves notes only. Reach for it when the person brings a .mid (from their DAW, a score program or the web) to open, read or
     import into a song, its pitch bend, mod wheel, other controllers and MPE included. The listing names each
     track's GM program (1 to 128); into= writes notes and lanes, not programs (a track's sound is its instrument)."""
     path = os.path.abspath(file)

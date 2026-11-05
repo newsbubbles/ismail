@@ -288,3 +288,29 @@ def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False):
             continue
         dedup.append((b, r, ch))
     return (dedup if with_ch else [(b, r) for b, r, _ in dedup]), overlapped, skipped
+
+
+def poly_to_channel(notes, ctl):
+    """Polyphonic aftertouch (one key's own pressure) onto its channel's pressure, since ismail's lanes are per track,
+    not per note: on each channel that sends poly pressure and no channel pressure, the channel's pressure follows
+    the newest key still sounding (last-note priority, as an MPE part is read; when it lets go, the newest older key
+    held). notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)] with 'poly:<pitch>' messages. Returns
+    (ctl with those channels' poly pressure as 'pressure', poly messages read that way, poly messages left as they
+    were because their channel sends channel pressure too)."""
+    poly = {}
+    for b, ch, w, raw in ctl:
+        if w.startswith('poly:'):
+            poly.setdefault(ch, []).append((b, int(w[5:]), 'pressure', raw))
+    chans = {ch for _, ch, w, _ in ctl if w == 'pressure'}
+    out = [c for c in ctl if not (c[2].startswith('poly:') and c[1] in poly and c[1] not in chans)]
+    read = kept = 0
+    for ch, msgs in poly.items():
+        if ch in chans:
+            kept += len(msgs)
+            continue
+        keys = [(n[0], n[1], n[2], n[3], n[1]) for n in notes if n[4] == ch]    # each key as its own "channel"
+        evs, _, _ = mpe_merge(keys, msgs, 'pressure', master=-1)
+        out += [(b, ch, 'pressure', raw) for b, raw in evs]
+        read += len(msgs)
+    out.sort(key=lambda c: c[0])
+    return out, read, kept

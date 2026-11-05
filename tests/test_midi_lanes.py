@@ -301,3 +301,29 @@ def test_an_mpe_configuration_in_a_conductor_track_counts_for_the_notes_track(tm
     assert _lane(q, 'solo', 'bend') == [[0.0, 48.0], [pytest.approx(1 - 1 / 960), 48.0], [1.0, 0.0]]
     out = OPS['midi_read'](q, path, into={'#1': 'solo'}, mpe=False)        # one plain part: +-2, channels merged
     assert 'MPE' not in out and '(bend range +-2)' in out
+
+
+def test_poly_pressure_follows_the_newest_key_held_onto_the_channels_pressure_lane(tmp_path):
+    path = str(tmp_path / 'poly.mid')
+    poly = [(0, 60, 40), (1, 64, 100), (1.5, 64, 110), (2.5, 60, 20)]          # (beat, key, pressure)
+    MF.write(path, [{'name': 'keys', 'channel': 0, 'notes': [(0, 60, 4, 100), (1, 64, 1, 100)],
+                     'events': [(b, bytes([0xA0, k, v])) for b, k, v in poly]}], bpm=120)
+    q = str(tmp_path / 'q')
+    api.project_new(q, bpm=120, length_bars=2)
+    api.track_add(q, 'keys', instrument={'type': 'synth', 'oscs': [{'wave': 'saw'}]})
+    out = OPS['midi_read'](q, path, into={'keys': 'keys'})
+    assert "not read: poly pressure (4 messages); poly pressure goes onto the lane that takes pressure" in out
+    out = OPS['midi_read'](q, path, into={'keys': 'keys'}, lanes={'level': {'midi': 'pressure', 'range': [0, 127]}})
+    assert "poly pressure: 4 per-key messages read as their channel's pressure (the newest key still held wins" in out
+    lane = _lane(q, 'keys', 'level')
+    for beat, want in ((0.5, 40), (1.25, 100), (1.75, 110), (2.25, 40), (3, 20)):   # E4 lets go at 2: C4's again
+        assert ML.value_at(lane, beat) == pytest.approx(want, abs=0.6), beat
+
+
+def test_poly_pressure_on_a_channel_with_channel_pressure_is_left_to_it():
+    notes = [(0, 60, 2, 100, 0), (0, 62, 2, 100, 1)]
+    ctl = [(0, 0, 'poly:60', 50), (0.5, 0, 'pressure', 70), (0, 1, 'poly:62', 30), (1, 1, 'poly:62', 90)]
+    out, read, kept = ML.poly_to_channel(notes, ctl)
+    assert (read, kept) == (2, 1)
+    assert [c for c in out if c[1] == 1] == [(0, 1, 'pressure', 30), (1, 1, 'pressure', 90)]
+    assert (0, 0, 'poly:60', 50) in out and (0.5, 0, 'pressure', 70) in out

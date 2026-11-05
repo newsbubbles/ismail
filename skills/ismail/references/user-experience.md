@@ -96,7 +96,10 @@ Tell them at the right moment, once, without being asked:
   clears the span first, `'add'` merges; `quantize=0.25` snaps starts to 16ths (default: as played). Positions are
   read in beats, so a file at another tempo keeps its bars at the song's tempo. Its pitch bend, cc:1, cc:11 and
   cc:2 become the target's lanes by the same map (`lanes=` changes it); an MPE file (RPN 6, or `mpe=True`) is read
-  per note.
+  per note. Poly pressure (one key's own) is read as its channel's pressure, the newest key still held winning,
+  onto the lane that takes pressure: on a plain part none does by default, so the reply says to add
+  `lanes={'level': {'midi': 'pressure', 'range': [-40, 0]}}`. A channel that sends channel pressure too keeps its
+  own, and its poly pressure is listed as not read.
 - **Example, out.** The person says "can I have the flute line with its bends in my DAW? I play it on an MPE
   synth." `midi_write(project, tracks=['lead'], mpe=True)`. The reply:
   `wrote <project>/exports/<name>.mid: 2 notes on 1 tracks, 128 BPM, 4/4, bars 1-8`, then
@@ -110,8 +113,8 @@ Tell them at the right moment, once, without being asked:
   `#1 -> lead: 2 notes, bars 1-1` and `lane bend: 86 points from 171 bend messages (bend range +-48), per note
   (MPE)`. Tell them what landed where, then render and say before it plays.
 - Not yet: per-note lanes inside ismail (an MPE file's chord shares one lane per track, the newest note still
-  sounding wins, and the reply counts the overlaps), poly pressure read from a file, MPE's upper zone, and track
-  volume or pan automation written as MIDI.
+  sounding wins, and the reply counts the overlaps; poly pressure the same way), poly pressure written to a file
+  (no per-note pressure in a song), MPE's upper zone, and track volume or pan automation written as MIDI.
 
 ## The lexicon: their words, our terms
 

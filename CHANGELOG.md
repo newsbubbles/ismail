@@ -15,6 +15,10 @@
   at `at`, just before that beat's notes (and again to a new port). `midi_write(programs={'bass': 33, 'lead': {1:
   81, 17: 82}})` writes GM program changes per track and per bar (none before: a track has no program of its own);
   `midi_read`'s listing names a file's programs.
+- Poly pressure in files: `midi_read` reads polyphonic aftertouch onto the lane that takes pressure, as the
+  channel's pressure following the newest key still held (last-note priority, as an MPE part is read), and the reply
+  says so; a channel that also sends channel pressure keeps its own. `midi_write` writes none: a song has no
+  per-note pressure.
 
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 
