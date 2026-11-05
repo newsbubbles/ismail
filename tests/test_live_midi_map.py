@@ -615,3 +615,92 @@ def test_an_encoder_map_takes_its_own_step_size(eng):
                     step=0)
     with pytest.raises(LiveError, match="add midi='cc:<n>'"):
         eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], step=0.1)
+
+
+# ------------------------------------------------------------------ poly pressure and MPE expression as controls (D-244)
+def test_poly_pressure_drives_a_control_by_one_key_or_the_hardest_pressed_key(eng):
+    r = eng.cmd_map('press', target='lead', param='pan', range=[-1, 1], midi='poly', source='pad grid')
+    assert "<- MIDI poly (the hardest-pressed key held), any channel, on 'pad grid', absolute" in r
+    assert "The keys still play; each key's poly pressure is this control's now" in r
+    eng.cmd_map('c4', target='pad', param='pan', range=[0, 1], midi='poly:C4', source='pad grid')
+    send('pad grid', 0x90, 60, 100)
+    send('pad grid', 0x90, 64, 100)
+    send('pad grid', 0xA0, 60, 127)                            # C4 hard
+    send('pad grid', 0xA0, 64, 0x40)                           # E4 softer
+    assert eng.tracks['lead']['pan'] == pytest.approx(1.0)     # the hardest key held: C4
+    assert eng.tracks['pad']['pan'] == pytest.approx(1.0)
+    send('pad grid', 0x80, 60, 0)                              # C4 let go: E4's pressure now, C4's map at rest
+    assert eng.tracks['lead']['pan'] == pytest.approx(-1 + 2 * 64 / 127)
+    assert eng.tracks['pad']['pan'] == 0.0
+    send('pad grid', 0xA0, 64, 0)
+    assert eng.tracks['lead']['pan'] == -1.0
+    assert [x['via'] for x in eng.controls.read('press')][0] == 'midi poly ch1'     # live_controls reads it
+    with pytest.raises(LiveError, match="sends a pressure or a bend as it moves: mode 'absolute' or 'pickup'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='poly', source='pad grid', mode='toggle')
+    with pytest.raises(LiveError, match="'poly:<0-127 or a name like C4>'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='poly:X9', source='pad grid')
+
+
+def test_a_poly_map_never_takes_a_key_and_its_pressure_drives_no_lane(eng):
+    eng.cmd_track('keys', instrument={'type': 'kick'})
+    eng.cmd_midi(source='pad grid', instrument={'type': 'synth', 'oscs': [{'wave': 'sine'}]},
+                 lanes={'level': {'midi': 'pressure', 'range': [0, 6]}})
+    eng.cmd_map('press', target='lead', param='pan', range=[-1, 1], midi='poly', source='pad grid')
+    played = eng.midi.patches['pad grid']['played']
+    send('pad grid', 0x90, 60, 100)
+    assert eng.midi.patches['pad grid']['played'] == played + 1      # the key plays
+    v = eng.midi.voices[-1]
+    send('pad grid', 0xA0, 60, 127)
+    assert eng.tracks['lead']['pan'] == pytest.approx(1.0) and eng.midi.xv[v].poly == {}   # the map's, not the lane's
+
+
+def test_an_mpe_notes_own_pressure_bend_and_timbre_drive_controls_newest_note_first(eng):
+    r = eng.cmd_map('swell', target='lead', param='fx:delay.mix', range=[0, 1], midi='mpe:pressure', source='knob')
+    assert "<- MIDI mpe:pressure (the newest note's own, on its zone's member channels), on 'knob box'" in r
+    eng.cmd_map('slide', target='lead', param='pan', range=[-1, 1], midi='mpe:bend', source='knob')
+    eng.cmd_map('tone', target='lead', param='fx:filter.cutoff', range=[200, 8000], curve='log',
+                midi='mpe:timbre', source='knob')
+    mix = lambda: eng.tracks['lead']['path'].chain.fx[1]['mix']          # noqa: E731
+    send('knob box', 0xB1, 74, 127)                            # the note's timbre, just before its note-on
+    send('knob box', 0x91, 60, 100)                            # a note on channel 2
+    assert cutoff(eng) == pytest.approx(8000)
+    send('knob box', 0xD1, 100, 0)
+    assert mix() == pytest.approx(100 / 127)
+    send('knob box', 0xB2, 74, 0)
+    send('knob box', 0x92, 64, 100)                            # a newer note on channel 3 takes over
+    assert cutoff(eng) == pytest.approx(200) and mix() == 0.0    # its own pressure: none yet
+    send('knob box', 0xD1, 120, 0)                             # the older note's pressure: not the control's now
+    assert mix() == 0.0
+    send('knob box', 0xE2, 0x7F, 0x7F)                         # the newest note bends up
+    assert eng.tracks['lead']['pan'] == pytest.approx(1.0)
+    send('knob box', 0x82, 64, 0)                              # it lets go: back to the older note's values
+    assert mix() == pytest.approx(120 / 127) and cutoff(eng) == pytest.approx(8000)
+    assert eng.tracks['lead']['pan'] == pytest.approx(0.0, abs=1e-3)   # channel 2 never bent: at rest
+    send('knob box', 0xE0, 0x7F, 0x7F)                         # the master channel bends: not a note's own
+    assert eng.tracks['lead']['pan'] == pytest.approx(0.0, abs=1e-3)
+    with pytest.raises(LiveError, match="leave channel out"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='mpe:bend', source='knob', channel=2)
+    with pytest.raises(LiveError, match="'mpe:bend', 'mpe:pressure' or 'mpe:timbre'"):
+        eng.cmd_map('x', target='lead', param='pan', range=[-1, 1], midi='mpe:slide', source='knob')
+
+
+def test_mpe_controls_follow_the_inputs_zone_and_unmapped_ones_are_listed(eng):
+    eng.cmd_map('swell', target='lead', param='pan', range=[0, 1], midi='mpe:pressure', source='knob')
+    for d1, d2 in ((101, 0), (100, 6), (6, 15)):               # the controller: upper zone, channel 16 the master
+        send('knob box', 0xBF, d1, d2)
+    send('knob box', 0x9F, 60, 100)                            # channel 16 is the master now: not a note's
+    send('knob box', 0xDF, 127, 0)
+    assert eng.tracks['lead']['pan'] == 0.0
+    send('knob box', 0x90, 62, 100)                            # channel 1 is a member in the upper zone
+    send('knob box', 0xD0, 127, 0)
+    assert eng.tracks['lead']['pan'] == pytest.approx(1.0)
+    send('knob box', 0xE4, 0, 96)                              # a member's bend and timbre nobody maps
+    send('knob box', 0xB5, 74, 30)
+    heard = eng.cmd_controls()
+    assert "'knob box' mpe:bend member channels: last 4096, 1 messages" in heard
+    assert "'knob box' mpe:timbre member channels: last 30" in heard and 'cc:101' not in heard
+    eng.cmd_controls(source='pad grid')                         # listen to the pads
+    send('pad grid', 0xA1, 61, 90)                             # poly pressure nobody maps
+    assert "'pad grid' poly ch2: last 90 (key C#4), 1 messages" in eng.cmd_controls()
+    eng.cmd_map('tone', target='pad', param='pan', range=[0, 1], midi='mpe:timbre', source='knob')
+    assert 'mpe:timbre' not in eng.cmd_controls()              # mapped: off the unmapped list

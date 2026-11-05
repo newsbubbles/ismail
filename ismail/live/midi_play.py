@@ -265,7 +265,7 @@ class MidiPlay:
                 for k in [k for k in self.heard if k[0] == name and self._takes(binding, k[1], k[2])]:
                     del self.heard[k]
         p = self.patches.get(name)
-        if p is not None:
+        if p is not None and (binding or {}).get('kind') not in ('poly', 'mpe'):   # those never take a key
             p['sustain'] = False
             self.release_all(p)
 
@@ -290,9 +290,13 @@ class MidiPlay:
             return
         if (st & 0xF0) == 0xB0 and d1 in (6, 38, 98, 99, 100, 101):
             return                                          # RPN settings (bend range, MPE zones): not a knob
-        k = (name, what, (st & 0x0F) + 1)
-        kind = st & 0xF0
-        val = ((d2 << 7) | d1) - 8192 if kind == 0xE0 else d1 if kind == 0xD0 else d1 + 1 if kind == 0xC0 else d2
+        kind, ch = st & 0xF0, (st & 0x0F) + 1
+        k = (name, what, ch)
+        p = self.patches.get(name)
+        zones = (p['mpe'] if p is not None and p['mpe'] else None) or self.zones_heard.get(name)
+        if zones and O.mpe_text(st, d1) and ML.zone_of(zones, ch - 1) not in (None, ch - 1):
+            k = (name, O.mpe_text(st, d1), 0)               # an MPE note's own: one row for every member channel
+        val = ((d2 << 7) | d1) - 8192 if kind == 0xE0 else d1 if kind == 0xD0 else d1 + 1 if kind == 0xC0 else             f"{d2} (key {M.note_name(d1)})" if kind == 0xA0 else d2
         with self.heard_lock:
             h = self.heard.pop(k, [0, 0])
             self.heard[k] = [val, h[1] + 1]
@@ -316,7 +320,8 @@ class MidiPlay:
                      f"live_controls(source={source!r}) again")
         elif rows:
             L.append("MIDI heard, not mapped (live_map(control=..., midi=..., source=..., channel=...) binds one):")
-            L += [f"  {src!r} {what} ch{ch}: last {val}, {n} messages" for (src, what, ch), (val, n) in rows]
+            L += [f"  {src!r} {what} " + (f"ch{ch}" if ch else "member channels") + f": last {val}, {n} messages"
+                  for (src, what, ch), (val, n) in rows]
         return L
 
     # ------------------------------------------------------------------ the command

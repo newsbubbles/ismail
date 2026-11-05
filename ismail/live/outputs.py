@@ -9,9 +9,9 @@ beyond localhost.
 Controls: a named control (a knob, a switch, a slider on the VR stage) is mapped once by an agent to a live parameter
 (a track, bus or deck volume, a deck EQ, an effect param). Its moves then apply in the engine in milliseconds, with no
 model in the loop, and every move is logged with the bar it happened at, so a take's knob moves read back as
-automation points. A MIDI controller's CC, 14-bit CC pair, pitch bend, channel pressure or a pad's note can be the
-source of a map (live_map(midi=...)), in modes absolute, pickup, relative and toggle: Controls.midi_in turns its
-messages into moves. A map can fire an action instead of moving a param (live_map(action=...)): each press of a pad
+automation points. A MIDI controller's CC, 14-bit CC pair, pitch bend, channel pressure, a pad's note, a key's poly
+pressure or an MPE note's own bend, pressure or timbre can be the source of a map (live_map(midi=...)), in modes
+absolute, pickup, relative and toggle: Controls.midi_in turns its messages into moves. A map can fire an action instead of moving a param (live_map(action=...)): each press of a pad
 or a button, or a program change, then queues a scene (a batch of clips), changes the tempo or starts a deck
 transition, the same commands live_queue, live_tempo and live_transition send.
 
@@ -29,6 +29,7 @@ import time
 
 import numpy as np
 
+from .. import midilanes as ML
 from .safety import Safety
 
 MAX_QUEUE_S = 1.0
@@ -166,8 +167,10 @@ def unscale(x, rng, curve):
 
 # ------------------------------------------------------------------ MIDI as a control source (live_map(midi=...))
 
-MIDI_KINDS = ("'cc:<0-127>', 'cc14:<0-31>' (MSB n with LSB n+32), 'bend', 'pressure', 'note:<36 or C2>', or "
-              "'program:<1-128>'")
+MIDI_KINDS = ("'cc:<0-127>', 'cc14:<0-31>' (MSB n with LSB n+32), 'bend', 'pressure', 'note:<36 or C2>', "
+              "'program:<1-128>', 'poly' (poly pressure, the hardest-pressed key) or 'poly:<60 or C4>' (one key's), "
+              "or 'mpe:bend', 'mpe:pressure', 'mpe:timbre' (the newest MPE note's own; timbre is cc:74)")
+MPE_SUBS = {'bend': 'bend', 'pressure': 'pressure', 'timbre': 'cc:74'}    # mpe:<sub> -> the member channel's message
 MODES = ('absolute', 'pickup', 'relative', 'relative64', 'toggle', 'trigger')
 # what a map may fire (live_map(action=...)): the live op it mirrors -> the arguments it takes, as that op takes them
 ACTIONS = {'live_queue': ('clips', 'section', 'cancel_section', 'cancel_at'),
@@ -185,7 +188,23 @@ def parse_midi(midi, channel=None, mode='absolute', step=None):
     kind, _, arg = str(midi).strip().partition(':')
     kind, arg = kind.lower(), arg.strip()
     num = lsb = None
-    if kind in ('cc', 'cc14', 'note', 'program'):
+    if kind == 'poly' and arg:
+        try:
+            num = pitch_to_midi(arg)
+            assert 0 <= num <= 127
+        except (ValueError, NotationError, AssertionError):
+            raise ValueError(f"midi {midi!r}: 'poly' (any key: the hardest-pressed key held) or 'poly:<0-127 or a "
+                             f"name like C4>' (that one key's pressure)")
+    elif kind == 'mpe':
+        if arg.lower() not in MPE_SUBS:
+            raise ValueError(f"midi {midi!r}: 'mpe:bend', 'mpe:pressure' or 'mpe:timbre' (cc:74): the newest MPE "
+                             f"note's own, on its member channel")
+        arg = arg.lower()
+        if channel:
+            raise ValueError(f"midi {midi!r} follows the newest note on its zone's member channels (the zone "
+                             f"live_midi(mpe=...) or the controller's MPE configuration gives; else the lower "
+                             f"zone): leave channel out")
+    elif kind in ('cc', 'cc14', 'note', 'program'):
         try:
             num = pitch_to_midi(arg) if kind == 'note' else int(arg)
         except (ValueError, NotationError):
@@ -197,7 +216,7 @@ def parse_midi(midi, channel=None, mode='absolute', step=None):
                                 if kind == 'program' else '') + f"; sources: {MIDI_KINDS}")
         if kind == 'cc14':
             lsb = num + 32
-    elif kind not in ('bend', 'pressure') or arg:
+    elif kind not in ('bend', 'pressure', 'poly') or arg:
         raise ValueError(f"midi {midi!r}: one of {MIDI_KINDS}. Not sure what a knob sends? live_controls(source=<the "
                          f"input>) listens; move it, then call live_controls again")
     if mode not in MODES:
@@ -205,6 +224,8 @@ def parse_midi(midi, channel=None, mode='absolute', step=None):
     if mode in ('relative', 'relative64') and kind != 'cc':
         raise ValueError(f"mode {mode!r} reads an endless encoder's steps on a 'cc:<n>'; {kind} sends positions: "
                          f"mode 'absolute' or 'pickup'")
+    if kind in ('poly', 'mpe') and mode not in ('absolute', 'pickup'):
+        raise ValueError(f"midi {midi!r} sends a pressure or a bend as it moves: mode 'absolute' or 'pickup'")
     if mode in ('toggle', 'trigger') and kind not in ('cc', 'note', 'program'):
         raise ValueError(f"mode {mode!r} {'flips' if mode == 'toggle' else 'fires'} on a button press: a 'note:<n>' "
                          f"pad, a 'cc:<n>' button or a 'program:<n>'")
@@ -226,9 +247,9 @@ def parse_midi(midi, channel=None, mode='absolute', step=None):
         except (TypeError, ValueError, AssertionError):
             raise ValueError(f"step {step!r}: a fraction of the range per tick, above 0 and at most 1 (default "
                              f"1/128 = {REL_STEP:g}: 128 ticks end to end; 1/32 moves 4 times as far)")
-    text = f"{kind}:{num}" if num is not None else kind
-    return {'kind': kind, 'num': num, 'lsb': lsb, 'channel': int(channel) if channel else None, 'mode': mode,
-            'text': text, 'step': step}
+    text = f"{kind}:{num}" if num is not None else f"mpe:{arg}" if kind == 'mpe' else kind
+    return {'kind': kind, 'num': arg if kind == 'mpe' else num, 'lsb': lsb,
+            'channel': int(channel) if channel else None, 'mode': mode, 'text': text, 'step': step}
 
 
 def parse_action(action):
@@ -261,9 +282,16 @@ def parse_action(action):
 
 def midi_text(st, d1):
     """What a message is, in live_map's words: 'cc:74', 'note:36', 'bend', 'pressure', 'program:5' (numbered from
-    1); None for the rest."""
+    1), 'poly' (any key's poly pressure); None for the rest."""
     return {0xB0: f"cc:{d1}", 0x90: f"note:{d1}", 0x80: f"note:{d1}", 0xE0: 'bend',
-            0xD0: 'pressure', 0xC0: f"program:{d1 + 1}"}.get(st & 0xF0)
+            0xD0: 'pressure', 0xC0: f"program:{d1 + 1}", 0xA0: 'poly'}.get(st & 0xF0)
+
+
+def mpe_text(st, d1):
+    """A member channel's message as an MPE control: 'mpe:bend', 'mpe:pressure', 'mpe:timbre' (cc:74), or None."""
+    kind = st & 0xF0
+    return ('mpe:bend' if kind == 0xE0 else 'mpe:pressure' if kind == 0xD0 else
+            'mpe:timbre' if kind == 0xB0 and d1 == 74 else None)
 
 
 class Controls:
@@ -320,11 +348,13 @@ class Controls:
         """The maps a MIDI input drives: [(control, map)]."""
         return [(c, m) for c, m in list(self.maps.items()) if (m.get('midi') or {}).get('source') == source]
 
-    def midi_in(self, source, st, d1, d2, now):
+    def midi_in(self, source, st, d1, d2, now, zones=None):
         """A message from input `source` -> (the moves it makes [(control, map, position 0..1, via)], whether a map is
         bound to it: a bound message is a control, never a key). now(m): the map's param now as a position 0..1, or
         None when it cannot be read. While this map's own moves wait in the engine's queue, relative steps, toggles
-        and pickup count from the last position it sent, not from the param (which has not moved yet)."""
+        and pickup count from the last position it sent, not from the param (which has not moved yet). zones: the
+        input's MPE zones {master channel from 0: members} for 'mpe:' maps (default the lower zone). A poly or MPE
+        map watches note-ons and note-offs (who holds which key) but never takes them: the keys still play."""
         kind, ch = st & 0xF0, (st & 0x0F) + 1
         moves, hit = [], False
         for control, m in self.bound(source):
@@ -381,6 +411,12 @@ class Controls:
             elif b['kind'] == 'program' and kind == 0xC0 and d1 + 1 == b['num']:
                 hit = True
                 v = 1.0 if b['mode'] == 'trigger' else self._flip(m, now)
+            elif b['kind'] == 'poly':
+                took, v = self._poly(b, s, kind, ch, d1, d2)
+                hit = hit or took
+            elif b['kind'] == 'mpe':
+                took, v = self._mpe(b, s, kind, ch, d1, d2, zones)
+                hit = hit or took
             if v is None or (b['mode'] == 'pickup' and not self._caught(m, v, now)):
                 continue
             s['applied'] = v
@@ -389,6 +425,71 @@ class Controls:
         return moves, hit
 
     clock = staticmethod(time.monotonic)
+
+    @staticmethod
+    def _poly(b, s, kind, ch, d1, d2):
+        """Poly pressure as a control: (taken, position or None). 'poly:<n>' is that key's pressure; 'poly' the
+        hardest-pressed key held, so letting go of it falls back to the next. A key let go, or struck again, has no
+        pressure until it sends some."""
+        keys = s.setdefault('keys', {})
+        if kind == 0xA0 and (b['num'] is None or d1 == b['num']):
+            keys[(ch, d1)] = d2
+            return True, (d2 if b['num'] is not None else max(keys.values())) / 127.0
+        if kind in (0x80, 0x90) and keys.pop((ch, d1), None) is not None:
+            v = (max(keys.values(), default=0) if b['num'] is None else 0) / 127.0
+            return False, None if v == s['applied'] else v
+        return False, None
+
+    @staticmethod
+    def _mpe(b, s, kind, ch, d1, d2, zones):
+        """An MPE note's own bend, pressure or timbre (cc:74) as a control: (taken, position or None). The control
+        follows the newest note held on the zone's member channels (last-note priority, as midi_read reads an MPE
+        part); when it lets go, the newest older note held; with none held the value stays. A note-on moves the
+        control to its channel's value (MPE sends a note's bend and timbre just before it); a channel handed to a new
+        note starts without the last note's pressure. Bend is 0.5 at rest, as for 'bend'."""
+        c = ch - 1
+        zm = ML.zone_of(zones or {ML.MPE_MASTER: 15}, c)
+        if zm is None or zm == c:
+            return False, None                     # a master channel, or no zone's: not a note's own
+        x = s.setdefault('mpe', {'held': [], 'vals': {}, 'owner': None, 'stale': set()})
+        sub = b['num']
+
+        def pos(raw):
+            if sub == 'bend':
+                return (min(1.0, max(-1.0, (raw - 8192) / 8191.0)) + 1) / 2
+            return raw / 127.0
+        if kind == 0x90 and d2:
+            x['held'] = [h for h in x['held'] if h != (c, d1)] + [(c, d1)]
+            if sub == 'pressure' and c in x['stale']:
+                x['vals'][c] = 0
+            x['stale'].discard(c)
+            x['owner'] = c
+            raw = x['vals'].get(c, 8192 if sub == 'bend' else 0 if sub == 'pressure' else None)
+            v = None if raw is None else pos(raw)
+            return False, None if v == s['applied'] else v
+        if kind in (0x80, 0x90):
+            if (c, d1) not in x['held']:
+                return False, None
+            x['held'].remove((c, d1))
+            if not any(h[0] == c for h in x['held']):
+                x['stale'].add(c)
+            if x['owner'] == c and x['held'] and not any(h[0] == c for h in x['held']):
+                x['owner'] = x['held'][-1][0]
+                raw = x['vals'].get(x['owner'], 8192 if sub == 'bend' else 0 if sub == 'pressure' else None)
+                v = None if raw is None else pos(raw)
+                return False, None if v == s['applied'] else v
+            return False, None
+        msg = ('bend' if kind == 0xE0 else 'pressure' if kind == 0xD0 else
+               f"cc:{d1}" if kind == 0xB0 else None)
+        if msg != MPE_SUBS[sub]:
+            return False, None
+        raw = ((d2 << 7) | d1) if kind == 0xE0 else d1 if kind == 0xD0 else d2
+        x['vals'][c] = raw
+        if sub == 'pressure':
+            x['stale'].discard(c)
+        if x['owner'] is None:
+            x['owner'] = c
+        return True, pos(raw) if x['owner'] == c else None
 
     @staticmethod
     def pending(m):
@@ -489,7 +590,10 @@ def describe(m):
     b = m.get('midi')
     if b:
         out += (f" <- MIDI {b['text']}" + (f" (LSB cc:{b['lsb']})" if b['lsb'] is not None else '')
-                + (f" ch{b['channel']}" if b['channel'] else ', any channel') + f", on {b['source']!r}, {b['mode']}"
+                + (" (the newest note's own, on its zone's member channels)" if b['kind'] == 'mpe' else
+                   (" (the hardest-pressed key held)" if b['kind'] == 'poly' and b['num'] is None else '')
+                   + (f" ch{b['channel']}" if b['channel'] else ', any channel'))
+                + f", on {b['source']!r}, {b['mode']}"
                 + (f", a tick {b['step']:g} of the range" if b.get('step') else ''))
         w = m['st'].get('waiting')
         if b['mode'] == 'pickup' and w:

@@ -2743,7 +2743,8 @@ class Engine:
         if midi is None and (source is not None or channel is not None or mode not in ('absolute', 'trigger')
                              or step is not None):
             raise LiveError("source, channel and mode bind a MIDI controller: add midi='cc:<n>' (or 'cc14:<n>', "
-                            "'bend', 'pressure', 'note:<n>'); live_controls(source=<input>) shows what a knob sends")
+                            "'bend', 'pressure', 'note:<n>', 'poly', 'mpe:pressure'); live_controls(source=<input>) "
+                            "shows what a knob sends")
         kept = (f"; {control} keeps its old map ({O.describe(old_map)})" if old_map else
                 f"; {control} is not mapped")
         # every check before anything changes: a failed remap leaves the old map working
@@ -2786,10 +2787,14 @@ class Engine:
         self.midi.bound_now(binding['source'], binding)
         same = [c for c, x in self.controls.bound(binding['source']) if c != control and
                 x['midi']['text'] == binding['text'] and x['midi']['channel'] == binding['channel']]
+        bound = (". The keys still play; " + ("each key's poly pressure" if binding['kind'] == 'poly' else
+                                              f"each MPE note's own {binding['num']}")
+                 + " is this control's now, not a lane's of the patched keys, and is not logged with them"
+                 if binding['kind'] in ('poly', 'mpe') else
+                 ". A bound message is a control, not a key: it no longer plays or logs as a note")
         return (f"{control} -> {O.describe(m)}: " + (what or "each move applies in the engine at once and is logged "
                                                              "by bar") + " (live_controls)"
-                + (f"; the same MIDI control also drives {', '.join(same)}" if same else '')
-                + ". A bound message is a control, not a key: it no longer plays or logs as a note")
+                + (f"; the same MIDI control also drives {', '.join(same)}" if same else '') + bound)
 
     def _check_action(self, a):
         """What an action names exists now and what it says parses (called under the lock): its clips parse onto
@@ -2944,7 +2949,7 @@ class Engine:
         nothing here touches a file or rebuilds an effect). True
         when a map is bound to it (then it is a control, not a key). With no control thread running (a test, a
         harness), the moves apply here."""
-        moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now)
+        moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now, zones=self.midi.zones_of(source))
         if moves:
             with self._ctl_lock:
                 for control, m, v, via in moves:

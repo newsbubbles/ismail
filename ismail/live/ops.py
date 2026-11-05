@@ -699,9 +699,13 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     live_controls reads them back as automation. remove=True unmaps.
     MIDI as the source: midi='cc:<0-127>' (a knob or fader, 0..127 as 0..1), 'cc14:<0-31>' (a 14-bit pair, MSB n
     and LSB n+32), 'bend' (the wheel; centre = 0.5), 'pressure' (channel aftertouch), 'note:<36 or C2>' (a pad:
-    held = 1, released = 0) or 'program:<1-128>' (a program change, numbered from 1 as a GM list or the
+    held = 1, released = 0), 'program:<1-128>' (a program change, numbered from 1 as a GM list or the
     controller's screen shows it: a footswitch or a preset button; it fires an action, or with mode='toggle' flips
-    a param). source: the MIDI input (midi_sources; optional when there is one), opened by the map
+    a param), 'poly' (polyphonic aftertouch: the hardest-pressed key held) or 'poly:<60 or C4>' (that key's), or
+    'mpe:pressure', 'mpe:bend', 'mpe:timbre' (an MPE note's own pressure, bend or cc:74, the newest note held winning,
+    on the member channels of the zone the input plays in: live_midi(mpe=...) or the controller's own MPE
+    configuration, else the lower zone; no channel=). A poly or mpe map takes that expression only: the keys still
+    play. source: the MIDI input (midi_sources; optional when there is one), opened by the map
     even when no keys are patched; channel: 1 to 16 (default every channel). mode: 'absolute' (the param jumps to the
     knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
     stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
@@ -719,7 +723,9 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     'B', 'bars': 16, 'style': 'blend'}. The tracks and decks it names are checked when it is mapped; the reply of
     each press comes in the engine's news, and live_controls lists the presses by bar. Mute a track from a pad with
     a param map: target=<track>, param='volume_db', range=[0, -120], curve='switch', mode='toggle'. live_control
-    (value=1) fires an action map too."""
+    (value=1) fires an action map too. Reach for it when the person wants a knob, fader, pad, footswitch, the
+    pressure on a key (aftertouch) or an MPE note's own slide or pressure on their controller to move something in
+    the set."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
                  remove=remove, midi=midi, source=source, channel=channel, mode=mode,
                  **{k: v for k, v in (('action', action), ('step', step)) if v is not None})

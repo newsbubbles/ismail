@@ -12,6 +12,13 @@
   the part's notes. A played controller's own MPE Configuration Message sets the patch's zones and sizes (both
   zones of a split keyboard, the other zone shrinking when one grows, as the MPE spec says) and the news says so;
   `live_midi(mpe=False)` ignores it. A take with no patch is read in the zone its key log configured.
+- Polyphonic aftertouch and MPE expression as controls: `live_map(midi='poly')` (the hardest-pressed key held;
+  letting go of it falls back to the next), `'poly:<n>'` (one key's), and `'mpe:pressure'`, `'mpe:bend'`,
+  `'mpe:timbre'` (cc:74): an MPE note's own, the newest note held winning, on the member channels of the zone the
+  input plays in. They watch the keys but never take them: the keys still play, and only that expression becomes
+  the map's. Absolute or pickup. Unmapped, `live_controls` lists them as other inputs: `poly ch1: last 90 (key
+  C#4)`, and `mpe:timbre member channels` on an input whose zone is known. RPN messages (bend range, MPE
+  configuration) are no longer listed as unmapped knobs.
 - Not yet: per-note lanes for an MPE chord (a song has one lane per track), poly pressure written to a file, a
   member channel's own bend range (RPN 0) taken live, Ableton Link, MIDI Time Code.
 
@@ -45,7 +52,7 @@
 - Encoder step size per map: `live_map(..., mode='relative' | 'relative64', step=1/32)` sets how far one tick of an
   endless encoder moves, as a fraction of the range (default 1/128); `live_status` shows it.
 - Not yet: per-note lanes for an MPE chord (it shares one lane per track), poly pressure written to a file,
-  polyphonic aftertouch and MPE as live_map controls, encoder acceleration, Ableton Link, MIDI Time Code.
+  encoder acceleration, Ableton Link, MIDI Time Code.
 
 ### MIDI effects, live and in the studio (MIDI parity step 7b)
 

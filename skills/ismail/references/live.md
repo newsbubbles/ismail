@@ -614,7 +614,10 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   n 0..31 and LSB n+32), `'bend'` (centre = the middle of the range), `'pressure'` (channel aftertouch),
   `'note:<n>'` (a pad: held = the range's top, released = its bottom), `'program:<n>'` (a program change, 1 to 128
   as a GM list or the controller's screen numbers it: a footswitch, a preset button; it fires an action or, with
-  `mode='toggle'`, flips a param). `source` is optional when one input is
+  `mode='toggle'`, flips a param), `'poly'` (poly pressure: the hardest-pressed key held, so letting go of it falls
+  back to the next) or `'poly:<n>'` (one key's pressure, `'poly:C4'`), and `'mpe:pressure'`, `'mpe:bend'`,
+  `'mpe:timbre'` (an MPE note's own pressure, bend or cc:74, the newest note held winning: when it lets go, the
+  next newest takes over). `source` is optional when one input is
   plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
   give `[value at 0, value at the top]`; the curve is `'linear'` (default), `'log'` (Hz, ratios: both ends above 0)
   or `'switch'` (`'raw'` is refused for MIDI). The range, curve and `at` work as for any control, and every move is
@@ -628,11 +631,22 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
     (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
     0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
     which source: `relative` and `relative64` only on `'cc:<n>'`; `toggle` on `'cc:<n>'` or `'note:<n>'`; a
-    `'note:<n>'` pad only `absolute` or `toggle`; `bend`, `pressure` and `'cc14:<n>'` are `absolute` or `pickup`.
-    A wrong pair is refused and the old map stays.
+    `'note:<n>'` pad only `absolute` or `toggle`; `bend`, `pressure`, `'cc14:<n>'`, `poly` and `mpe:` are
+    `absolute` or `pickup`. A wrong pair is refused and the old map stays.
   - **One knob, several params:** map each param with the same `midi=`; reverse a range to move one the other way.
   - **Bound means control:** a bound note or CC no longer plays or logs as a key on that input. Binding one lets go
     of the keys held and the pedal on that input, so nothing hangs waiting for a release that is now a control.
+    A `poly` or `mpe:` map takes only the pressure, bend or timbre: the keys still play, but that expression is the
+    map's now, not a lane's of the patched keys, and it is not in the key log.
+  - **Pressure and MPE as controls.** Press harder on a key to open a filter: `live_map(control='open', target='lead',
+    param='fx:filter.cutoff', range=[400, 8000], curve='log', midi='poly', source='keys')`. An MPE controller's
+    pressure, slide or timbre on whichever note was played last: `midi='mpe:pressure'`, `'mpe:bend'` (0.5 at rest:
+    the middle of the range) or `'mpe:timbre'`. An `mpe:` map reads the zone the input plays in (`live_midi(mpe=...)`,
+    or the controller's own MPE configuration; the lower zone when neither says), so `channel=` is refused: the
+    master channel is never a note's own. A new note moves the map to its own value at once (its bend and timbre are
+    sent just before it), and a channel handed to a new note starts without the old note's pressure. Unmapped, they
+    are listed by `live_controls` as other inputs are: `'keys' poly ch1: last 90 (key C#4)`, and on an input whose
+    zone is known, `'keys' mpe:timbre member channels: last 30` (one row for every member channel).
   - **Finding the numbers.** Ask the person what the controller is, or listen: `live_controls(source='knob box')`
     opens the input for 2 minutes (each call restarts it; a map on it keeps it open); ask them to move the knob,
     then call it again. It lists what came in that no map takes
@@ -671,8 +685,8 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
        engine's news) and is logged by bar (live_controls)`.
     2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
-  - Not yet: polyphonic aftertouch and MPE as controls, acceleration for encoders (a fast turn moving further per
-    tick), and a curve beyond linear, log and switch.
+  - Not yet: acceleration for encoders (a fast turn moving further per tick), and a curve beyond linear, log and
+    switch.
 
 ## Played keys: the person plays a part
 
