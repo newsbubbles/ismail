@@ -943,8 +943,11 @@ def live_played(project: str, source: str = None, bars=8, fit: bool = False, fro
     and midi_write take it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}}, any lane the
     song's voice has, e.g. {'breath': {'midi': 'cc:2', 'range': [0, 1]}}; {lane: None} leaves one out), or
     lanes=False for notes only. mpe: read each note's own channel (default: as the input is patched). Poly pressure
-    goes onto the channel's pressure by the newest key held, since a song's lanes are per track. The lanes replace
-    the track's points over the take (mode='add' merges only notes); with fit they move with the notes."""
+    goes onto the channel's pressure by the newest key held (a key that sends none is at 0), since a song's lanes
+    are per track. The lanes run to the take's last bar line, so a wheel let go after the last note springs back,
+    and a bend or pressure still off rest there goes back to rest on that line. They replace the track's points
+    over the take's bars, and on to the last point when a note is held past them; the song's own point on the bar
+    line after stays (mode='add' merges only notes). With fit they move with the notes."""
     if into is None:
         if bar != 1 or mode != 'replace' or str(placement).upper() != 'A' or lanes is not None or mpe is not None:
             raise OpError("bar, mode, placement, lanes and mpe say where and how into='<track>' writes the take; add "

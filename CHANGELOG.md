@@ -7,22 +7,27 @@
 - `live_map(control, action={'op': 'live_queue' | 'live_tempo' | 'live_transition', ...}, midi='note:<n>' |
   'cc:<n>', ...)`: a pad or a button fires a command on each press (a note-on, or a CC button reaching 64), with the
   arguments of the op it mirrors: a scene or a part (a batch of clips, stops, a section cut-over), a tempo change, a
-  deck transition. What it names is checked when it is mapped; each press's reply comes in the engine's news and
-  `live_controls` lists the presses by bar. A bound pad does not play. `live_control(value=1)` fires one too.
+  deck transition. What it names and every `at=` it gives are checked when it is mapped; each press's reply comes
+  in the engine's news (a press the op refuses is one news line, and the other controls still move), quick presses
+  each fire, and `live_controls` lists the presses by bar. A bound pad does not play. `live_control(value=1)` fires one too.
 - Program change: `live_map(midi='program:<1-128>', action=... or mode='toggle')` takes a program change (a
   footswitch, a preset button) as a trigger or a toggle, numbered from 1 as GM lists are; an unmapped one is listed
   by `live_controls`. `live_midi_out(..., program=<1-128>)` sends one on the route's channel, at the route's start or
-  at `at`, just before that beat's notes (and again to a new port). `midi_write(programs={'bass': 33, 'lead': {1:
-  81, 17: 82}})` writes GM program changes per track and per bar (none before: a track has no program of its own);
-  `midi_read`'s listing names a file's programs.
+  at `at`, just before that beat's notes (and again to a new port or a new channel; one booked for a later bar
+  keeps its bar). `midi_write(programs={'bass': 33, 'lead': {1: 81, 17: 82}})` writes GM program changes per track
+  and per bar on whole bars, before the bar's first note when a nudge puts it early (none before: a track has no
+  program of its own); the reply names changes past the bars written. `midi_read`'s listing names each change with
+  its bar.
 - Poly pressure in files: `midi_read` reads polyphonic aftertouch onto the lane that takes pressure, as the
-  channel's pressure following the newest key still held (last-note priority, as an MPE part is read), and the reply
-  says so; a channel that also sends channel pressure keeps its own. `midi_write` writes none: a song has no
+  channel's pressure following the newest key still held (last-note priority, as an MPE part is read; a key that
+  sends none is at 0), and the reply says so; a channel that also sends channel pressure keeps its own. `midi_write` writes none: a song has no
   per-note pressure.
 - Played expression into the song: `live_played(into=..., lanes=None, mpe=None)` writes the take's pitch bend,
   pressure and controllers onto the track's lanes (`inst.lane.<name>`) over the take, by live_midi's map or the
   patch's own, `lanes=` as data for others (any lane the song's voice has), `lanes=False` for notes only. With
-  `fit=True` the lanes move with the snapped notes. The key log now keeps bend, pressure and controllers on a
+  `fit=True` the lanes move with the snapped notes. The lanes run to the take's last bar line and end at rest
+  there; they replace the take's bars and on to a held note's last point, keeping the song's point on the next bar
+  line (`midi_read` replaces a lane over the notes it replaced the same way). The key log now keeps bend, pressure and controllers on a
   patched input even when the live sound took none of them.
 - Encoder step size per map: `live_map(..., mode='relative' | 'relative64', step=1/32)` sets how far one tick of an
   endless encoder moves, as a fraction of the range (default 1/128); `live_status` shows it.

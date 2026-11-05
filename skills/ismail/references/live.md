@@ -762,8 +762,11 @@ straight to the speakers.
     wheel (+-2, or +-48 per note with MPE), `vib` from the mod wheel, `level` from pressure (0..+6 dB), or the
     patch's own `lanes=` while the input is patched. `lanes=` as data names others the song's voice has
     (`{'breath': {'midi': 'cc:2', 'range': [0, 1]}}`); `lanes=False` writes notes only. Poly pressure goes onto the
-    channel's pressure, the newest key held winning, and an MPE take follows the newest note (a song's lanes are per
-    track). The lanes replace the track's points over the take in both modes; with `fit` they move with the notes.
+    channel's pressure, the newest key held winning (a key that sends none is at 0), and an MPE take follows the
+    newest note (a song's lanes are per track). The lanes run to the take's last bar line, so a wheel let go after
+    the last note springs back, and a bend or pressure still off rest there goes back to rest on that line. They
+    replace the track's points over the take's bars in both modes (and on to the last point when a note is held
+    past them; the song's point on the next bar line stays); with `fit` they move with the notes.
     The reply has a line per lane, and says when the track's sound has no such lane (they sound once it plays a
     performer voice that has them).
   - The reply names the bars written, the note count and range, and how to hear it. To try B after A, `undo()`
