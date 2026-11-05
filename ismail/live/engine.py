@@ -3032,9 +3032,9 @@ class Engine:
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
-    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A'):
+    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None):
         try:
-            return self.midi.take(source, bars, fit, from_bar, placement)
+            return self.midi.take(source, bars, fit, from_bar, placement, lanes=lanes, mpe=mpe)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 

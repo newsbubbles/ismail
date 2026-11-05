@@ -720,8 +720,8 @@ straight to the speakers.
     4. Tell them: "Ready: each finger bends its own note, up to 4 octaves, and pressure adds up to 6 dB." Without
        `mpe=True`, each note's channel still bends its note, but at +-2 and with no master channel: a slide
        across a few keys bends far too little.
-  - Not yet: the played bend and pressure written into the song as lanes by `live_played(into=...)` (the log keeps
-    them), MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release velocity.
+  - Not yet: MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release
+    velocity.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
 - **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
@@ -756,6 +756,15 @@ straight to the speakers.
   - Without `fit` it is written as it sounded: the player's own timing off the grid, velocities and lengths, the
     pedal's holds. That is right for a part that should breathe (a melody, a pad). For a loop or anything that must
     lock to the drums, `fit=True` writes the snapped notes, `placement='A'` or `'B'` as the player picked by ear.
+  - **The expression goes in too.** The take's pitch bend, pressure and controllers (the key log keeps them, even
+    when the live sound had no lanes) become the track's lanes over the take, by live_midi's map: `bend` from the
+    wheel (+-2, or +-48 per note with MPE), `vib` from the mod wheel, `level` from pressure (0..+6 dB), or the
+    patch's own `lanes=` while the input is patched. `lanes=` as data names others the song's voice has
+    (`{'breath': {'midi': 'cc:2', 'range': [0, 1]}}`); `lanes=False` writes notes only. Poly pressure goes onto the
+    channel's pressure, the newest key held winning, and an MPE take follows the newest note (a song's lanes are per
+    track). The lanes replace the track's points over the take in both modes; with `fit` they move with the notes.
+    The reply has a line per lane, and says when the track's sound has no such lane (they sound once it plays a
+    performer voice that has them).
   - The reply names the bars written, the note count and range, and how to hear it. To try B after A, `undo()`
     first: a write that lands in fewer bars only clears its own bars. `undo()` takes back any write.
 - **A take recorded as audio** (an instrument on the mic) has no key log. Take its onset times in beats, unrounded

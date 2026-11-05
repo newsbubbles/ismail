@@ -912,7 +912,7 @@ def live_midi_clock_in(project: str, source: str = None, on: bool = True, transp
 
 @op(mutates=True)
 def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None, into: str = None,
-                bar: int = 1, mode: str = 'replace', placement: str = 'A') -> str:
+                bar: int = 1, mode: str = 'replace', placement: str = 'A', lanes=None, mpe: bool = None) -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
     bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last
     `bars` bars that had keys, or [a, b] for those bars (ask the player which part; never guess). Per input
@@ -934,17 +934,28 @@ def live_played(project: str, source: str = None, bars=8, fit: bool = False, fro
     the track first, 'add' merges. Without fit it writes the take as it sounded: off the grid where it was played,
     each note's velocity and length, the pedal's holds. With fit=True it writes the snapped notes, placement='A'
     (as played, the default) or 'B' (the groups from beat 1) as the reply named them; ask the player first. The
-    reply says what was written, how to hear it, and undo() takes it back."""
+    reply says what was written, how to hear it, and undo() takes it back.
+    The played expression goes in too: the take's pitch bend, pressure and controllers (the key log keeps them,
+    whether or not the sound took them live) become the track's lanes (automation inst.lane.<name>) over the take,
+    by live_midi's map: bend <- pitch bend (+-2, or +-48 per note with MPE), vib <- cc:1 (0..50 cents), level <-
+    pressure (0..+6 dB), or the patch's own lanes= while the input is patched. lanes: the map as data, as live_midi
+    and midi_write take it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}}, any lane the
+    song's voice has, e.g. {'breath': {'midi': 'cc:2', 'range': [0, 1]}}; {lane: None} leaves one out), or
+    lanes=False for notes only. mpe: read each note's own channel (default: as the input is patched). Poly pressure
+    goes onto the channel's pressure by the newest key held, since a song's lanes are per track. The lanes replace
+    the track's points over the take (mode='add' merges only notes); with fit they move with the notes."""
     if into is None:
-        if bar != 1 or mode != 'replace' or str(placement).upper() != 'A':
-            raise OpError("bar, mode and placement say where and how into='<track>' writes the take; add into=, or "
-                          "leave them out to read the lines")
+        if bar != 1 or mode != 'replace' or str(placement).upper() != 'A' or lanes is not None or mpe is not None:
+            raise OpError("bar, mode, placement, lanes and mpe say where and how into='<track>' writes the take; add "
+                          "into=, or leave them out to read the lines")
         return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
-    return _record(project, into, source, bars, fit, from_bar, bar, mode, placement)
+    return _record(project, into, source, bars, fit, from_bar, bar, mode, placement, lanes, mpe)
 
 
-def _record(project, into, source, bars, fit, from_bar, bar, mode, placement):
-    """live_played(into=...): the engine's take written into a song track, as midi_read writes a file's notes."""
+def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, lanes=None, mpe=None):
+    """live_played(into=...): the engine's take written into a song track, as midi_read writes a file's notes and
+    lanes."""
+    from .. import midilanes as ML
     from ..api import _clear, _kit_warning, _load
     from ..notation import fmt_num, midi_to_name
     if mode not in ('replace', 'add'):
@@ -960,13 +971,20 @@ def _record(project, into, source, bars, fit, from_bar, bar, mode, placement):
         raise OpError(f"no track {into!r} in {P.root}: track_add(project={project!r}, name={into!r}, instrument=...) "
                       f"first, with the sound the take should keep (tracks now: {list(P.d['tracks']) or 'none'})")
     tr = P.track(into)
-    t = _call(project, 'take', source=source, bars=bars, fit=fit, from_bar=from_bar, placement=placement)
+    extra = {k: v for k, v in (('lanes', lanes), ('mpe', mpe)) if v is not None}   # an older engine takes the rest
+    t = _call(project, 'take', source=source, bars=bars, fit=fit, from_bar=from_bar, placement=placement, **extra)
     bpb = P.bpb
     base = P.bar_to_beat(bar)
     rows = [[round(base + s, 6), int(p), d, int(v)] for s, p, d, v in t['notes']]
     last = bar + int((max(r[0] for r in rows) - base) // bpb)
     removed = _clear(tr, base, P.bar_to_beat(last + 1)) if mode == 'replace' else 0
     tr['notes'] = sorted(tr['notes'] + rows)
+    auto = tr.setdefault('automation', {}) if t.get('lanes') else {}
+    for lane, pts in (t.get('lanes') or {}).items():
+        pts = [[round(base + b, 6), v] for b, v in pts]
+        a, z = (base, P.bar_to_beat(last + 1)) if mode == 'replace' else (pts[0][0], pts[-1][0])
+        key = 'inst.lane.' + lane
+        auto[key] = sorted([q for q in auto.get(key, []) if not a <= q[0] <= z] + pts)
     P.save()
     pitches, vels = [r[1] for r in rows], [r[3] for r in rows]
     eng = (t['first_bar'], t['first_bar'] + last - bar)
@@ -974,6 +992,13 @@ def _record(project, into, source, bars, fit, from_bar, bar, mode, placement):
          f"{bar}-{last} ({mode}" + (f", replaced {removed} notes" if removed else '') + f"), "
          f"{midi_to_name(min(pitches))}-{midi_to_name(max(pitches))}, v={min(vels)}-{max(vels)}"]
     L += ['  ' + x for x in t['lines']]
+    if t.get('lanes'):
+        have = ML.voice_lanes(tr.get('instrument'), P.root)
+        miss = [x for x in t['lanes'] if x not in have]
+        if miss:
+            L.append(f"{into} plays a sound with no {'/'.join(miss)} lane: the points are kept as automation "
+                     f"(automation_read shows them) and sound once the track plays a performer voice that has "
+                     f"{'it' if len(miss) == 1 else 'them'} (voice_help lists a voice's lanes)")
     if abs(t['bpm'] - P.d['bpm']) > 0.01:
         L.append(f"the set plays at {fmt_num(round(t['bpm'], 2))} BPM, the song at {fmt_num(P.d['bpm'])}: the notes "
                  f"keep their beats, so the take plays at the song's tempo")

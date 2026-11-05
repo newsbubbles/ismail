@@ -19,6 +19,11 @@
   channel's pressure following the newest key still held (last-note priority, as an MPE part is read), and the reply
   says so; a channel that also sends channel pressure keeps its own. `midi_write` writes none: a song has no
   per-note pressure.
+- Played expression into the song: `live_played(into=..., lanes=None, mpe=None)` writes the take's pitch bend,
+  pressure and controllers onto the track's lanes (`inst.lane.<name>`) over the take, by live_midi's map or the
+  patch's own, `lanes=` as data for others (any lane the song's voice has), `lanes=False` for notes only. With
+  `fit=True` the lanes move with the snapped notes. The key log now keeps bend, pressure and controllers on a
+  patched input even when the live sound took none of them.
 
 ### The on-air check: silence, named sources and your own rules before a render airs (Nate 11-04, ledger:M432)
 
