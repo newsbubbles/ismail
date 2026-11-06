@@ -233,6 +233,15 @@ Find any tool by what you need or by role with `ops_find`.
   lines it can reach. `transport='tempo'` ignores their transport. A dropout holds the last tempo. Clock out and the
   arp follow the followed tempo; clock in and clock out on one port is refused; `live_tempo` is refused while it
   follows.
+- **MIDI Time Code.** `live_midi_timecode` sends the set's time from its start (plus an `offset`, e.g.
+  `'01:00:00:00'`) as quarter frames at 24, 25, 29.97 drop-frame or 30 fps, each when its time reaches the
+  speakers, after a full-frame locate. `live_midi_timecode_in` makes the set chase a video player's or a DAW's
+  timecode: MTC has no tempo, so the set keeps its own and lays its bar lines on their time (`offset` is their bar
+  1). Their play brings the set in on the first of their bar lines it can reach; it follows their speed; no
+  quarter frames for `dropout_ms` (their stop), a locate, a jump, a new rate or running backwards silence it until
+  their time runs again. `rate=` takes only one rate. With MIDI clock in on too, the clock leads. The arithmetic
+  (labels, frame counts, drop-frame, quarter frames, the full frame) is pure, in `ismail/mtc.py`. SysEx goes out
+  and comes in on both MIDI backends (winmm, mido).
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
