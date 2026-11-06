@@ -261,7 +261,9 @@ def live_engines():
 
 
 def engine_call(port, op, timeout=3, **args):
-    req = urllib.request.Request(f'http://127.0.0.1:{port}/', data=json.dumps({'op': op, 'args': args}).encode(),
+    # agent=False: the engine keeps its news for the agent's next call (the phone polls status and onsets)
+    req = urllib.request.Request(f'http://127.0.0.1:{port}/', data=json.dumps({'op': op, 'args': args,
+                                                                              'agent': False}).encode(),
                                  headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         res = json.loads(r.read())

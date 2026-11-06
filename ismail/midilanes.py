@@ -8,10 +8,12 @@ A lane map is data the agent can override: {lane: {'midi': 'bend' | 'pressure' |
 at its bottom is lo, its centre (lo + hi) / 2 and its top hi, so a bend range is symmetric ([-2, 2] or the number 2,
 written as RPN 0 in a file). A lane mapped to None is left out.
 
-MPE (MIDI Polyphonic Expression): each note on its own member channel (2 to 16, the lower zone; channel 1 is the
-master), with its own pitch bend (48 semitones by default) and channel pressure. ismail's lanes are per track, not
-per note, so an MPE file read in follows the newest sounding note (last-note priority), and an MPE file written out
-gives each note the track's lane over its own span.
+MPE (MIDI Polyphonic Expression): each note on its own member channel, with its own pitch bend (48 semitones by
+default) and channel pressure. The lower zone has channel 1 as its master and members from channel 2 up; the upper
+zone has channel 16 as its master and members from channel 15 down. An MPE Configuration Message (RPN 6 on a
+master channel) says how many members a zone has; with both zones they share the 14 channels between the masters.
+ismail's lanes are per track, not per note, so an MPE file read in follows the newest sounding note (last-note
+priority), and an MPE file written out gives each note the track's lane over its own span.
 """
 import math
 
@@ -27,6 +29,8 @@ LIVE = {'bend': {'midi': 'bend', 'range': [-2.0, 2.0]},
 LIVE_MPE = {**LIVE, 'bend': {'midi': 'bend', 'range': [-48.0, 48.0]}}
 LIVE_LANES = ('bend', 'vib', 'level')       # what a key rendered ahead can still do: pitch, vibrato, gain
 MPE_MASTER = 0                              # channel 1, the lower zone's master
+MPE_UPPER = 15                              # channel 16, the upper zone's master
+ZONES = {'lower': MPE_MASTER, 'upper': MPE_UPPER}
 MPE_BEND = 48.0
 # controllers that mean something else to every synth: bank select, data entry and RPN/NRPN, the pedals, the
 # channel-mode messages
@@ -244,26 +248,124 @@ def voice_lanes(inst, root=None):
     return set()
 
 
-def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False, rest=None):
+def is_true(mpe):
+    """mpe=True (or 1): MPE, in the zones the controller or the file configures, else the lower zone."""
+    return mpe is True or (type(mpe) is int and mpe == 1)
+
+
+def mpe_zone(mpe):
+    """mpe= as the ops take it -> None (not given), {} (off) or {master channel: member count} (channels from 0):
+    True or 'lower' the lower zone (master channel 1, members 2 to 16), 'upper' the upper zone (master channel 16,
+    members 15 down to 1). A LaneMapError says what it takes."""
+    if mpe is None:
+        return None
+    if mpe is False or (type(mpe) is int and mpe == 0):
+        return {}
+    if is_true(mpe):
+        return {MPE_MASTER: 15}
+    s = str(mpe).strip().lower()
+    if s in ZONES:
+        return {ZONES[s]: 15}
+    raise LaneMapError(f"mpe {mpe!r}: True or 'lower' (the lower zone: channel 1 the master, 2-16 a note each), "
+                       f"'upper' (the upper zone: channel 16 the master, 15 down to 1 a note each), or False")
+
+
+def zone_members(master, n):
+    """A zone's member channels (from 0), in the order a controller hands them out: the lower zone's from channel 2
+    up, the upper zone's from channel 15 down."""
+    n = max(0, min(15, int(n)))
+    return list(range(1, 1 + n)) if master == MPE_MASTER else list(range(14, 14 - n, -1))
+
+
+def mcm(zones, master, n):
+    """An MPE Configuration Message (RPN 6 on a master channel, n members) applied to zones {master: members}: 0
+    members turns that zone off; a zone that now overlaps the other shrinks the other (the two share the 14
+    channels between the masters), and one shrunk to nothing is off. A new dict."""
+    out = dict(zones or {})
+    if master not in (MPE_MASTER, MPE_UPPER):
+        return out
+    n = max(0, min(15, int(n)))
+    out.pop(master, None)
+    if n:
+        out[master] = n
+        other = MPE_UPPER if master == MPE_MASTER else MPE_MASTER
+        if other in out and out[other] + n > 14:
+            if n >= 14:
+                del out[other]
+            else:
+                out[other] = 14 - n
+    return out
+
+
+def zone_of(zones, ch):
+    """The master channel of the zone that holds channel ch (as its master or a member), or None."""
+    for master, n in (zones or {}).items():
+        if ch == master or ch in zone_members(master, n):
+            return master
+    return None
+
+
+def pick_zone(zones, notes):
+    """The zone a part is read in: the one whose member channels hold most of its notes ([(beat, pitch, dur, vel,
+    ch)]), (master, member channels); None when no note is on a member channel (a part on a zone's master channel, or
+    outside every zone, is a plain part)."""
+    if not zones:
+        return None
+    count = {m: sum(1 for n in notes if n[4] in zone_members(m, zones[m])) for m in sorted(zones)}
+    best = max(count, key=count.get)
+    return (best, zone_members(best, zones[best])) if count[best] else None
+
+
+def zones_at(history, beat):
+    """The zones in force at a beat: every configuration [(beat, master, members)] at or before it, in time order
+    (a format 1 file may keep them in several tracks)."""
+    z = {}
+    for b, master, n in sorted(history, key=lambda h: h[0]):
+        if b <= beat + 1e-9:
+            z = mcm(z, master, n)
+    return z
+
+
+def _span(chs):
+    lo, hi = min(chs) + 1, max(chs) + 1
+    return f"{lo}" if lo == hi else f"{lo}-{hi}"
+
+
+def zone_text(zones):
+    """Zones in plain words, channels from 1: 'channel 1 the master, 2-16 a note each' for the usual lower zone,
+    'upper zone, channel 16 the master, 1-15 a note each'."""
+    parts = []
+    for master in sorted(zones or {}):
+        mem = zone_members(master, zones[master])
+        plain = master == MPE_MASTER and len(zones) == 1 and len(mem) == 15     # the usual lower zone
+        parts.append(('' if plain else 'lower zone, ' if master == MPE_MASTER else 'upper zone, ')
+                     + f"channel {master + 1} the master, {_span(mem)} a note each")
+    return '; '.join(parts)
+
+
+def mpe_merge(notes, ctl, what, master=MPE_MASTER, with_ch=False, rest=None, members=None):
     """MPE: each note's own channel stream of one message ('bend', 'pressure', 'cc:<n>') joined into one lane by
     last-note priority. notes: [(beat, pitch, dur, vel, ch)]; ctl: [(beat, ch, what, raw)]. At any time the lane
     belongs to the newest-started note still sounding; when that note ends it goes back to the newest older note
     still held, and while nothing sounds the last owner keeps it. In each owner's stretch the lane takes that
     note's channel's value. master: the zone's master channel (0 lower, 15 upper). rest: a value each owner's
     stretch starts at unless that note's channel sent one since the note began (poly pressure: a key that sends
-    none has none, and a key struck again starts from nothing); None keeps the channel's last value. Returns
-    (events [(beat, raw)], or [(beat, raw, channel)] with with_ch, notes overlapped by a newer one, master-channel
-    messages left out)."""
+    none has none, and a key struck again starts from nothing); None keeps the channel's last value. members: the
+    zone's member channels, when only those count (notes and messages on other channels are another part's);
+    None counts every channel but the master. Returns (events [(beat, raw)], or [(beat, raw, channel)] with
+    with_ch, notes overlapped by a newer one, master-channel messages left out)."""
     by_ch = {}
     skipped = 0
+    inz = (lambda c: c != master) if members is None else (lambda c: c in members)
     for b, ch, w, raw in ctl:
         if w != what:
             continue
         if ch == master:
             skipped += 1
             continue
-        by_ch.setdefault(ch, []).append((b, raw))
-    ns = sorted(n for n in notes if n[4] != master)
+        if inz(ch):
+            by_ch.setdefault(ch, []).append((b, raw))
+    ns = sorted(n for n in notes if inz(n[4]))
     overlapped = sum(1 for i, n in enumerate(ns) if any(m[0] < n[0] + n[2] - 1e-9 for m in ns[i + 1:]))
     cuts = sorted({n[0] for n in ns} | {n[0] + n[2] for n in ns})
     stretches, owner = [], None                        # [(from, to, channel, the owner note's start)]

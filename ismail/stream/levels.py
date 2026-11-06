@@ -51,7 +51,9 @@ def analyse(mono):
 
 
 def _engine_op(port, op, **args):
-    req = urllib.request.Request(f'http://127.0.0.1:{port}/', data=json.dumps({'op': op, 'args': args}).encode(),
+    # agent=False: polling the clock and the onsets leaves the engine's news for the agent
+    req = urllib.request.Request(f'http://127.0.0.1:{port}/', data=json.dumps({'op': op, 'args': args,
+                                                                              'agent': False}).encode(),
                                  headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=3) as r:
         res = json.loads(r.read())

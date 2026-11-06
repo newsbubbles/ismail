@@ -635,3 +635,69 @@ def test_poly_pressure_in_a_take_follows_the_newest_key_and_fit_moves_the_lanes_
     assert ML.value_at(bend, start - 0.1) == pytest.approx(0, abs=0.01)
     assert ML.value_at(bend, start + 0.05) == pytest.approx(1.0, abs=0.01)   # with its note, not 0.06 beat late
     assert ML.value_at(lanes['inst.lane.level'], true[2] - 8.5 + 0.1) == pytest.approx(6 * 60 / 127, abs=0.05)
+
+
+def test_a_take_from_an_upper_zone_controller_reads_each_members_bend_and_leaves_the_master_out(song):
+    from ismail.live import ops as LO
+    from ismail import midilanes as ML
+    p = song
+    log = os.path.join(p, 'live', 'midi', 'ismail_keys.jsonl')
+    recs = [{'wall': 0, 'beat': 7.0, 'press': 6.91, 'st': 0xBF, 'd1': d1, 'd2': d2} for d1, d2 in
+            ((101, 0), (100, 6), (6, 15))]                         # the controller's MPE configuration: upper zone
+    for b, st, d1, d2 in ((8.0, 0xEE, 0, 96), (8.0, 0x9E, 60, 90), (8.5, 0xEF, 0x7F, 0x7F), (9.0, 0x8E, 60, 0),
+                          (9.0, 0xED, 0, 32), (9.0, 0x9D, 62, 90), (10.0, 0x8D, 62, 0)):
+        recs.append({'wall': 0, 'beat': b, 'press': b - 0.09, 'st': st, 'd1': d1, 'd2': d2})
+    _log(log, recs)
+    r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=1)
+    assert 'per note (MPE, upper zone, channel 16 the master, 1-15 a note each, the newest note still sounding)' \
+        in r, r
+    bend = _auto(p)['inst.lane.bend']
+    assert ML.value_at(bend, 0.75) == pytest.approx(24, abs=0.05)    # channel 15's own +24; the master's top is out
+    assert ML.value_at(bend, 1.5) == pytest.approx(-24, abs=0.05)    # channel 14's note
+    r = LO.live_played(p, source='ismail keys', bars=[3, 3], into='keys', bar=1, mpe=False)
+    assert 'per note' not in r and 'bend range +-2' in r
+
+
+def test_a_take_through_midi_effects_writes_the_chains_notes_into_the_song(song, eng):
+    from ismail import api
+    from ismail.live import ops as LO
+    p = song
+    chain = [{'type': 'chord', 'intervals': [0, 4]},
+             {'type': 'random', 'chance': 0.5, 'choices': 1, 'interval': 12, 'sign': 'up', 'seed': 2}]
+    eng.cmd_midi(source='ismail keys', instrument='preset:pluck')
+    eng.cmd_midi_fx(source='ismail keys', chain=chain, at='now')
+    pulls(eng, 0.3)
+    for m in (60, 62, 64, 67):
+        key('ismail keys', 0x90, m, 100)
+        pulls(eng, 0.1)
+        key('ismail keys', 0x80, m, 0)
+        pulls(eng, 0.1)
+    made = sorted(n for *_, outs in eng.mfx.fx['ismail keys']['recent'] for n, _ in outs
+                  if MP.LO <= n <= MP.HI)                      # the notes that sounded
+    r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1)
+    assert 'these are the notes its chain made of them' in r and sorted(n[1] for n in _track(p)) == made
+    assert '\nNEW since your last call:\n  ' in r            # the engine's news rides beside a take, said once
+    assert 'NEW since' not in LO.live_played(p, source='ismail keys', bars=[1, 1])
+    api.undo(p)
+    api.OPS['track_midi_fx'](p, 'keys', chain=chain)
+    r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1)
+    assert 'keys has its own MIDI effects (track_midi_fx): they run again on these notes at render' in r
+    r = LO.live_played(p, source='ismail keys', bars=[1, 1], into='keys', bar=1, raw=True)
+    assert sorted(n[1] for n in _track(p)) == [60, 62, 64, 67] and 'raw: the keys pressed' in r
+    assert 'raw=True' in LO.live_played(p, source='ismail keys', bars=[1, 1])
+
+
+def test_the_engines_news_waits_for_the_agent_while_the_phone_and_the_stream_poll(song, eng):
+    import urllib.request
+    from ismail.live import ops as LO
+    port = json.load(open(os.path.join(song, 'live', 'engine.json')))['port']
+
+    def post(op, **body):
+        req = urllib.request.Request(f'http://127.0.0.1:{port}/', data=json.dumps(dict({'op': op, 'args': {}},
+                                     **body)).encode(), headers={'Content-Type': 'application/json'})
+        return json.loads(urllib.request.urlopen(req, timeout=10).read())
+    eng.news.append('keys X: the controller configured MPE')
+    assert 'news' not in post('onsets')                         # a poller that does not say: its op never takes it
+    assert 'NEW since' not in post('status', agent=False)['result']   # the phone's status poll
+    assert 'NEW since your last call:\n  keys X: the controller configured MPE' in LO.live_status(song)
+    assert 'NEW since' not in LO.live_status(song)              # said once

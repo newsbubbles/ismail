@@ -204,11 +204,15 @@ Find any tool by what you need or by role with `ops_find`.
   as MIDI: `bend` as pitch bend (+-2 semitones, said with RPN 0; a file's own RPN range is read), `vib` as cc:1,
   `level` as cc:11, `breath` as cc:2, any other lane by a map the agent gives
   (`lanes={'mute': {'midi': 'cc:20', 'range': [0, 1]}}`). `midi_write(mpe=True)` puts each note on its own channel
-  for an MPE synth; `midi_read` reads an MPE part (RPN 6 in the file, or `mpe=True`) per note (bend +-48, pressure
-  as level), and since lanes are per track the lane follows the newest note still sounding. Live MIDI from a
+  for an MPE synth (`mpe='upper'` the upper zone, `{'bass': 'lower', 'lead': 'upper'}` a split synth); the other
+  tracks get channels outside the zones (a kit keeps 10, and a zone shrinks to make room, as the reply says);
+  `midi_read` reads an MPE part (RPN 6 in the file, lower or upper zone, as configured at its first note, or
+  `mpe=True`) per note (bend +-48, pressure as level), and since lanes are per track the lane follows the newest
+  note still sounding. A part on a zone's master channel, or outside every zone, reads as a plain part. Live MIDI from a
   keyboard: `live_midi` (Playing live; its bend, pressure, mod wheel and MPE drive the playing voice's lanes);
   `live_played(into='<track>', bar=...)` records what was played into a song track, as it sounded or snapped to 16ths
-  (`fit=True`), and `undo()` takes it back.
+  (`fit=True`), and `undo()` takes it back. Keys played through `live_midi_fx` come as the notes its chain made,
+  dice as rolled live (`raw=True` gives the keys).
 - **The kit, by family.** [KIT.md](KIT.md) lists every public voice (keys, organs, guitars, basses, bowed strings,
   woodwinds, brass, mallets, voices, drum kits, hand percussion, the synth families, fx) and every effect (level and
   tone, dynamics, drive, rig, time, modulation, voice, space): its type, what it is modeled on, its ear state with
@@ -238,7 +242,10 @@ Find any tool by what you need or by role with `ops_find`.
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
   DJ kit for whole cycles of moves (`ismail.live.djkit`). A MIDI controller's knobs, faders, pads, bend wheel and
   pressure drive the same maps (`live_map(midi='cc:74', source=..., channel=, mode=)`: 7-bit and 14-bit CC,
-  absolute, pickup, relative encoders, toggles, one control on several params), every move logged as automation.
+  absolute, pickup, relative encoders with their own step and acceleration (`step=`, `accel=`), toggles, one
+  control on several params), and so do a key's poly pressure
+  (`midi='poly'`, `'poly:C4'`) and an MPE note's own pressure, bend or timbre (`'mpe:pressure'`, `'mpe:bend'`,
+  `'mpe:timbre'`), every move logged as automation.
   An arpeggiator steps the keys a person holds on the set's beat (`live_arp`: patterns, scale degrees, exact step
   lists switching on bar lines, per-step velocity, gate, accent, slide, octave, cutoff and pan), and the same core
   arps a track's chords at render (`track_arp`, `write=True` for plain notes). MIDI effects (chord, scale,

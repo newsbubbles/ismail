@@ -26,7 +26,9 @@ def _call(project, name, /, timeout=30, **args):     # positional-only: an op ar
             port = json.load(f)['port']
     except (OSError, ValueError, KeyError):
         raise OpError(f"no live engine for {project}; start one with live_start(project='{project}', bpm=...)")
-    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=json.dumps({'op': name, 'args': args}).encode(),
+    # agent=True: the engine's news is for these calls, not for the pages and listeners that poll it
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=json.dumps({'op': name, 'args': args,
+                                                                              'agent': True}).encode(),
                                  headers={'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -36,7 +38,15 @@ def _call(project, name, /, timeout=30, **args):     # positional-only: an op ar
                       f"(its log is {os.path.join(os.path.abspath(project), 'live', 'engine.log')})")
     if not res.get('ok'):
         raise OpError(res.get('error', 'engine error'))
+    if res.get('news') and isinstance(res['result'], dict):
+        return dict(res['result'], news=res['news'])
     return res['result']
+
+
+def _news(r, text):
+    """text, with the engine's news after it when a reply that is data carried some (_call puts it in r['news'])."""
+    news = r.get('news') if isinstance(r, dict) else None
+    return '\n'.join([text, "NEW since your last call:"] + ['  ' + x for x in news]) if news else text
 
 
 def _alive(project):
@@ -616,7 +626,8 @@ def live_listen(project: str, bars=4, view: str = 'bars', band: str = None, reco
     rng = [d['first'], d['last']]
     kw = {'band': band} if view == 'envelope' else {}
     txt = VIEWS[view](d['path'], g, rng, **kw)[1]
-    return f"live bars {d['first']}-{d['last']} ({view})\n" + (f"note: {d['note']}\n" if d.get('note') else '') + txt
+    return _news(d, f"live bars {d['first']}-{d['last']} ({view})\n" + (f"note: {d['note']}\n" if d.get('note') else '')
+                 + txt)
 
 
 @op()
@@ -681,14 +692,15 @@ def live_stream(project: str, name: str = 'master') -> str:
     r = _call(project, 'stream', name=name)
     with open(_info_path(project), encoding='utf8') as f:
         port = json.load(f)['port']
-    return (f"stream {name}: http://127.0.0.1:{port}{r['path']} | {r['format']} {r['channels']} ch {r['rate']} Hz | "
-            f"{r['listening']} listening")
+    return _news(r, f"stream {name}: http://127.0.0.1:{port}{r['path']} | {r['format']} {r['channels']} ch "
+                    f"{r['rate']} Hz | {r['listening']} listening")
 
 
 @op()
 def live_map(project: str, control: str, target: str = None, param: str = 'volume_db', range: list = None,
              curve: str = 'linear', at: str = 'now', remove: bool = False, midi: str = None, source: str = None,
-             channel: int = None, mode: str = 'absolute', action: dict = None, step: float = None) -> str:
+             channel: int = None, mode: str = 'absolute', action: dict = None, step: float = None,
+             accel=None) -> str:
     """Map a named control (a knob, slider or switch on the VR stage, any client, or a MIDI controller's knob, fader,
     pad or bend wheel) to a live parameter, so its moves apply in the engine at once with no agent in the loop.
     target: a track, 'bus:<name>' or 'deck:<name>'. param: 'volume_db', 'pan' (tracks), a deck's
@@ -699,14 +711,21 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     live_controls reads them back as automation. remove=True unmaps.
     MIDI as the source: midi='cc:<0-127>' (a knob or fader, 0..127 as 0..1), 'cc14:<0-31>' (a 14-bit pair, MSB n
     and LSB n+32), 'bend' (the wheel; centre = 0.5), 'pressure' (channel aftertouch), 'note:<36 or C2>' (a pad:
-    held = 1, released = 0) or 'program:<1-128>' (a program change, numbered from 1 as a GM list or the
+    held = 1, released = 0), 'program:<1-128>' (a program change, numbered from 1 as a GM list or the
     controller's screen shows it: a footswitch or a preset button; it fires an action, or with mode='toggle' flips
-    a param). source: the MIDI input (midi_sources; optional when there is one), opened by the map
+    a param), 'poly' (polyphonic aftertouch: the hardest-pressed key held) or 'poly:<60 or C4>' (that key's), or
+    'mpe:pressure', 'mpe:bend', 'mpe:timbre' (an MPE note's own pressure, bend or cc:74, the newest note held winning,
+    on the member channels of the zone the input plays in: live_midi(mpe=...) or the controller's own MPE
+    configuration, else the lower zone; no channel=). A poly or mpe map takes that expression only: the keys still
+    play. source: the MIDI input (midi_sources; optional when there is one), opened by the map
     even when no keys are patched; channel: 1 to 16 (default every channel). mode: 'absolute' (the param jumps to the
     knob), 'pickup' (it moves only once the knob reaches the param's value, so nothing jumps after the agent or the
     stage moved it), 'relative' (an endless encoder sending two's complement steps, 1..63 up, 127..65 down) or
     'relative64' (64 = still, 65 up, 63 down), each step 1/128 of the range (step= sets it per map: 1/32 for a
-    coarse encoder, 1/512 for a fine one), from the param's value now (fast steps add up); 'toggle'
+    coarse encoder, 1/512 for a fine one), from the param's value now (fast steps add up). accel: a fast turn moves
+    further, as on a hardware synth's encoder: a tick 0.1 s or more after the last moves one step, a faster one more
+    (twice as fast, twice as far), up to accel steps (above 1, at most 16; True = 4). Off by default; live_status
+    shows it. Use it when one encoder must both sweep the range quickly and set it finely. 'toggle'
     (a pad or a button flips between the range's ends on each press: 64 or more after a release, or a repeat 0.1 s
     or more after the last with no release). Several maps may share one MIDI control (one
     knob, several params; reverse a range to move one the other way). A bound message is a control, not a key: it
@@ -719,10 +738,12 @@ def live_map(project: str, control: str, target: str = None, param: str = 'volum
     'B', 'bars': 16, 'style': 'blend'}. The tracks and decks it names are checked when it is mapped; the reply of
     each press comes in the engine's news, and live_controls lists the presses by bar. Mute a track from a pad with
     a param map: target=<track>, param='volume_db', range=[0, -120], curve='switch', mode='toggle'. live_control
-    (value=1) fires an action map too."""
+    (value=1) fires an action map too. Reach for it when the person wants a knob, fader, pad, footswitch, the
+    pressure on a key (aftertouch) or an MPE note's own slide or pressure on their controller to move something in
+    the set."""
     return _call(project, 'map', control=control, target=target, param=param, range=range, curve=curve, at=at,
                  remove=remove, midi=midi, source=source, channel=channel, mode=mode,
-                 **{k: v for k, v in (('action', action), ('step', step)) if v is not None})
+                 **{k: v for k, v in (('action', action), ('step', step), ('accel', accel)) if v is not None})
 
 
 @op()
@@ -732,8 +753,8 @@ def live_control(project: str, control: str, value: float) -> str:
     action fires it on 0.5 or more; the reply is the action's."""
     r = _call(project, 'control', control=control, value=value)
     if 'fired' in r:
-        return f"{control} fired at {r['bar']}: {r['fired']}"
-    return f"{control} = {value:g} -> {r['applied']:g} at {r['bar']}"
+        return _news(r, f"{control} fired at {r['bar']}: {r['fired']}")
+    return _news(r, f"{control} = {value:g} -> {r['applied']:g} at {r['bar']}")
 
 
 @op()
@@ -776,7 +797,7 @@ def midi_sources() -> str:
 @op()
 def live_midi(project: str, source: str = None, track: str = None, instrument=None, volume_db: float = None,
               transpose: int = None, channel: int = None, remove: bool = False, lanes: dict = None,
-              mpe: bool = None) -> str:
+              mpe=None) -> str:
     """Play a MIDI input (a keyboard, a pad, a loopMIDI port) through the live set: the person plays along from the
     same speakers. source: the input's name or a unique part of it (midi_sources), or 'screen keys' (the on-screen
     keys page, live_keys_page); with no source, says what is plugged in and what is patched. What it plays: track='<live track>' (that track's sound, its baked effects
@@ -794,8 +815,13 @@ def live_midi(project: str, source: str = None, track: str = None, instrument=No
     {lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}} or {lane: None} to turn one off; a lane
     named here is driven even when the sound does not have it (e.g. {'bend': {'midi': 'bend', 'range': 12}} on a
     synth). Live, a key plays a note rendered ahead, so lanes move it only as pitch and gain: bend, vib and level.
-    mpe=True: an MPE controller (lower zone): channel 1 the master, whose values add to every note, and each note's
-    own channel 2-16 its own bend (+-48) and pressure. A message bound with live_map stays that map's control.
+    mpe: an MPE controller, each note on its own channel with its own bend (+-48) and pressure, and a master channel
+    whose values add to every note of its zone. True: the zones the controller configured, else the lower zone;
+    'lower': the lower zone (channel 1 the master, 2-16 a note each); 'upper': the upper zone (channel 16 the
+    master, 15 down to 1). The controller's own MPE Configuration Message (RPN 6, sent when it connects) sets the zones and
+    their sizes, both zones of a split keyboard included (a zone you named shrinks to make room, as the MPE spec
+    says), and the news says so; mpe=False plays each channel as its own part and ignores it, and so does a patch
+    on one channel (channel=). A message bound with live_map stays that map's control.
     Tell the person before their keys first sound. Reach for it when the person wants to play their MIDI keyboard,
     pads or MPE keyboard through the set, its pitch bend wheel, pressure and mod wheel included."""
     if instrument is not None:
@@ -843,8 +869,9 @@ def live_midi_fx(project: str, source: str = None, chain: list = None, at: str =
     """MIDI effects on a patched input's keys (live_midi: a keyboard, a loopMIDI port or 'screen keys'): each key
     plays what a chain of Ableton-style effects makes of it, Chord, Scale, Pitch, Velocity, Note Length and Random.
     The same core and chain as the studio's track_midi_fx: the same key on the same beat makes the same notes live
-    and rendered, dice included. A recorded take (live_played) keeps the keys played, not the notes made, so a
-    take rendered through the chain re-rolls its random effects. chain: a list of effects applied in order; a new
+    and rendered, dice included. A recorded take (live_played) keeps the notes the chain made, dice as rolled
+    live, so written into a song it plays what was heard (raw=True there gives the keys). chain: a list of
+    effects applied in order; a new
     chain replaces the old one. Effects (as track_midi_fx takes them):
     {'type': 'chord', 'intervals': [0, 4, 7], 'velocity': 0.8}; {'type': 'scale', 'key': 'A', 'scale': 'minor',
     'mode': 'nearest' | 'up' | 'down' | 'drop'}; {'type': 'pitch', 'transpose': 12, 'lowest': 'C3', 'highest': 'C6',
@@ -856,8 +883,8 @@ def live_midi_fx(project: str, source: str = None, chain: list = None, at: str =
     steps). A key's release ends exactly the notes it started, even when the chain changed while it was held. With
     live_arp on the same input the chain runs first: the arp steps the notes it makes. at: when it starts, changes
     or stops ('next_bar' default, 'now', 'next_4', 'bar:17'): keys pressed from that beat use it. off=True takes it
-    off. source alone: that input's chain; nothing: every chain on. live_status shows them. live_played still logs
-    the keys pressed, not the notes made. Tell the person what their keys will do before it lands."""
+    off. source alone: that input's chain; nothing: every chain on. live_status shows them. Tell the person what
+    their keys will do before it lands."""
     return _call(project, 'midi_fx', source=source, chain=chain, at=at, off=off)
 
 
@@ -937,7 +964,8 @@ def live_midi_clock_in(project: str, source: str = None, on: bool = True, transp
 
 @op(mutates=True)
 def live_played(project: str, source: str = None, bars=8, fit: bool = False, from_bar: int = None, into: str = None,
-                bar: int = 1, mode: str = 'replace', placement: str = 'A', lanes=None, mpe: bool = None) -> str:
+                bar: int = 1, mode: str = 'replace', placement: str = 'A', lanes=None, mpe=None,
+                raw: bool = False) -> str:
     """What the person played on their keys, as notes text: 'bar | +beat | pitch | d= | v=' lines in this engine's
     bars, the same notes format tracks take (note-offs held while the sustain pedal was down). bars: the last
     `bars` bars that had keys, or [a, b] for those bars (ask the player which part; never guess). Per input
@@ -966,21 +994,28 @@ def live_played(project: str, source: str = None, bars=8, fit: bool = False, fro
     pressure (0..+6 dB), or the patch's own lanes= while the input is patched. lanes: the map as data, as live_midi
     and midi_write take it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range': [lo, hi]}}, any lane the
     song's voice has, e.g. {'breath': {'midi': 'cc:2', 'range': [0, 1]}}; {lane: None} leaves one out), or
-    lanes=False for notes only. mpe: read each note's own channel (default: as the input is patched). Poly pressure
+    lanes=False for notes only. mpe: read each note's own channel, True or 'lower', 'upper' or False (default: as
+    the input is patched, else the MPE configuration the log holds). Poly pressure
     goes onto the channel's pressure by the newest key held (a key that sends none is at 0), since a song's lanes
     are per track. The lanes run to the take's last bar line, so a wheel let go after the last note springs back,
     and a bend or pressure still off rest there goes back to rest on that line. They replace the track's points
     over the take's bars, and on to the last point when a note is held past them; the song's own point on the bar
-    line after stays (mode='add' merges only notes). With fit they move with the notes."""
+    line after stays (mode='add' merges only notes). With fit they move with the notes.
+    MIDI effects: keys played through live_midi_fx come as the notes its chain made of them, as they sounded (its
+    random choices as rolled live, its note lengths), so a take written into a song plays what was heard and does
+    not roll the dice again. With live_arp on too, they are the notes the arp held, not its steps. raw=True gives the
+    keys pressed instead (for a track whose own track_midi_fx makes the notes); the reply says which it gave. Reach
+    for it when the person wants to keep a take of what the effects made live, its random rolls included."""
+    rw = {'raw': True} if raw else {}                # an older engine takes the rest
     if into is None:
         if bar != 1 or mode != 'replace' or str(placement).upper() != 'A' or lanes is not None or mpe is not None:
             raise OpError("bar, mode, placement, lanes and mpe say where and how into='<track>' writes the take; add "
                           "into=, or leave them out to read the lines")
-        return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar)
-    return _record(project, into, source, bars, fit, from_bar, bar, mode, placement, lanes, mpe)
+        return _call(project, 'played', source=source, bars=bars, fit=fit, from_bar=from_bar, **rw)
+    return _record(project, into, source, bars, fit, from_bar, bar, mode, placement, lanes, mpe, raw)
 
 
-def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, lanes=None, mpe=None):
+def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, lanes=None, mpe=None, raw=False):
     """live_played(into=...): the engine's take written into a song track, as midi_read writes a file's notes and
     lanes."""
     from .. import midilanes as ML
@@ -1000,6 +1035,8 @@ def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, la
                       f"first, with the sound the take should keep (tracks now: {list(P.d['tracks']) or 'none'})")
     tr = P.track(into)
     extra = {k: v for k, v in (('lanes', lanes), ('mpe', mpe)) if v is not None}   # an older engine takes the rest
+    if raw:
+        extra['raw'] = True
     t = _call(project, 'take', source=source, bars=bars, fit=fit, from_bar=from_bar, placement=placement, **extra)
     bpb = P.bpb
     base = P.bar_to_beat(bar)
@@ -1030,6 +1067,14 @@ def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, la
             L.append(f"{into} plays a sound with no {'/'.join(miss)} lane: the points are kept as automation "
                      f"(automation_read shows them) and sound once the track plays a performer voice that has "
                      f"{'it' if len(miss) == 1 else 'them'} (voice_help lists a voice's lanes)")
+    fx = t.get('fx') or {}
+    if tr.get('midi_fx') and fx.get('keys') and not fx.get('raw'):
+        L.append(f"{into} has its own MIDI effects (track_midi_fx): they run again on these notes at render, which "
+                 f"the chain live already made. raw=True writes the keys instead, or track_midi_fx(project="
+                 f"{project!r}, track={into!r}, off=True) plays these as written")
+    elif fx.get('raw') and fx.get('keys') and not tr.get('midi_fx'):
+        L.append(f"raw: {into} has no MIDI effects, so it plays the keys as pressed, not what the chain made of them "
+                 f"live: leave raw out to write the chain's notes")
     if abs(t['bpm'] - P.d['bpm']) > 0.01:
         L.append(f"the set plays at {fmt_num(round(t['bpm'], 2))} BPM, the song at {fmt_num(P.d['bpm'])}: the notes "
                  f"keep their beats, so the take plays at the song's tempo")
@@ -1043,7 +1088,7 @@ def _record(project, into, source, bars, fit, from_bar, bar, mode, placement, la
              f"it plays out loud); notes_read(project={project!r}, track={into!r}, bars=[{bar}, {last}]) shows the "
              f"lines")
     L.append(f"undo: undo(project={project!r}) puts {into} back as it was before this write")
-    return '\n'.join(L) + _kit_warning(tr, rows)
+    return _news(t, '\n'.join(L)) + _kit_warning(tr, rows)
 
 
 @op()
