@@ -17,6 +17,11 @@ person and an agent change the same scene.
   keep-out boxes, spawn, credits, and `build`: the room script that exports it), waypoints, cues, takes, voice
   notes and snapshots. `scenes/stage.json` may name the default scene. Takes, voice and snapshots are the person's:
   never share them by default.
+- **Who the stage answers:** the page on its own address and agents on this PC. It refuses a page on another
+  site, Host names that are not its own (loopback on its port, this PC's tailnet name, `--host`, or names listed in
+  `~/.ismail/stage.json` `"hosts"`), and any client posting the person's words (voice and performance events come
+  only from the server's own transcription). `GET /health` counts refusals by reason. Scene folders must be real
+  folders, not links or junctions: a path that resolves outside the scenes folder is refused.
 - **Start:** `stage_start(scenes="<song>/video/vr/scenes")` replies with the address. Open
   `<address>?scene=<name>` on the desktop, or in the headset through `tailscale serve` (https). One server per port;
   `stage_status` lists servers, scenes, which pages are live and the server's health (workers busy, long-polls,
