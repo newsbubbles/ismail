@@ -955,8 +955,9 @@ def live_midi_clock_in(project: str, source: str = None, on: bool = True, transp
     tempo and says so; the set plays on. Clock out (live_midi_clock) and the arp follow the followed tempo. Clock in
     and clock out on one port is refused (the set would chase its own clock). While it is on, live_tempo is refused.
     Call again to change a setting; on=False lets go (the tempo holds). With no source: the inputs and the follow;
-    live_status shows it too. A video or a DAW's timecode: live_midi_timecode_in. Not yet: Ableton Link, their
-    meter (ismail's beats per bar is assumed), forwarding their Start/Stop to clock out."""
+    live_status shows it too. A video or a DAW's timecode: live_midi_timecode_in; an Ableton Link session:
+    live_link. Not yet: their meter (ismail's beats per bar is assumed), forwarding their Start/Stop to clock
+    out."""
     return _call(project, 'midi_clock_in', source=source, on=on, transport=transport, offset_ms=offset_ms,
                  bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
                  max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)
@@ -1012,6 +1013,34 @@ def live_midi_timecode_in(project: str, source: str = None, on: bool = True, rat
     return _call(project, 'midi_timecode_in', source=source, on=on, rate=rate, offset=offset, offset_ms=offset_ms,
                  bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
                  max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)
+
+
+@op()
+def live_link(project: str, on: bool = True, follow: bool = None, lead: bool = None, quantum: float = None,
+              start_stop: bool = None, offset_ms: float = None, tempo_tol_bpm: float = None,
+              phase_tol_ms: float = None, max_bend_pct: float = None, step_beats: int = None) -> str:
+    """The set joins an Ableton Link session: Ableton Live, Bitwig, a phone or tablet app, or any other Link app on
+    the same network or computer, all at one tempo and on one beat. Reach for it when the set should sync with Link,
+    play in time with Ableton Live over the network, jam with a Link app, or share its tempo with other apps
+    (MIDI cables and ports instead: live_midi_clock_in, live_midi_clock).
+    live_link(project) joins and follows: the session's tempo and beat phase lead the set. Their bar lines are where
+    Link's phase is 0 (quantum beats apart, the set's beats per bar by default). Joining waits 1 s for peers. Alone,
+    the session takes the set's beat and nothing is heard to change; with peers the set goes silent and comes in on
+    the session's next bar line it can reach (one to two bars), then keeps its beats on theirs with tempo changes as
+    live_midi_clock_in makes them (phase_tol_ms 4, tempo_tol_bpm 0.25, max_bend_pct 3, step_beats a bar; offset_ms:
+    positive lands ismail later). A peer's tempo change is heard about 1.5 s later (the set's notes render again
+    from it); their beat jumping, or the set more than a beat off, relocks the same way. While it only follows,
+    live_tempo is refused. lead=True: live_tempo works and each change reaches the session when its bar is heard.
+    follow=False, lead=True: ismail is the session's clock: its tempo and bar lines go to the session at once (the
+    peers jump to them), a peer's tempo change is set back. start_stop=True: Link's start/stop sync; following, the
+    session's stop silences the set and its start brings it in on the next bar line; leading, joining starts the
+    session and leaving stops it. Call again to change a setting; on=False leaves. live_status shows the peers, the
+    session's tempo and beat, the lock and the phase. Refused while MIDI clock in or timecode in is on (one leader).
+    Needs the aalink add-on (pip install "ismail[link]"; GPLv3+, while ismail stays MIT): without it the call says
+    what to install and installs nothing. Not yet: bridging clock in or timecode in into a Link session."""
+    return _call(project, 'link', on=on, follow=follow, lead=lead, quantum=quantum, start_stop=start_stop,
+                 offset_ms=offset_ms, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
+                 max_bend_pct=max_bend_pct, step_beats=step_beats)
 
 
 @op(mutates=True)

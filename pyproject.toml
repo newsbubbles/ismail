@@ -40,6 +40,7 @@ live = ["sounddevice>=0.4"]
 voice = ["pyworld>=0.3.4"]
 listen = ["pyaudiowpatch>=0.2; sys_platform == 'win32'"]
 stream = ["websockets>=12", "grpcio>=1.60", "protobuf>=4.21"]
+link = ["aalink>=0.2.3"]    # Ableton Link (live_link): aalink is GPLv3+, an add-on; ismail stays MIT and never needs it
 dev = ["pytest>=8.0"]
 
 [project.urls]
