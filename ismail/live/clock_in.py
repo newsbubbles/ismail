@@ -83,6 +83,7 @@ SHORT = 12                  # ticks in the short line that tells a tempo step (h
 STEP_PCT = 4.0              # the short line this far from the loop's period (or 6 of its own errors): a step
 LOST_X = 2.5                # a gap longer than this many periods (plus the jitter) counts lost ticks
 STEP_BEND_PCT = 15.0        # after a tempo step of theirs the set may bend this much to catch their beat up
+NOMINAL_BAND = 0.1          # numbered ticks with a nominal period (MTC): the period is held within 10% of it
 DROPOUT_TICKS = 3           # dropout_ms is at least this many tick periods
 FADE_S = 0.005              # the speakers' fade when the transport stops or starts
 LOCK_BEND = (0.67, 1.5)     # silent before a lock bar, the set may run this much slower or faster to reach it
@@ -107,9 +108,22 @@ def same_port(a, b):
 class ClockFilter:
     """Tick times in, the tick period and the filtered time of the last tick out. Single-threaded: its owner locks."""
 
-    def __init__(self, bandwidth_hz=DEFAULTS['bandwidth_hz']):
+    def __init__(self, bandwidth_hz=DEFAULTS['bandwidth_hz'], nominal=None):
+        """nominal: the period the sender means (MIDI Time Code's quarter frame); the period is then held within
+        NOMINAL_BAND of it, and a short line far outside it (a burst of buffered ticks) is not a step. None (clock
+        in): any period."""
         self.B = float(bandwidth_hz)
+        self.nominal = nominal
         self.reset()
+
+    def _band(self, T):
+        if self.nominal is None or T is None:
+            return T
+        lo, hi = self.nominal * (1 - NOMINAL_BAND), self.nominal * (1 + NOMINAL_BAND)
+        return min(max(T, lo), hi)
+
+    def _in_band(self, T):
+        return self.nominal is None or abs(T / self.nominal - 1) <= NOMINAL_BAND
 
     def reset(self):
         self.n = 0                  # tick periods since the first tick
@@ -170,6 +184,9 @@ class ClockFilter:
             x = np.array([w[0] for w in self._warm], dtype=float)
             y = np.array([w[1] for w in self._warm]) - self._warm[0][1]
             T, c = np.polyfit(x, y, 1)
+            if self.nominal is not None and not self._in_band(T):     # a burst: the slope its own band allows
+                T = self._band(T)
+                c = float(np.mean(y - T * x))
             if T > 0:
                 self.T = float(T)
                 self.t0 = self._warm[0][1] + float(c) + self.T * self.n
@@ -188,7 +205,7 @@ class ClockFilter:
         w = self.w()
         self.t0 = self.t1
         self.t1 += math.sqrt(2.0) * w * e + T
-        self.T += w * w * e
+        self.T = self._band(self.T + w * w * e)
         self.jit = math.sqrt(0.98 * self.jit ** 2 + 0.02 * e * e)
         return k
 
@@ -208,7 +225,7 @@ class ClockFilter:
             return False
         Ts, tl = self._line(h)
         sd = self.jit * math.sqrt(12.0 / (SHORT ** 3 - SHORT))     # the short line's own error, seconds per tick
-        if Ts <= 0:
+        if Ts <= 0 or not self._in_band(Ts):            # a burst far from the sender's own period: not a step
             return False
         # against a line through the second before this half beat (since the last step), else the loop's period
         # half a beat ago: never the loop now, which starts to chase a step and wobbles at a high bandwidth. On a
@@ -258,7 +275,7 @@ class ClockFilter:
         if len(h) < 3 or h[-1][1] - h[0][1] < STEADY_S[0]:
             return None
         T, c = self._line(h)
-        return (T, c) if T > 0 else None
+        return (T, c) if T > 0 and self._in_band(T) else None
 
     def recent(self):
         """Seconds per tick from a straight line through the ticks of the last RECENT_S, or None (fewer than

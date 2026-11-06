@@ -33,8 +33,33 @@
   driver, not yet on a real port.
 - `ClockFilter.tick(t, k=None)` takes the periods since the last tick when the sender numbers them (no duplicate or
   lost-tick guess), and `ClockIn` has `_x_at`, `_lock_spans` and `_said_locked` hooks; clock in behaves as before.
-- Not yet: placing the set at their exact time (a live set cannot jump), their tempo map, the silence reaching
-  `live_listen`, `live_record` and the streams, and user bits in MTC.
+- After review (each with a test in `tests/test_midi_timecode.py`):
+  - An offset their rate has no label for (`00:01:00:00` at 29.97 drop-frame, frame 24 at 24 fps; checked at 25
+    fps when given before their rate is known) raised on the MIDI driver's thread at every label, unseen. Now
+    their time is not followed (`BAD OFFSET`), and the news and `live_status` name the label that exists. A new
+    `rate=` that keeps an earlier offset its rate has no label for is refused, naming it ("pass offset=..."), in
+    and out.
+  - Clock in turned off while their time was stopped, located or running backwards left the set playing. Now it
+    goes silent again.
+  - A sender that held its quarter frames 100 to 150 ms and let them out at once read as a jump (about 2.8 s of
+    silence while it relocked). A whole label their numbering led to is now never a jump; after a broken order a
+    label is tested against the filtered line, and one behind it by what a late delivery could be waits for the
+    next. Bursts of 12 quarter frames drove the tempo to 70 or 259 BPM: with the rate known, the filtered period
+    stays within 10% of the rate's own (`ClockFilter(nominal=)`; clock in passes none, so it is as before).
+  - The grid `live_tempo` moved was lost at their next play. It now holds through their stops, locates and
+    relocks; a new offset or rate starts it again.
+  - The quarter frames' reserved bits are ignored (a label with one set read as one that cannot exist).
+  - Timecode out after the set's end is refused (nothing would go out); another port says the old one stopped.
+    Offsets in seconds wrap at the rate's own day.
+  - winmm: `MIDIHDR` is packed as mmsystem.h packs it (112 bytes on 64-bit Windows, not 120). A buffer back with
+    `MIM_LONGERROR` is queued again (four of them left SysEx in dead). Input close takes a lock against the
+    callback re-queueing a buffer after the reset, checks the unprepare and close results (one more reset on
+    STILLPLAYING) and, if the driver still holds a buffer, keeps it and the handle and says so. A buffer that
+    could not be prepared or queued is said at open. Output close checks STILLPLAYING the same way. An input
+    without SysEx opens and closes as before.
+- Not yet: placing the set at their exact time (a live set cannot jump), their tempo map, 29.97 non-drop (MTC's
+  rate code 2 is drop-frame; `'29.97'` means drop-frame), the silence reaching `live_listen`, `live_record` and the
+  streams, and user bits in MTC.
 
 ### MIDI: pads as triggers, program change, poly pressure, played expression, encoder steps (Nate 10-23)
 

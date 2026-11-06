@@ -144,7 +144,8 @@ def parse_tc(text, rate):
 
 
 def offset_frames(x, rate):
-    """An offset as frames since 00:00:00:00: a label 'hh:mm:ss:ff', or seconds (0 up to 24 hours)."""
+    """An offset as frames since 00:00:00:00: a label 'hh:mm:ss:ff', or seconds (0 up to 24 hours; a drop-frame day
+    is 86399.9136 s, so seconds past it wrap to just after midnight)."""
     if x is None:
         return 0
     if isinstance(x, str) and re.search(r'[:;]', x):
@@ -155,7 +156,27 @@ def offset_frames(x, rate):
         raise ValueError(f"offset={x!r}: a timecode 'hh:mm:ss:ff' (e.g. '01:00:00:00') or seconds")
     if not 0 <= sec < 86400:
         raise ValueError(f"offset={x!r}: 0 up to 24 hours (86400 s), or a timecode 'hh:mm:ss:ff'")
-    return int(round(seconds_to_frames(sec, rate)))
+    return int(round(seconds_to_frames(sec, rate))) % frames_per_day(rate)
+
+
+def nearest_label(tc, rate):
+    """A label the rate has, nearest tc: frames held to the rate's last, a skipped drop-frame number moved on to 02."""
+    h, m, s, f = (int(v) for v in tc)
+    h, m, s, f = min(max(h, 0), 23), min(max(m, 0), 59), min(max(s, 0), 59), min(max(f, 0), NOMINAL[rate] - 1)
+    if is_drop(rate) and s == 0 and f < 2 and m % 10:
+        f = 2
+    return h, m, s, f
+
+
+def offset_problem(x, rate):
+    """None when offset x exists at `rate`, else (what is wrong, a label that does exist there)."""
+    try:
+        offset_frames(x, rate)
+        return None
+    except ValueError as ex:
+        m = re.fullmatch(r'\s*(\d{1,2})[:;.](\d{1,2})[:;.](\d{1,2})[:;.](\d{1,2})\s*', str(x))
+        good = fmt_tc(nearest_label(tuple(int(g) for g in m.groups()), rate), rate) if m else None
+        return str(ex), good
 
 
 # ---------------------------------------------------------------------------------------------- the messages
@@ -202,14 +223,16 @@ def unwrap(q, near, rate):
 
 
 # ---------------------------------------------------------------------------------------------- reading them
-Reading = collections.namedtuple('Reading', 'q direction rate complete tc')
+Reading = collections.namedtuple('Reading', 'q direction rate complete tc continued')
 
 
 class QuarterFrames:
     """Quarter-frame data bytes in, in arrival order; positions out. feed() returns None while it cannot tell the time
     (fewer than eight pieces in order since it started, or since the order broke), else a Reading: q, the quarter
     frame this piece sits on (4 F + k, wrapped at 24 hours); direction +1 forward or -1 backwards (from the order);
-    the rate; complete True when this piece made a whole label (then tc is that label). A piece out of order (one
+    the rate; complete True when this piece made a whole label (then tc is that label, and continued says whether
+    the order held since the last whole label and this one is where counting on from it led: False after a broken
+    order or a label somewhere else). A piece out of order (one
     lost, or a jump) or a turn round starts the eight again. A label that cannot exist (frame 30 at 25 fps, a skipped
     drop-frame number) is counted in `bad` and starts the eight again."""
 
@@ -245,15 +268,18 @@ class QuarterFrames:
         if self.run >= 8 and k == (7 if d > 0 else 0):
             n = self.nib
             rate = BY_CODE[(n[7] >> 1) & 3]
-            tc = ((n[6] | (n[7] & 1) << 4), n[4] | n[5] << 4, n[2] | n[3] << 4, n[0] | n[1] << 4)
+            # the bits a label does not use (frames' top three, seconds' and minutes' top two) are reserved: masked
+            tc = ((n[6] | (n[7] & 1) << 4), n[4] | (n[5] & 3) << 4, n[2] | (n[3] & 3) << 4, n[0] | (n[1] & 1) << 4)
             try:
                 F = tc_to_frames(tc, rate)
             except ValueError:
                 self.bad += 1
                 self.nib, self.run, self.q, self.dir = [None] * 8, 0, None, 0
                 return None
-            self.q, self.rate = 4 * F + (7 if d > 0 else 0), rate
-            return Reading(self.q, d, rate, True, tc)
+            q = 4 * F + (7 if d > 0 else 0)
+            cont = self.q is not None and self.rate == rate and self.q == q
+            self.q, self.rate = q, rate
+            return Reading(q, d, rate, True, tc, cont)
         if self.q is None:
             return None
-        return Reading(self.q, d, self.rate, False, None)
+        return Reading(self.q, d, self.rate, False, None, None)

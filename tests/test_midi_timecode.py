@@ -151,10 +151,12 @@ def test_a_sysex_is_checked_before_it_goes_out():
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
 def test_winmm_sysex_out_and_in_through_a_stand_in_driver(monkeypatch):
-    """The header winmm reads (MIDIHDR: 120 bytes on 64-bit Windows, 64 on 32-bit), a SysEx handed to
+    """The header winmm reads (MIDIHDR, packed as mmsystem.h packs it: 112 bytes on 64-bit Windows, 64 on 32-bit;
+    unpacked it would be 120 and the driver would read dwOffset and the reserved words 8 bytes off), a SysEx handed to
     midiOutLongMsg and its buffer let go once the driver marks it done, and SysEx in put back together across two
     buffers, each queued again. A stand-in driver: no MIDI device opens."""
-    assert ctypes.sizeof(M._MIDIHDR) == (120 if ctypes.sizeof(ctypes.c_void_p) == 8 else 64)
+    assert ctypes.sizeof(M._MIDIHDR) == (112 if ctypes.sizeof(ctypes.c_void_p) == 8 else 64)
+    assert M._MIDIHDR.dwOffset.offset == (44 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
     sent, unprep, added = [], [], []
 
     class W:
@@ -185,6 +187,7 @@ def test_winmm_sysex_out_and_in_through_a_stand_in_driver(monkeypatch):
     got = []
     inp = object.__new__(M.Input)
     inp._h, inp._sx, inp._closing, inp._part = 1, lambda t, d: got.append(d), False, b''
+    inp._lk = __import__('threading').Lock()
     bufs = []
     for part in (ff[:4], ff[4:]):
         buf = ctypes.create_string_buffer(part, 1024)
@@ -554,3 +557,467 @@ def test_the_ops_are_listed_and_found_by_plain_words():
         assert name in api.OPS
     assert api.OPS['ops_find'](need='sync the set to video timecode', n=3).splitlines()[1].split()[0] == \
         'live_midi_timecode_in'
+
+
+# ---------------------------------------------------------------------------------------------------- review fixes
+STILL = 65                                         # MIDIERR_STILLPLAYING
+
+
+class StandInIn:
+    """A stand-in winmm for midi.Input: it holds the queued SysEx buffers, hands them back through the callback on
+    midiInReset (as winmm does), says STILLPLAYING for a buffer it still holds. No device opens."""
+
+    def __init__(self, stick=(), miss_first_reset=0, prepare_fails_at=None):
+        self.queue, self.cb, self.closed, self.log = [], None, False, []
+        self.stick = set(stick)                    # indexes of buffers it never gives back
+        self.miss = miss_first_reset               # buffers the first reset keeps
+        self.prepare_fails_at, self.n_prep, self.addrs = prepare_fails_at, 0, []
+        self.hold = None                           # (entered, release): the callback thread's AddBuffer waits
+
+    def midiInOpen(self, ph, idx, cb, inst, flags):
+        self.cb = cb
+        ph._obj.value = 1
+        return 0
+
+    def midiInPrepareHeader(self, h, ph, n):
+        self.n_prep += 1
+        self.log.append('prepare')
+        return 7 if self.n_prep == self.prepare_fails_at else 0
+
+    def midiInAddBuffer(self, h, ph, n):
+        import threading
+        a = ctypes.cast(ph, ctypes.c_void_p).value
+        if self.hold is not None and threading.current_thread() is not threading.main_thread():
+            entered, release = self.hold
+            entered.set()
+            release.wait(5)
+        if self.closed:
+            self.log.append('add after close')
+            return 5
+        if a not in self.addrs:
+            self.addrs.append(a)
+        self.queue.append(a)
+        self.log.append('add')
+        return 0
+
+    def midiInStart(self, h):
+        return 0
+
+    def midiInStop(self, h):
+        self.log.append('stop')
+        return 0
+
+    def midiInReset(self, h):
+        keep = [a for a in self.queue if self.addrs.index(a) in self.stick][:]
+        back = [a for a in self.queue if a not in keep]
+        if self.miss:
+            keep, back, self.miss = keep + back[:self.miss], back[self.miss:], 0
+        self.queue = keep
+        for a in back:
+            M._MIDIHDR.from_address(a).dwBytesRecorded = 0
+            self.cb(1, M._MIM_LONGDATA, 0, a, 0)
+        self.log.append(f'reset returned {len(back)}')
+        return 0
+
+    def midiInUnprepareHeader(self, h, ph, n):
+        a = ctypes.cast(ph, ctypes.c_void_p).value
+        r = STILL if a in self.queue else 0
+        self.log.append(f'unprepare {r}')
+        return r
+
+    def midiInClose(self, h):
+        r = STILL if self.queue else 0
+        self.closed = not r
+        self.log.append(f'close {r}')
+        return r
+
+
+def stand_in_input(monkeypatch, w, sysex=True):
+    monkeypatch.setattr(M, '_w', w)
+    monkeypatch.setattr(M, 'sources', lambda: ['X'])
+    got, short = [], []
+
+    def on(t, a, b, c):
+        short.append((a, b, c))
+    if sysex:
+        on.sysex = lambda t, d: got.append(bytes(d))
+    return M.Input('X', on), got, short
+
+
+def deliver(w, a, data, kind=None):
+    hd = M._MIDIHDR.from_address(a)
+    ctypes.memmove(hd.lpData, data, len(data))
+    hd.dwBytesRecorded = len(data)
+    w.queue.remove(a)
+    w.cb(1, kind or M._MIM_LONGDATA, 0, a, 0)
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
+def test_winmm_a_broken_sysex_buffer_is_queued_again_and_a_new_message_starts_clean(monkeypatch):
+    """MIM_LONGERROR (a cut or broken SysEx) hands the buffer back like MIM_LONGDATA: queued again, and its bytes
+    and what came before them dropped. Before, four of them and SysEx in was dead until the input reopened. A
+    buffer starting F0 drops a leftover that never got its F7."""
+    w = StandInIn()
+    inp, got, _ = stand_in_input(monkeypatch, w)
+    assert len(w.queue) == M.SYSEX_BUFS
+    for _ in range(2 * M.SYSEX_BUFS):
+        deliver(w, w.queue[0], b'\xf0\x7f\x7f\x01', M._MIM_LONGERROR)
+    assert len(w.queue) == M.SYSEX_BUFS and inp._part == b'' and got == []
+    ff = T.full_frame((1, 0, 0, 0), 25)
+    deliver(w, w.queue[0], b'\xf0\x7f\x7f\x01\x01')               # a start that never ends
+    deliver(w, w.queue[0], ff[:5])                                  # then a whole message over two buffers
+    deliver(w, w.queue[0], ff[5:])
+    assert got == [ff] and len(w.queue) == M.SYSEX_BUFS
+    inp.close()
+    assert w.closed and not w.queue and inp._h is None
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
+def test_winmm_close_waits_for_a_callback_queueing_a_buffer_and_gets_every_buffer_back(monkeypatch):
+    """The driver's thread is inside the callback, past the closing check, about to queue its buffer again, as
+    close() begins. Before: that buffer landed after midiInReset, unprepare and close said STILLPLAYING unread,
+    and the handle stayed open over freed buffers. Now the check and the queueing hold the lock close() takes to
+    say closing, so the reset comes after it and hands every buffer back."""
+    import threading
+    w = StandInIn()
+    inp, got, _ = stand_in_input(monkeypatch, w)
+    ff = T.full_frame((1, 0, 0, 0), 25)
+    a = w.queue.pop(0)
+    hd = M._MIDIHDR.from_address(a)
+    ctypes.memmove(hd.lpData, ff, len(ff))
+    hd.dwBytesRecorded = len(ff)
+    entered, release = threading.Event(), threading.Event()
+    w.hold = (entered, release)
+    cb = threading.Thread(target=lambda: w.cb(1, M._MIM_LONGDATA, 0, a, 0))
+    cb.start()
+    assert entered.wait(5)
+    errs = []
+
+    def close():
+        try:
+            inp.close()
+        except Exception as ex:
+            errs.append(ex)
+    cl = threading.Thread(target=close)
+    cl.start()
+    cl.join(0.2)
+    assert cl.is_alive() and 'stop' not in w.log                   # close waits for the queueing to finish
+    w.hold = None
+    release.set()
+    cb.join(5)
+    cl.join(5)
+    assert not errs and not cl.is_alive()
+    assert w.log[-7:] == ['stop', 'reset returned 4'] + ['unprepare 0'] * 4 + ['close 0']
+    assert w.closed and not w.queue and inp._h is None and inp._bufs == [] and got == [ff]
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
+def test_winmm_close_retries_after_a_reset_and_keeps_buffers_the_driver_will_not_give_back(monkeypatch):
+    w = StandInIn(miss_first_reset=1)                              # the first reset keeps one: a second gets it
+    inp, _, _ = stand_in_input(monkeypatch, w)
+    inp.close()
+    assert w.log.count('stop') == 1 and [x for x in w.log if x.startswith('reset')] == \
+        ['reset returned 3', 'reset returned 1']
+    assert w.closed and inp._h is None and inp._bufs == []
+    w = StandInIn(stick={2})                                       # one it never gives back
+    inp, _, _ = stand_in_input(monkeypatch, w)
+    with pytest.raises(M.MidiError, match=r"did not close \(winmm error 65\): the driver still holds 1 SysEx "
+                                          r"buffer\(s\); they are kept"):
+        inp.close()
+    assert not w.closed and inp._h is not None and len(inp._bufs) == 1  # kept: the driver may still write it
+    assert ctypes.cast(ctypes.byref(inp._bufs[0][1]), ctypes.c_void_p).value == w.queue[0]
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
+def test_winmm_an_input_without_sysex_opens_and_closes_as_before(monkeypatch):
+    """Every live input has on.sysex now; one opened without it (another caller) queues no buffer and closes as
+    before: stop, reset, close, nothing else asked of the driver."""
+    w = StandInIn()
+    inp, got, short = stand_in_input(monkeypatch, w, sysex=False)
+    assert w.log == [] and inp._bufs == []
+    w.cb(1, M._MIM_DATA, 0, 0x7F3C90, 0)
+    assert short == [(0x90, 0x3C, 0x7F)]
+    inp.close()
+    assert w.log == ['stop', 'reset returned 0', 'close 0'] and inp._h is None
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
+def test_winmm_a_sysex_buffer_the_driver_will_not_take_is_said(monkeypatch):
+    w = StandInIn(prepare_fails_at=3)
+    with pytest.raises(M.MidiError, match=r"a SysEx buffer was not taken \(winmm error 7\).*it is closed again"):
+        stand_in_input(monkeypatch, w)
+    assert w.closed and not w.queue
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='winmm is the Windows driver')
+def test_winmm_output_close_checks_the_driver_let_go(monkeypatch):
+    """Output.close: a STILLPLAYING close gets one more reset and close; a driver that still holds a SysEx buffer
+    keeps it (and the handle) and says so, instead of a close that reads as done over memory it may still read."""
+    log = []
+
+    class W:
+        """Marks the queued SysEx done on reset number `done_at` (None: never)."""
+
+        def __init__(self, done_at):
+            self.done_at, self.resets = done_at, 0
+
+        def midiOutPrepareHeader(self, h, ph, n):
+            return 0
+
+        def midiOutLongMsg(self, h, ph, n):
+            return 0                                                # queued, not done yet
+
+        def midiOutReset(self, h):
+            self.resets += 1
+            log.append('reset')
+            if self.resets == self.done_at:
+                for _, hd in out._long:
+                    hd.dwFlags |= 1
+
+        def midiOutUnprepareHeader(self, h, ph, n):
+            log.append('unprepare')
+            return 0
+
+        def midiOutClose(self, h):
+            r = STILL if out._long else 0
+            log.append(f'close {r}')
+            return r
+
+    def opened(done_at):
+        monkeypatch.setattr(M, '_w', W(done_at))
+        log.clear()
+        o = object.__new__(M.Output)
+        o.name, o._h, o._long = 'stand-in', 1, []
+        return o
+    out = opened(1)
+    out.send(T.full_frame((0, 0, 0, 0), 25))
+    out.close()
+    assert log == ['reset', 'unprepare', 'close 0'] and out._h is None and out._long == []
+    out = opened(2)                                                 # done only after a second reset
+    out.send(T.full_frame((0, 0, 0, 0), 25))
+    out.close()
+    assert log == ['reset', 'close 65', 'reset', 'unprepare', 'close 0'] and out._h is None
+    out = opened(None)                                              # never let go
+    out.send(T.full_frame((0, 0, 0, 0), 25))
+    with pytest.raises(M.MidiError, match=r"did not close \(winmm error 65\): the driver still holds 1 SysEx"):
+        out.close()
+    assert out._h == 1 and len(out._long) == 1
+
+
+@pytest.mark.parametrize('piece, bit', [(1, 0x2), (3, 0x4), (5, 0x8), (7, 0x8)])
+def test_the_reserved_bits_of_a_quarter_frame_are_ignored(piece, bit):
+    """The MTC spec: senders put 0 in the unused bits, receivers ignore them. Before, a sender with one set had
+    every label read as one that cannot exist."""
+    dec = T.QuarterFrames()
+    labels = []
+    for q in range(4 * 1000, 4 * 1000 + 64):
+        d = T.quarter_frame(q, 25)[1]
+        r = dec.feed(d | bit if d >> 4 == piece else d)
+        if r is not None and r.complete:
+            labels.append(r.tc)
+    assert dec.bad == 0 and labels == [T.frames_to_tc(1000 + 2 * i, 25) for i in range(8)]
+
+
+def test_offsets_their_rate_has_no_label_for_name_one_it_has():
+    assert T.offset_problem('00:01:00:00', 29.97)[1] == '00:01:00;02'
+    assert T.offset_problem('00:10:00:00', 29.97) is None                 # each tenth minute keeps 00 and 01
+    assert T.offset_problem('00:00:10:24', 24)[1] == '00:00:10:23'
+    assert T.offset_problem('00:00:10:24', 25) is None and T.offset_problem(3.5, 24) is None
+    # seconds wrap at the rate's own day: a drop-frame day is 86399.9136 s
+    assert T.offset_frames(86399.95, 29.97) == 1 and T.offset_frames(86399.8, 29.97) == T.frames_per_day(29.97) - 3
+
+
+def test_the_frame_period_stays_near_their_rates_own_through_bursts():
+    """Quarter frames delivered twelve at a time (a sender's buffer let out at once): with their rate known, the
+    filtered period holds within 10% of it and the steady line is not made from the burst. Clock in passes no
+    nominal, so its own filter is as before."""
+    from ismail.live.clock_in import NOMINAL_BAND, ClockFilter
+    tq = 0.01
+    f, free = ClockFilter(0.5, nominal=tq), ClockFilter(0.5)
+    for i in range(0, 2400, 12):
+        for j in range(12):
+            t = 100.0 + (i + 11) * tq + j * 2e-5
+            f.tick(t, k=1)
+            free.tick(t, k=1)
+            assert f.T is None or abs(f.T - tq) <= NOMINAL_BAND * tq + 1e-12
+    st = f.steady()
+    assert st is None or abs(st[0] - tq) <= NOMINAL_BAND * tq
+    assert f.steps == 0
+    assert free.nominal is None
+
+
+@pytest.mark.parametrize('stall_ms, first_piece', [(100, 7), (150, 7), (150, 3)])
+def test_a_short_delivery_stall_plays_through(eng, stall_ms, first_piece):
+    """The sender's thread or USB holds the quarter frames for 100-150 ms, then lets them out at once, in order.
+    Their numbering runs on, so it is no jump. Before: read as a jump, the set relocked with about 2.8 s of
+    silence."""
+    kick(eng)
+    eng.cmd_midi_timecode_in(source=SRC)
+    tq, q0 = 0.01, 4 * T.tc_to_frames((0, 0, 10, 0), 25)
+    feed, q, t = [], q0, 100.3
+    while t < 112.0:
+        feed.append([t, 0xF1, T.quarter_frame(q, 25)[1], 0])
+        q, t = q + 1, t + tq
+    i0 = next(i for i, m in enumerate(feed) if m[0] > 107.0 and (q0 + i) % 8 == first_piece)
+    t_out = feed[i0][0] + stall_ms / 1000
+    for j in range(i0, len(feed)):
+        if feed[j][0] < t_out:
+            feed[j][0] = t_out + (j - i0) * 1e-5
+    eng.feed = [tuple(m) for m in feed]
+    run(eng, 107.0)
+    assert eng.tcin.state == 'locked'
+    y = run(eng, 112.0)
+    assert eng.tcin.jumps == 0 and not [n for n in eng.news if 'jumped' in n] and eng.tcin.state == 'locked'
+    z = np.abs(y[:3 * SR, 0]) == 0
+    run_max = max((len(g) for g in ''.join('1' if v else '0' for v in z).split('0')), default=0)
+    assert run_max < 0.25 * SR                                     # the kicks play on through it
+
+
+@pytest.mark.parametrize('n', [8, 12])
+def test_quarter_frames_in_bursts_keep_the_tempo(eng, n):
+    """Every n quarter frames delivered together at the last one's time. Before, bursts of 12 drove the set to 70
+    or 259 BPM."""
+    kick(eng)
+    eng.cmd_midi_timecode_in(source=SRC)
+    th = Their(eng, 25, '00:00:10:00', 100.3, 125.0)
+    fd = []
+    for i in range(0, len(eng.feed), n):
+        grp = eng.feed[i:i + n]
+        fd += [(grp[-1][0] + j * 2e-5,) + m[1:] for j, m in enumerate(grp)]
+    eng.feed = fd
+    run(eng, 125.0)
+    tc = eng.tcin
+    assert tc.state == 'locked' and tc.jumps == 0 and eng.bpm == pytest.approx(120, abs=0.25)
+    err = phase_ms(eng, th, tc.locked[1] + 8, eng.beat(eng.played) - 4)
+    assert abs(np.median(err) - (n - 1) * 5) < 3                   # late by the burst's own lateness, no more
+
+
+def test_a_small_jump_back_while_running_is_still_a_jump(eng):
+    kick(eng)
+    eng.cmd_midi_timecode_in(source=SRC)
+    Their(eng, 25, '00:00:00:00', 100.3, 106.0)
+    run(eng, 105.0)
+    assert eng.tcin.state == 'locked'
+    eng.feed = [m for m in eng.feed if m[0] < 105.5]
+    Their(eng, 25, '00:00:04:00', 105.5, 114.0)                    # their 00:00:05:08 back to 00:00:04:00
+    run(eng, 114.0)
+    assert eng.tcin.jumps == 1 and eng.tcin.state == 'locked'
+    assert any('they jumped from 00:00:05' in n and 'to 00:00:04:0' in n for n in eng.news)
+
+
+def test_an_offset_their_rate_has_no_label_for_is_said_and_not_followed(eng):
+    """offset='00:01:00:00' given before their rate is known (checked at 25 fps), then they send 29.97 drop-frame,
+    which has no 00:01:00;00. Before: a ValueError on the driver's thread each label, swallowed, nothing said."""
+    kick(eng)
+    r = eng.cmd_midi_timecode_in(source=SRC, offset='00:01:00:00')
+    assert 'checked at 25 fps until their rate is known' in r and 'pin rate= first' in r
+    Their(eng, 29.97, '00:01:00;02', 100.3, 116.0)
+    run(eng, 106.0)
+    tin = eng.tcin
+    assert tin.state == 'bad offset' and not tin.running and eng.stats['timecode_in_errors'] == 0
+    said = [n for n in eng.news if 'does not exist' in n]
+    assert len(said) == 1 and "offset='00:01:00;02'" in said[0] and 'pin rate= first' in said[0]
+    line = [x for x in eng.cmd_status().splitlines() if 'timecode in' in x][0]
+    assert "BAD OFFSET: offset='00:01:00:00'" in line and "(offset='00:01:00;02' does)" in line
+    assert 'timecode in' in eng.cmd_midi_timecode_in()            # describing it does not raise either
+    y = run(eng, 107.0)
+    assert np.abs(y).max() > 0.05                                  # not followed: the set plays on by itself
+    eng.cmd_midi_timecode_in(offset='00:01:00;02')
+    run(eng, 116.0)
+    assert tin.state == 'locked' and tin.bad_offset is None
+    with pytest.raises(ValueError, match=r"frames 0 to 23"):       # pinned: checked at their rate at once
+        eng.cmd_midi_timecode_in(rate=24, offset='00:00:10:24')
+
+
+def test_a_rate_change_that_keeps_an_earlier_offset_names_it(eng):
+    eng.cmd_midi_timecode_in(source=SRC, rate=30, offset='00:01:00:00')
+    with pytest.raises(ValueError, match=r"rate=29.97 keeps the offset given before, '00:01:00:00', and that does "
+                                         r"not exist at 29.97 fps drop-frame .*pass offset=\.\.\. with it, e\.g\. "
+                                         r"offset='00:01:00;02'"):
+        eng.cmd_midi_timecode_in(rate=29.97)
+    assert eng.tcin.pin == 30
+    eng.cmd_midi_timecode(port='Video', rate=30, offset='00:01:00:00')
+    with pytest.raises(ValueError, match=r"rate=29.97 keeps the offset given before, '00:01:00:00', and that does "
+                                         r"not exist at 29.97 fps drop-frame .*pass offset=\.\.\. with it"):
+        eng.cmd_midi_timecode(rate=29.97)
+    assert eng.mout.tc['rate'] == 30
+
+
+@pytest.mark.parametrize('their', ['stopped', 'located'])
+def test_clock_in_turned_off_while_their_time_stands_still_keeps_the_set_silent(eng, their):
+    """Clock in leads while on (timecode only reads); turned off while their time is stopped or located, the set
+    goes back to silent. Before, it played on by itself until their time ran."""
+    kick(eng)
+    eng.cmd_midi_timecode_in(source=SRC, dropout_ms=200)
+    Their(eng, 25, '00:00:10:00', 100.3, 106.0)
+    if their == 'located':
+        eng.feed.append((106.5, 'sysex', T.full_frame((0, 0, 30, 0), 25), 0))
+    run(eng, 107.0)
+    assert eng.tcin.state == their
+    eng.cmd_midi_clock_in(source='test keys', transport='tempo')
+    y = run(eng, 108.0)
+    assert eng.tcin.passive and np.abs(y).max() > 0.05             # clock in leads: the set plays
+    eng.cmd_midi_clock_in(on=False)
+    y = run(eng, 110.0)
+    assert not eng.tcin.passive and eng.tcin.state == their
+    assert np.abs(y[int(0.3 * SR):]).max() == 0.0
+    assert any(f'their time is {their}, so the set is silent until it runs' in n for n in eng.news)
+
+
+def test_their_grid_moved_by_live_tempo_holds_through_their_stop_and_play(eng):
+    """live_tempo moves their bar grid from the change on; their stop and play from the same place keeps it.
+    Before, the relock went back to the grid from offset at the new tempo: bar lines 21.6, 24.0, ... not 20.0,
+    22.4, ... A new offset starts it again from the offset."""
+    kick(eng)
+    eng.cmd_midi_timecode_in(source=SRC, dropout_ms=200)
+    Their(eng, 25, '00:00:00:00', 100.3, 116.0)
+    run(eng, 107.0)
+    eng.cmd_tempo(100)
+    run(eng, 116.0)
+    tc = eng.tcin
+
+    def bars():
+        return [round(tc._secs_of(x), 3) for x in range(0, 80, 4) if 20 <= tc._secs_of(x) <= 30]
+    before = bars()
+    assert before == [20.0, 22.4, 24.8, 27.2, 29.6]
+    run(eng, 117.0)
+    assert tc.state == 'stopped'
+    eng.feed = []
+    Their(eng, 25, '00:00:20:00', 117.5, 130.0)
+    run(eng, 130.0)
+    assert tc.state == 'locked' and bars() == before
+    eng.cmd_midi_timecode_in(offset='00:00:00:00')
+    assert tc.anchor is None
+
+
+def test_timecode_out_after_the_set_ends_says_nothing_would_go_and_a_move_says_the_old_port_stopped(eng):
+    run(eng, 100.2)
+    eng.cmd_midi_timecode(port='Video')
+    run(eng, 101.0)
+    r = eng.cmd_midi_timecode(port='Test Out')
+    assert r.startswith("timecode out to 'Video' stopped (") and "timecode out -> 'Test Out'" in r
+    eng.mout.end(0.5)
+    with pytest.raises(ValueError, match=r"the set has ended \(its end is planned\): timecode out would send "
+                                         r"nothing"):
+        eng.cmd_midi_timecode(offset='01:00:00:00')
+    run(eng, 102.0)
+    assert eng.mout.ended
+    with pytest.raises(ValueError, match=r"the set has ended: timecode out would send nothing"):
+        eng.cmd_midi_timecode(port='Video')
+    assert 'timecode out' in eng.cmd_midi_timecode(on=False)
+
+
+def test_their_rate_changing_to_one_without_the_offset_label_stops_following(eng):
+    """Locked at 25 fps on offset 00:01:00:00, then they switch to 29.97 drop-frame, which has no such label: not
+    followed, said once, and live_tempo still works (no grid is read from an offset that does not exist)."""
+    kick(eng)
+    eng.cmd_midi_timecode_in(source=SRC, offset='00:01:00:00')
+    Their(eng, 25, '00:01:00:00', 100.3, 106.0)
+    run(eng, 105.5)
+    assert eng.tcin.state == 'locked'
+    eng.feed = [m for m in eng.feed if m[0] < 105.5]
+    Their(eng, 29.97, '00:01:05;10', 105.5, 110.0)
+    run(eng, 110.0)
+    assert eng.tcin.state == 'bad offset' and eng.stats['timecode_in_errors'] == 0
+    assert len([n for n in eng.news if 'does not exist at their 29.97' in n]) == 1
+    assert 'BPM' in eng.cmd_tempo(110)

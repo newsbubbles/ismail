@@ -12,6 +12,7 @@ lets go of it.
 find_output(name) picks an output by its name or a unique part of it.
 """
 import sys
+import threading
 import time
 
 NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -98,6 +99,7 @@ if sys.platform == 'win32':
     _w.midiOutClose.argtypes = [wintypes.HANDLE]
 
     class _MIDIHDR(ctypes.Structure):
+        _pack_ = 1                          # mmsystem.h packs it: 112 bytes on 64-bit Windows, 64 on 32-bit
         _fields_ = [('lpData', ctypes.c_void_p), ('dwBufferLength', wintypes.DWORD),
                     ('dwBytesRecorded', wintypes.DWORD), ('dwUser', ctypes.c_size_t), ('dwFlags', wintypes.DWORD),
                     ('lpNext', ctypes.c_void_p), ('reserved', ctypes.c_size_t), ('dwOffset', wintypes.DWORD),
@@ -106,6 +108,8 @@ if sys.platform == 'win32':
     _PHDR = ctypes.POINTER(_MIDIHDR)
     _MHDR_DONE = 0x1
     _MIM_LONGDATA = 0x3C4
+    _MIM_LONGERROR = 0x3C6              # a buffer back with a cut or broken SysEx: queued again like LONGDATA
+    _STILLPLAYING = 65                  # MIDIERR_STILLPLAYING: the driver still holds a buffer
     for _f in ('midiOutPrepareHeader', 'midiOutUnprepareHeader', 'midiOutLongMsg', 'midiInPrepareHeader',
                'midiInUnprepareHeader', 'midiInAddBuffer'):
         getattr(_w, _f).argtypes = [wintypes.HANDLE, _PHDR, wintypes.UINT]
@@ -174,8 +178,19 @@ if sys.platform == 'win32':
         def close(self):
             if self._h:
                 _w.midiOutReset(self._h)          # marks every SysEx buffer still queued as done
-                self._reap()
-                _w.midiOutClose(self._h)
+                for _ in range(50):               # a driver that marks them a moment later: up to 50 ms
+                    self._reap()
+                    if not self._long:
+                        break
+                    time.sleep(0.001)
+                r = _w.midiOutClose(self._h)
+                if r == _STILLPLAYING:            # one more reset, then once again
+                    _w.midiOutReset(self._h)
+                    self._reap()
+                    r = _w.midiOutClose(self._h)
+                if r and self._long:              # the buffers stay held, so the driver never writes freed memory
+                    raise MidiError(f"MIDI output {self.name!r} did not close (winmm error {r}): the driver still "
+                                    f"holds {len(self._long)} SysEx buffer(s); they are kept until it lets go")
                 self._h = None
 
     def sources():
@@ -195,6 +210,7 @@ if sys.platform == 'win32':
             self._on = on_msg
             self._sx = getattr(on_msg, 'sysex', None)
             self._bufs, self._part, self._closing = [], b'', False
+            self._lk = threading.Lock()     # the closing check and the re-queue, against close()
 
             def cb(h, msg, inst, p1, p2):
                 if msg == _MIM_DATA:
@@ -202,9 +218,9 @@ if sys.platform == 'win32':
                         self._on(time.perf_counter(), p1 & 0xFF, (p1 >> 8) & 0xFF, (p1 >> 16) & 0xFF)
                     except Exception:
                         pass
-                elif msg == _MIM_LONGDATA:
+                elif msg == _MIM_LONGDATA or msg == _MIM_LONGERROR:
                     try:
-                        self._long_in(p1)
+                        self._long_in(p1, msg == _MIM_LONGERROR)
                     except Exception:
                         pass
             self._cb = _CB(cb)              # kept: the driver calls it until close
@@ -218,22 +234,38 @@ if sys.platform == 'win32':
                     buf = ctypes.create_string_buffer(SYSEX_LEN)
                     hd = _MIDIHDR()
                     hd.lpData, hd.dwBufferLength = ctypes.cast(buf, ctypes.c_void_p), SYSEX_LEN
-                    if _w.midiInPrepareHeader(self._h, ctypes.byref(hd), ctypes.sizeof(hd)) == 0:
-                        _w.midiInAddBuffer(self._h, ctypes.byref(hd), ctypes.sizeof(hd))
+                    r = _w.midiInPrepareHeader(self._h, ctypes.byref(hd), ctypes.sizeof(hd))
+                    if r == 0:
                         self._bufs.append((buf, hd))
+                        r = _w.midiInAddBuffer(self._h, ctypes.byref(hd), ctypes.sizeof(hd))
+                    if r:
+                        try:
+                            self.close()
+                        except MidiError:
+                            pass
+                        raise MidiError(f"MIDI input {name!r}: a SysEx buffer was not taken (winmm error {r}), so "
+                                        f"timecode locates and other SysEx could not come in; it is closed again")
             _w.midiInStart(self._h)
 
-        def _long_in(self, p1):
-            """A SysEx buffer came back full (or with a message's end): its bytes, then the buffer queued again."""
+        def _long_in(self, p1, error=False):
+            """A SysEx buffer came back full (or with a message's end, or broken: MIM_LONGERROR): its bytes, then
+            the buffer queued again. The closing check and the re-queue hold the lock close() takes to set it, so
+            no buffer goes back to the driver once close() has begun."""
             t = time.perf_counter()
             ph = ctypes.cast(ctypes.c_void_p(p1), _PHDR)
             hd = ph.contents
-            data = ctypes.string_at(hd.lpData, hd.dwBytesRecorded) if hd.dwBytesRecorded else b''
-            if self._closing:
+            data = ctypes.string_at(hd.lpData, hd.dwBytesRecorded) if hd.dwBytesRecorded and not error else b''
+            with self._lk:
+                if self._closing:
+                    return
+                _w.midiInAddBuffer(self._h, ph, ctypes.sizeof(_MIDIHDR))
+            if error:                       # what came before it is no message's start
+                self._part = b''
                 return
-            _w.midiInAddBuffer(self._h, ph, ctypes.sizeof(_MIDIHDR))
             if not data or self._sx is None:
                 return
+            if data.startswith(b'\xf0'):    # a new message: whatever was left over was cut
+                self._part = b''
             self._part = (self._part + data)[-65536:]
             if self._part.endswith(b'\xf7'):
                 whole, self._part = self._part, b''
@@ -241,15 +273,36 @@ if sys.platform == 'win32':
                     self._sx(t, whole)
 
         def close(self):
+            """Stop, hand the SysEx buffers back, close. midiInReset runs outside the lock: a driver that hands the
+            buffers back through the callback on its own thread, and waits for it, would otherwise wait forever."""
             if self._h:
-                self._closing = True
+                with self._lk:
+                    self._closing = True
                 _w.midiInStop(self._h)
                 _w.midiInReset(self._h)       # hands every queued SysEx buffer back
-                for _, hd in self._bufs:
-                    _w.midiInUnprepareHeader(self._h, ctypes.byref(hd), ctypes.sizeof(hd))
+                held = self._unprepare()
+                if held:                      # a buffer the driver kept through the reset: once more
+                    _w.midiInReset(self._h)
+                    held = self._unprepare()
+                r = _w.midiInClose(self._h)
+                if r == _STILLPLAYING:
+                    _w.midiInReset(self._h)
+                    held = self._unprepare()
+                    r = _w.midiInClose(self._h)
+                if r and (held or self._bufs):
+                    raise MidiError(f"MIDI input {self.name!r} did not close (winmm error {r}): the driver still "
+                                    f"holds {len(self._bufs)} SysEx buffer(s); they are kept until it lets go")
                 self._bufs = []
-                _w.midiInClose(self._h)
                 self._h = None
+
+        def _unprepare(self):
+            """Let go of the buffers the driver gave back; keep the ones it still holds. How many it holds."""
+            keep = []
+            for buf, hd in self._bufs:
+                if _w.midiInUnprepareHeader(self._h, ctypes.byref(hd), ctypes.sizeof(hd)) == _STILLPLAYING:
+                    keep.append((buf, hd))
+            self._bufs = keep
+            return len(keep)
 else:
     def outputs():
         try:

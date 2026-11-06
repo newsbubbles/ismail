@@ -942,11 +942,13 @@ def live_midi_timecode(project: str, port: str = None, on: bool = True, rate=Non
     a tape machine that chases timecode follows the set's position. Reach for it when the set leads and another
     app takes its time from it: send timecode to my DAW or my video editor (for tempo and beats, live_midi_clock).
     rate: 24, 25 (default), 29.97 (drop-frame; '30df' says the same) or 30 frames per second, as the receiver is
-    set. offset: the timecode the set's start reads as, 'hh:mm:ss:ff' (e.g. '01:00:00:00') or seconds (default 0).
-    Quarter frames go out four a frame, each when its time reaches the speakers (as live_midi_out's notes), after a
-    full-frame message of the first frame, so the receiver locates there first. The time is the set's seconds: a
+    set ('29.97' is drop-frame, MTC's own code for it; 29.97 non-drop is not yet). offset: the timecode the set's
+    start reads as, 'hh:mm:ss:ff' (e.g. '01:00:00:00') or seconds (default 0). Quarter frames go out four a frame,
+    each when its time reaches the speakers (as live_midi_out's notes), after a full-frame message of the first
+    frame, so the receiver locates there first. The time is the set's seconds: a
     tempo change does not move it. Call again with another offset or rate to locate there. on=False stops the
-    quarter frames, which a receiver takes as a stop; the set's end does the same. offset_ms: as live_midi_out
+    quarter frames, which a receiver takes as a stop; the set's end does the same, and after it the call is refused
+    (nothing would go out). Another port: the old one stops, and the reply says so. offset_ms: as live_midi_out
     (shared by the port). Timecode out and timecode in on one port is refused. With no port: what is sending
     (live_status says it too)."""
     return _call(project, 'midi_timecode', port=port, on=on, rate=rate, offset=offset, offset_ms=offset_ms)
@@ -971,11 +973,15 @@ def live_midi_timecode_in(project: str, source: str = None, on: bool = True, rat
     gap): their transport stopped, and the set is silent until their time runs again. A full-frame message (a
     locate), a jump in their time, or a new rate relocks the same way; running backwards silences it. rate: 24,
     25, 29.97 (drop-frame) or 30 to take only that rate (another is not followed, and the news says so); 'any'
-    (the default) takes what they send. offset_ms: positive lands ismail later, for an app whose sound is late.
+    (the default) takes what they send. An offset their rate has no label for (00:01:00:00 at drop-frame, frame 24
+    at 24 fps) is not followed: the news and live_status name the label that exists (pin rate= to have it checked
+    when given). A grid live_tempo moved holds through their stops, locates and relocks; a new offset or rate
+    starts it again from offset. A sender that holds quarter frames and lets them out at once plays through: their
+    numbering runs on, so it is no jump. offset_ms: positive lands ismail later, for an app whose sound is late.
     With MIDI clock in on too, the clock leads (it carries the tempo) and timecode only reads their time. Call
     again to change a setting; on=False lets go. With no source: the inputs and the chase; live_status shows their
     time, the lock and the phase. Not yet: placing the set at their exact time (a live set cannot jump), their
-    tempo map."""
+    tempo map, 29.97 non-drop."""
     return _call(project, 'midi_timecode_in', source=source, on=on, rate=rate, offset=offset, offset_ms=offset_ms,
                  bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
                  max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)

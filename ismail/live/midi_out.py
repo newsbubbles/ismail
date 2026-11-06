@@ -319,10 +319,20 @@ class MidiOut:
                     raise ValueError("timecode out is off: name the port to send it to (port=..., midi_ports lists "
                                      "the outputs)")
                 return self.describe()
+            if self.ended or self.ending is not None:
+                raise ValueError("the set has ended" + ("" if self.ended else " (its end is planned)") + ": timecode "
+                                 "out would send nothing, since its quarter frames stop at the set's end. Turn it on "
+                                 "while a set plays")
             c = self.tc
             r = TC.rate_of(rate) if rate is not None else (c['rate'] if c else 25)
             given = offset if offset is not None else (c['offset'] if c else 0)
-            zero = TC.offset_frames(given, r)
+            try:
+                zero = TC.offset_frames(given, r)
+            except ValueError as ex:
+                if offset is not None or c is None:
+                    raise
+                raise ValueError(f"rate={rate!r} keeps the offset given before, {given!r}, and that does not exist at "
+                                 f"{TC.fmt_rate(r)} ({ex}): pass offset=... with it") from None
             name = self.find(port) if port is not None else c['port']
             tin = getattr(e, 'tcin', None)
             if tin is not None and tin.source is not None and same_port(tin.source, name):
@@ -330,8 +340,11 @@ class MidiOut:
                                  f"the set's time back to itself and it would chase its own time. Send it to another "
                                  f"port (a second loopMIDI port), or turn timecode in off first: "
                                  f"live_midi_timecode_in(on=False)")
+            moved = None
             if c is not None and name != c['port']:
-                self._tc_off()
+                old = self._tc_off()
+                moved = (f"timecode out to {old['port']!r} stopped ({old['sent']} quarter frames sent); a receiver "
+                         f"there takes it as a stop. ")
                 c = None
             p = self._port(name, offset_ms)
             if c is not None and r == c['rate'] and zero == c['zero']:
@@ -346,7 +359,8 @@ class MidiOut:
             self.tc = {'port': name, 'rate': r, 'zero': zero, 'offset': given, 'q': q0, 'full': q0,
                        'sent': c['sent'] if c else 0, 'fulls': c['fulls'] if c else 0}
             self._start()
-            return (f"timecode out -> {name!r}: {TC.fmt_rate(r)}, the set's start = {TC.fmt_frames(zero, r)} "
+            return ((moved or '') + f"timecode out -> {name!r}: {TC.fmt_rate(r)}, the set's start = "
+                    f"{TC.fmt_frames(zero, r)} "
                     f"(offset); a full frame of {TC.fmt_frames(q0 // 4, r)} as that time reaches the speakers (a "
                     f"locate), then four quarter frames a frame. The receiver must chase MTC at {TC.fmt_rate(r)}; "
                     f"the quarter frames stop when turned off and at the set's end")

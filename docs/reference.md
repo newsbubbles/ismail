@@ -234,7 +234,7 @@ Find any tool by what you need or by role with `ops_find`.
   arp follow the followed tempo; clock in and clock out on one port is refused; `live_tempo` is refused while it
   follows.
 - **MIDI Time Code.** `live_midi_timecode` sends the set's time from its start (plus an `offset`, e.g.
-  `'01:00:00:00'`) as quarter frames at 24, 25, 29.97 drop-frame or 30 fps, each when its time reaches the
+  `'01:00:00:00'`) as quarter frames at 24, 25, 29.97 drop-frame (what '29.97' means) or 30 fps, each when its time reaches the
   speakers, after a full-frame locate. `live_midi_timecode_in` makes the set chase a video player's or a DAW's
   timecode: MTC has no tempo, so the set keeps its own and lays its bar lines on their time (`offset` is their bar
   1). Their play brings the set in on the first of their bar lines it can reach; it follows their speed; no

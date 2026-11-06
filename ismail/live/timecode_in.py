@@ -22,14 +22,26 @@ tempo_tol_bpm or phase_tol_ms, bending at most max_bend_pct. A jump of more than
 their time should be (a locate while running), a full-frame SysEx (a locate), and a change of their rate relock the
 same way. Running backwards: the set cannot, so it is silent until their time runs forward again.
 
+A jump is told from their own numbering first: a whole label that counting on from the last one led to is never a
+jump, however late it arrives (a USB or a sender thread that holds messages and lets them out in a burst). A label
+after a broken order is a jump when it is behind their last position, ahead of where the filtered line says their
+time is, or behind it by more than a delay under dropout_ms could make it; behind it by less, the next whole label
+decides (still off the line: a jump; back on it: it was late). A burst of quarter frames does not move the
+filtered period outside 10% of their rate's own (ClockFilter's nominal band).
+
 A dropout: no quarter frame for dropout_ms (250 by default). Under it the set plays on through the gap; past it their
 transport has stopped (MTC has no stop message: the quarter frames stop) or the cable is out, and the set goes
 silent until their time runs again. A rate= pinned in the command and another rate coming in: not followed, said
-in the news and in live_status.
+in the news and in live_status. An offset label that does not exist at their rate (00:01:00:00 at 29.97 drop-frame,
+frame 24 at 24 fps) is not followed either: the news and live_status name the label that does.
 
-Not yet: placing the set at their time (a live set cannot jump back or ahead; it comes in on its next bar line on
-their grid), their tempo map (their bars run at the set's tempo), and the silence reaching live_listen, live_record
-and the streams (the speakers only, as with clock in).
+Their bar grid: `offset` at the set's tempo. live_tempo moves it from the change on, and that grid holds through
+their stops, locates and relocks; a new offset or rate starts it again from offset.
+
+Not yet: 29.97 non-drop (MTC's rate code 2 is drop-frame, and '29.97' here means drop-frame; a sender that runs
+29.97 non-drop marks it 30), placing the set at their time (a live set cannot jump back or ahead; it comes in on
+its next bar line on their grid), their tempo map (their bars run at the set's tempo), and the silence reaching
+live_listen, live_record and the streams (the speakers only, as with clock in).
 """
 import math
 
@@ -41,6 +53,8 @@ from .timeline import fmt_bar
 SNAP = 0.001                # before the steady line, a speed within this of 1x is taken as 1x (a crystal is within
                             # 0.0001)
 JUMP_Q = 8                  # their time this many quarter frames (two frames) from where it should be: a jump
+QUIET = ('wrong rate', 'bad offset')    # not followed: the set plays on by itself
+SILENT = ('stopped', 'located', 'reverse')  # their time is not running forward: the set is silent
 DEFAULTS = {'bandwidth_hz': 0.5, 'tempo_tol_bpm': 0.25, 'phase_tol_ms': 4.0, 'max_bend_pct': 3.0,
             'step_beats': None, 'dropout_ms': 250.0, 'offset_ms': 0.0}
 RANGES = {'bandwidth_hz': (0.05, 5.0, "Hz: lower is steadier, higher follows a speed change sooner"),
@@ -76,13 +90,15 @@ class TimecodeIn(ClockIn):
         self.bpm0 = None            # the set's own tempo their bars run at
         self.passive = False        # clock in leads: read only
         self.jumps = 0
+        self.cand = None            # a whole label behind the line, waiting for the next to say jump or late
+        self.bad_offset = None      # (what is wrong, a label that exists) while the offset does not at their rate
 
     # ------------------------------------------------------------------ their time
     def _tq(self, rate=None):
         return float(T.frame_s(rate or self.rate)) / 4
 
-    def _zero_s(self):
-        r = self.rate or self.pin or 25
+    def _zero_s(self, rate=None):
+        r = rate or self.rate or self.pin or 25
         f = T.offset_frames(self.zero_raw, r) if self.zero_raw is not None else self.zero_f
         return T.frames_to_seconds(f, r)
 
@@ -171,7 +187,7 @@ class TimecodeIn(ClockIn):
                 self.e.news.append(f"timecode in: their rate changed from {T.fmt_rate(self.rate)} to "
                                    f"{T.fmt_rate(r.rate)}: the set relocks on the first of their bar lines it can "
                                    f"reach")
-                self.rate = r.rate
+                self.rate, self.anchor = r.rate, None       # a new rate: the grid again from offset
                 self._run(t, r, quiet=True)
                 return
             if not self.running:
@@ -181,10 +197,18 @@ class TimecodeIn(ClockIn):
                 return
             q = T.unwrap(r.q, self.qlast, r.rate)
             if r.complete:
-                Tp = self.f.T or self._tq()
-                pred = self.qlast + (t - self.tlast) / Tp
-                if abs(q - pred) > JUMP_Q:
+                pred = self._line_q(t)
+                if r.continued and self.cand is None:
+                    verdict = 'held'
+                elif r.continued:                           # the label after one behind the line
+                    verdict = 'jump' if abs(q - pred) > JUMP_Q else 'held'
+                    self.cand = None
+                else:
+                    verdict = self._jump_or_late(q, pred)
+                    self.cand = (q, t) if verdict == 'wait' else None
+                if verdict == 'jump':
                     self.jumps += 1
+                    self.cand = None
                     self.e.news.append(f"timecode in: they jumped from {self._label(pred * self._tq())} to "
                                        f"{T.fmt_tc(r.tc, r.rate)}: the set relocks on the first of their bar lines "
                                        f"it can reach")
@@ -195,6 +219,24 @@ class TimecodeIn(ClockIn):
                 return
             self.f.tick(t, k=k)
             self.qlast, self.tlast = q, t
+
+    def _line_q(self, t):
+        """Their position at time t (quarter frames) by the filtered line through the arrivals so far."""
+        st = self.f.steady()
+        t0, Tp = (st[1], st[0]) if st is not None else (self.f.t0, self.f.T or self._tq())
+        return self.qlast + (t - t0) / Tp
+
+    def _jump_or_late(self, q, pred):
+        """A whole label after a broken order: 'jump', 'wait' (behind the line by what a late delivery could be: the
+        next label decides) or 'held'."""
+        if q <= self.qlast:                                 # behind their last position: no delay does that
+            return 'jump'
+        off = q - pred
+        if off > JUMP_Q:                                    # ahead of their time by the line: no delay does that
+            return 'jump'
+        if off < -(self._dropout_s() / self._tq() + JUMP_Q):
+            return 'jump'
+        return 'wait' if off < -JUMP_Q else 'held'
 
     def sysex(self, t, data):
         ff = T.read_full_frame(data)
@@ -219,19 +261,30 @@ class TimecodeIn(ClockIn):
     def _run(self, t, r, quiet=False):
         """Their time runs forward from reading r: a fresh filter, the set silent until it locks on their grid."""
         e = self.e
-        self.f = ClockFilter(self.cfg['bandwidth_hz'])
+        bad = T.offset_problem(self.zero_raw, r.rate) if self.zero_raw is not None else None
+        if bad is not None:
+            if self.bad_offset is None or self.state != 'bad offset':
+                checked = "" if self.pin else (" (it was checked at 25 fps when given, their rate unknown then: pin "
+                                               "rate= first to check it at theirs)")
+                e.news.append(f"timecode in: offset={self.zero_raw!r} does not exist at their {T.fmt_rate(r.rate)} "
+                              f"({bad[0]}){checked}: not following. live_midi_timecode_in(offset="
+                              f"{bad[1]!r})" + (" puts their bar 1 there" if bad[1] else ""))
+            self._halt('bad offset', None)
+            self.bad_offset, self.rate, self.D, self.locked = bad, r.rate, None, None   # no grid until it exists
+            return
+        self.bad_offset = None
+        self.f = ClockFilter(self.cfg['bandwidth_hz'], nominal=self._tq(r.rate))
         self.f.tick(t)
         # their time as the day nearest their bar 1 has it: just past midnight after an offset late in the day
         # counts on from it
-        q = T.unwrap(r.q, self._zero_s() / self._tq(r.rate), r.rate)
-        self.qlast, self.tlast = q, t
+        q = T.unwrap(r.q, self._zero_s(r.rate) / self._tq(r.rate), r.rate)
+        self.qlast, self.tlast, self.cand = q, t, None
         self.running, self.D, self.lock_req, self.locked = True, None, True, None
         self.at_tc, self._steps_seen, self.catching = None, 0, False
         self.next_ok = -math.inf
         if self.bpm0 is None:
             self.bpm0 = e.bpm
-        self.anchor = None
-        self.state = 'locking'
+        self.state = 'locking'                     # the anchor stays: a live_tempo grid holds through a relock
         if not self.passive:
             self._gate(e.played, False)
             if not quiet:
@@ -239,15 +292,15 @@ class TimecodeIn(ClockIn):
                               f"({T.fmt_rate(r.rate)}): the set comes in on the first of their bar lines it can reach")
 
     def _halt(self, state, label):
-        """Their time stopped, located or turned round: silent until it runs forward. At a rate not asked for, not
-        followed: the set plays on by itself."""
+        """Their time stopped, located or turned round: silent until it runs forward. At a rate not asked for, or
+        with an offset their rate has no label for, not followed: the set plays on by itself."""
         e = self.e
         was = self.running
         self.running, self.lock_req, self.state, self.at_tc = False, False, state, label
         self.dec.reset()
         if not self.passive:
-            self._gate(e.played, state == 'wrong rate')
-            if was and state != 'wrong rate':
+            self._gate(e.played, state in QUIET)
+            if was and state not in QUIET:
                 e.mout.silence()
 
     # ------------------------------------------------------------------ the follower (the engine's scheduler pass)
@@ -272,6 +325,10 @@ class TimecodeIn(ClockIn):
                     self._gate(e.played, False)
                     e.news.append("timecode in: clock in is off, so timecode leads again: the set comes in on the "
                                   "first of their bar lines it can reach")
+                elif self.state in SILENT:              # their time stands still: so does the set, as before
+                    self._gate(e.played, False)
+                    e.news.append(f"timecode in: clock in is off, so timecode leads again; their time is "
+                                  f"{self.state}, so the set is silent until it runs")
             if not self.running:
                 return
             if now - self.tlast > self._dropout_s():
@@ -297,8 +354,9 @@ class TimecodeIn(ClockIn):
             return
         if lock_req:
             self._lock(est, ref, a)
-            if self.locked is not None and not self.lock_req:
-                self.state = 'locked'
+            with self.lock:
+                if self.locked is not None and not self.lock_req and self.running:
+                    self.state = 'locked'
         elif D is not None:
             self._follow(est, ref, a, D)
 
@@ -350,9 +408,15 @@ class TimecodeIn(ClockIn):
                 ok = False
             if not ok:
                 raise ValueError(f"{k}={v!r}: {lo:g} to {hi:g} ({what})")
-        pin = T.rate_of(rate) if rate not in (None, 'any') else None
+        pin = T.rate_of(rate) if rate not in (None, 'any') else (None if rate == 'any' else self.pin)
+        at = pin or self.rate or 25
         if offset is not None:
-            T.offset_frames(offset, pin or self.rate or 25)          # a wrong offset says so before anything moves
+            T.offset_frames(offset, at)                      # a wrong offset says so before anything moves
+        elif rate is not None and self.zero_raw is not None and T.offset_problem(self.zero_raw, at):
+            bad = T.offset_problem(self.zero_raw, at)
+            raise ValueError(f"rate={rate!r} keeps the offset given before, {self.zero_raw!r}, and that does not "
+                             f"exist at {T.fmt_rate(at)} ({bad[0]}): pass offset=... with it"
+                             + (f", e.g. offset={bad[1]!r}" if bad[1] else ''))
         name = self.source if source is None else self._find(source)
         tco = e.mout.tc
         if tco is not None and same_port(tco['port'], name):
@@ -383,7 +447,9 @@ class TimecodeIn(ClockIn):
                 if pin is not None and self.rate is not None and self.rate != pin and self.running:
                     self._halt('wrong rate', None)
             if offset is not None:
-                self.zero_raw = offset
+                self.zero_raw, self.anchor, self.bad_offset = offset, None, None
+                if self.state == 'bad offset':
+                    self.state = 'reading'
                 if self.running:                    # a new grid: lock on it again
                     self.lock_req, self.D, self.locked, self.anchor = True, None, None, None
                     self.state = 'locking'
@@ -391,7 +457,10 @@ class TimecodeIn(ClockIn):
                         self._gate(e.played, False)
             if self.bpm0 is None:
                 self.bpm0 = e.bpm
-        zero = self._label(self._zero_s())
+        try:
+            zero = self._label(self._zero_s())
+        except ValueError:
+            zero = repr(self.zero_raw)
         lines.append(f"chases their time ({'rate ' + T.fmt_rate(self.pin) if self.pin else 'any rate they send'}): "
                      f"MTC carries no tempo, so the set keeps its own ({fmt_num(round(e.bpm, 2))} BPM; live_tempo "
                      f"works) and lays its bar lines on their time, their bar 1 at {zero} (offset)")
@@ -402,6 +471,9 @@ class TimecodeIn(ClockIn):
         lines.append(f"no quarter frame for {self.cfg['dropout_ms']:g} ms: their transport stopped and the set is "
                      f"silent; a locate (full frame or a jump), a turn backwards or a new rate silences it too until "
                      f"their time runs forward again")
+        if offset is not None and isinstance(offset, str) and self.pin is None and self.rate is None:
+            lines.append(f"offset {offset!r} is checked at 25 fps until their rate is known: if they send another "
+                         f"rate, pin rate= first (an offset their rate has no label for is not followed)")
         if e.cin.source is not None:
             lines.append(f"MIDI clock in from {e.cin.source!r} is on and leads (tempo, beat and transport); timecode "
                          f"in only reads their time while it is on")
@@ -451,6 +523,10 @@ class TimecodeIn(ClockIn):
                 parts.append("RUNNING BACKWARDS: the set is silent until their time runs forward")
             elif self.state == 'wrong rate':
                 parts.append(f"WRONG RATE: rate={self.pin} asked, they send another; not following")
+            elif self.state == 'bad offset':
+                bad = self.bad_offset or ('', None)
+                parts.append(f"BAD OFFSET: offset={self.zero_raw!r} does not exist at their rate; not following"
+                             + (f" (offset={bad[1]!r} does)" if bad[1] else ''))
             elif self.state == 'locking':
                 parts.append("locking to the first of their bar lines it can reach (silent until then)")
             elif self.locked is not None:

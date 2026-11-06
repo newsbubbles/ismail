@@ -1018,24 +1018,35 @@ lines sit on their time. For a tempo and a beat to follow, use clock in instead.
   "timecode in: locked, their 01:00:06:00 = ismail bar 5". Then the set keeps its beats on theirs and follows
   their speed (a tape or a varispeed 1% fast makes the set 1% fast), with tempo changes as clock in makes them.
 - **Their stop.** MTC has no stop message: the quarter frames stop. No quarter frame for `dropout_ms` (250): the
-  set goes silent until their time runs again. A shorter gap plays through. A full-frame message (a locate), a
-  jump in their time, or a new frame rate relocks the same way: silent, then in on their next bar line.
-  Running backwards silences the set until it runs forward.
+  set goes silent until their time runs again. A shorter gap plays through, and so does a sender that holds
+  its quarter frames and lets them out at once (their numbering runs on, so it is no jump). A full-frame message
+  (a locate), a jump in their time, or a new frame rate relocks the same way: silent, then in on their next bar
+  line. Running backwards silences the set until it runs forward.
+- **Their grid after live_tempo.** The bar lines `live_tempo` moved stay where it put them through their stops,
+  locates and relocks. A new `offset` or a new rate starts the grid again from `offset`.
 - **Rate.** `rate=25` (or 24, 29.97 drop-frame, 30) takes only that rate: another one is not followed, the set
-  plays on by itself and the news says so. `rate='any'` (the default) takes what they send.
+  plays on by itself and the news says so. `rate='any'` (the default) takes what they send. `29.97` means
+  drop-frame (MTC has no code for 29.97 non-drop; a sender running it marks it 30).
+- **An offset their rate has no label for.** `00:01:00:00` does not exist in 29.97 drop-frame (each minute but
+  every tenth starts at `;02`), and frame 24 does not exist at 24 fps. Given before their rate is known, the
+  offset is checked at 25 fps; when their rate has no such label, the set is not followed (it plays on by itself),
+  and the news and `live_status` say `BAD OFFSET` and name the label that exists, e.g. `offset='00:01:00;02'`.
+  Pin `rate=` first to have the offset checked at their rate when given. A new `rate=` that keeps an earlier
+  offset its rate has no label for is refused, naming it: pass `offset=` with it.
 - **With clock in too.** When `live_midi_clock_in` is also on (a DAW sending both on one port), the clock leads:
   it carries the tempo. Timecode then only reads their time and shows it.
 - **Sending the set's time.** `live_midi_timecode(port='to video', rate=25, offset='01:00:00:00')`: the set's
   start reads as `offset`, and the time runs in seconds from there (a tempo change does not move it). Each
   quarter frame goes out when its time reaches the speakers, after a full frame of the first one, so the other
   app locates there first. Call again with another `offset` to locate there. `on=False` stops the quarter frames,
-  which the other app takes as a stop; the set's end does the same. Set the other app to chase MTC at the same
-  rate.
+  which the other app takes as a stop; the set's end does the same, and after it the call is refused (nothing
+  would go out). Another `port=` stops the old one, and the reply says so. Set the other app to chase MTC at the
+  same rate.
 - `live_status` shows their time and rate, the lock ("their 01:00:06:00 = ismail bar 5"), their speed, the phase
   and the tempo changes; for timecode out, the time heard now and what was sent. Timecode in and out on one port
   is refused: use two loopMIDI ports. `source='screen keys'` is refused.
-- **Settings and their ranges:** `rate` 24, 25, 29.97 (also `'30df'`) or 30, or `'any'`; `offset` a timecode
-  `'hh:mm:ss:ff'` or seconds (0 to 24 hours); `dropout_ms` 100 to 5000 (250); `offset_ms` -500 to 2000 (0,
+- **Settings and their ranges:** `rate` 24, 25, 29.97 drop-frame (also `'30df'`) or 30, or `'any'`; `offset` a
+  timecode `'hh:mm:ss:ff'` or seconds (0 to 24 hours; at 29.97 seconds past its 86399.9 s day wrap to midnight); `dropout_ms` 100 to 5000 (250); `offset_ms` -500 to 2000 (0,
   positive lands ismail later); `phase_tol_ms`, `tempo_tol_bpm`, `max_bend_pct`, `step_beats` and
   `bandwidth_hz` as clock in.
 - **Example.** The person says "play along with my video, it sends timecode from Reaper."
@@ -1054,8 +1065,8 @@ lines sit on their time. For a tempo and a beat to follow, use clock in instead.
   within 0.1 ms of their grid and its beats stay within 0.1 ms after it; at their speed 1.01 the set runs at
   121.2 BPM with its beats within 0.1 ms; after `live_tempo` 120 to 100 the beats are on the new grid.
 - Not yet: placing the set at their exact time (a live set cannot jump back or ahead: it comes in on its next bar
-  line on their grid), their tempo map (their bars run at the set's tempo), and the silence reaching
-  `live_listen`, `live_record` and the streams (the speakers only).
+  line on their grid), their tempo map (their bars run at the set's tempo), 29.97 non-drop, and the silence
+  reaching `live_listen`, `live_record` and the streams (the speakers only).
 
 ## Playing for a screen recording
 
