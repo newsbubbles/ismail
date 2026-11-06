@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.5 (2026-11-06)
 
 ### Ableton Link: the set joins a Link session, follows it, leads it (MIDI parity step 8b, ledger:M437)
 
