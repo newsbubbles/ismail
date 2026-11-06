@@ -226,6 +226,9 @@ class Engine:
         self._ctl_wake = threading.Event()
         self._ctl_thread = False
         self.lock = threading.RLock()
+        # one leader of the set's tempo: clock in, timecode in and Link turn on and off one call at a time (taken
+        # before self.lock, never inside it)
+        self.lead_lock = threading.RLock()
         self.tl = Timeline(self.bpb)
         self.tracks = {}
         self.buses = {}
@@ -3110,9 +3113,9 @@ class Engine:
 
     def cmd_midi_clock_in(self, source=None, on=True, transport=None, bandwidth_hz=None, tempo_tol_bpm=None,
                           phase_tol_ms=None, max_bend_pct=None, step_beats=None, dropout_ms=None, offset_ms=None):
-        self._link_leads(on and source is not None, 'MIDI clock in')
         try:
-            with self.lock:
+            with self.lead_lock, self.lock:
+                self._link_leads(on and source is not None, 'MIDI clock in')
                 return self.cin.cmd(source, on, transport, bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm,
                                     phase_tol_ms=phase_tol_ms, max_bend_pct=max_bend_pct, step_beats=step_beats,
                                     dropout_ms=dropout_ms, offset_ms=offset_ms)
@@ -3128,9 +3131,9 @@ class Engine:
     def cmd_midi_timecode_in(self, source=None, on=True, rate=None, offset=None, offset_ms=None, bandwidth_hz=None,
                              tempo_tol_bpm=None, phase_tol_ms=None, max_bend_pct=None, step_beats=None,
                              dropout_ms=None):
-        self._link_leads(on and source is not None, 'timecode in')
         try:
-            with self.lock:
+            with self.lead_lock, self.lock:
+                self._link_leads(on and source is not None, 'timecode in')
                 return self.tcin.cmd(source, on, rate, offset, bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm,
                                      phase_tol_ms=phase_tol_ms, max_bend_pct=max_bend_pct, step_beats=step_beats,
                                      dropout_ms=dropout_ms, offset_ms=offset_ms)
@@ -3139,11 +3142,13 @@ class Engine:
 
     def cmd_link(self, on=True, follow=None, lead=None, quantum=None, start_stop=None, offset_ms=None,
                  tempo_tol_bpm=None, phase_tol_ms=None, max_bend_pct=None, step_beats=None):
-        # not under the engine's lock: joining starts Link's thread (LinkIn takes the lock for its own state)
+        # not under the engine's lock: joining starts Link's thread (LinkIn takes the lock for its own state). Under
+        # the leader's lock: two joins at once would make two Links, and clock in could turn on between check and set
         try:
-            return self.link.cmd(on, follow, lead, quantum, start_stop, offset_ms=offset_ms,
-                                 tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms, max_bend_pct=max_bend_pct,
-                                 step_beats=step_beats)
+            with self.lead_lock:
+                return self.link.cmd(on, follow, lead, quantum, start_stop, offset_ms=offset_ms,
+                                     tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
+                                     max_bend_pct=max_bend_pct, step_beats=step_beats)
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 

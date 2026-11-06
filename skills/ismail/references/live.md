@@ -1107,12 +1107,15 @@ another computer runs one.
 - **The add-on.** Link comes from the package aalink, installed with the extra: `pip install "ismail[link]"` in the
   Python that runs the set. aalink is GPLv3+ (it includes Ableton's Link library); ismail itself stays MIT and loads
   it only when `live_link` is called. Without it, `live_link` says the exact line to run and installs nothing: ask
-  the person before installing it (it is a new download), then call `live_link` again (no restart).
+  the person before installing it (it is a new download). Where ismail runs in a Python with pip, call `live_link`
+  again after the install (no restart). Where it runs through uvx (the Claude Code and Codex plugins: no pip there),
+  the error names the line instead, `uvx --python 3.12 --from "ismail[link]==<version>" ismail mcp` in place of the
+  plain uvx line in the MCP settings; ismail's tools then restart, and the set is started again with `live_start`.
 - **Follow.** `live_link()` joins and follows the session's tempo and beat. Their bar lines are where Link's phase
   is 0: every `quantum` beats, the set's beats per bar by default (`quantum=8` lines up two-bar phrases). Joining
   waits 1 s for peers. Alone, the session takes the set's beat and nothing is heard to change. With peers, the set
-  goes silent and comes in on the session's next bar line it can reach (one to two bars): tell the person before
-  you join. Then the beats stay on theirs with tempo changes as clock in makes them (`phase_tol_ms` 4,
+  stays as it is when it already plays on their beat and bar lines; else it goes silent and comes in on the
+  session's next bar line it can reach (one to two bars): tell the person before you join. Then the beats stay on theirs with tempo changes as clock in makes them (`phase_tol_ms` 4,
   `tempo_tol_bpm` 0.25, `max_bend_pct` 3, `step_beats` a bar).
 - **Their tempo changes.** A peer's change is heard about 1.5 s later (the set's notes render again from it) and
   the beats are back on theirs within 2.5 to 3.5 s; a halving takes about 10 s. Their beat jumping (a peer forcing
@@ -1122,7 +1125,15 @@ another computer runs one.
   together.
 - **Lead.** `live_link(follow=False, lead=True)`: ismail is the session's clock. The session takes the set's tempo
   and bar lines at once (the peers jump to them), a peer's tempo change is set back (the news says so), and a drift
-  is forced back at most once a bar. Use it when ismail's set is the reference for the room.
+  is forced back at most once a bar. Use it when ismail's set is the reference for the room. A second app that
+  leads too (it puts its own tempo or bar lines back 3 times in 10 s) is not fought: ismail stops, plays on at its
+  own tempo, and the news says so once; `live_status` shows `CONTESTED`. Ask the person which app leads, then
+  `live_link(follow=True)` to follow it or `live_link(lead=True)` to take the lead back.
+- **Changing a setting while joined.** It relocks (silent, then in on their next bar line) only when it moves the
+  session's bar lines off the set's: a new `quantum` with peers whose bar lines then miss the set's (from 2 to 4
+  with the set's bar line on their beat 3), or `follow=True` after leading when the beats differ. Alone, or with
+  the bar lines still on the set's (from 8 to 2 or 4, following again after leading), nothing heard changes. The
+  news says which. Link's news folds repeats of one kind into one line with a count.
 - **Start and stop.** `start_stop=True` turns on Link's start/stop sync. Following, the session's stop silences
   the set on the speakers (its time and queue run on; MIDI out is held back) and its start brings it in on the next
   bar line. Leading, joining starts the session and leaving (or the set's end) stops it. Off by default, as in
@@ -1148,7 +1159,9 @@ another computer runs one.
      session goes to 130 BPM when bar 21 is heard (1 peer follows it)`.
 - Measured: on a stand-in session (`tests/test_link.py`) the lock bar lands within 0.1 ms of their bar line and the
   beats stay within 0.1 ms; with two real Link peers on one Windows computer a silent set came in on the peer's bar
-  line and held its beats within 0.3 ms.
+  line and held its beats within 0.3 ms. A led `live_tempo` change reached the real session 0.4 ms late at the
+  median (at most 1.0 ms) on an idle machine, 11.5 ms (at most 56 ms) with two other Python threads busy on the
+  CPU (Windows 10, 20 changes each).
 - Not yet: bridging MIDI clock in or timecode in into a Link session, the session's start time as the set's bar 1,
   and the silence while stopped reaching `live_listen`, `live_record` and the streams (the speakers only).
 

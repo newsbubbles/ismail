@@ -1025,19 +1025,22 @@ def live_link(project: str, on: bool = True, follow: bool = None, lead: bool = N
     (MIDI cables and ports instead: live_midi_clock_in, live_midi_clock).
     live_link(project) joins and follows: the session's tempo and beat phase lead the set. Their bar lines are where
     Link's phase is 0 (quantum beats apart, the set's beats per bar by default). Joining waits 1 s for peers. Alone,
-    the session takes the set's beat and nothing is heard to change; with peers the set goes silent and comes in on
-    the session's next bar line it can reach (one to two bars), then keeps its beats on theirs with tempo changes as
+    the session takes the set's beat and nothing is heard to change; with peers the set stays as it is when it
+    already plays on their beat and bar lines, else it goes silent and comes in on the session's next bar line it
+    can reach (one to two bars), then keeps its beats on theirs with tempo changes as
     live_midi_clock_in makes them (phase_tol_ms 4, tempo_tol_bpm 0.25, max_bend_pct 3, step_beats a bar; offset_ms:
     positive lands ismail later). A peer's tempo change is heard about 1.5 s later (the set's notes render again
     from it); their beat jumping, or the set more than a beat off, relocks the same way. While it only follows,
     live_tempo is refused. lead=True: live_tempo works and each change reaches the session when its bar is heard.
     follow=False, lead=True: ismail is the session's clock: its tempo and bar lines go to the session at once (the
-    peers jump to them), a peer's tempo change is set back. start_stop=True: Link's start/stop sync; following, the
+    peers jump to them), a peer's tempo change is set back; a second leader that keeps putting its own back is not
+    fought (the news names live_link(follow=True) and live_link(lead=True)). start_stop=True: Link's start/stop sync; following, the
     session's stop silences the set and its start brings it in on the next bar line; leading, joining starts the
-    session and leaving stops it. Call again to change a setting; on=False leaves. live_status shows the peers, the
+    session and leaving stops it. Call again to change a setting: it relocks only when it moves their bar lines
+    off the set's (the news says which); on=False leaves. live_status shows the peers, the
     session's tempo and beat, the lock and the phase. Refused while MIDI clock in or timecode in is on (one leader).
-    Needs the aalink add-on (pip install "ismail[link]"; GPLv3+, while ismail stays MIT): without it the call says
-    what to install and installs nothing. Not yet: bridging clock in or timecode in into a Link session."""
+    Needs the aalink add-on (pip install "ismail[link]", or under uvx the line the error names; GPLv3+, while
+    ismail stays MIT): without it the call says what to install and installs nothing. Not yet: bridging clock in or timecode in into a Link session."""
     return _call(project, 'link', on=on, follow=follow, lead=lead, quantum=quantum, start_stop=start_stop,
                  offset_ms=offset_ms, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
                  max_bend_pct=max_bend_pct, step_beats=step_beats)

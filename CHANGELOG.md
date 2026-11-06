@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.4 (2026-11-06)
+## Unreleased
 
 ### Ableton Link: the set joins a Link session, follows it, leads it (MIDI parity step 8b, ledger:M437)
 
@@ -9,22 +9,35 @@
   session on the network or the computer (Ableton Live, Bitwig, phone apps, any Link app). `live_link(project)`
   joins and follows: the session's tempo and beat phase lead the set, its bar lines are where Link's phase is 0
   (`quantum` beats apart, the set's beats per bar by default). Joining waits 1 s for peers. Alone, the session
-  takes the set's beat and nothing is heard to change; with peers the set goes silent and comes in on the
-  session's next bar line it can reach (one to two bars), then clock in's follower keeps its beats on theirs. A
+  takes the set's beat and nothing is heard to change; with peers the set stays as it is when it already plays on
+  the session's beat and bar lines, else it goes silent and comes in on the session's next bar line it can reach
+  (one to two bars), then clock in's follower keeps its beats on theirs. A
   peer's tempo step is followed (the set's change is heard about 1.5 s later, as its notes render again); their
   beat jumping, or the set more than a beat off, relocks. `live_tempo` is refused while it only follows.
 - `lead=True`: `live_tempo` works and each change reaches the session at the moment its bar is heard.
   `follow=False, lead=True`: ismail is the session's clock: its tempo and bar lines go to the session at once
   (the peers jump to them, as Link does for an external clock), a peer's tempo change is set back, and a drift
-  past `phase_tol_ms` is forced back at most once a bar. `start_stop=True`: Link's start/stop sync; following,
+  past `phase_tol_ms` is forced back at most once a bar. A second leader (a peer that puts its own tempo or bar
+  lines back 3 times in 10 s) is not fought: ismail stops setting the session back, plays on at its own tempo, and
+  says so once, naming `live_link(follow=True)` to follow it and `live_link(lead=True)` to take the lead back.
+  `start_stop=True`: Link's start/stop sync; following,
   the session's stop silences the set (on the speakers, MIDI out held back) and its start brings it in on the next
   bar line; leading, joining starts the session and leaving or the set's end stops it. `on=False` leaves.
   `live_status` shows the peers, the session's tempo and beat in the bar, following or leading, the lock and the
   phase. Link is refused while MIDI clock in or timecode in is on, and they are refused while Link is on (one
   leader of the set's tempo).
+- A setting changed while joined relocks only when it moves the session's bar lines off the set's (a new `quantum`
+  with peers whose bar lines then miss the set's, following again after leading when the beats differ); else it
+  applies live, nothing heard changes, and the news says what changed. Link's news folds: a repeat of one kind
+  before the agent reads the news replaces the earlier line and counts the times, so a storm never fills it.
+- Two joins at once make one Link: Link, clock in and timecode in turn on and off under one lock. A Link that takes
+  more than 5 s to start is disabled and its thread ended, with an error saying to call again.
 - Link is an optional add-on: the extra `ismail[link]` installs aalink (0.2.3 or later), which is GPLv3+ (it
   includes Ableton's Link library). ismail itself stays MIT and imports aalink only when `live_link` is called;
-  without it the call names the install line for the Python that runs the set and installs nothing.
+  without it the call names the install line for the Python that runs the set and installs nothing. In a uv
+  environment (uvx, the Claude Code and Codex plugins: no pip there) it names
+  `uvx --python 3.12 --from "ismail[link]==<this version>" ismail mcp` and says ismail's tools restart in it. A
+  failed import of an installed aalink says so too.
 - `ismail/live/link.py`: `LinkSession` runs aalink's asyncio loop on a thread of its own and keeps a snapshot (the
   session's beat as a line in time, tempo, peers, playing, quantum) under its lock; the engine reads only the
   snapshot, and commands go to the loop without waiting. Closing takes the callbacks off, disables Link and drops it
@@ -33,12 +46,17 @@
   before) on Link's line, with no filter: Link gives a timeline, not ticks.
 - Measured on a stand-in session (`tests/test_link.py`): the lock bar lands within 0.1 ms of the session's bar line
   and the beats stay within 0.1 ms; after a peer's step from 120 to 123, 135, 100 or 180 BPM the beats are back
-  within 4 ms in 2.5 to 3.4 s, a halving (60) in 9.6 s, with no relock; a led change reaches the session within 5
-  ms of its bar being heard. With two real aalink 0.2.3 peers on one Windows computer: found in 0.6 s, a tempo
+  within 4 ms in 2.5 to 3.4 s, a halving (60) in 9.6 s, with no relock. A led `live_tempo` change, on the real
+  threaded path (aalink 0.2.3, Windows 10, the engine's 1 ms thread switch interval, 20 changes each, timed at
+  Link's tempo setter): idle, 0.4 ms late at the median and at most 1.0 ms; with two other Python threads busy on
+  the CPU, 11.5 ms at the median and at most 56 ms. (It waits on the loop's timer until 25 ms before, then sleeps
+  once to the moment: the loop's own timer alone ticks in 15.6 ms steps on Windows.) With two real aalink 0.2.3 peers on one Windows computer: found in 0.6 s, a tempo
   change reached the other, phases equal; a silent engine joined a real peer at 126 BPM, came in on its bar line
   and held its beats within 0.3 ms, followed its step to 128, and led it to 110 with the beats within 2.2 ms.
 - Not yet: bridging MIDI clock in or timecode in into a Link session, the session's start time as the set's bar
   1, and the stopped silence reaching `live_listen`, `live_record` and the streams.
+
+## 0.4.4 (2026-11-06)
 
 ### MIDI Time Code: the set chases a video or a DAW, and sends its own time (MIDI parity step 8, hq:D-244)
 

@@ -321,23 +321,124 @@ def test_peers_coming_and_going_are_said(eng):
     run(eng, 106.5)
     fake(eng).peer_join(0)
     run(eng, 107.0)
-    assert 'Link: 3 peers in the session now (was 1)' in news(eng)
-    assert 'Link: 0 peers in the session now (was 3)' in news(eng)
+    said = news(eng)
+    assert 'Link: 0 peers in the session now (was 3; since the news was last read: 0, 1, 3, 0)' in said
+    assert said.count('peers in the session now') == 1             # one line, however often they come and go
     assert 'Link: alone (no peers yet)' in eng.cmd_status()
 
 
-def test_quantum_sets_the_sessions_bar_lines_and_a_new_one_relocks(eng):
+def longest_silence(y):
+    """The longest run of all-zero audio in y, in seconds."""
+    z = np.max(np.abs(y), axis=1) == 0
+    best = run_ = 0
+    for v in z:
+        run_ = run_ + 1 if v else 0
+        best = max(best, run_)
+    return best / SR
+
+
+def test_quantum_sets_the_sessions_bar_lines_and_one_that_keeps_them_changes_nothing_heard(eng):
     join_peers(eng, 120, 1.0, until=112.0, quantum=8)
     xL, bL = eng.link.locked
     assert fake(eng).quantum == 8 and xL % 8 == pytest.approx(0, abs=1e-9) and bL % 4 == 0
-    r = eng.cmd_link(quantum=2)
-    assert 'quantum 2' in r and 'relocks' in r
-    run(eng, 122.0)
-    xL, bL = eng.link.locked
-    assert fake(eng).quantum == 2 and xL % 2 == pytest.approx(0, abs=1e-9)
-    assert abs(speaker(eng, bL) - fake(eng).arrives(xL)) < 0.004
+    relocks = eng.link.relocks
+    r = eng.cmd_link(quantum=2)                     # every one of their old bar lines is still one of theirs
+    assert 'quantum 2' in r and 'nothing heard changes' in r
+    y = run(eng, 122.0)
+    assert fake(eng).quantum == 2 and eng.link.relocks == relocks and eng.link.state == 'locked'
+    assert longest_silence(y) < 0.3
+    assert 'quantum 2: the set already plays on the session' in news(eng)
+    assert np.abs(phase_ms(eng, eng.beat(eng.played) - 8, eng.beat(eng.played) - 1)).max() < 2.0
     with pytest.raises(LiveError, match=r"quantum=0: 1 to 64"):
         eng.cmd_link(quantum=0)
+
+
+def test_a_quantum_that_moves_the_sessions_bar_lines_off_the_sets_relocks(eng):
+    join_peers(eng, 120, 0.0, until=112.0, quantum=2)
+    assert eng.link.D % 4 == 2                      # their bar lines are on the set's beat 3
+    relocks = eng.link.relocks
+    eng.cmd_link(quantum=4)                         # now none of theirs is on one of the set's
+    run(eng, 124.0)
+    assert eng.link.relocks == relocks + 1 and eng.link.state == 'locked'
+    assert 'quantum 4 at 120 BPM: the set goes silent' in news(eng)
+    xL, bL = eng.link.locked
+    assert fake(eng).quantum == 4 and xL % 4 == pytest.approx(0, abs=1e-9) and bL % 4 == 0
+    assert abs(speaker(eng, bL) - fake(eng).arrives(xL)) < 0.004
+
+
+def test_alone_a_new_quantum_changes_nothing_heard(eng):
+    kick(eng)
+    run(eng, 100.5)
+    eng.cmd_link()
+    run(eng, 106.0)
+    r = eng.cmd_link(quantum=8)
+    assert 'quantum 8' in r
+    y = run(eng, 116.0)
+    assert longest_silence(y) < 0.3 and eng.link.relocks == 0
+    assert 'quantum 8: no peers' in news(eng)
+
+
+def test_leading_then_following_a_session_already_on_the_sets_beat_changes_nothing_heard(eng):
+    join_peers(eng, 90, 13.7, follow=False, lead=True, until=110.0)
+    assert eng.link.state == 'leading'
+    eng.news.clear()
+    r = eng.cmd_link(follow=True)
+    assert 'deciding again (follows the session now)' in r
+    y = run(eng, 120.0)
+    assert longest_silence(y) < 0.3 and eng.link.relocks == 0 and eng.link.state == 'locked'
+    said = news(eng)
+    assert 'follows the session now: the set already plays on the session' in said and 'joined' not in said
+    assert np.abs(phase_ms(eng, eng.beat(eng.played) - 8, eng.beat(eng.played) - 1)).max() < 2.0
+
+
+def test_following_then_leading_alone_changes_nothing_heard(eng):
+    join_peers(eng, 120, 1.0, until=112.0)
+    eng.cmd_link(follow=False, lead=True)
+    y = run(eng, 120.0)
+    assert longest_silence(y) < 0.3 and eng.link.state == 'leading'
+    assert 'leads alone now (follow=False): leading 1 peer' in news(eng)
+
+
+def test_a_second_leader_is_not_fought_forever_and_the_news_says_so_once(eng):
+    join_peers(eng, 90, 13.7, follow=False, lead=True, until=106.0)
+    lk = fake(eng)
+    eng.news.clear()
+    sets = 0
+    while eng.clk.t < 166.0:                        # a minute against an app that keeps its own tempo and beat
+        run(eng, eng.clk.t + 0.5)
+        if lk.tempo != 95:
+            lk.peer_tempo(95)
+            sets += 1
+        lk.peer_force(lk.beat + 0.37)
+    assert eng.link.pushed <= L.CONTEST_N and eng.link.forces <= L.CONTEST_N + 1
+    said = news(eng).splitlines()
+    assert len(said) <= 4, said
+    contest = [x for x in said if 'another peer leads the session too' in x]
+    assert len(contest) == 1 and 'the session runs at 95 BPM' in contest[0] and 'its own 120 BPM' in contest[0]
+    assert 'live_link(follow=True) follows it' in contest[0] and 'live_link(lead=True) again' in contest[0]
+    assert 'CONTESTED' in eng.cmd_status()
+    r = eng.cmd_link(lead=True)                     # take it back: one more try, then contested again
+    assert 'deciding again (takes the lead back)' in r
+    run(eng, 170.0)
+    assert lk.tempo == pytest.approx(120)          # the set's own tempo again
+    lk.peer_tempo(95)
+    eng.cmd_link(follow=True)                       # or follow it
+    run(eng, 185.0)
+    assert eng.link.state in ('locked', 'locking') and abs(eng.bpm - 95) < 0.5
+
+
+def test_repeated_link_news_never_floods_the_news(eng):
+    join_peers(eng, 120, 0.0, until=106.0)
+    eng.news.clear()
+    lk = fake(eng)
+    for i in range(40):                             # peers come and go, and the beat jumps, again and again
+        lk.peer_join(1 + i % 3)
+        lk.peer_force(lk.beat + 0.5)
+        run(eng, eng.clk.t + 0.2)
+    eng.news.append('track drums: something else worth saying')
+    said = news(eng).splitlines()
+    assert 'track drums: something else worth saying' in said and len(said) <= 6, said
+    assert sum('peers in the session now' in x or 'peer in the session now' in x for x in said) == 1
 
 
 # ---------------------------------------------------------------------------------------------------- leading
@@ -473,7 +574,8 @@ def test_settings_conflicts_and_errors(eng):
     assert not fake(eng).enabled and eng.link.session is None
 
 
-def test_without_the_add_on_it_says_what_to_install_and_installs_nothing(eng, monkeypatch):
+def test_without_the_add_on_it_says_what_to_install_and_installs_nothing(no_aalink, monkeypatch):
+    eng = no_aalink
     monkeypatch.setitem(sys.modules, 'aalink', None)                        # import aalink raises ImportError
     eng.link.factory = None
     with pytest.raises(LiveError) as ex:
@@ -482,6 +584,90 @@ def test_without_the_add_on_it_says_what_to_install_and_installs_nothing(eng, mo
     assert 'pip install "ismail[link]"' in msg and '-m pip install aalink' in msg and sys.executable in msg
     assert 'GPLv3+' in msg and 'ismail stays MIT' in msg and 'Nothing was installed' in msg
     assert eng.link.session is None and 'Link' not in eng.cmd_status()
+
+
+@pytest.fixture
+def no_aalink(eng, monkeypatch):
+    monkeypatch.setattr(L, '_LINK', None)                                   # not imported yet in this process
+    eng.link.factory = None
+    return eng
+
+
+def test_without_the_add_on_in_a_uv_environment_it_names_the_uvx_line_and_the_restart(no_aalink, monkeypatch):
+    monkeypatch.setitem(sys.modules, 'aalink', None)
+    monkeypatch.setattr(L, '_has_pip', lambda: False)                       # uvx and the plugins make no pip
+    monkeypatch.setattr(L, '_version', lambda: '9.8.7')
+    with pytest.raises(LiveError) as ex:
+        no_aalink.cmd_link()
+    msg = str(ex.value)
+    assert 'uvx --python 3.12 --from "ismail[link]==9.8.7" ismail mcp' in msg
+    assert 'restart' in msg and 'pip install' not in msg and 'Nothing was installed' in msg
+
+
+def test_an_add_on_that_fails_to_import_says_so_and_what_to_do(no_aalink, monkeypatch):
+    class Broken:
+        def find_spec(self, name, path=None, target=None):
+            if name == 'aalink':
+                raise OSError("DLL load failed while importing _aalink")
+            return None
+    monkeypatch.delitem(sys.modules, 'aalink', raising=False)
+    monkeypatch.setattr(sys, 'meta_path', [Broken()] + sys.meta_path)
+    with pytest.raises(LiveError) as ex:
+        no_aalink.cmd_link()
+    msg = str(ex.value)
+    assert 'importing it failed: OSError: DLL load failed' in msg and 'Nothing was installed' in msg
+    assert no_aalink.link.session is None
+
+
+def test_two_joins_at_once_make_one_link(eng):
+    made = FakeLink.made
+    slow = eng.link.factory
+
+    def factory(bpm):
+        time.sleep(0.05)                                                    # wide open between check and set
+        return slow(bpm)
+    eng.link.factory = factory
+    kick(eng)
+    run(eng, 100.5)
+    go, out = threading.Barrier(4), []
+
+    def join():
+        go.wait()
+        try:
+            out.append(eng.cmd_link())
+        except LiveError as ex:
+            out.append(str(ex))
+    ts = [threading.Thread(target=join) for _ in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(10)
+    assert len(out) == 4 and len(made) == 1 and made[0].enabled
+    eng.cmd_link(on=False)
+    assert not any(m.enabled for m in made) and eng.link.session is None
+
+
+def test_clock_in_and_link_turned_on_at_once_leave_one_leader(eng):
+    for _ in range(5):
+        go, out = threading.Barrier(2), []
+
+        def call(f):
+            go.wait()
+            try:
+                out.append(f())
+            except LiveError as ex:
+                out.append(ex)
+        ts = [threading.Thread(target=call, args=(eng.cmd_link,)),
+              threading.Thread(target=call, args=(lambda: eng.cmd_midi_clock_in(source='Test Clock'),))]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(10)
+        assert len(out) == 2 and sum(isinstance(x, LiveError) for x in out) == 1, out
+        assert (eng.link.session is None) != (eng.cin.source is None)
+        eng.cmd_link(on=False)
+        eng.cmd_midi_clock_in(on=False)
+    assert not any(m.enabled for m in FakeLink.made)
 
 
 def test_importing_ismail_never_imports_aalink():
@@ -596,6 +782,21 @@ def test_closing_while_a_callback_is_reading_the_session_waits_for_it():
     assert lk.torn_on == s.thread.ident and not s.problems
 
 
+def test_a_link_that_takes_too_long_to_start_is_disabled_and_its_thread_ends(monkeypatch):
+    monkeypatch.setattr(L, 'START_TIMEOUT_S', 0.2)
+    LoopLink.instances, LoopLink.hold = [], None
+
+    def slow(bpm):
+        time.sleep(0.3)                                                     # a busy machine, a network that blocks
+        return LoopLink(bpm)
+    before = {t.ident for t in threading.enumerate()}
+    with pytest.raises(RuntimeError, match=r"did not start in 0.2 s.*It was disabled and its thread ended"):
+        LinkSession(slow, 120, 4, time.perf_counter, threaded=True)
+    lk = LoopLink.instances[-1]
+    assert not lk.enabled and not any(lk.cbs.values()) and not lk.pump.is_alive()
+    assert not [t for t in threading.enumerate() if t.name == 'ismail-link' and t.ident not in before]
+
+
 def test_a_link_that_fails_to_start_says_so():
     def broken(bpm):
         raise OSError("no network")
@@ -629,3 +830,36 @@ def test_two_real_aalink_peers_on_this_computer_share_tempo_and_phase():
     finally:
         assert a.close() is None and b.close() is None
     assert not a.thread.is_alive() and not b.thread.is_alive()
+
+
+@pytest.mark.skipif(importlib.util.find_spec('aalink') is None, reason="aalink (the Link add-on) is not installed")
+def test_a_silent_engine_follows_and_leads_a_real_aalink_peer(tmp_path):
+    peer = LinkSession(L.load_aalink(), 126, 4, time.perf_counter, threaded=True)
+    e = Engine(str(tmp_path), bpm=120, bpb=4, workers=0, device='none')
+
+    def off_ms():
+        t = time.perf_counter()
+        d = (peer.snapshot().beat_at(t) - e.mout.beat_at(t) + 2) % 4 - 2   # their bar lines on the set's
+        return d * 60 / peer.snapshot().tempo * 1000
+    try:
+        e.start()
+        time.sleep(4.0)                                 # the silent device's clock settles first
+        e.cmd_link()
+        deadline = time.time() + 20
+        while time.time() < deadline and not (e.link.state == 'locked' and abs(e.bpm - 126) < 0.01
+                                               and abs(off_ms()) < 5):
+            time.sleep(0.25)
+        assert e.link.state == 'locked' and abs(e.bpm - 126) < 0.01 and abs(off_ms()) < 5, e.link.line()
+        e.cmd_link(lead=True)
+        e.cmd_tempo(110)
+        deadline = time.time() + 10
+        while time.time() < deadline and abs(peer.snapshot().tempo - 110) > 0.01:
+            time.sleep(0.1)
+        assert peer.snapshot().tempo == pytest.approx(110, abs=0.01)
+        th = e.link.session.thread
+        assert 'left the session' in e.cmd_link(on=False)
+        assert not th.is_alive()
+    finally:
+        e.shutdown()
+        peer.close()
+    assert not peer.thread.is_alive()

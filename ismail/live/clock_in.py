@@ -625,7 +625,7 @@ class ClockIn:
             self._gate(e.sample(bL) + self.lag, True)
         self.locked = (xL, bL)
         self.next_ok = bL
-        e.news.append(self._said_locked(xL, bL, est))
+        self._news('locked', self._said_locked(xL, bL, est))
 
     def _their_bar(self):
         """Beats from one of their bar lines to the next (Link's quantum): ismail's beats per bar here."""
@@ -636,6 +636,10 @@ class ClockIn:
         """The beats the set may run to a lock bar (m0 to its first bar line, then whole bars), nearest the ideal
         first: here only the nearest."""
         return [m0 + max(0, round((ideal - m0) / bpb)) * bpb]
+
+    def _news(self, key, text):
+        """A line for the next reply (Link folds repeats of one kind into one line)."""
+        self.e.news.append(text)
 
     def _said_locked(self, xL, bL, est):
         bpb = self.e.bpb

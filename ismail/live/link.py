@@ -23,8 +23,11 @@ Following. Link gives a timeline, not ticks: no filter is needed. The follower i
 bar line, the tempo steps, the bend) with Link's line as its reference and Link's quantum as their bar length. Their
 bar lines are the beats where Link's phase is 0 (multiples of the quantum, ismail's beats per bar by default).
 Joining waits JOIN_S for peers to be found. Alone, the session's beat is set to the set's (request_beat), so nothing
-is heard to change. With peers, the set goes silent and comes in on the session's next bar line it can reach (one to
-two bars), as clock in's Start does. A peer's tempo change is followed as clock in follows a step (the set's change
+is heard to change. With peers, the set stays as it is when it already plays on their beat and bar lines; else it
+goes silent and comes in on the session's next bar line it can reach (one to two bars), as clock in's Start does. A
+setting changed while joined (quantum, follow) is decided the same way at once, so it relocks only when it moves
+their bar lines off the set's. Leading against a second leader (CONTEST_N set-backs or forced beats in CONTEST_S),
+ismail stops fighting and says so once. Link's news folds repeats of one kind into one counted line. A peer's tempo change is followed as clock in follows a step (the set's change
 lands after the render lead, so it bends up to STEP_BEND_PCT to catch the beat up); the beat off by more than
 RELOCK_BEATS, or their timeline jumping (a peer forcing its beat, two sessions meeting), relocks the same way.
 
@@ -44,9 +47,11 @@ import asyncio
 import collections
 import concurrent.futures
 import importlib
+import importlib.util
 import math
 import sys
 import threading
+import time
 from dataclasses import dataclass
 
 from ..notation import fmt_num
@@ -58,6 +63,8 @@ SAMPLE_S = 0.002            # a beat read that took longer (the GIL elsewhere) i
 JUMP_BEATS = 0.05           # their beat this far off its own line between two readings: their timeline jumped
 JOIN_S = 1.0                # joining waits this long for peers to be found before it decides
 RELOCK_BEATS = 1.0          # the set's beat this far off theirs: relock on their next bar line
+AT_EARLY_S = 0.025          # a timed command's timer wakes this early, then sleeps the rest on the engine's clock
+CONTEST_S, CONTEST_N = 10.0, 3   # leading: this many set-backs (or forced beats) in this long = another leader
 HOLD_S = 0.05               # a led tempo change: the follow waits this long after it reaches the session
 START_TIMEOUT_S = 5.0
 CLOSE_TIMEOUT_S = 3.0
@@ -76,22 +83,62 @@ class LinkMissing(ValueError):
     pass
 
 
-def missing_text():
+def _version():
+    try:
+        from importlib.metadata import version
+        return version('ismail')
+    except Exception:
+        return None
+
+
+def _has_pip():
+    try:
+        return importlib.util.find_spec('pip') is not None
+    except Exception:
+        return False
+
+
+def missing_text(why=None):
+    """What to run so live_link works, for the Python that runs this set: pip where it has pip; where it has none (a
+    uv environment: uvx and the Claude Code or Codex plugin make those), the uvx line with the extra, and the restart
+    that needs."""
     exe = sys.executable
-    return (f"Ableton Link needs the add-on aalink, which is not installed in the Python that runs this set ({exe}). "
-            f"Install it there: {INSTALL} (or \"{exe}\" -m pip install aalink; from uvx: uvx --from \"ismail[link]\" "
-            f"ismail-mcp), then call live_link again. aalink is GPLv3+ (it includes Ableton's Link library); ismail "
-            f"stays MIT and loads it only when live_link is called. Nothing was installed.")
+    head = (f"Ableton Link needs the add-on aalink, which is not installed in the Python that runs this set ({exe})"
+            + (f" (importing it failed: {why})" if why else '') + ". ")
+    if _has_pip():
+        how = (f"Install it there: {INSTALL} (or \"{exe}\" -m pip install aalink), then call live_link again (no "
+               f"restart). ")
+    else:
+        ver = _version()
+        pin = f"ismail[link]=={ver}" if ver else "ismail[link]"
+        how = (f"This Python has no pip: it is a uv environment, as uvx and the Claude Code or Codex plugin make. Run "
+               f"ismail's tools with the add-on instead: uvx --python 3.12 --from \"{pin}\" ismail mcp (in the MCP "
+               f"settings, in place of the plain uvx line), then restart ismail's tools and live_start the set "
+               f"again: the set runs in that new environment. ")
+    return (head + how + "aalink is GPLv3+ (it includes Ableton's Link library); ismail stays MIT and loads it only "
+            "when live_link is called. Nothing was installed.")
+
+
+_IMPORT_LOCK = threading.Lock()
+_LINK = None
 
 
 def load_aalink():
-    """aalink.Link, imported now (never when ismail is imported), or LinkMissing saying what to install."""
-    importlib.invalidate_caches()           # installed since the last try: found without a restart
-    try:
-        mod = importlib.import_module('aalink')
-        return mod.Link
-    except ImportError:
-        raise LinkMissing(missing_text()) from None
+    """aalink.Link, imported once (never when ismail is imported) under a lock, or LinkMissing saying what to
+    install. Any failure of the import is LinkMissing, never a bare error."""
+    global _LINK
+    with _IMPORT_LOCK:
+        if _LINK is not None:
+            return _LINK
+        try:
+            importlib.invalidate_caches()           # installed since the last try: found without a restart
+            mod = importlib.import_module('aalink')
+            _LINK = mod.Link
+            return _LINK
+        except ImportError:
+            raise LinkMissing(missing_text()) from None
+        except Exception as ex:
+            raise LinkMissing(missing_text(f"{type(ex).__name__}: {ex}")) from None
 
 
 @dataclass(frozen=True)
@@ -140,8 +187,14 @@ class LinkSession:
         try:
             ready.result(START_TIMEOUT_S)
         except concurrent.futures.TimeoutError:
-            self._closed = True
-            raise RuntimeError(f"Ableton Link did not start in {START_TIMEOUT_S:g} s")
+            with self._lock:
+                self._closed = True             # the loop's thread tears the Link down as soon as it is made
+            self.thread.join(START_TIMEOUT_S)
+            left = (" Its thread is still starting; it disables the Link and ends when the start returns."
+                    if self.thread.is_alive() else " It was disabled and its thread ended.")
+            raise RuntimeError(f"Ableton Link did not start in {START_TIMEOUT_S:g} s (a busy machine or a network "
+                               f"that blocks it).{left} Call live_link again to retry; live_status shows the set "
+                               f"plays on without it")
 
     # ------------------------------------------------------------------ the loop's thread
     def _boot(self, bpm, quantum, start_stop):
@@ -168,9 +221,14 @@ class LinkSession:
             loop.close()
             ready.set_exception(ex)
             return
-        ready.set_result(True)
+        with self._lock:
+            late = self._closed                 # the caller gave up waiting: take the Link down again
         try:
-            loop.run_forever()
+            if late:
+                self._teardown(False)
+            else:
+                ready.set_result(True)
+                loop.run_forever()
         finally:
             tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
             for t in tasks:
@@ -284,7 +342,17 @@ class LinkSession:
         return seq if at is None else 0
 
     def _at(self, seq, kind, args, at):
-        self.loop.call_later(max(0.0, at - self.now()), self._apply, -1, kind, args)
+        """Apply at `at` on the engine's clock. The loop's timer runs on time.monotonic (15.6 ms steps on
+        Windows), so it wakes up to AT_EARLY_S before, and the last stretch is a precise sleep on the engine's
+        clock."""
+        def fire():
+            if self._closed:
+                return
+            left = at - self.now()
+            if left > 0:
+                time.sleep(left)                # one precise wait: a spin would queue for the GIL each turn
+            self._apply(-1, kind, args)
+        self.loop.call_later(max(0.0, at - self.now() - AT_EARLY_S), fire)
 
     def drain(self):
         out = []
@@ -360,6 +428,11 @@ class LinkIn(ClockIn):
         self.pushed = 0
         self.relocks = 0
         self.wild = False
+        self._said = {}                         # news key -> (the line in the news, times said)
+        self.redecide = None                    # why the next decision is made again (a setting changed)
+        self.contest = None                     # (their tempo, when): another peer leads the session too
+        self.setbacks = collections.deque()     # when the set's tempo was set back, the last CONTEST_S
+        self.force_times = collections.deque()  # when the set's beat was forced back, the last CONTEST_S
 
     def now(self):
         return self.e.mout.now()
@@ -385,7 +458,7 @@ class LinkIn(ClockIn):
         e = self.e
         snap = s.snapshot()
         for p in s.drain():
-            e.news.append(f"Link: {p}")
+            self._say('problem', f"Link: {p}")
         a = e.mout.anchor()
         if snap is None or a is None:
             return
@@ -400,8 +473,8 @@ class LinkIn(ClockIn):
             if not 20.0 <= snap.tempo <= 400.0:
                 if not self.wild:
                     self.wild = True
-                    e.news.append(f"Link: the session runs at {fmt_num(round(snap.tempo, 2))} BPM, outside the "
-                                  f"set's 20 to 400: not followed until it is back inside")
+                    self._say('wild', f"Link: the session runs at {fmt_num(round(snap.tempo, 2))} BPM, outside "
+                                      f"the set's 20 to 400: not followed until it is back inside")
                 return
             self.wild = False
             if self.state == 'joining':
@@ -444,9 +517,41 @@ class LinkIn(ClockIn):
             return
         self._follow(est, ref, a, D)
 
+    def _say(self, key, text, data=None, counted=True):
+        """One news line per kind: said again before the agent read it, the earlier line goes and the new one
+        counts the times, so a storm of one thing never fills the news (20 lines) and hides the rest. Returns the
+        data kept with the line it replaced (None: there was none in the news)."""
+        news = self.e.news
+        prev = self._said.get(key)
+        n, kept = 1, None
+        if prev is not None:
+            try:
+                news.remove(prev[0])
+                n, kept = prev[1] + 1, prev[2]
+            except (ValueError, RuntimeError):          # read since (or being read): count again
+                pass
+        if callable(text):
+            text = text(kept)
+        line = text + (f" ({n} times since the news was last read)" if n > 1 and counted else '')
+        news.append(line)
+        self._said[key] = (line, n, data if not callable(data) else data(kept))
+        return kept
+
+    def _news(self, key, text):
+        self._say(key, text)
+
     def _peers_news(self, snap):
         if self.peers_seen is not None and snap.peers != self.peers_seen:
-            self.e.news.append(f"Link: {self._peers(snap.peers)} in the session now (was {self.peers_seen})")
+            was, now_n = self.peers_seen, snap.peers
+
+            def counts(kept):
+                return ((kept or [was]) + [now_n])[-12:]
+
+            def text(kept):
+                c = counts(kept)
+                return (f"Link: {self._peers(now_n)} in the session now (was {was}"
+                        + (f"; since the news was last read: {', '.join(map(str, c))}" if len(c) > 2 else '') + ")")
+            self._say('peers', text, data=counts, counted=False)
         self.peers_seen = snap.peers
 
     @staticmethod
@@ -454,35 +559,73 @@ class LinkIn(ClockIn):
         return f"{n} peer" + ('' if n == 1 else 's')
 
     def _decide(self, snap, now, a):
-        """JOIN_S after joining (under self.lock): alone, the session takes the set's beat; with peers, the set
-        locks on theirs; leading, the session takes the set's tempo and beat."""
+        """JOIN_S after joining, or at once after a setting that changes how the set and the session line up (under
+        self.lock): alone, the session takes the set's beat; with peers, the set stays as it is when it already
+        plays on their bar lines, else it locks on their next one; leading, the session takes the set's tempo and
+        beat."""
         e = self.e
+        why, self.redecide = self.redecide, None
         h, bpm = self._heard(now, a)
         self.jumps_seen, self.starts_seen, self.prev_tempo = None, snap.starts, snap.tempo
+        self.contest = None
+        self.setbacks.clear()
+        self.force_times.clear()
         if self.lead_on and self.start_stop and not snap.playing:
             self.session.post('playing', True)
+        head = f"Link: {why}: " if why else "Link: "
         if not self.follow_on:
             self.session.post('tempo', bpm)
             self.wait_seq = self.session.post('force', h, now, bpm)
-            self.D, self.state, self.forces = 0.0, 'leading', 1
+            self.D, self.state, self.locked = 0.0, 'leading', None
+            self.forces += 1
             self.next_force = now + e.bpb * 60.0 / bpm
-            e.news.append(f"Link: leading {self._peers(snap.peers)}: the session takes the set's "
-                          f"{fmt_num(round(bpm, 2))} BPM and its bar lines")
+            self._say('decide', f"{head}leading {self._peers(snap.peers)}: the session takes the set's "
+                                f"{fmt_num(round(bpm, 2))} BPM and its bar lines")
             return
         self.running = bool(snap.playing) or not self.start_stop or self.lead_on
         if snap.peers == 0:
             self.wait_seq = self.session.post('request', h, now, bpm)
             self.D, self.state, self.locked = 0.0, 'locked', None
-            e.news.append(f"Link: no peers yet: the session's beat is the set's ({fmt_num(round(bpm, 2))} BPM); "
-                          f"a peer that joins takes it")
+            self._say('decide', f"{head}no peers{'' if why else ' yet'}: the session's beat is the set's "
+                                f"({fmt_num(round(bpm, 2))} BPM), nothing heard changes; a peer that joins takes it")
         elif self.running:
-            self._relock(f"joined {self._peers(snap.peers)} at {fmt_num(round(snap.tempo, 2))} BPM", quiet=True)
-            e.news.append(f"Link: joined {self._peers(snap.peers)} at {fmt_num(round(snap.tempo, 2))} BPM: the set "
-                          f"goes silent and comes in on the session's next bar line it can reach")
+            joined = why or f"joined {self._peers(snap.peers)}"
+            D = self._on_their_bars(snap, now, h, bpm)
+            if D is not None:
+                self.D, self.state, self.locked, self.lock_req = D, 'locked', None, False
+                self._say('decide', f"Link: {joined}: the set already plays on the session's beat and bar lines "
+                                    f"at {fmt_num(round(snap.tempo, 2))} BPM, so nothing heard changes")
+            else:
+                self._relock('', quiet=True)
+                self._say('decide', f"Link: {joined} at {fmt_num(round(snap.tempo, 2))} BPM: the set goes silent "
+                                    f"and comes in on the session's next bar line it can reach")
         if not self.running:
             self.state = 'stopped'
             self._gate(e.played, False)
-            e.news.append("Link: the session is stopped (start/stop sync): the set is silent until a peer starts it")
+            self._say('stopped', "Link: the session is stopped (start/stop sync): the set is silent until a peer "
+                                 "starts it")
+
+    def _on_their_bars(self, snap, now, h, bpm):
+        """D (ismail's beat minus theirs) when the set already plays on the session's beat, at its tempo, with
+        their bar lines on ismail's as a lock would put them: no relock is needed. Else None."""
+        if abs(bpm - snap.tempo) > self.cfg['tempo_tol_bpm']:
+            return None
+        x = snap.beat_at(now)
+        D = round(h - x)
+        if abs(h - x - D) * 60.0 / snap.tempo * 1000 > self.cfg['phase_tol_ms']:
+            return None
+        q, bpb = snap.quantum, self.e.bpb
+        xn = math.ceil(x / q - EPS) * q                     # their next bar line
+        for k in range(64):                                 # one of their next bar lines on one of ismail's
+            b = (xn + k * q + D) / bpb
+            if abs(b - round(b)) < 1e-6:
+                return float(D)
+        return None
+
+    def _again(self, why):
+        """Decide again at the next pass, as at the join (under self.lock)."""
+        self.state, self.joined_at, self.redecide = 'joining', self.now() - JOIN_S, why
+        self.lock_req, self.locked, self.catching = False, None, False
 
     def _relock(self, why, quiet=False):
         e = self.e
@@ -491,8 +634,8 @@ class LinkIn(ClockIn):
         self.relocks += 1
         self._gate(e.played, False)
         if not quiet:
-            e.news.append(f"Link: {why}: the set goes silent and comes in on the session's next bar line it can "
-                          f"reach")
+            self._say('relock', f"Link: {why}: the set goes silent and comes in on the session's next bar line it "
+                                f"can reach")
 
     def _transport(self, snap):
         """start_stop: their stop silences the set, their start brings it in on their next bar line."""
@@ -505,31 +648,52 @@ class LinkIn(ClockIn):
             self.running, self.lock_req, self.state = False, False, 'stopped'
             self._gate(e.played, False)
             e.mout.silence()                            # notes held on their synths go off with the set
-            e.news.append("Link: the session stopped: the set is silent until it starts (its time and queue run on)")
+            self._say('stopped', "Link: the session stopped: the set is silent until it starts (its time and queue "
+                                 "run on)")
         elif snap.playing and not self.running:
             self.running = True
             self._relock("the session started", quiet=True)
-            e.news.append("Link: the session started: the set comes in on the session's next bar line it can reach")
+            self._say('started', "Link: the session started: the set comes in on the session's next bar line it "
+                                 "can reach")
 
     def _lead_pass(self, snap, now, a):
-        """follow=False, lead=True (under self.lock): the session keeps the set's tempo and bar lines."""
+        """follow=False, lead=True (under self.lock): the session keeps the set's tempo and bar lines, until another
+        peer keeps putting its own back (CONTEST_N times in CONTEST_S): then ismail stops fighting it, says so once,
+        and plays on at its own tempo until the agent decides."""
         e = self.e
-        if now < self.hold_until:
+        if now < self.hold_until or self.contest is not None:
             return
+        for d in (self.setbacks, self.force_times):
+            while d and now - d[0] > CONTEST_S:
+                d.popleft()
         h, bpm = self._heard(now, a)
         if abs(snap.tempo - bpm) > self.cfg['tempo_tol_bpm'] and now >= self.next_push:
+            if len(self.setbacks) >= CONTEST_N:
+                return self._contested(snap, bpm, f"put its {fmt_num(round(snap.tempo, 2))} BPM back")
             self.session.post('tempo', bpm)
             self.pushed += 1
+            self.setbacks.append(now)
             self.next_push = now + 1.0
-            e.news.append(f"Link: the session went to {fmt_num(round(snap.tempo, 2))} BPM; ismail leads "
-                          f"(follow=False), so it is set back to {fmt_num(round(bpm, 2))} BPM")
+            self._say('setback', f"Link: the session went to {fmt_num(round(snap.tempo, 2))} BPM; ismail leads "
+                                 f"(follow=False), so it is set back to {fmt_num(round(bpm, 2))} BPM")
             return
         err = (snap.beat_at(now) - h) * 60.0 / bpm      # +: their beat ahead, ismail late
         self.last_err = err
         if abs(err) * 1000 > self.cfg['phase_tol_ms'] and now >= self.next_force:
+            if len(self.force_times) >= CONTEST_N:
+                return self._contested(snap, bpm, "moved the session's bar lines back")
             self.wait_seq = self.session.post('force', h, now, bpm)
             self.forces += 1
+            self.force_times.append(now)
             self.next_force = now + e.bpb * 60.0 / bpm
+
+    def _contested(self, snap, bpm, what):
+        self.contest = (snap.tempo, self.now())
+        self.state = 'contested'
+        self._say('contest', f"Link: another peer leads the session too (it {what} {CONTEST_N} times in "
+                             f"{CONTEST_S:g} s): ismail stops setting it back and plays on at its own "
+                             f"{fmt_num(round(bpm, 2))} BPM; the session runs at {fmt_num(round(snap.tempo, 2))} BPM. "
+                             f"live_link(follow=True) follows it; live_link(lead=True) again takes the lead back")
 
     def retempo(self, beat, bpm):
         """live_tempo at ismail `beat` (under the engine's lock): leading, the session takes it when that beat is
@@ -602,13 +766,19 @@ class LinkIn(ClockIn):
             except Exception as ex:
                 raise ValueError(f"Ableton Link did not start: {type(ex).__name__}: {ex}")
             with e.lock, self.lock:
-                self._reset_state()
-                for k, v in params.items():
-                    if v is not None:
-                        self.cfg[k] = int(v) if k == 'step_beats' else float(v)
-                self.session, self.source = session, SOURCE
-                self.follow_on, self.lead_on, self.start_stop, self.q = fol, led, ss, quantum
-                self.joined_at = self.now()
+                lost = self.session is not None         # another join came first (a caller outside the engine's
+                if not lost:                            # leader lock): one Link only, this one goes again
+                    self._reset_state()
+                    for k, v in params.items():
+                        if v is not None:
+                            self.cfg[k] = int(v) if k == 'step_beats' else float(v)
+                    self.session, self.source = session, SOURCE
+                    self.follow_on, self.lead_on, self.start_stop, self.q = fol, led, ss, quantum
+                    self.joined_at = self.now()
+            if lost:
+                session.close()
+                return '\n'.join(["Link: already joined (one session at a time)"] + self._describe_lines()
+                                 + [self.line()])
             lines.append(f"Link: joined (quantum {q:g}); in {JOIN_S:g} s, once its peers are found, the set "
                          + ("follows" if fol and not led else "follows and leads" if fol else "leads") + " the session")
         else:
@@ -620,11 +790,13 @@ class LinkIn(ClockIn):
                 if quantum is not None and float(quantum) != self._their_bar():
                     self.q = quantum
                     self.wait_seq = s.post('quantum', float(quantum))
-                    if self.follow_on and self.state != 'joining':
-                        self._relock(f"quantum {float(quantum):g}", quiet=True)
+                    if self.state != 'joining':
+                        self._again(f"quantum {float(quantum):g}")
                     lines.append(f"Link: quantum {float(quantum):g}: the session's bar lines are every "
-                                 f"{float(quantum):g} beats" + (", and the set relocks on the next" if self.follow_on
-                                                               else ''))
+                                 f"{float(quantum):g} beats. " + (
+                                     "Alone, or with the set's bar lines already on theirs, nothing heard changes; "
+                                     "else the set goes silent and comes in on their next one (the news says which)"
+                                     if self.follow_on else "The session takes the set's bar lines at it"))
                 if ss != self.start_stop:
                     self.start_stop = ss
                     s.post('start_stop', ss)
@@ -635,12 +807,13 @@ class LinkIn(ClockIn):
                     if ss and self.lead_on and self.snap is not None and not self.snap.playing:
                         s.post('playing', True)
                 if fol != self.follow_on and self.state != 'joining':
-                    # following starts or stops: decide again at once, as at the join (lead alone changes nothing
-                    # heard: following, it only lets live_tempo through)
-                    self.state, self.joined_at = 'joining', self.now() - JOIN_S
-                    self.lock_req, self.locked, self.catching = False, None, False
+                    # following starts or stops: decide again at once (lead alone changes nothing heard: following,
+                    # it only lets live_tempo through). The set stays as it is when it is already on their bar lines.
+                    self._again("follows the session now" if fol else "leads alone now (follow=False)")
                     if not fol:
                         self._gate(e.played, True)
+                elif lead and not fol and self.contest is not None:
+                    self._again("takes the lead back")
                 self.follow_on, self.lead_on = fol, led
         lines += self._describe_lines()
         lines.append(self.line())
@@ -651,7 +824,8 @@ class LinkIn(ClockIn):
         out = []
         if self.follow_on:
             out.append(f"follows: the session's tempo and beat; alone, the session takes the set's beat; with "
-                       f"peers the set goes silent and comes in on the session's next bar line (one to two bars). "
+                       f"peers the set stays as it is when it is already on their beat and bar lines, else it goes "
+                       f"silent and comes in on the session's next bar line (one to two bars). "
                        f"Then beats within {c['phase_tol_ms']:g} ms of theirs (offset_ms {c['offset_ms']:+g}), a "
                        f"tempo change at most every {fmt_num(self._step())} beats, bending at most "
                        f"{c['max_bend_pct']:g}% while heard")
@@ -705,11 +879,16 @@ class LinkIn(ClockIn):
             parts.append("follows and leads" if self.follow_on and self.lead_on else
                          "follows" if self.follow_on else "leads")
             if self.state == 'joining':
-                parts.append(f"joining: looking for peers ({max(0.0, JOIN_S - (now - self.joined_at)):.1f} s left)")
+                parts.append(f"deciding again ({self.redecide})" if self.redecide else
+                             f"joining: looking for peers ({max(0.0, JOIN_S - (now - self.joined_at)):.1f} s left)")
             elif self.state == 'stopped':
                 parts.append("STOPPED (start/stop sync): the set is silent until the session starts")
             elif self.state == 'locking':
                 parts.append("locking to the session's next bar line (silent until then)")
+            elif self.state == 'contested':
+                parts.append(f"CONTESTED: another peer leads the session at {fmt_num(round(self.contest[0], 2))} "
+                             f"BPM; the set plays on at its own (live_link(follow=True) follows it, live_link(lead=True) "
+                             f"takes the lead back)")
             elif self.state == 'leading':
                 parts.append(f"the session keeps the set's bar lines ({self.forces} beat forced, {self.pushed} tempo "
                              f"set back)")
