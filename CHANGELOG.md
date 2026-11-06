@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.4 (2026-11-06)
 
 ### MIDI Time Code: the set chases a video or a DAW, and sends its own time (MIDI parity step 8, hq:D-244)
 
