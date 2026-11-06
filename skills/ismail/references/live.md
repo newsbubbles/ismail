@@ -1028,9 +1028,74 @@ When another app or a drum machine leads (its tempo, its play and stop), the set
   after a step of their tempo (120 to 100, 90, 80, 150 or 200, and 140 to 70) every tick is counted and the beats
   are back within `phase_tol_ms` in 2 to 4.6 s with `transport='tempo'`, 2.9 to 7.9 s with `'follow'` (which keeps
   their bar lines), and 13 s for a halving (140 to 70) in `'follow'`.
-- Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed), their Start and Stop
-  passed on to clock out, and the silence while they are stopped reaching `live_listen`, `live_record` and the
-  streams (only the speakers go silent).
+- A video or a DAW's timecode (MTC) leads by position, not tempo: "Timecode", next.
+- Not yet: Ableton Link, their meter (ismail's beats per bar is assumed), their Start and Stop passed on to clock
+  out, and the silence while they are stopped reaching `live_listen`, `live_record` and the streams (only the
+  speakers go silent).
+
+### Timecode: the set chases a video or a DAW, or sends its own time
+
+MIDI Time Code (MTC) carries a time (hours, minutes, seconds, frames), not a tempo. Use it when a video player, a
+DAW or a tape machine leads by its position: the set plays when it plays, goes quiet when it stops, and its bar
+lines sit on their time. For a tempo and a beat to follow, use clock in instead.
+
+- **Chasing their time.** `live_midi_timecode_in(source='ismail in', offset='01:00:00:00')`. `offset` is their
+  bar 1 (default 00:00:00:00); their bars run from there at the set's own tempo. The set keeps its tempo, and
+  `live_tempo` still works: their bar lines move to the new tempo from that bar on.
+- When their time runs (eight quarter frames in order, about two frames after they press play), the set goes
+  silent and comes in on the first of their bar lines it can reach: about two bars at 120 BPM. The news says
+  "timecode in: locked, their 01:00:06:00 = ismail bar 5". Then the set keeps its beats on theirs and follows
+  their speed (a tape or a varispeed 1% fast makes the set 1% fast), with tempo changes as clock in makes them.
+- **Their stop.** MTC has no stop message: the quarter frames stop. No quarter frame for `dropout_ms` (250): the
+  set goes silent until their time runs again. A shorter gap plays through, and so does a sender that holds
+  its quarter frames and lets them out at once (their numbering runs on, so it is no jump). A full-frame message
+  (a locate), a jump in their time, or a new frame rate relocks the same way: silent, then in on their next bar
+  line. Running backwards silences the set until it runs forward.
+- **Their grid after live_tempo.** The bar lines `live_tempo` moved stay where it put them through their stops,
+  locates and relocks. A new `offset` or a new rate starts the grid again from `offset`.
+- **Rate.** `rate=25` (or 24, 29.97 drop-frame, 30) takes only that rate: another one is not followed, the set
+  plays on by itself and the news says so. `rate='any'` (the default) takes what they send. `29.97` means
+  drop-frame (MTC has no code for 29.97 non-drop; a sender running it marks it 30).
+- **An offset their rate has no label for.** `00:01:00:00` does not exist in 29.97 drop-frame (each minute but
+  every tenth starts at `;02`), and frame 24 does not exist at 24 fps. Given before their rate is known, the
+  offset is checked at 25 fps; when their rate has no such label, the set is not followed (it plays on by itself),
+  and the news and `live_status` say `BAD OFFSET` and name the label that exists, e.g. `offset='00:01:00;02'`.
+  Pin `rate=` first to have the offset checked at their rate when given. A new `rate=` that keeps an earlier
+  offset its rate has no label for is refused, naming it: pass `offset=` with it.
+- **With clock in too.** When `live_midi_clock_in` is also on (a DAW sending both on one port), the clock leads:
+  it carries the tempo. Timecode then only reads their time and shows it.
+- **Sending the set's time.** `live_midi_timecode(port='to video', rate=25, offset='01:00:00:00')`: the set's
+  start reads as `offset`, and the time runs in seconds from there (a tempo change does not move it). Each
+  quarter frame goes out when its time reaches the speakers, after a full frame of the first one, so the other
+  app locates there first. Call again with another `offset` to locate there. `on=False` stops the quarter frames,
+  which the other app takes as a stop; the set's end does the same, and after it the call is refused (nothing
+  would go out). Another `port=` stops the old one, and the reply says so. Set the other app to chase MTC at the
+  same rate.
+- `live_status` shows their time and rate, the lock ("their 01:00:06:00 = ismail bar 5"), their speed, the phase
+  and the tempo changes; for timecode out, the time heard now and what was sent. Timecode in and out on one port
+  is refused: use two loopMIDI ports. `source='screen keys'` is refused.
+- **Settings and their ranges:** `rate` 24, 25, 29.97 drop-frame (also `'30df'`) or 30, or `'any'`; `offset` a
+  timecode `'hh:mm:ss:ff'` or seconds (0 to 24 hours; at 29.97 seconds past its 86399.9 s day wrap to midnight); `dropout_ms` 100 to 5000 (250); `offset_ms` -500 to 2000 (0,
+  positive lands ismail later); `phase_tol_ms`, `tempo_tol_bpm`, `max_bend_pct`, `step_beats` and
+  `bandwidth_hz` as clock in.
+- **Example.** The person says "play along with my video, it sends timecode from Reaper."
+  1. `midi_sources()` names the input (here `'loopMIDI Port'`). Tell them: "Set Reaper to send MIDI Time Code to
+     loopMIDI. When you press play, the music goes quiet for about two bars and comes in on a bar line, in time
+     with your video. When you stop, it goes quiet."
+  2. `live_midi_timecode_in(source='loopMIDI', offset='00:00:00:00')`. The reply ends with
+     `timecode in <- 'loopMIDI Port': waiting for timecode (nothing heard yet)`. Still waiting after they press
+     play: the MTC output in Reaper is off, or goes to another port.
+  3. After their play, the news: `timecode in: locked, their 00:00:12:00 = ismail bar 41; the set comes in there
+     at 120 BPM`. `live_status`: `their 00:00:15:08 (25 fps) | running, their 00:00:12:00 = ismail bar 41 | their
+     speed 1.0000x (0.4 ms jitter) | set 120 BPM | phase +0.0 ms (+: ismail late) | 2 tempo changes`.
+  4. Ask whether the music sits on the picture. Late or early by ear: `live_midi_timecode_in(offset_ms=20)`
+     (positive = ismail later).
+- Measured on synthetic timecode (`tests/test_midi_timecode.py`): with 1 ms of jitter the set's lock bar lands
+  within 0.1 ms of their grid and its beats stay within 0.1 ms after it; at their speed 1.01 the set runs at
+  121.2 BPM with its beats within 0.1 ms; after `live_tempo` 120 to 100 the beats are on the new grid.
+- Not yet: placing the set at their exact time (a live set cannot jump back or ahead: it comes in on its next bar
+  line on their grid), their tempo map (their bars run at the set's tempo), 29.97 non-drop, and the silence
+  reaching `live_listen`, `live_record` and the streams (the speakers only).
 
 ## Playing for a screen recording
 
@@ -1068,8 +1133,8 @@ from earlier bars are not played).
 Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
 `loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
 deck's song has it; otherwise use fx params, or expr lanes on a performer), gradual tempo
-ramps (`live_tempo` steps at a bar), Ableton Link and MIDI Time Code (MIDI clock in works: `live_midi_clock_in`), and
-placed audio clips on a deck.
+ramps (`live_tempo` steps at a bar), Ableton Link (MIDI clock in and timecode work: `live_midi_clock_in`,
+`live_midi_timecode_in`), and placed audio clips on a deck.
 
 ### Sung takes, tuned
 

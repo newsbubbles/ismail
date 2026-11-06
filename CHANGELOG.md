@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+### MIDI Time Code: the set chases a video or a DAW, and sends its own time (MIDI parity step 8, hq:D-244)
+
+- `live_midi_timecode(project, port, on=True, rate=None, offset=None, offset_ms=None)`: the set's time from its
+  start, plus `offset` (`'01:00:00:00'` or seconds), as MTC quarter frames at 24, 25, 29.97 drop-frame or 30 fps.
+  Each goes out on the sample its time reaches the speakers, as a routed note does. A full-frame SysEx (F0 7F 7F
+  01 01 hh mm ss ff F7) of the first frame comes first, and again on a locate (another `offset` or `rate`). The
+  time is the set's seconds: a tempo change does not move it. `on=False` and the set's end stop the quarter
+  frames. `live_status` shows the time heard now and what was sent.
+- `live_midi_timecode_in(project, source, on=True, rate=None, offset=None, offset_ms=None, ...)`: the set chases
+  their timecode. MTC carries no tempo, so the set keeps its own (`live_tempo` works and moves their bar grid
+  with it) and lays its bar lines on their time, `offset` being their bar 1. The eight quarter frames are put
+  together with the direction from their order (two frames of latency), then each one moves the time a quarter
+  frame on. Their play brings the set in on the first of their bar lines it can reach (about two bars at 120
+  BPM), with clock in's follower keeping the beats on theirs and following their speed. No quarter frame for
+  `dropout_ms` (250: their stop), a full-frame locate, a jump, a new rate, or running backwards silence it until
+  their time runs forward again; `rate=` pinned and another rate coming in is not followed. Each is a news line,
+  and `live_status` shows their time, the lock, their speed and the phase. With MIDI clock in on too, the clock
+  leads (it carries the tempo) and timecode only reads.
+- Measured on synthetic timecode with 1 ms of jitter: the lock bar lands within 0.1 ms of their grid and the beats
+  stay within 0.1 ms; at their speed 1.01 the set runs at 121.2 BPM, the beats again within 0.1 ms. Before the
+  steady line has 2 s, a speed within 0.1% of 1x is taken as 1x, and the lock waits until the period is known to
+  0.05% (about 0.8 s at 1 ms of jitter): a quarter second of jittery quarter frames would misplace the lock bar by
+  10 ms.
+- `ismail/mtc.py`: pure helpers for labels and frame counts both ways at every rate (drop-frame skips 0 and 1 each
+  minute but every tenth; 2589408 frames a day), the wrap at 24 hours, quarter frames, the full frame, and a
+  decoder that tells the direction. Timecode in and out on one port is refused both ways.
+- SysEx out and in on both MIDI backends (winmm long messages and input buffers, mido): `Output.send` takes F0 ...
+  F7, and an input handler with a `sysex` attribute gets SysEx. The winmm path is checked against a stand-in
+  driver, not yet on a real port.
+- `ClockFilter.tick(t, k=None)` takes the periods since the last tick when the sender numbers them (no duplicate or
+  lost-tick guess), and `ClockIn` has `_x_at`, `_lock_spans` and `_said_locked` hooks; clock in behaves as before.
+- After review (each with a test in `tests/test_midi_timecode.py`):
+  - An offset their rate has no label for (`00:01:00:00` at 29.97 drop-frame, frame 24 at 24 fps; checked at 25
+    fps when given before their rate is known) raised on the MIDI driver's thread at every label, unseen. Now
+    their time is not followed (`BAD OFFSET`), and the news and `live_status` name the label that exists. A new
+    `rate=` that keeps an earlier offset its rate has no label for is refused, naming it ("pass offset=..."), in
+    and out.
+  - Clock in turned off while their time was stopped, located or running backwards left the set playing. Now it
+    goes silent again.
+  - A sender that held its quarter frames 100 to 150 ms and let them out at once read as a jump (about 2.8 s of
+    silence while it relocked). A whole label their numbering led to is now never a jump; after a broken order a
+    label is tested against the filtered line, and one behind it by what a late delivery could be waits for the
+    next. Bursts of 12 quarter frames drove the tempo to 70 or 259 BPM: with the rate known, the filtered period
+    stays within 10% of the rate's own (`ClockFilter(nominal=)`; clock in passes none, so it is as before).
+  - The grid `live_tempo` moved was lost at their next play. It now holds through their stops, locates and
+    relocks; a new offset or rate starts it again.
+  - The quarter frames' reserved bits are ignored (a label with one set read as one that cannot exist).
+  - Timecode out after the set's end is refused (nothing would go out); another port says the old one stopped.
+    Offsets in seconds wrap at the rate's own day.
+  - winmm: `MIDIHDR` is packed as mmsystem.h packs it (112 bytes on 64-bit Windows, not 120). A buffer back with
+    `MIM_LONGERROR` is queued again (four of them left SysEx in dead). Input close takes a lock against the
+    callback re-queueing a buffer after the reset, checks the unprepare and close results (one more reset on
+    STILLPLAYING) and, if the driver still holds a buffer, keeps it and the handle and says so. A buffer that
+    could not be prepared or queued is said at open. Output close checks STILLPLAYING the same way. An input
+    without SysEx opens and closes as before.
+- Not yet: placing the set at their exact time (a live set cannot jump), their tempo map, 29.97 non-drop (MTC's
+  rate code 2 is drop-frame; `'29.97'` means drop-frame), the silence reaching `live_listen`, `live_record` and the
+  streams, and user bits in MTC.
+
 ### MIDI: MPE's upper zone, pressure and MPE as controls, takes that keep the chain's notes, encoder acceleration (MIDI parity steps 5 to 7, hq:D-244)
 
 - MPE's upper zone: `mpe=` takes True or `'lower'` (as before: channel 1 the master, notes on 2 to 16) and
@@ -43,7 +102,7 @@
   `accel` steps (above 1, at most 16; `True` is 4). A turn back starts slow again. Off by default; `live_status`
   shows it. Another mode with `accel` is refused and says to leave it out.
 - Not yet: per-note lanes for an MPE chord (a song has one lane per track), poly pressure written to a file, a
-  member channel's own bend range (RPN 0) taken live, Ableton Link, MIDI Time Code.
+  member channel's own bend range (RPN 0) taken live, Ableton Link.
 
 ### MIDI: pads as triggers, program change, poly pressure, played expression, encoder steps (Nate 10-23)
 
@@ -75,7 +134,7 @@
 - Encoder step size per map: `live_map(..., mode='relative' | 'relative64', step=1/32)` sets how far one tick of an
   endless encoder moves, as a fraction of the range (default 1/128); `live_status` shows it.
 - Not yet: per-note lanes for an MPE chord (it shares one lane per track), poly pressure written to a file,
-  Ableton Link, MIDI Time Code.
+  Ableton Link.
 
 ### MIDI effects, live and in the studio (MIDI parity step 7b)
 
@@ -220,8 +279,8 @@
 - Clock out and the arp follow the followed tempo. Clock in and clock out on one port is refused both ways (the set
   would chase its own clock). `live_tempo` is refused while clock in is on. `live_status` shows the follow.
 - `live_tempo`'s change is now one engine method shared with clock in (no change in behavior).
-- Not yet: Ableton Link (it needs a new dependency), MIDI Time Code, their meter, their Start and Stop passed on to
-  clock out, and the stopped silence in `live_listen`, `live_record` and the streams.
+- Not yet: Ableton Link (it needs a new dependency), their meter, their Start and Stop passed on to clock out, and
+  the stopped silence in `live_listen`, `live_record` and the streams.
 
 ### The arpeggiator, live and in the studio (MIDI parity step 7)
 

@@ -54,7 +54,8 @@ playing. When ticks come back, the ticks missed are counted from the time and th
 
 Clock out (midi_out.py) and the arp (arp.py) place their pulses and steps through the engine's tempo map, so they
 follow the followed tempo with no code of their own; MIDI out's notes are held back while the speakers are shut.
-Not yet: Ableton Link and MIDI Time Code; their meter (ismail's beats per bar is assumed for their bar lines);
+MIDI Time Code in is timecode_in.py, built on this follower. Not yet: Ableton Link; their meter (ismail's beats per
+bar is assumed for their bar lines);
 their Start and Stop forwarded to clock out; the silence while they are stopped is on the speakers only:
 live_listen, live_record and the streams still carry the set.
 """
@@ -82,6 +83,7 @@ SHORT = 12                  # ticks in the short line that tells a tempo step (h
 STEP_PCT = 4.0              # the short line this far from the loop's period (or 6 of its own errors): a step
 LOST_X = 2.5                # a gap longer than this many periods (plus the jitter) counts lost ticks
 STEP_BEND_PCT = 15.0        # after a tempo step of theirs the set may bend this much to catch their beat up
+NOMINAL_BAND = 0.1          # numbered ticks with a nominal period (MTC): the period is held within 10% of it
 DROPOUT_TICKS = 3           # dropout_ms is at least this many tick periods
 FADE_S = 0.005              # the speakers' fade when the transport stops or starts
 LOCK_BEND = (0.67, 1.5)     # silent before a lock bar, the set may run this much slower or faster to reach it
@@ -106,9 +108,22 @@ def same_port(a, b):
 class ClockFilter:
     """Tick times in, the tick period and the filtered time of the last tick out. Single-threaded: its owner locks."""
 
-    def __init__(self, bandwidth_hz=DEFAULTS['bandwidth_hz']):
+    def __init__(self, bandwidth_hz=DEFAULTS['bandwidth_hz'], nominal=None):
+        """nominal: the period the sender means (MIDI Time Code's quarter frame); the period is then held within
+        NOMINAL_BAND of it, and a short line far outside it (a burst of buffered ticks) is not a step. None (clock
+        in): any period."""
         self.B = float(bandwidth_hz)
+        self.nominal = nominal
         self.reset()
+
+    def _band(self, T):
+        if self.nominal is None or T is None:
+            return T
+        lo, hi = self.nominal * (1 - NOMINAL_BAND), self.nominal * (1 + NOMINAL_BAND)
+        return min(max(T, lo), hi)
+
+    def _in_band(self, T):
+        return self.nominal is None or abs(T / self.nominal - 1) <= NOMINAL_BAND
 
     def reset(self):
         self.n = 0                  # tick periods since the first tick
@@ -138,20 +153,22 @@ class ClockFilter:
     def confirming(self):
         return self._confirm
 
-    def tick(self, t):
+    def tick(self, t, k=None):
         """A tick arrived at t. Returns the tick periods since the last one (1; more for ticks lost in a gap of more
         than LOST_X periods; 0 for the first), or None for a duplicate it ignored.
 
         Counting goes by the measured interval, never by the loop's prediction, which lags a tempo change: a step to
         half the tempo is one tick a period late each time, not a lost tick. A tick far earlier than the period
-        right after a normal interval is a duplicate; right after a late one it is the second of a buffered pair."""
+        right after a normal interval is a duplicate; right after a late one it is the second of a buffered pair.
+        k: the periods since the last tick when the sender says it (MIDI Time Code numbers its quarter frames), so
+        nothing is guessed from the interval and a burst of them is never a duplicate."""
         t = float(t)
         if self.last is None:
             self.last, self.t0, self._warm = t, t, [(0, t)]
             return 0
         gap = t - self.last
-        k = 1
-        if self.T is not None:
+        known, k = k is not None, 1 if k is None else max(1, int(k))
+        if self.T is not None and not known:
             slack = 3.0 * self.jit
             thr = min(0.25 * self.T, self.T - 1.5 * slack)       # none when the jitter is too wide to tell
             if self.n >= WARM and thr > 0 and gap < thr and (self.gap is None or self.gap < 1.5 * self.T):
@@ -167,6 +184,9 @@ class ClockFilter:
             x = np.array([w[0] for w in self._warm], dtype=float)
             y = np.array([w[1] for w in self._warm]) - self._warm[0][1]
             T, c = np.polyfit(x, y, 1)
+            if self.nominal is not None and not self._in_band(T):     # a burst: the slope its own band allows
+                T = self._band(T)
+                c = float(np.mean(y - T * x))
             if T > 0:
                 self.T = float(T)
                 self.t0 = self._warm[0][1] + float(c) + self.T * self.n
@@ -185,7 +205,7 @@ class ClockFilter:
         w = self.w()
         self.t0 = self.t1
         self.t1 += math.sqrt(2.0) * w * e + T
-        self.T += w * w * e
+        self.T = self._band(self.T + w * w * e)
         self.jit = math.sqrt(0.98 * self.jit ** 2 + 0.02 * e * e)
         return k
 
@@ -205,7 +225,7 @@ class ClockFilter:
             return False
         Ts, tl = self._line(h)
         sd = self.jit * math.sqrt(12.0 / (SHORT ** 3 - SHORT))     # the short line's own error, seconds per tick
-        if Ts <= 0:
+        if Ts <= 0 or not self._in_band(Ts):            # a burst far from the sender's own period: not a step
             return False
         # against a line through the second before this half beat (since the last step), else the loop's period
         # half a beat ago: never the loop now, which starts to chase a step and wobbles at a high bandwidth. On a
@@ -255,7 +275,7 @@ class ClockFilter:
         if len(h) < 3 or h[-1][1] - h[0][1] < STEADY_S[0]:
             return None
         T, c = self._line(h)
-        return (T, c) if T > 0 else None
+        return (T, c) if T > 0 and self._in_band(T) else None
 
     def recent(self):
         """Seconds per tick from a straight line through the ticks of the last RECENT_S, or None (fewer than
@@ -429,6 +449,11 @@ class ClockIn:
         t0, p, T = ref
         return t0 + (x * PPQN - p) * T
 
+    @staticmethod
+    def _x_at(ref, t):
+        """Their beat at time t (on the ticks' clock): _t_ext the other way round."""
+        return (t - ref[0]) / ref[2] / PPQN + ref[1] / PPQN
+
     # ------------------------------------------------------------------ the follower (the engine's scheduler pass)
     def plan(self):
         """Called under the engine's lock every scheduler pass: decide a tempo change, a lock, or nothing."""
@@ -520,7 +545,7 @@ class ClockIn:
         off = self.cfg['offset_ms'] / 1000
         if D is None:                                       # first lock on the beat: the nearest of their beats
             heard = e.mout.beat_at(self.now(), a)
-            x = (self.now() - off - ref[0]) / ref[2] / PPQN + ref[1] / PPQN
+            x = self._x_at(ref, self.now() - off)
             D = float(round(heard - x))
             with self.lock:
                 self.D = D
@@ -567,7 +592,7 @@ class ClockIn:
         off = self.cfg['offset_ms'] / 1000
         b0 = self._earliest(est)
         W0 = e.mout.wall(b0, 0.0, a)
-        x0 = (W0 - off - ref[0]) / ref[2] / PPQN + ref[1] / PPQN       # their beat at ismail's b0
+        x0 = self._x_at(ref, W0 - off)                                  # their beat at ismail's b0
         first = math.ceil(b0 / bpb + EPS) * bpb                         # ismail's first bar line after b0
         xb = math.ceil(x0 / bpb + EPS) * bpb
         lo, hi = LOCK_BEND
@@ -578,10 +603,12 @@ class ClockIn:
             if dt <= 0:
                 continue
             ideal = dt * est / 60.0
-            m = first - b0 + max(0, round((ideal - (first - b0)) / bpb)) * bpb
-            bpm = 60.0 * m / dt
-            if lo * est <= bpm <= hi * est and 20.0 <= bpm <= 400.0:
-                pick = (xL, b0 + m, bpm)
+            for m in self._lock_spans(first - b0, ideal, bpb):
+                bpm = 60.0 * m / dt
+                if lo * est <= bpm <= hi * est and 20.0 <= bpm <= 400.0:
+                    pick = (xL, b0 + m, bpm)
+                    break
+            if pick is not None:
                 break
         if pick is None:
             return                                          # try again next pass
@@ -597,8 +624,18 @@ class ClockIn:
             self._gate(e.sample(bL) + self.lag, True)
         self.locked = (xL, bL)
         self.next_ok = bL
-        e.news.append(f"clock in: locked, their {fmt_bar(xL, bpb)} = ismail {fmt_bar(bL, bpb)}; the set comes in "
-                      f"there at {fmt_num(round(est, 2))} BPM")
+        e.news.append(self._said_locked(xL, bL, est))
+
+    @staticmethod
+    def _lock_spans(m0, ideal, bpb):
+        """The beats the set may run to a lock bar (m0 to its first bar line, then whole bars), nearest the ideal
+        first: here only the nearest."""
+        return [m0 + max(0, round((ideal - m0) / bpb)) * bpb]
+
+    def _said_locked(self, xL, bL, est):
+        bpb = self.e.bpb
+        return (f"clock in: locked, their {fmt_bar(xL, bpb)} = ismail {fmt_bar(bL, bpb)}; the set comes in there at "
+                f"{fmt_num(round(est, 2))} BPM")
 
     # ------------------------------------------------------------------ the command
     def cmd(self, source=None, on=True, transport=None, **params):
