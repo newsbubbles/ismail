@@ -16,6 +16,7 @@ from .notation import midi_to_name, pitch_to_midi, placed, fmt_num
 from .arp import expand_project
 
 DRUM_CH = 9                    # channel 10, where every DAW and GM synth looks for drums
+MIN_ZONE = 4                   # midi_write shrinks an MPE zone for other tracks' channels down to this many members
 
 
 def _is_kit(tr):
@@ -39,11 +40,15 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
     -40..0 dB, 127 the fader), breath as cc:2 (0..1). lanes: overrides as data, {lane: {'midi': 'bend' | 'pressure'
     | 'cc:<n>', 'range': [lo, hi]}} (the lane's values at the message's ends; a bend range is [-r, r] or r), or
     {lane: None} to leave one out; e.g. {'bend': {'range': 12}, 'mute': {'midi': 'cc:20', 'range': [0, 1]}}. The
-    reply names lanes with no message and values clamped to a range. mpe: True (every melodic track) or a list of
-    track names written as MPE: channel 1 the master, each note on its own member channel 2 to 16 with the track's
-    lanes over its own span (bend +-48, level as per-note channel pressure), for an MPE synth. No poly pressure goes
-    out: a song's lanes are per track, with no per-note pressure to carry (mpe= gives each note its own channel
-    pressure instead).
+    reply names lanes with no message and values clamped to a range. mpe: the tracks written as MPE, for an MPE
+    synth: each note on its own member channel with the track's lanes over its own span (bend +-48, level as
+    per-note channel pressure), after the MPE configuration (RPN 6). True or 'lower' (every melodic track in the
+    lower zone: channel 1 the master, members 2 to 16), 'upper' (the upper zone: channel 16 the master, members 15
+    down to 1), a list of track names (the lower zone), or {track: 'lower' | 'upper'} (a split synth: with both
+    zones in the file each has 7 members, 2-8 and 9-15). The other tracks get channels outside the zones: a kit
+    keeps channel 10, and a zone shrinks (to 4 members at least) to leave each plain track a channel; the reply
+    says how far. No poly pressure goes out: a song's lanes are per track, with no per-note pressure to carry (mpe=
+    gives each note its own channel pressure instead).
     programs: a GM program change per track, 1 to 128 as a GM list numbers them (1 piano, 33 acoustic bass, 81
     square lead), so a GM synth or a DAW's GM player picks the sound: {'bass': 33}, or a program per bar where the
     sound changes, {'lead': {1: 81, 17: 82}}. With bars=, the program in force at the first bar goes at the file's
@@ -57,20 +62,23 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
         raise OpError("no track has notes; write some (notes_write) or name tracks=[...]")
     for n in names:
         P.track(n)
+    zones = _mpe_tracks(mpe, names, P)
     try:
         lmaps = {False: ML.resolve(lanes, ML.FILE)}
-        if mpe:                                  # a map that only clashes with the MPE defaults is fine without
+        if zones:                                # a map that only clashes with the MPE defaults is fine without
             lmaps[True] = ML.resolve(lanes, ML.FILE_MPE)
     except ML.LaneMapError as e:
         raise OpError(str(e))
-    if mpe not in (None, False, True) and not (isinstance(mpe, (list, tuple)) and all(m in names for m in mpe)):
-        raise OpError(f"mpe: True (every melodic track) or a list of the tracks written: {names}")
     progs = _programs(programs, names)
     bpb, bpm = P.bpb, P.d['bpm']
     a, b = bars or [1, P.d['length_bars']]
     b0, b1 = P.bar_to_beat(a), P.bar_to_beat(b + 1)
     shift = b0 if bars else 0.0
-    parts, chans, lines, free = [], {}, [], [c for c in range(16) if c != DRUM_CH]
+    has = [n for n in names if any(b0 <= x[0] < b1 for x in P.track(n)['notes'])]   # tracks written
+    sizes, free, lines = _zone_plan({zones[n] for n in has if n in zones},
+                                    [n for n in has if n not in zones and not _is_kit(P.track(n))],
+                                    any(_is_kit(P.track(n)) for n in has))
+    parts, chans = [], {}
     for n in names:
         tr = P.track(n)
         sel = [x for x in tr['notes'] if b0 <= x[0] < b1]
@@ -78,16 +86,17 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
             lines.append(f"  {n}: no notes in bars {a}-{b}, left out")
             continue
         notes = [(max(0.0, s - shift), p, d, v) for s, p, d, v in placed(sel, bpm, tr.get('offset_ms') or 0.0)]
-        as_mpe = not _is_kit(tr) and (mpe is True or (isinstance(mpe, (list, tuple)) and n in mpe))
+        mz = (zones[n], sizes[zones[n]]) if n in zones else None
+        as_mpe = mz is not None
         if _is_kit(tr):
             ch = DRUM_CH
         elif as_mpe:
-            ch = ML.MPE_MASTER
+            ch = mz[0]
         else:
             ch = free[len(chans) % len(free)]
             chans[n] = ch
         part = {'name': n, 'channel': ch, 'notes': notes}
-        lane_txt = _write_lanes(part, tr, lmaps[as_mpe], as_mpe, b0, b1, shift)
+        lane_txt = _write_lanes(part, tr, lmaps[as_mpe], mz, b0, b1, shift)
         rows = progs.get(n) or []
         pg = _program_events(rows, ch, P, a, b, shift, sel, notes)
         part['events'] = pg + part['events']             # first at their tick: the sound before the notes
@@ -103,7 +112,7 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
             used = sorted({x[1] for x in sel})
             what = '; pads ' + ', '.join(f"{p} {midi_to_name(p)}={_pad_name(pads.get(p))}" for p in used[:16]) + \
                    (f" (+{len(used) - 16} more)" if len(used) > 16 else '')
-        where = "MPE (channel 1 the master, a channel of 2-16 per note)" if as_mpe else f"channel {ch + 1}"
+        where = _mpe_where(*mz) if as_mpe else f"channel {ch + 1}"
         lines.append(f"  {n}: {len(notes)} notes, {where}" + (' (muted in the mix)' if tr.get('mute') else '')
                      + what)
         lines += lane_txt
@@ -126,6 +135,72 @@ def midi_write(project: str, out: str = None, tracks: list = None, bars: list = 
         tail.append(f"WARNING {len(chans)} melodic tracks share 15 channels: some share a channel, which is fine "
                     f"in a DAW (each MIDI track keeps its own notes) but not on one hardware synth")
     return '\n'.join([head] + lines + tail)
+
+
+def _mpe_tracks(mpe, names, P):
+    """midi_write's mpe= -> {track: its zone's master channel (0 lower, 15 upper)}, melodic tracks only (a kit stays
+    on channel 10), checked."""
+    if mpe is None or mpe is False:
+        return {}
+    melodic = [n for n in names if not _is_kit(P.track(n))]
+    shape = (f"mpe: True or 'lower' (every melodic track in the lower zone), 'upper' (the upper zone), a list of the "
+             f"tracks written ({names}), or {{track: 'lower' | 'upper'}}")
+    if type(mpe) is int and mpe in (0, 1):      # 1 and 0 as True and False, as before
+        mpe = bool(mpe)
+        if not mpe:
+            return {}
+    miss = [m for m in (mpe if isinstance(mpe, (list, tuple, dict)) else ()) if m not in names]
+    if miss:
+        raise OpError(f"{shape}; not tracks written: {miss}")
+    try:
+        if isinstance(mpe, dict):
+            got = {n: ML.mpe_zone(z) for n, z in mpe.items() if n in melodic}
+            return {n: next(iter(z)) for n, z in got.items() if z}          # {track: False} leaves it plain
+        if isinstance(mpe, (list, tuple)):
+            return {n: ML.MPE_MASTER for n in mpe if n in melodic}
+        z = ML.mpe_zone(mpe)
+    except (KeyError, ML.LaneMapError):
+        raise OpError(shape)
+    return {n: next(iter(z)) for n in melodic} if z else {}
+
+
+def _zone_plan(masters, plain, kit):
+    """Channels for midi_write's MPE zones: ({master: members}, the channels the other melodic tracks take in turn,
+    lines for the reply). A zone has 15 members (7 each with both zones). A kit keeps channel 10, so a zone that
+    holds it shrinks to leave it out; then a zone shrinks one member at a time, the larger first and never below
+    MIN_ZONE, until each track in `plain` has a channel outside every zone (left short, they share)."""
+    sizes = {m: 7 if len(masters) > 1 else 15 for m in sorted(masters)}
+    start, why = dict(sizes), {m: [] for m in sizes}
+
+    def free():
+        taken = {c for m, k in sizes.items() for c in (m, *ML.zone_members(m, k))}
+        return [c for c in range(16) if c != DRUM_CH and c not in taken]
+    for m in sizes:
+        if kit and DRUM_CH in ML.zone_members(m, sizes[m]):
+            while DRUM_CH in ML.zone_members(m, sizes[m]):
+                sizes[m] -= 1
+            why[m].append("channel 10 stays the kit's")
+    kit_sizes = dict(sizes)
+    while len(free()) < len(plain):
+        big = [m for m in sizes if sizes[m] > MIN_ZONE]
+        if not big:
+            break
+        sizes[max(big, key=lambda m: (sizes[m], -m))] -= 1
+    for m in sizes:
+        if sizes[m] < kit_sizes[m]:
+            why[m].append(f"{', '.join(plain)} get{'s' if len(plain) == 1 else ''} "
+                          f"{'a channel' if len(plain) == 1 else 'channels'} outside it")
+    lines = [f"  MPE {'lower' if m == ML.MPE_MASTER else 'upper'} zone: {sizes[m]} members, not {start[m]}, so "
+             f"{' and '.join(why[m])}" for m in sizes if sizes[m] != start[m]]
+    return sizes, free() or [c for c in range(16) if c != DRUM_CH], lines
+
+
+def _mpe_where(master, size):
+    mem = ML.zone_members(master, size)
+    if master == ML.MPE_MASTER and size == 15:
+        return "MPE (channel 1 the master, a channel of 2-16 per note)"
+    return (f"MPE {'lower' if master == ML.MPE_MASTER else 'upper'} zone (channel {master + 1} the master, a "
+            f"channel of {min(mem) + 1}-{max(mem) + 1} per note)")
 
 
 def _programs(programs, names):
@@ -186,16 +261,18 @@ def _bend_rpn(ch, lmap, lanes):
     return [] if r is None else ML.rpn(ch, 0, 0, int(r), round((r % 1) * 100))
 
 
-def _write_lanes(part, tr, lmap, as_mpe, b0, b1, shift):
+def _write_lanes(part, tr, lmap, mz, b0, b1, shift):
     """A track's lanes (automation inst.lane.<name>, in beats) over the beats b0..b1 into part['events'] as MIDI,
-    moved `shift` beats earlier as the notes are. as_mpe: the notes onto member channels 2-16 (a free one, else the
-    one whose note ends soonest), each note's lanes over its own span on its own channel, after the MPE
-    configuration (RPN 6 on channel 1). The reply's lines."""
+    moved `shift` beats earlier as the notes are. mz: (the MPE zone's master channel, its member count) or None.
+    With MPE the notes go onto the zone's member channels (a free one, else the one whose note ends soonest), each
+    note's lanes over its own span on its own channel, after the MPE configuration (RPN 6 on the master). The
+    reply's lines."""
     pts = {k[10:]: v for k, v in (tr.get('automation') or {}).items() if k.startswith('inst.lane.') and v}
     done = [x for x in pts if x in lmap]
     ev, L, clamped = [], [], {}
-    if as_mpe:
-        last, out = {c: -1.0 for c in range(1, 16)}, []
+    if mz is not None:
+        members = ML.zone_members(*mz)
+        last, out = {c: -1.0 for c in members}, []
         for s, p, d, v in sorted(part['notes']):
             c = min(last, key=lambda c: (last[c] > s + 1e-9, last[c]))
             last[c] = s + d
@@ -206,7 +283,7 @@ def _write_lanes(part, tr, lmap, as_mpe, b0, b1, shift):
                 clamped[lane] = clamped.get(lane, 0) + cl
                 ev += [(max(0.0, t - shift), ML.message(kind, num, c, raw)) for t, raw in es]
         part['notes'] = out
-        head = ML.rpn(ML.MPE_MASTER, 0, 6, 15) + [m for c in range(1, 16) for m in _bend_rpn(c, lmap, done)]
+        head = ML.rpn(mz[0], 0, 6, mz[1]) + [m for c in members for m in _bend_rpn(c, lmap, done)]
     else:
         ch = part['channel']
         for lane in done:
@@ -236,16 +313,36 @@ def _pad_name(v):
     return os.path.splitext(os.path.basename(str(v)))[0] if v else '?'
 
 
-def _file_zone(f):
-    """The MPE zone the file configures (RPN 6 with members, in any track: a conductor track may hold it): its master
-    channel (0 lower, 15 upper), or None."""
-    return next((t['mpe_master'] for t in f['tracks'] if t['mpe']), None)
+def _history(t, f):
+    """A track's MPE configurations [(beat, master channel, members)] in time order: its own, else every track's (a
+    conductor track may hold them)."""
+    return sorted(t['mpe_history'] or [h for u in f['tracks'] for h in u['mpe_history']], key=lambda h: h[0])
+
+
+def _track_zones(t, f, notes=None):
+    """A track's MPE zones {master channel: members} in force at its first note (no notes: after the last
+    configuration), and the beats where the configuration changes while its notes start."""
+    hist = _history(t, f)
+    if not notes:
+        return ML.zones_at(hist, float('inf')), []
+    a, z = min(n[0] for n in notes), max(n[0] for n in notes)
+    return ML.zones_at(hist, a), sorted({b for b, _, _ in hist if a + 1e-9 < b <= z + 1e-9})
+
+
+def _zone_label(zones):
+    """The MPE zones of a listed track in a few words: nothing for the usual lower zone of 15 members."""
+    if zones == {ML.MPE_MASTER: 15}:
+        return ''
+    if zones == {ML.MPE_UPPER: 15}:
+        return ' (upper zone, master channel 16)'
+    return f" ({ML.zone_text(zones)})"
 
 
 def _key(spec, f):
     """What a key in `into` names: a track's name, '#<index>', or 'ch<1-16>' (that channel in every track), as
     (notes, controller messages in file order, bend ranges {channel: [(beat, semitones)]} from RPN 0 in any track,
-    the MPE zone's master channel or None)."""
+    the MPE zones in force at its first note {master channel: members}, the beats where they change during its
+    notes)."""
     s = str(spec).strip()
     ranges = {}
     for t in f['tracks']:                        # an RPN may sit in another track than the notes (a conductor)
@@ -257,19 +354,19 @@ def _key(spec, f):
         if k >= len(f['tracks']):
             raise OpError(f"{s}: the file has tracks #0-#{len(f['tracks']) - 1}")
         t = f['tracks'][k]
-        return t['notes'], t['ctl'], ranges, t['mpe_master'] if t['mpe'] else _file_zone(f)
+        return (t['notes'], t['ctl'], ranges) + _track_zones(t, f, t['notes'])
     if s.lower().startswith('ch') and s[2:].isdigit():
         ch = int(s[2:]) - 1
         if not 0 <= ch <= 15:
             raise OpError(f"{s}: channels are ch1 to ch16")
         return ([n for t in f['tracks'] for n in t['notes'] if n[4] == ch],
-                sorted((c for t in f['tracks'] for c in t['ctl'] if c[1] == ch), key=lambda c: c[0]), ranges, None)
+                sorted((c for t in f['tracks'] for c in t['ctl'] if c[1] == ch), key=lambda c: c[0]), ranges, {}, [])
     hits = [t for t in f['tracks'] if t['name'] == s]
     if len(hits) != 1:
         raise OpError(f"{s!r} is not one track name in the file; call midi_read without into to list them, then use "
                       f"the name, '#<index>' or 'ch<n>'")
     t = hits[0]
-    return t['notes'], t['ctl'], ranges, t['mpe_master'] if t['mpe'] else _file_zone(f)
+    return (t['notes'], t['ctl'], ranges) + _track_zones(t, f, t['notes'])
 
 
 def _range_at(hist, beat, default):
@@ -283,11 +380,24 @@ def _range_at(hist, beat, default):
     return r
 
 
-def _is_mpe(zone, asked=None):
-    """An MPE part: the file configures MPE (RPN 6 with members, zone its master channel), or the caller says so
-    (mpe=True; mpe=False overrides the file). A multi-channel part with bend on several channels is not enough: a
-    type 0 GM file looks the same."""
-    return bool(asked) if asked is not None else zone is not None
+def _part_zone(zones, notes, asked=None):
+    """The zone an MPE part is read in, (master channel, member channels), or None for a plain part: the file
+    configures MPE (RPN 6 with members; with both zones, the one holding most of the part's notes), or the caller
+    says so (mpe=True: the file's zone, else the lower; 'lower' or 'upper': that zone, its size from the file when
+    it configures it; mpe=False overrides the file). A multi-channel part with bend on several channels is not
+    enough: a type 0 GM file looks the same."""
+    try:
+        want = ML.mpe_zone(asked)
+    except ML.LaneMapError as e:
+        raise OpError(str(e))
+    if want is None:
+        return ML.pick_zone(zones, notes)
+    if not want:
+        return None
+    if asked is True:
+        return ML.pick_zone(zones, notes) or ML.pick_zone(want, notes)
+    master = next(iter(want))
+    return master, ML.zone_members(master, (zones or {}).get(master, 15))
 
 
 def _ctl_counts(ctl):
@@ -298,13 +408,14 @@ def _ctl_counts(ctl):
     return out
 
 
-def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None, span=None):
+def _read_lanes(P, tr, target, notes, ctl, ranges, zones, lanes, base, asked=None, span=None):
     """The lanes a part's controller messages carry, written into tr's automation (inst.lane.<name>, beats from
     base): (lines for the reply, warnings). A bend is read at the range in force on its channel at its time. span:
     the beats [a, z) the notes replaced (mode='replace'): a lane's old points there go too, and on to its last new
     point; an old point on the end itself stays."""
-    mpe = _is_mpe(zone, asked)
-    master = zone if zone is not None else ML.MPE_MASTER
+    pz = _part_zone(zones, notes, asked)
+    mpe = pz is not None
+    master, members = pz if mpe else (None, None)
     try:
         lmap = ML.resolve(lanes, ML.FILE_MPE if mpe else ML.FILE)
     except ML.LaneMapError as e:
@@ -316,11 +427,20 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
     ctl, n_poly, n_kept = ML.poly_to_channel(notes, ctl)     # per-key pressure: onto the channel's (lanes per track)
     given = {str(k)[10:] if str(k).startswith('inst.lane.') else str(k): v for k, v in (lanes or {}).items()}
     L, W, wrote = [], [], []
+    if mpe:                                      # one track holding notes of the other zone (or of no zone)
+        out_chs = sorted({n[4] for n in notes if n[4] not in members and n[4] != master})
+        lost = [c for c in ctl if c[1] in out_chs]
+        if lost:
+            n_out = sum(1 for n in notes if n[4] in out_chs)
+            W.append(f"WARNING {target}: {n_out} notes are on channel {'/'.join(str(c + 1) for c in out_chs)}, outside "
+                     f"the {ML.zone_text({master: len(members)})} this part is read in: the notes are written, their "
+                     f"own {len(lost)} expression messages left out (lanes follow the zone's notes). into={{'ch"
+                     f"{out_chs[0] + 1}': ...}} reads one channel on its own")
     for lane, (kind, num, lo, hi) in lmap.items():
         what = ML.midi_name(kind, num)
         fixed = kind != 'bend' or (isinstance(given.get(lane), dict) and 'range' in given[lane])
         if mpe:
-            evs, over, skipped = ML.mpe_merge(notes, ctl, what, master=master, with_ch=True)
+            evs, over, skipped = ML.mpe_merge(notes, ctl, what, master=master, with_ch=True, members=set(members))
             if over and evs:
                 W.append(f"WARNING {target}.{lane}: MPE gives each note its own {what}, ismail's lanes are per track: "
                          f"{over} notes overlap a newer one, and the lane follows the newest (last-note priority)")
@@ -355,7 +475,8 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
         L.append(f"    lane {lane}: {len(pts)} points from {len(evs)} {what} messages"
                  + ((f" (bend range +-{'/'.join(fmt_num(r) for r in sorted(used_r))})" if not fixed else
                      f" (bend range +-{fmt_num(hi)})") if kind == 'bend' else f" ({fmt_num(lo)}..{fmt_num(hi)})")
-                 + (", per note (MPE)" if mpe else ''))
+                 + ((", per note (MPE)" + ('' if master == ML.MPE_MASTER and len(members) == 15 else
+                                          f", {ML.zone_text({master: len(members)})}")) if mpe else ''))
     used = {ML.midi_name(k, n) for k, n, _, _ in lmap.values()}
     if n_poly and 'pressure' in used:
         L.append(f"    poly pressure: {n_poly} per-key messages read as their channel's pressure (the newest key still "
@@ -383,7 +504,7 @@ def _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, asked=None
 
 @op(mutates=True)
 def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: str = 'replace',
-              quantize: float = None, lanes: dict = None, mpe: bool = None) -> str:
+              quantize: float = None, lanes: dict = None, mpe=None) -> str:
     """Read a Standard MIDI File (.mid, from a DAW, a score program or the web). Without `into`, it lists what the
     file holds: tempo and meter (and any changes), markers, and every track and channel with its note count, range
     and bars. With into={<file track>: <ismail track>} it writes those notes into existing tracks (track_add first),
@@ -397,8 +518,11 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     -> vib (0..50 cents), cc:11 -> level (-40..0 dB), cc:2 -> breath (0..1); the reply names the messages no lane
     took. lanes: the map as data, as midi_write takes it ({lane: {'midi': 'bend' | 'pressure' | 'cc:<n>', 'range':
     [lo, hi]}}, {lane: None} skips one), e.g. {'mute': {'midi': 'cc:20', 'range': [0, 1]}}. An MPE part (the file
-    configures MPE with RPN 6 in any track, lower or upper zone, or mpe=True; mpe=False reads it as one plain part,
-    every channel's messages into one lane) is read per note: bend at +-48
+    configures MPE with RPN 6 in any track, lower or upper zone, sized as it says, or mpe=True, 'lower' or 'upper'
+    for a file that does not say; mpe=False reads it as one plain part, every channel's messages into one lane) is
+    read per note, in the configuration in force at its first note (the reply warns when it changes while the
+    part plays), its zone's member channels only; a part on a zone's master channel or outside every zone is a
+    plain part. Bend at +-48
     unless the file says, and per-note pressure -> level; a lane follows the newest note still sounding, since
     ismail's lanes are per track. Poly pressure (one key's own) is read the same way, as its channel's pressure
     following the newest key still held, onto the lane that takes pressure (lanes={'level': {'midi': 'pressure',
@@ -429,10 +553,10 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         for t in f['tracks']:
             ns = t['notes']
             cc = _ctl_counts(t['ctl'])
-            mz = t['mpe_master'] if t['mpe'] else (_file_zone(f) if len({n[4] for n in ns}) >= 2 else None)
+            mz = _track_zones(t, f, ns)[0] if t['mpe_history'] or len({n[4] for n in ns}) >= 2 else {}
+            mz = mz if not ns or ML.pick_zone(mz, ns) else {}     # its notes on a master or outside: plain
             rngs = sorted({r for h in t['bend_ranges'].values() for _, r in h})
-            ctl_txt = ((f"; MPE{' (upper zone, master channel 16)' if mz == 15 else ''}, " if mz is not None
-                        else "; ")
+            ctl_txt = ((f"; MPE{_zone_label(mz)}, " if mz else "; ")
                        + "expression: " + ', '.join(f"{w} {c}" for w, c in sorted(cc.items()))
                        + (" (bend range +-" + '/'.join(fmt_num(r) for r in rngs) + ")" if rngs else '')) if cc else ''
             if not ns:
@@ -456,7 +580,7 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
     out, warn = [], []
     for spec, target in into.items():
         tr = P.track(target)
-        notes, ctl, ranges, zone = _key(spec, f)
+        notes, ctl, ranges, zones, moves = _key(spec, f)
         if not notes:
             out.append(f"  {spec} -> {target}: no notes")
             continue
@@ -472,7 +596,12 @@ def midi_read(project: str, file: str, into: dict = None, bar: int = 1, mode: st
         tr['notes'] = sorted(tr['notes'] + rows)
         out.append(f"  {spec} -> {target}: {len(rows)} notes, bars {bar + int(min(r[0] for r in rows) - base) // bpb}"
                    f"-{bar + int(max(r[0] for r in rows) - base) // bpb}")
-        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zone, lanes, base, mpe, span)
+        lt, lw = _read_lanes(P, tr, target, notes, ctl, ranges, zones, lanes, base, mpe, span)
+        if moves and mpe is None:
+            lw.append(f"WARNING {target}: the file changes its MPE configuration at bar "
+                      f"{', '.join(str(fbar(b)) for b in moves)}, while these notes play; read as at the first note ("
+                      + (ML.zone_text(zones) if zones else "no MPE") + "). mpe='lower', 'upper' or False reads it one "
+                      "way throughout")
         out += lt
         warn += lw
         if _is_kit(tr):

@@ -47,6 +47,7 @@ from .trouble import Trouble
 from .. import settings
 
 BLOCK = 1024
+POLL_OPS = ('keys', 'clock', 'onsets')   # ops pages and listeners poll: they never take the agent's news
 QUIET = 1e-6            # a path whose input stops and whose output stays below this goes dormant
 DORMANT_S = 0.5
 SOUND_FLOOR = 1e-4      # -80 dBFS: the mix made a sound (silence on air is measured against it)
@@ -2731,7 +2732,7 @@ class Engine:
         return {'path': f"/stream?name={name}", 'rate': SR, **O.FORMAT, 'listening': self.hub.names().get(name, 0)}
 
     def cmd_map(self, control, target=None, param='volume_db', range=None, curve='linear', at='now', remove=False,
-                midi=None, source=None, channel=None, mode='absolute', action=None, step=None):
+                midi=None, source=None, channel=None, mode='absolute', action=None, step=None, accel=None):
         old_map = self.controls.maps.get(control)
         old = (old_map or {}).get('midi')
         if remove:
@@ -2755,9 +2756,10 @@ class Engine:
             raise LiveError("target: the track, 'bus:<name>' or 'deck:<name>' the control drives (or action=... "
                             "for a pad that queues a scene, changes the tempo or starts a transition)")
         if midi is None and (source is not None or channel is not None or mode not in ('absolute', 'trigger')
-                             or step is not None):
+                             or step is not None or accel is not None):
             raise LiveError("source, channel and mode bind a MIDI controller: add midi='cc:<n>' (or 'cc14:<n>', "
-                            "'bend', 'pressure', 'note:<n>'); live_controls(source=<input>) shows what a knob sends")
+                            "'bend', 'pressure', 'note:<n>', 'poly', 'mpe:pressure'); live_controls(source=<input>) "
+                            "shows what a knob sends")
         kept = (f"; {control} keeps its old map ({O.describe(old_map)})" if old_map else
                 f"; {control} is not mapped")
         # every check before anything changes: a failed remap leaves the old map working
@@ -2765,7 +2767,7 @@ class Engine:
             kind, name = (None, None) if action is not None else O.parse_param(target, param)[:2]
             binding = None
             if midi is not None:
-                binding = O.parse_midi(midi, channel, mode, step)
+                binding = O.parse_midi(midi, channel, mode, step, accel)
                 binding['source'] = self.midi.input_for(source)
             m = (self.controls.build_action(action, midi=binding) if action is not None else
                  self.controls.build(target, param, range, curve, at, midi=binding))
@@ -2800,10 +2802,14 @@ class Engine:
         self.midi.bound_now(binding['source'], binding)
         same = [c for c, x in self.controls.bound(binding['source']) if c != control and
                 x['midi']['text'] == binding['text'] and x['midi']['channel'] == binding['channel']]
+        bound = (". The keys still play; " + ("each key's poly pressure" if binding['kind'] == 'poly' else
+                                              f"each MPE note's own {binding['num']}")
+                 + " is this control's now, not a lane's of the patched keys, and is not logged with them"
+                 if binding['kind'] in ('poly', 'mpe') else
+                 ". A bound message is a control, not a key: it no longer plays or logs as a note")
         return (f"{control} -> {O.describe(m)}: " + (what or "each move applies in the engine at once and is logged "
                                                              "by bar") + " (live_controls)"
-                + (f"; the same MIDI control also drives {', '.join(same)}" if same else '')
-                + ". A bound message is a control, not a key: it no longer plays or logs as a note")
+                + (f"; the same MIDI control also drives {', '.join(same)}" if same else '') + bound)
 
     def _check_action(self, a):
         """What an action names exists now and what it says parses (called under the lock): its clips parse onto
@@ -2958,7 +2964,7 @@ class Engine:
         nothing here touches a file or rebuilds an effect). True
         when a map is bound to it (then it is a control, not a key). With no control thread running (a test, a
         harness), the moves apply here."""
-        moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now)
+        moves, hit = self.controls.midi_in(source, st, d1, d2, self._map_now, zones=self.midi.zones_of(source))
         if moves:
             with self._ctl_lock:
                 for control, m, v, via in moves:
@@ -3125,15 +3131,16 @@ class Engine:
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
-    def cmd_played(self, source=None, bars=8, fit=False, from_bar=None):
+    def cmd_played(self, source=None, bars=8, fit=False, from_bar=None, raw=False):
         try:
-            return self.midi.played(source, bars, fit, from_bar)
+            return self.midi.played(source, bars, fit, from_bar, raw=raw)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
-    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None):
+    def cmd_take(self, source=None, bars=8, fit=False, from_bar=None, placement='A', lanes=None, mpe=None,
+                 raw=False):
         try:
-            return self.midi.take(source, bars, fit, from_bar, placement, lanes=lanes, mpe=mpe)
+            return self.midi.take(source, bars, fit, from_bar, placement, lanes=lanes, mpe=mpe, raw=raw)
         except (ValueError, OSError) as e:
             raise LiveError(str(e))
 
@@ -3557,12 +3564,17 @@ def serve(engine, port=0, idle_min=None):
             except Exception as e:
                 traceback.print_exc()
                 res = {'ok': False, 'error': f"engine error {type(e).__name__}: {e}"}
-            # news is for the agent's calls: a key from the page or a listener reading the clock must not
-            # take it (nor carry it)
-            news = None if isinstance(req, dict) and req.get('op') in ('keys', 'clock') else engine.drain_news()
+            # news is for the agent's calls (live ops send agent=True): a key from the page, a listener reading the
+            # clock, the phone or the stream polling status and onsets (agent=False) must not take it (nor carry it).
+            # A caller that does not say: everything but the pollers' own ops
+            agent = req.get('agent', req.get('op') not in POLL_OPS) if isinstance(req, dict) else False
+            news = engine.drain_news() if agent else None
             if news:
                 k = 'result' if res['ok'] else 'error'
-                res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)
+                if isinstance(res[k], str):
+                    res[k] = f"{res[k]}\nNEW since your last call:\n" + '\n'.join('  ' + x for x in news)
+                else:                           # data (a take): its news beside it, the data kept as data
+                    res['news'] = news
             body = json.dumps(res).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

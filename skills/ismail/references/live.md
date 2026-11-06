@@ -614,8 +614,11 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
   n 0..31 and LSB n+32), `'bend'` (centre = the middle of the range), `'pressure'` (channel aftertouch),
   `'note:<n>'` (a pad: held = the range's top, released = its bottom), `'program:<n>'` (a program change, 1 to 128
   as a GM list or the controller's screen numbers it: a footswitch, a preset button; it fires an action or, with
-  `mode='toggle'`, flips a param). `source` is optional when one input is
-  plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
+  `mode='toggle'`, flips a param), `'poly'` (poly pressure: the hardest-pressed key held, so letting go of it falls
+  back to the next) or `'poly:<n>'` (one key's pressure, `'poly:C4'`), and `'mpe:pressure'`, `'mpe:bend'`,
+  `'mpe:timbre'` (an MPE note's own pressure, bend or cc:74, the newest note held winning: when it lets go, the
+  next newest takes over; All Notes Off, an unpatch or an unplugged input lets go of every key they held).
+  `source` is optional when one input is plugged in; `channel` is 1 to 16, and the default (or 0) is every channel. `range` has no default for a MIDI map:
   give `[value at 0, value at the top]`; the curve is `'linear'` (default), `'log'` (Hz, ratios: both ends above 0)
   or `'switch'` (`'raw'` is refused for MIDI). The range, curve and `at` work as for any control, and every move is
   logged for `live_controls` (its `via` says which MIDI control moved it).
@@ -624,15 +627,31 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
     says where a waiting knob and its param are. `'relative'` and `'relative64'` for endless encoders (two's
     complement, or 64 = still), 1/128 of the range per step (`step=1/32` on the map for a coarse encoder,
     `step=1/512` for a fine one), from the param's value now (steps that arrive
-    faster than the engine applies them add up). `'toggle'`: a pad or a button flips between the range's ends
+    faster than the engine applies them add up). `accel=` makes a fast turn move further, as a hardware synth's
+    encoder does: a tick 0.1 s or more after the last is one step, a faster one more (twice as fast, twice as far),
+    up to `accel` steps a tick (above 1, at most 16; `True` is 4). Off by default; `live_status` shows it
+    (`, accel up to x8 when turned fast`). A turn back starts slow again. Use it when one encoder must both sweep
+    a filter quickly and set it finely: `live_map(..., midi='cc:20', mode='relative', accel=8)`. `'toggle'`: a pad or a button flips between the range's ends
     (with `curve='switch'`, a mute: `range=[0, -120]`); a button press is 64 or more after a release, or a repeat
     0.1 s or more after the last one with no release (a button that sends 127 on every press and never 0). Which mode fits
     which source: `relative` and `relative64` only on `'cc:<n>'`; `toggle` on `'cc:<n>'` or `'note:<n>'`; a
-    `'note:<n>'` pad only `absolute` or `toggle`; `bend`, `pressure` and `'cc14:<n>'` are `absolute` or `pickup`.
-    A wrong pair is refused and the old map stays.
+    `'note:<n>'` pad only `absolute` or `toggle`; `bend`, `pressure`, `'cc14:<n>'`, `poly` and `mpe:` are
+    `absolute` or `pickup`. A wrong pair is refused and the old map stays.
   - **One knob, several params:** map each param with the same `midi=`; reverse a range to move one the other way.
   - **Bound means control:** a bound note or CC no longer plays or logs as a key on that input. Binding one lets go
     of the keys held and the pedal on that input, so nothing hangs waiting for a release that is now a control.
+    A `poly` or `mpe:` map takes only the pressure, bend or timbre: the keys still play, but that expression is the
+    map's now, not a lane's of the patched keys, and it is not in the key log.
+  - **Pressure and MPE as controls.** Press harder on a key to open a filter: `live_map(control='open', target='lead',
+    param='fx:filter.cutoff', range=[400, 8000], curve='log', midi='poly', source='keys')`. An MPE controller's
+    pressure, slide or timbre on whichever note was played last: `midi='mpe:pressure'`, `'mpe:bend'` (0.5 at rest:
+    the middle of the range) or `'mpe:timbre'`. An `mpe:` map reads the zone the input plays in (`live_midi(mpe=...)`,
+    or the controller's own MPE configuration; the lower zone when neither says), so `channel=` is refused: the
+    master channel is never a note's own. A new note moves the map to its own value at once (its bend and timbre are
+    sent just before it), and a channel handed to a new note starts without the old note's pressure. Unmapped, they
+    are listed by `live_controls` as other inputs are: `'keys' poly ch1: last 90 (key C#4)`, and on an input whose
+    zone is known, `'keys' mpe:timbre member channels: last 30` (one row for every member channel). The bend range
+    and MPE settings (RPN 0 and 6) are not listed; an NRPN knob is, as its `cc:99`, `cc:98` and `cc:6` rows.
   - **Finding the numbers.** Ask the person what the controller is, or listen: `live_controls(source='knob box')`
     opens the input for 2 minutes (each call restarts it; a map on it keeps it open); ask them to move the knob,
     then call it again. It lists what came in that no map takes
@@ -671,8 +690,7 @@ A live set can play inside a VR stage or any page, and the stage's objects can p
        drop) <- MIDI note:36 ch10, on 'pad grid', trigger: each press fires it at once (its reply comes in the
        engine's news) and is logged by bar (live_controls)`.
     2. Tell them: "The first pad now brings the drop in on the next bar. It does not play a sound itself."
-  - Not yet: polyphonic aftertouch and MPE as controls, acceleration for encoders (a fast turn moving further per
-    tick), and a curve beyond linear, log and switch.
+  - Not yet: a curve beyond linear, log and switch.
 
 ## Played keys: the person plays a part
 
@@ -694,7 +712,12 @@ straight to the speakers.
   `live_midi(source='keys', lanes={'bend': {'midi': 'bend', 'range': 12}, 'level': None})` changes a range or a
   message, turns a lane off, or drives a lane the sound does not have (a synth bends that way too). The patch's
   status line says what drives what. `mpe=True` for an MPE controller (lower zone): channel 1 is the master, whose
-  values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure. Two fingers on one
+  values add to every note; each note's own channel 2-16 is its own bend (+-48) and pressure. `mpe='upper'` for
+  one set to the upper zone: channel 16 the master, notes from channel 15 down. Most MPE controllers send an MPE
+  Configuration Message when they connect: it sets the zones and their sizes by itself (a split keyboard's two
+  zones too, and a zone you named shrinks to make room, as the MPE spec says), and the news says so; `mpe=True`
+  after that takes the zones it configured. `mpe=False` keeps each channel its own part and ignores it, and so
+  does a patch on one channel (`channel=1`): the news names the call that follows it instead. Two fingers on one
   pitch are two keys. When the controller hands a channel to a new note, the old note's tail keeps its own bend,
   and the new note starts without the old note's pressure and mod (a bend sent just before its note-on is kept).
   - A key plays a note rendered ahead, so lanes move it as pitch and gain only: `bend` and `vib` as a resampled read
@@ -721,8 +744,8 @@ straight to the speakers.
     4. Tell them: "Ready: each finger bends its own note, up to 4 octaves, and pressure adds up to 6 dB." Without
        `mpe=True`, each note's channel still bends its note, but at +-2 and with no master channel: a slide
        across a few keys bends far too little.
-  - Not yet: MPE's upper zone (master channel 16), cc:74 (MPE timbre) mapped by default, per-note release
-    velocity.
+  - Not yet: cc:74 (MPE timbre) mapped to a lane by default, per-note release velocity, a member channel's own
+    bend range (RPN 0) taken live.
 - Keys join at the speakers, not the mixer: they skip the track's live effects and the safety limiter (a soft clip
   above -1 dB guards them), and they are not in `live_record` recordings or streams yet. `live_listen` hears them.
 - **What they played is text.** Every key is logged, and `live_played()` reads it back as notes lines
@@ -849,9 +872,9 @@ renders the same.
 
 Ableton's Chord, Scale, Pitch, Velocity, Note Length and Random, as one chain of data. One core does both
 (`live_midi_fx` on played keys, `track_midi_fx` on a track's notes at render): the same key on the same beat makes
-the same notes live and rendered, dice included. A recorded take (`live_played`) keeps the keys played, not the
-notes the chain made, so a take rendered through the chain re-rolls its `random` and velocity `random`; the other
-effects come out the same. The arpeggiator is the seventh one, with its own ops (above).
+the same notes live and rendered, dice included. A recorded take (`live_played`) gives the notes the chain made,
+as they sounded: its `random` as rolled live, its lengths as they were heard. So a take written into a song plays
+what was heard and does not roll the dice again. The arpeggiator is the seventh one, with its own ops (above).
 
 - **The chain** is a list, applied in order to every note a key (or a written note) starts; a new chain replaces
   the old one:
@@ -901,9 +924,15 @@ effects come out the same. The arpeggiator is the seventh one, with its own ops 
   yet: tell them "About a third of the lead's notes now jump an octave, all inside C3 to C6. I'll render it so you
   can hear it" and render. To edit single notes, `track_midi_fx(track='lead', write=True)`: the processed notes
   become plain notes (`undo()` brings the written ones back). `off=True` takes the chain off.
-- Not yet: `live_played` logs the keys pressed, not the notes the chain made (`live_played(into=)` writing the
-  chain's own notes, so a take keeps what its dice rolled); with the arp on, a set length lets go
-  of the arp's key on its beat but a played key starts the chain on the buffer it arrives in, as keys always do.
+- **A take keeps the chain's notes.** `live_played(source='keys')` reads them, and `live_played(into='lead')`
+  writes them: each key's notes are kept with it in the key log as the chain made them and as they sounded (a note
+  outside the sound's range never did, so it is not in the take). The reply says so for the keys of the bars
+  taken (`midi fx: 12 keys went through live_midi_fx: these are the notes its chain made of them`). With the arp on too, they are
+  the notes the arp held, not its steps. `raw=True` gives the keys pressed instead: for a track whose own
+  `track_midi_fx` makes the notes at render. Writing the chain's notes into a track that has its own chain runs the
+  effects twice, so the reply says so and names both ways out (`raw=True`, or `track_midi_fx(..., off=True)`).
+- Not yet: with the arp on, a set length lets go of the arp's key on its beat but a played key starts the chain
+  on the buffer it arrives in, as keys always do.
 
 ## MIDI out: synths and other apps play with the set
 

@@ -354,3 +354,184 @@ def test_poly_pressure_a_key_with_none_of_its_own_is_at_rest_even_struck_again()
     notes = [(0.0, 60, 1.0, 90, 0), (2.0, 60, 1.0, 90, 0)]
     out = ML.poly_to_channel(notes, [(0.5, 0, 'poly:60', 90)])[0]
     assert out[-1] == (2.0, 0, 'pressure', 0)
+
+
+# ------------------------------------------------------------------ MPE's upper zone and zone sizes (MIDI parity, D-244)
+def test_an_mpe_configuration_sizes_a_zone_and_the_two_zones_share_the_channels():
+    assert ML.mcm({}, 0, 15) == {0: 15} and ML.mcm({}, 15, 15) == {15: 15}
+    assert ML.mcm({0: 15}, 15, 5) == {15: 5, 0: 9}             # the lower zone shrinks to make room
+    assert ML.mcm({15: 15}, 0, 15) == {0: 15}                  # a full zone takes the other's channels: it is off
+    assert ML.mcm({0: 7, 15: 7}, 15, 0) == {0: 7}               # 0 members: that zone off
+    assert ML.mcm({0: 7}, 4, 3) == {0: 7}                      # RPN 6 is a master's (channel 1 or 16) only
+    assert ML.zone_members(0, 3) == [1, 2, 3] and ML.zone_members(15, 3) == [14, 13, 12]
+    assert ML.zone_of({0: 7, 15: 7}, 8) == 15 and ML.zone_of({0: 3}, 8) is None
+    assert ML.zone_text({15: 15}) == 'upper zone, channel 16 the master, 1-15 a note each'
+    assert ML.zone_text({0: 7, 15: 7}) == ('lower zone, channel 1 the master, 2-8 a note each; upper zone, channel 16 '
+                                           'the master, 9-15 a note each')
+    assert ML.zone_text({0: 15}) == 'channel 1 the master, 2-16 a note each'
+    assert ML.mpe_zone(True) == {0: 15} and ML.mpe_zone('Upper') == {15: 15} and ML.mpe_zone(False) == {}
+    with pytest.raises(ML.LaneMapError, match=r"'upper' \(the upper zone"):
+        ML.mpe_zone('middle')
+
+
+def test_mpe_upper_writes_channel_16_as_the_master_and_reads_back_per_note(tmp_path):
+    p = str(tmp_path / 'song')
+    api.project_new(p, bpm=120, length_bars=2)
+    api.track_add(p, 'lead', instrument={'type': 'code', 'voice': 'flute', 'tail': 0.5})
+    api.notes_write(p, 'lead', 1, "0 C5 1 100; 1 D5 1 100; 2 E5,G5 2 100")
+    api.automation_set(p, 'lead', 'inst.lane.bend', [[1, 0], [2, 2], [2.5, -1]])
+    path = str(tmp_path / 'up.mid')
+    out = OPS['midi_write'](p, out=path, mpe='upper')
+    assert 'MPE upper zone (channel 16 the master, a channel of 1-15 per note)' in out
+    tr = MF.read(path)['tracks'][1]
+    assert tr['mpe_zones'] == {15: 15} and tr['mpe_master'] == 15
+    chans = [n[4] for n in tr['notes']]
+    assert 15 not in chans and chans[0] == 14 and len(set(chans[2:])) == 2   # from channel 15 down
+    q = _solo(tmp_path)
+    assert 'MPE (upper zone, master channel 16)' in OPS['midi_read'](q, path)
+    back = OPS['midi_read'](q, path, into={'lead': 'solo'})
+    assert 'per note (MPE), upper zone, channel 16 the master, 1-15 a note each' in back
+    assert '(bend range +-48)' in back
+    _same_curve(_lane(p, 'lead', 'bend'), _lane(q, 'solo', 'bend'), 96 / 8191 + 1e-6, 0, 3.95)
+
+
+def test_a_split_synth_gets_both_zones_seven_members_each_and_each_part_reads_back_in_its_own(tmp_path):
+    p = str(tmp_path / 'song')
+    api.project_new(p, bpm=120, length_bars=2)
+    for name, notes, bend in (('low', "0 C3 2 100; 2 D3 2 100", 1), ('high', "0 C5 2 100; 2 E5,G5 2 100", -1)):
+        api.track_add(p, name, instrument={'type': 'code', 'voice': 'flute', 'tail': 0.5})
+        api.notes_write(p, name, 1, notes)
+        api.automation_set(p, name, 'inst.lane.bend', [[1, 0], [2, bend]])
+    path = str(tmp_path / 'split.mid')
+    out = OPS['midi_write'](p, out=path, mpe={'low': 'lower', 'high': 'upper'})
+    assert 'MPE lower zone (channel 1 the master, a channel of 2-8 per note)' in out
+    assert 'MPE upper zone (channel 16 the master, a channel of 9-15 per note)' in out
+    f = MF.read(path)
+    low, high = f['tracks'][1], f['tracks'][2]
+    assert low['mpe_zones'] == {0: 7} and high['mpe_zones'] == {15: 7}
+    assert {n[4] for n in low['notes']} <= set(range(1, 8)) and {n[4] for n in high['notes']} <= set(range(8, 15))
+    q = _solo(tmp_path)
+    api.track_add(q, 'solo2', instrument={'type': 'code', 'voice': 'flute', 'tail': 0.5})
+    back = OPS['midi_read'](q, path, into={'low': 'solo', 'high': 'solo2'})
+    assert 'per note (MPE), lower zone, channel 1 the master, 2-8 a note each' in back
+    assert 'per note (MPE), upper zone, channel 16 the master, 9-15 a note each' in back
+    _same_curve(_lane(p, 'low', 'bend'), _lane(q, 'solo', 'bend'), 96 / 8191 + 1e-6, 0, 3.95)
+    _same_curve(_lane(p, 'high', 'bend'), _lane(q, 'solo2', 'bend'), 96 / 8191 + 1e-6, 0, 3.95)
+
+
+def test_a_file_that_does_not_say_reads_as_the_upper_zone_when_asked_and_a_zone_counts_its_members_only(tmp_path):
+    # notes on channels 15 and 14, the master (16) bent: read as the upper zone, the master is left out
+    path = _raw_file(tmp_path / 'u.mid', [bytes([0, 0xEF, 0x7F, 0x7F, 0, 0xEE, 0x7F, 0x7F, 0, 0x9E, 60, 100]),
+                                          bytes([0x83, 0x60, 0x8E, 60, 0, 0, 0xED, 0, 0, 0, 0x9D, 62, 100]),
+                                          bytes([0x83, 0x60, 0x8D, 62, 0])])
+    q = _solo(tmp_path)
+    out = OPS['midi_read'](q, path, into={'#0': 'solo'}, mpe='upper')
+    assert 'master channel (16) were left out' in out and '(bend range +-48)' in out
+    assert _lane(q, 'solo', 'bend')[0] == [0.0, 48.0] and ML.value_at(_lane(q, 'solo', 'bend'), 1.5) == -48
+    with pytest.raises(api.OpError, match="mpe 'side'"):
+        OPS['midi_read'](q, path, into={'#0': 'solo'}, mpe='side')
+    # a lower zone of 3 members (channels 2-4): a bent note on channel 9 is not the zone's
+    path = _raw_file(tmp_path / 'z.mid', [_rpn(0, 6, 3), bytes([0, 0xE1, 0x7F, 0x7F, 0, 0x91, 60, 100]),
+                                          bytes([0x81, 0x70, 0xE8, 0, 0, 0, 0x98, 64, 100]),
+                                          bytes([0x81, 0x70, 0x81, 60, 0, 0, 0x88, 64, 0])])
+    q = _solo(tmp_path, 'q2')
+    assert 'MPE (lower zone, channel 1 the master, 2-4 a note each), expression' in OPS['midi_read'](q, path)
+    out = OPS['midi_read'](q, path, into={'#0': 'solo'})
+    assert 'per note (MPE), lower zone, channel 1 the master, 2-4 a note each' in out
+    assert _lane(q, 'solo', 'bend') == [[0.0, 48.0]]               # channel 9's bend to the bottom is not read
+
+
+FLUTE = {'type': 'code', 'voice': 'flute', 'tail': 0.5}
+
+
+def _song(p, tracks):
+    api.project_new(p, bpm=120, length_bars=2)
+    for name, inst, notes in tracks:
+        api.track_add(p, name, instrument=inst)
+        if notes:
+            api.notes_write(p, name, 1, notes)
+    return p
+
+
+def test_a_plain_track_beside_mpe_gets_a_channel_outside_the_zones_and_its_lanes_read_back(tmp_path):
+    p = _song(str(tmp_path / 'split'), [('low', FLUTE, "0 C3 2 100"), ('high', FLUTE, "0 C5 1 100; 1 E5 1 100"),
+                                        ('bass', FLUTE, "0 C2 4 100")])
+    api.automation_set(p, 'bass', 'inst.lane.bend', [[1, 0], [2, 1.5], [3, -1]])
+    path = str(tmp_path / 'split.mid')
+    out = OPS['midi_write'](p, out=path, mpe={'low': 'lower', 'high': 'upper'})
+    assert "MPE lower zone: 6 members, not 7, so bass gets a channel outside it" in out
+    assert 'bass: 1 notes, channel 8' in out and 'a channel of 2-7 per note' in out
+    f = MF.read(path)
+    assert f['tracks'][1]['mpe_zones'] == {0: 6} and {n[4] for n in f['tracks'][3]['notes']} == {7}
+    q = _solo(tmp_path)
+    back = OPS['midi_read'](q, path, into={'bass': 'solo'})
+    assert 'lane bend: 3 points from 512 bend messages (bend range +-2)' in back and 'MPE' not in back
+    _same_curve(_lane(p, 'bass', 'bend'), _lane(q, 'solo', 'bend'), 2 / 8191 * 2 + 1e-6, 0, 3.9)
+    # the lower zone alone, as before: 15 members leave no channel, so it gives one up
+    out = OPS['midi_write'](p, out=path, mpe=['low', 'high'])
+    assert "MPE lower zone: 14 members, not 15, so bass gets a channel outside it" in out
+    assert 'bass: 1 notes, channel 16' in out
+
+
+def test_a_kit_keeps_channel_10_and_a_zone_that_held_it_shrinks_and_says_so(tmp_path):
+    kit = {'type': 'kit', 'map': {'C2': {'type': 'kick'}}}
+    p = _song(str(tmp_path / 'k'), [('lead', FLUTE, "0 C5 1 100; 1 E5 1 100"), ('drums', kit, "0 C2 1 100")])
+    path = str(tmp_path / 'k.mid')
+    out = OPS['midi_write'](p, out=path, mpe=True)
+    assert "MPE lower zone: 8 members, not 15, so channel 10 stays the kit's" in out
+    assert 'a channel of 2-9 per note' in out and 'drums: 1 notes, channel 10' in out
+    out = OPS['midi_write'](p, out=path, mpe='upper')
+    assert "MPE upper zone: 5 members, not 15, so channel 10 stays the kit's" in out
+    assert 'a channel of 11-15 per note' in out
+
+
+def test_a_part_on_a_zones_master_or_outside_every_zone_reads_as_a_plain_part(tmp_path):
+    # the file configures the upper zone of 7 (members 9-15); one track plays on channel 16 (the master), one on 2
+    path = _raw_file(tmp_path / 'm.mid', None, tracks=[
+        [_rpn(15, 6, 7)],
+        [bytes([0, 0xEF, 0x7F, 0x7F, 0, 0x9F, 60, 100, 0x83, 0x60, 0x8F, 60, 0])],
+        [bytes([0, 0xE1, 0x7F, 0x7F, 0, 0x91, 62, 100, 0x83, 0x60, 0x81, 62, 0])]])
+    q = _solo(tmp_path)
+    api.track_add(q, 'solo2', instrument=FLUTE)
+    back = OPS['midi_read'](q, path, into={'#1': 'solo', '#2': 'solo2'})
+    assert back.count('lane bend: 1 points from 1 bend messages (bend range +-2)') == 2 and 'MPE' not in back
+    assert _lane(q, 'solo', 'bend') == [[0.0, 2.0]] and _lane(q, 'solo2', 'bend') == [[0.0, 2.0]]
+
+
+def test_one_track_with_both_zones_notes_warns_that_the_other_zones_expression_is_left_out(tmp_path):
+    path = _raw_file(tmp_path / 'b.mid', None, tracks=[[_rpn(0, 6, 7), _rpn(15, 6, 7)], [bytes([
+        0, 0xE1, 0x7F, 0x7F, 0, 0x91, 60, 100, 0, 0x92, 64, 100, 0, 0xEE, 0x7F, 0x7F, 0, 0x9E, 72, 100,
+        0x83, 0x60, 0x81, 60, 0, 0, 0x82, 64, 0, 0, 0x8E, 72, 0])]])
+    back = OPS['midi_read'](_solo(tmp_path), path, into={'#1': 'solo'})
+    assert ('WARNING solo: 1 notes are on channel 15, outside the lower zone, channel 1 the master, 2-8 a note each '
+            'this part is read in: the notes are written, their own 1 expression messages left out') in back
+
+
+def test_an_mpe_configuration_after_the_notes_does_not_change_how_they_read_and_one_during_them_warns(tmp_path):
+    def off_at(dt):                     # the lower zone, a bent note on channel 2, then MPE off dt ticks in
+        return [_rpn(0, 6, 15), bytes([0, 0xE1, 0x7F, 0x7F, 0, 0x91, 60, 100]), bytes([0x83, 0x60, 0x81, 60, 0]),
+                bytes([dt, 0xB0, 101, 0, 0, 0xB0, 100, 6, 0, 0xB0, 6, 0]),
+                bytes([0, 0x91, 62, 100, 0x83, 0x60, 0x81, 62, 0])]
+    q = _solo(tmp_path)
+    back = OPS['midi_read'](q, _raw_file(tmp_path / 'm.mid', off_at(0x10)), into={'#0': 'solo'})
+    assert 'bend range +-48), per note (MPE)' in back and _lane(q, 'solo', 'bend')[0] == [0.0, 48.0]
+    assert ('WARNING solo: the file changes its MPE configuration at bar 1, while these notes play; read as at the '
+            'first note (channel 1 the master, 2-16 a note each)') in back
+    # the configurations of a format 1 file count in time order, whichever track holds them
+    path = _raw_file(tmp_path / 'f1.mid', None, tracks=[
+        [bytes([0x87, 0x40, 0xB0, 101, 0, 0, 0xB0, 100, 6, 0, 0xB0, 6, 0])],      # MPE off, 2 beats in
+        [_rpn(0, 6, 15), bytes([0, 0xE1, 0x7F, 0x7F, 0, 0x91, 60, 100, 0x83, 0x60, 0x81, 60, 0])]])
+    back = OPS['midi_read'](_solo(tmp_path, 'q2'), path, into={'#1': 'solo'})
+    assert 'per note (MPE)' in back and 'WARNING' not in back
+
+
+def test_midi_write_takes_mpe_1_and_0_and_a_zone_per_track_as_true_and_a_split_with_one_part_silent(tmp_path):
+    p = _song(str(tmp_path / 's'), [('lead', FLUTE, "0 C5 1 100"), ('pad', FLUTE, None)])
+    path = str(tmp_path / 's.mid')
+    assert 'MPE (channel 1 the master, a channel of 2-16 per note)' in OPS['midi_write'](p, out=path, mpe=1,
+                                                                                          tracks=['lead'])
+    assert 'lead: 1 notes, channel 1' in OPS['midi_write'](p, out=path, mpe=0, tracks=['lead'])
+    assert 'MPE (channel 1 the master' in OPS['midi_write'](p, out=path, mpe={'lead': True}, tracks=['lead'])
+    api.notes_write(p, 'pad', 3, "0 C3 1 100")          # outside bars 1-2
+    out = OPS['midi_write'](p, out=path, mpe={'lead': 'lower', 'pad': 'upper'}, bars=[1, 2])
+    assert 'MPE (channel 1 the master, a channel of 2-16 per note)' in out   # the only zone written: all 15
