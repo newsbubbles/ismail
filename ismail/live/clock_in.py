@@ -54,8 +54,8 @@ playing. When ticks come back, the ticks missed are counted from the time and th
 
 Clock out (midi_out.py) and the arp (arp.py) place their pulses and steps through the engine's tempo map, so they
 follow the followed tempo with no code of their own; MIDI out's notes are held back while the speakers are shut.
-MIDI Time Code in is timecode_in.py, built on this follower. Not yet: Ableton Link; their meter (ismail's beats per
-bar is assumed for their bar lines);
+MIDI Time Code in is timecode_in.py and Ableton Link is link.py, both built on this follower. Not yet: their meter
+(ismail's beats per bar is assumed for their bar lines);
 their Start and Stop forwarded to clock out; the silence while they are stopped is on the speakers only:
 live_listen, live_record and the streams still carry the set.
 """
@@ -594,11 +594,12 @@ class ClockIn:
         W0 = e.mout.wall(b0, 0.0, a)
         x0 = self._x_at(ref, W0 - off)                                  # their beat at ismail's b0
         first = math.ceil(b0 / bpb + EPS) * bpb                         # ismail's first bar line after b0
-        xb = math.ceil(x0 / bpb + EPS) * bpb
+        qb = self._their_bar()
+        xb = math.ceil(x0 / qb + EPS) * qb
         lo, hi = LOCK_BEND
         pick = None
         for i in range(LOCK_TRIES):
-            xL = xb + i * bpb
+            xL = xb + i * qb
             dt = self._t_ext(ref, xL) + off - W0
             if dt <= 0:
                 continue
@@ -624,13 +625,21 @@ class ClockIn:
             self._gate(e.sample(bL) + self.lag, True)
         self.locked = (xL, bL)
         self.next_ok = bL
-        e.news.append(self._said_locked(xL, bL, est))
+        self._news('locked', self._said_locked(xL, bL, est))
+
+    def _their_bar(self):
+        """Beats from one of their bar lines to the next (Link's quantum): ismail's beats per bar here."""
+        return self.e.bpb
 
     @staticmethod
     def _lock_spans(m0, ideal, bpb):
         """The beats the set may run to a lock bar (m0 to its first bar line, then whole bars), nearest the ideal
         first: here only the nearest."""
         return [m0 + max(0, round((ideal - m0) / bpb)) * bpb]
+
+    def _news(self, key, text):
+        """A line for the next reply (Link folds repeats of one kind into one line)."""
+        self.e.news.append(text)
 
     def _said_locked(self, xL, bL, est):
         bpb = self.e.bpb

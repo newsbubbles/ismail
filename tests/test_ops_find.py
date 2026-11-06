@@ -76,6 +76,8 @@ def test_every_shelf_has_ops_and_every_role_names_real_shelves():
     ('sync the set to video timecode', 'live_midi_timecode_in'),
     ('chase SMPTE timecode from my DAW', 'live_midi_timecode_in'),
     ('send MIDI time code to my video editor', 'live_midi_timecode'),
+    ('sync with Ableton Link', 'live_link'),
+    ('join the link session on my phone app', 'live_link'),
     ('read the pitch bend and mod wheel from a midi file', 'midi_read'),
     ('write an MPE midi file', 'midi_write'),
     ('the lead line when the stem also has a backing part', 'melody_consensus'),

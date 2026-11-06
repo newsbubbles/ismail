@@ -489,8 +489,9 @@ class MidiOut:
         def act():
             e = self.e
             if played is not None and not all(g.is_open(played) for g in (getattr(e, 'cin', None),
-                                                                           getattr(e, 'tcin', None)) if g is not None):
-                return                             # clock or timecode in: the other app is stopped, the set is silent
+                                                                           getattr(e, 'tcin', None),
+                                                                           getattr(e, 'link', None)) if g is not None):
+                return                             # clock, timecode in or Link: the other app is stopped, silent
             notes.on(ch, pitch, vel, tok, track)
             r['sent'] += 1
             self.e.sounded = self.e.pos             # the synth sounds in the room: not SILENT ON AIR
