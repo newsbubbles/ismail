@@ -44,8 +44,9 @@ CATEGORIES = [
     ('lexicon', "the person's own words for what they hear and see", ('lexicon_',)),
     ('together', 'listening together: record what plays (a mic only with their yes), their words as they say them, '
                  'mark moments and their messages, read back skips, stretches and what was said on one clock', ('listen_',)),
-    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it, its notes and '
-             'clock out to synths and other apps, tracks frozen into one a deck plays, what a deck costs',
+    ('live', 'playing live: decks, transitions, the live engine, MIDI keyboards played through it, its notes, '
+             'clock and timecode to and from synths and other apps, tracks frozen into one a deck plays, what a deck '
+             'costs',
      ('live_', 'midi_', 'track_freeze', 'deck_cost')),
     ('phone', "the person's phone page: listening, panels, questions, exams, voice notes", ('phone_',)),
     ('stream', "live streaming: the set to several sites at once, the picture and its text, callouts and panels on "

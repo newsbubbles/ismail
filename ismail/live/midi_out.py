@@ -23,6 +23,14 @@ Turned on, it pulses at once (a receiver locks to the tempo), and Start (0xFA) g
 before that bar's first pulse: the other app's bar 1 is that bar. position=True sends the Song Position Pointer of
 that bar first, then Continue (0xFB), so a DAW that follows song position lands on the same bar number. Stop (0xFC)
 when turned off and when the set ends.
+
+MIDI Time Code (ismail.mtc has the arithmetic): the set's own time, from its start (sample 0) plus `offset`, as
+quarter frames (0xF1) at 24, 25, 29.97 drop-frame or 30 fps, four a frame, each stamped at the sample its time
+reaches the speakers (as a note is, so a video or a DAW chasing it lines up with what is heard). The time is the
+set's seconds, not its beats: a tempo change does not move it. Turned on, the first of the eight goes out on the
+first frame the sender can reach with an even count, right after a full-frame SysEx (F0 7F 7F 01 01 hh mm ss ff F7)
+of that frame, so the receiver locates there first; a new offset or rate is a locate the same way. The quarter
+frames stop when turned off and at the set's end (MTC has no stop message: the receiver stops when they do).
 """
 import collections
 import itertools
@@ -32,6 +40,7 @@ import time
 
 from .. import midi as M
 from .. import midisend as MS
+from .. import mtc as TC
 from ..dsp import SR
 from ..notation import fmt_num
 from . import graph as G
@@ -67,6 +76,7 @@ class MidiOut:
         self.ports = {}             # name -> {'out', 'notes': Notes, 'offset': s, 'users': set}
         self.routes = {}            # track -> {'port', 'ch', 'audio', 'from', 'planned', 'sent'}
         self.clock = None           # {'port', 'start', 'k', 'position', 'started', 'pulses'}
+        self.tc = None              # timecode out: {'port', 'rate', 'zero', 'offset', 'q', 'full', 'sent', 'fulls'}
         self.pulls = collections.deque()
         self._anchor = None
         self._tok = itertools.count(1)
@@ -98,6 +108,16 @@ class MidiOut:
         """When `beat` of the set reaches the speakers, on the `now` clock (plus a port's offset)."""
         a = self.anchor() if a is None else a
         return a + (self.e.sample(beat) + self._lag()) / SR + self._out_s() + offset
+
+    def wall_sample(self, sample, offset=0.0, a=None):
+        """When mix sample `sample` reaches the speakers, on the `now` clock (plus a port's offset)."""
+        a = self.anchor() if a is None else a
+        return a + (sample + self._lag()) / SR + self._out_s() + offset
+
+    def sample_at(self, t, a=None):
+        """The mix sample that reaches the speakers at time t (not rounded)."""
+        a = self.anchor() if a is None else a
+        return (t - a - self._out_s()) * SR - self._lag()
 
     def beat_at(self, t, a=None):
         a = self.anchor() if a is None else a
@@ -284,6 +304,91 @@ class MidiOut:
                     + f" on {fmt_bar(start, e.bpb)} (the other app's "
                     + ("same bar" if position else "bar 1") + "); Stop when turned off or when the set ends")
 
+    # ------------------------------------------------------------------ timecode out
+    def tc_cmd(self, port=None, on=True, rate=None, offset=None, offset_ms=None):
+        e = self.e
+        with e.lock, self.lock:
+            if not on:
+                if self.tc is None:
+                    return "timecode out is off"
+                c = self._tc_off()
+                return (f"timecode out off: {c['port']!r} got {c['sent']} quarter frames; they stop, which a "
+                        f"receiver takes as a stop")
+            if port is None and self.tc is None:
+                if rate is not None or offset is not None:
+                    raise ValueError("timecode out is off: name the port to send it to (port=..., midi_ports lists "
+                                     "the outputs)")
+                return self.describe()
+            c = self.tc
+            r = TC.rate_of(rate) if rate is not None else (c['rate'] if c else 25)
+            given = offset if offset is not None else (c['offset'] if c else 0)
+            zero = TC.offset_frames(given, r)
+            name = self.find(port) if port is not None else c['port']
+            tin = getattr(e, 'tcin', None)
+            if tin is not None and tin.source is not None and same_port(tin.source, name):
+                raise ValueError(f"timecode in already chases {tin.source!r}: timecode out to the same port would send "
+                                 f"the set's time back to itself and it would chase its own time. Send it to another "
+                                 f"port (a second loopMIDI port), or turn timecode in off first: "
+                                 f"live_midi_timecode_in(on=False)")
+            if c is not None and name != c['port']:
+                self._tc_off()
+                c = None
+            p = self._port(name, offset_ms)
+            if c is not None and r == c['rate'] and zero == c['zero']:
+                return self.tc_line()               # only the port's offset_ms changed (or nothing)
+            p['users'].add(('tc',))
+            self.sched.drop(tag=('tc',))             # a locate: what was planned on the old time goes
+            a = self.anchor()
+            s_now = self.sample_at(self.now() + 0.02, a) if a is not None else float(e.played)
+            fs = TC.frame_s(r)
+            q0 = math.ceil((max(0.0, s_now) / SR + float(zero * fs)) / float(fs / 4) - 1e-9)
+            q0 = -(-q0 // 8) * 8                     # piece 0, on an even frame count
+            self.tc = {'port': name, 'rate': r, 'zero': zero, 'offset': given, 'q': q0, 'full': q0,
+                       'sent': c['sent'] if c else 0, 'fulls': c['fulls'] if c else 0}
+            self._start()
+            return (f"timecode out -> {name!r}: {TC.fmt_rate(r)}, the set's start = {TC.fmt_frames(zero, r)} "
+                    f"(offset); a full frame of {TC.fmt_frames(q0 // 4, r)} as that time reaches the speakers (a "
+                    f"locate), then four quarter frames a frame. The receiver must chase MTC at {TC.fmt_rate(r)}; "
+                    f"the quarter frames stop when turned off and at the set's end")
+
+    def _tc_off(self):
+        c, self.tc = self.tc, None
+        self.sched.drop(tag=('tc',))
+        p = self.ports.get(c['port'])
+        if p is not None:
+            p['users'].discard(('tc',))
+            self._let_go(c['port'])
+        return c
+
+    def _plan_tc(self, hi, a):
+        """Quarter frames whose time reaches the speakers up to song beat `hi`, each on its own sample."""
+        c = self.tc
+        p = self.ports[c['port']]
+        out, off, r = p['out'], p['offset'], c['rate']
+        q4 = float(TC.frame_s(r)) / 4
+        zs = float(c['zero'] * TC.frame_s(r))
+        s_hi = self.e.tmap.secs(hi) * SR
+        while True:
+            q = c['q']
+            s = int(round((q * q4 - zs) * SR))
+            if s > s_hi:
+                break
+            t = self.wall_sample(s, off, a)
+            if self.ending is not None and t >= self.ending:
+                break
+            if q == c['full']:
+                m = TC.full_frame(TC.frames_to_tc(q // 4, r), r)
+                self.sched.at(t, self._tc_msg(out, c, m, 'fulls'), tag=('tc',))
+            self.sched.at(t, self._tc_msg(out, c, TC.quarter_frame(q, r), 'sent'), tag=('tc',))
+            c['q'] = q + 1
+
+    @staticmethod
+    def _tc_msg(out, c, m, count):
+        def act():
+            out.send(m)
+            c[count] += 1
+        return act
+
     def _clock_off(self):
         c, self.clock = self.clock, None
         self.sched.drop(tag=('clock',))
@@ -300,7 +405,7 @@ class MidiOut:
     # ------------------------------------------------------------------ planning (the engine's scheduler pass)
     def plan(self):
         """Hand the sender every message due within LOOK_S. Called under the engine's lock."""
-        if not (self.routes or self.clock) or self.ended:
+        if not (self.routes or self.clock or self.tc) or self.ended:
             return
         a = self.anchor()
         if a is None:
@@ -332,6 +437,8 @@ class MidiOut:
                     r['planned'] = hi
             if self.clock is not None:
                 self._plan_clock(hi, a)
+            if self.tc is not None:
+                self._plan_tc(hi, a)
 
     def _plan_notes(self, track, r, lo, hi, a):
         e = self.e
@@ -366,9 +473,10 @@ class MidiOut:
 
     def _on(self, notes, ch, pitch, vel, tok, track, r, played=None):
         def act():
-            cin = getattr(self.e, 'cin', None)
-            if cin is not None and played is not None and not cin.is_open(played):
-                return                             # clock in: the other app is stopped, the set is silent
+            e = self.e
+            if played is not None and not all(g.is_open(played) for g in (getattr(e, 'cin', None),
+                                                                           getattr(e, 'tcin', None)) if g is not None):
+                return                             # clock or timecode in: the other app is stopped, the set is silent
             notes.on(ch, pitch, vel, tok, track)
             r['sent'] += 1
             self.e.sounded = self.e.pos             # the synth sounds in the room: not SILENT ON AIR
@@ -419,7 +527,7 @@ class MidiOut:
 
     def end(self, after_s=0.0):
         """live_stop: notes stop with the fade; at its end every held note goes off and the clock stops."""
-        if not (self.routes or self.clock) or self.ending is not None:
+        if not (self.routes or self.clock or self.tc) or self.ending is not None:
             return
         self.ending = self.now() + max(0.0, float(after_s))
         self.sched.at(self.ending, self._finish, tag=('end',))
@@ -473,6 +581,20 @@ class MidiOut:
         return (f"clock out -> {c['port']!r}: {state} | {c['pulses']} pulses at {fmt_num(self.e.bpm)} BPM"
                 + (f" | offset {off:+.0f} ms" if off else '') + self._late())
 
+    def tc_line(self):
+        c = self.tc
+        if c is None:
+            return "timecode out: off"
+        p = self.ports.get(c['port'])
+        off = p['offset'] * 1000 if p else 0.0
+        r = c['rate']
+        e = self.e
+        heard = e.played - self._lag() - e.midi.out_latency()
+        now = TC.fmt_frames(math.floor(max(0, heard) / SR / float(TC.frame_s(r))) + c['zero'], r)
+        return (f"timecode out -> {c['port']!r}: {TC.fmt_rate(r)}, {now} heard now (the set's start = "
+                f"{TC.fmt_frames(c['zero'], r)}) | {c['sent']} quarter frames, {c['fulls']} full frame"
+                + ('s' if c['fulls'] != 1 else '') + (f" | offset {off:+.0f} ms" if off else '') + self._late())
+
     def _late(self):
         s = self.sched.lateness()
         err = f" | port errors: {'; '.join(self.sched.errors)}" if self.sched.errors else ''
@@ -482,6 +604,8 @@ class MidiOut:
         out = [self.line(t, r) for t, r in self.routes.items()]
         if self.clock is not None:
             out.append(self.clock_line())
+        if self.tc is not None:
+            out.append(self.tc_line())
         return out
 
     def describe(self):
@@ -493,7 +617,8 @@ class MidiOut:
         L = ["MIDI outputs: " + (', '.join(repr(n) for n in names) if names else
                                  (miss or "none (a synth's USB MIDI, or a loopMIDI port on Windows, shows up here)"))]
         L += self.status_lines() or ["no track sends MIDI: live_midi_out(track=..., port=...) routes one; "
-                                     "live_midi_clock(port=...) sends clock"]
+                                     "live_midi_clock(port=...) sends clock, live_midi_timecode(port=...) "
+                                     "timecode"]
         if self.clock is None and self.routes:
             L.append("clock out: off (live_midi_clock(port=...))")
         return '\n'.join(L)

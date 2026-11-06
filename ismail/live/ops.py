@@ -928,9 +928,55 @@ def live_midi_clock_in(project: str, source: str = None, on: bool = True, transp
     tempo and says so; the set plays on. Clock out (live_midi_clock) and the arp follow the followed tempo. Clock in
     and clock out on one port is refused (the set would chase its own clock). While it is on, live_tempo is refused.
     Call again to change a setting; on=False lets go (the tempo holds). With no source: the inputs and the follow;
-    live_status shows it too. Not yet: Ableton Link, MIDI Time Code, their meter (ismail's beats per bar is assumed),
-    forwarding their Start/Stop to clock out."""
+    live_status shows it too. A video or a DAW's timecode: live_midi_timecode_in. Not yet: Ableton Link, their
+    meter (ismail's beats per bar is assumed), forwarding their Start/Stop to clock out."""
     return _call(project, 'midi_clock_in', source=source, on=on, transport=transport, offset_ms=offset_ms,
+                 bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
+                 max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)
+
+
+@op()
+def live_midi_timecode(project: str, port: str = None, on: bool = True, rate=None, offset=None,
+                       offset_ms: float = None) -> str:
+    """Send MIDI Time Code (MTC) from the live set to a port: the set's time from its start, so a DAW, an editor or
+    a tape machine that chases timecode follows the set's position. Reach for it when the set leads and another
+    app takes its time from it: send timecode to my DAW or my video editor (for tempo and beats, live_midi_clock).
+    rate: 24, 25 (default), 29.97 (drop-frame; '30df' says the same) or 30 frames per second, as the receiver is
+    set. offset: the timecode the set's start reads as, 'hh:mm:ss:ff' (e.g. '01:00:00:00') or seconds (default 0).
+    Quarter frames go out four a frame, each when its time reaches the speakers (as live_midi_out's notes), after a
+    full-frame message of the first frame, so the receiver locates there first. The time is the set's seconds: a
+    tempo change does not move it. Call again with another offset or rate to locate there. on=False stops the
+    quarter frames, which a receiver takes as a stop; the set's end does the same. offset_ms: as live_midi_out
+    (shared by the port). Timecode out and timecode in on one port is refused. With no port: what is sending
+    (live_status says it too)."""
+    return _call(project, 'midi_timecode', port=port, on=on, rate=rate, offset=offset, offset_ms=offset_ms)
+
+
+@op()
+def live_midi_timecode_in(project: str, source: str = None, on: bool = True, rate=None, offset=None,
+                          offset_ms: float = None, bandwidth_hz: float = None, tempo_tol_bpm: float = None,
+                          phase_tol_ms: float = None, max_bend_pct: float = None, step_beats: int = None,
+                          dropout_ms: float = None) -> str:
+    """The set chases another app's MIDI Time Code (MTC) in: a video player, a DAW or a tape machine leads the
+    position, its play, stop and locate. Reach for it when the set should sync to video timecode, chase or follow
+    their timecode or SMPTE time, play when the video plays and stop when it stops (a tempo and beat to follow:
+    live_midi_clock_in; the set leading: live_midi_timecode). source: an input's name or a unique part of it
+    (midi_sources). MTC carries no tempo, so the set keeps its own (live_tempo works) and lays its bar lines on their
+    time: offset ('hh:mm:ss:ff' or seconds, default 0) is their bar 1, and their bars run from there at the set's
+    tempo. When their time runs (eight quarter frames in order, two frames after they start) the set goes silent
+    and comes in on the first of their bar lines it can reach (one to two bars; the news says "their 01:00:04:00 =
+    ismail bar 33"), then keeps its beats on theirs and follows their speed (a varispeed or a tape 1% fast) with
+    tempo changes as live_midi_clock_in makes them (phase_tol_ms 4, tempo_tol_bpm 0.25, max_bend_pct 3,
+    step_beats a bar, bandwidth_hz 0.5). No quarter frame for dropout_ms (250; under it the set plays through the
+    gap): their transport stopped, and the set is silent until their time runs again. A full-frame message (a
+    locate), a jump in their time, or a new rate relocks the same way; running backwards silences it. rate: 24,
+    25, 29.97 (drop-frame) or 30 to take only that rate (another is not followed, and the news says so); 'any'
+    (the default) takes what they send. offset_ms: positive lands ismail later, for an app whose sound is late.
+    With MIDI clock in on too, the clock leads (it carries the tempo) and timecode only reads their time. Call
+    again to change a setting; on=False lets go. With no source: the inputs and the chase; live_status shows their
+    time, the lock and the phase. Not yet: placing the set at their exact time (a live set cannot jump), their
+    tempo map."""
+    return _call(project, 'midi_timecode_in', source=source, on=on, rate=rate, offset=offset, offset_ms=offset_ms,
                  bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm, phase_tol_ms=phase_tol_ms,
                  max_bend_pct=max_bend_pct, step_beats=step_beats, dropout_ms=dropout_ms)
 

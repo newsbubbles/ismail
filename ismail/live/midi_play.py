@@ -200,8 +200,9 @@ class MidiPlay:
 
     def _wanted(self, name):
         cin = getattr(self.e, 'cin', None)
+        tcin = getattr(self.e, 'tcin', None)
         return (name in self.patches or name in self.listening or bool(self.e.controls.bound(name))
-                or (cin is not None and cin.source == name))
+                or (cin is not None and cin.source == name) or (tcin is not None and tcin.source == name))
 
     def release(self, name):
         """Close an input nothing uses any more (no patch, no control map, not listening)."""
@@ -484,10 +485,13 @@ class MidiPlay:
     # ------------------------------------------------------------------ keys (the driver's thread)
     def _on(self, name):
         def on(t, st, d1, d2):
-            if st >= 0xF0:                                  # clock, transport, song position: never keys or controls
+            if st >= 0xF0:              # clock, transport, song position, timecode: never keys or controls
                 cin = getattr(self.e, 'cin', None)
                 if cin is not None and cin.source == name:
                     cin.msg(t, st, d1, d2)
+                tcin = getattr(self.e, 'tcin', None)
+                if tcin is not None and tcin.source == name:
+                    tcin.msg(t, st, d1, d2)
                 return
             if self.e.midi_control(name, st, d1, d2):        # bound by live_map: a control move, not a key
                 return
@@ -521,6 +525,12 @@ class MidiPlay:
                     return                                   # live_played(into=) to write as lanes
             self._log.append((p['log'], {'wall': round(time.time(), 4), 'beat': round(self.sound_beat(), 4),
                                          'press': round(self.heard_beat(), 4), 'st': st, 'd1': d1, 'd2': d2}))
+
+        def sysex(t, data):             # midi.Input hands SysEx here: a full-frame timecode (a locate); no other is read
+            tcin = getattr(self.e, 'tcin', None)
+            if tcin is not None and tcin.source == name:
+                tcin.sysex(t, data)
+        on.sysex = sysex
         return on
 
     def heard_beat(self):

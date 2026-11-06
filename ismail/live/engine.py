@@ -41,6 +41,7 @@ from .midi_play import MidiPlay
 from .arp import LiveArps
 from .midifx import LiveMidiFx
 from .clock_in import ClockIn
+from .timecode_in import TimecodeIn
 from .timeline import EPS, QueueError, Timeline, fmt_bar
 from .trouble import Trouble
 from .. import settings
@@ -286,6 +287,7 @@ class Engine:
         self.arp = LiveArps(self)       # arpeggiators on played keys (live_arp)
         self.mfx = LiveMidiFx(self)     # MIDI effect chains on played keys, before the arp (live_midi_fx)
         self.cin = ClockIn(self)        # the set follows another app's MIDI clock (live_midi_clock_in)
+        self.tcin = TimecodeIn(self)    # the set chases another app's MIDI Time Code (live_midi_timecode_in)
         if self.n_workers > 0:
             import multiprocessing as mp
             ctx = mp.get_context('spawn')
@@ -662,6 +664,12 @@ class Engine:
                     self.news.append(f"clock in: following failed ({type(ex).__name__}: {ex}); tell Main Dev")
                 self.stats['clock_in_errors'] += 1
             try:
+                self.tcin.plan()              # timecode in, after clock in (which leads when both are on)
+            except Exception as ex:
+                if self.stats['timecode_in_errors'] < 3:
+                    self.news.append(f"timecode in: chasing failed ({type(ex).__name__}: {ex}); tell Main Dev")
+                self.stats['timecode_in_errors'] += 1
+            try:
                 self.mout.plan()
             except Exception as ex:           # MIDI out must never stop the set's own scheduling
                 if self.stats['midi_out_errors'] < 3:
@@ -996,6 +1004,9 @@ class Engine:
                 left = self._fifo_n if got == frames else 0
                 self.head_min = left if self.head_min is None else min(self.head_min, left)
         gate = self.cin.gain(self.played, frames)       # clock in, transport follow: their Stop silences the set
+        tgate = self.tcin.gain(self.played, frames)     # timecode in: their time stopped, the set is silent
+        if tgate is not None:
+            gate = tgate if gate is None else gate * tgate
         steps = self.arp.mix(frames, self.played)
         if gate is not None:
             out *= gate[:, None]
@@ -2557,6 +2568,7 @@ class Engine:
             except QueueError as e:
                 raise LiveError(f"{e}. The tempo did not change.")
             was, dropped, placed = self._tempo_change(beat, bpm)
+            chase = self.tcin.retempo(beat, bpm)
             parts = sorted({c.track for c in self.tl.clips.values() if c.end is None or c.end > beat + EPS})
             lines = [f"tempo {fmt_num(was)} -> {fmt_num(bpm)} BPM at {fmt_bar(beat, self.bpb)} ({at})"
                      + (f"; replaces the change queued at " + ', '.join(f"{fmt_bar(b, self.bpb)} ({fmt_num(t)} BPM)"
@@ -2576,6 +2588,8 @@ class Engine:
                 lines.append("  played keys keep their sounds (rendered in seconds, nothing re-renders)")
             if self.rec is not None:
                 lines.append(f"  recording: {os.path.basename(self.rec_path[:-4])}.json lists the change")
+            if chase:
+                lines.append(chase)
             if note:
                 lines.append(f"  note: {note}")
         self.tick()
@@ -3075,6 +3089,23 @@ class Engine:
         except (ValueError, OSError, RuntimeError) as e:
             raise LiveError(str(e))
 
+    def cmd_midi_timecode(self, port=None, on=True, rate=None, offset=None, offset_ms=None):
+        try:
+            return self.mout.tc_cmd(port, on, rate, offset, offset_ms)
+        except (ValueError, OSError, RuntimeError) as e:
+            raise LiveError(str(e))
+
+    def cmd_midi_timecode_in(self, source=None, on=True, rate=None, offset=None, offset_ms=None, bandwidth_hz=None,
+                             tempo_tol_bpm=None, phase_tol_ms=None, max_bend_pct=None, step_beats=None,
+                             dropout_ms=None):
+        try:
+            with self.lock:
+                return self.tcin.cmd(source, on, rate, offset, bandwidth_hz=bandwidth_hz, tempo_tol_bpm=tempo_tol_bpm,
+                                     phase_tol_ms=phase_tol_ms, max_bend_pct=max_bend_pct, step_beats=step_beats,
+                                     dropout_ms=dropout_ms, offset_ms=offset_ms)
+        except (ValueError, OSError, RuntimeError) as e:
+            raise LiveError(str(e))
+
     def cmd_keys(self, events=None, sid=None):
         """The on-screen keys page (live_keys_page): its key messages in, what the page shows out."""
         try:
@@ -3131,6 +3162,7 @@ class Engine:
             lines += self.arp.lines()
             lines += self.mout.status_lines()
             lines += self.cin.status_lines()
+            lines += self.tcin.status_lines()
             if self.controls.maps:
                 lines.append("controls: " + '; '.join(f"{c} -> {O.describe(m)}" for c, m in self.controls.maps.items()))
             stall = self._stalled()
@@ -3447,7 +3479,8 @@ def serve(engine, port=0, idle_min=None):
            'midi': engine.cmd_midi, 'played': engine.cmd_played, 'take': engine.cmd_take,
            'keys': engine.cmd_keys, 'arp': engine.cmd_arp, 'midi_fx': engine.cmd_midi_fx,
            'midi_out': engine.cmd_midi_out, 'midi_clock': engine.cmd_midi_clock,
-           'midi_clock_in': engine.cmd_midi_clock_in,
+           'midi_clock_in': engine.cmd_midi_clock_in, 'midi_timecode': engine.cmd_midi_timecode,
+           'midi_timecode_in': engine.cmd_midi_timecode_in,
            'clock': engine.cmd_clock, 'tempo': engine.cmd_tempo, 'rejects': engine.cmd_rejects}
     keys_page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'phone', 'page', 'keys.html')
 
