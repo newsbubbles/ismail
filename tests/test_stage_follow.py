@@ -30,7 +30,7 @@ def test_follow_reaches_the_page_with_only_the_options_given(stage):  # noqa: F8
         OPS['stage_follow'](scene='room', where='actor_a:head')
         assert page.seen[-1]['where'] == 'actor_a:head' and 'object' not in page.seen[-1]
         OPS['stage_follow'](scene='room')
-        assert set(page.seen[-1]) == {'type', 'id', 'ts'}                         # a list of what follows what
+        assert set(page.seen[-1]) - {'principal'} == {'type', 'id', 'ts'}        # a list of what follows what (who sent it is stamped)
         with pytest.raises(OpError, match="'target' or 'world'"):
             OPS['stage_follow'](scene='room', object='chase_cam', target='person', space='camera')
         with pytest.raises(OpError, match=r'offset must be \[x, y, z\]'):
