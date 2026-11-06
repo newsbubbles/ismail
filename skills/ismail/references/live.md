@@ -1029,9 +1029,10 @@ When another app or a drum machine leads (its tempo, its play and stop), the set
   are back within `phase_tol_ms` in 2 to 4.6 s with `transport='tempo'`, 2.9 to 7.9 s with `'follow'` (which keeps
   their bar lines), and 13 s for a halving (140 to 70) in `'follow'`.
 - A video or a DAW's timecode (MTC) leads by position, not tempo: "Timecode", next.
-- Not yet: Ableton Link, their meter (ismail's beats per bar is assumed), their Start and Stop passed on to clock
-  out, and the silence while they are stopped reaching `live_listen`, `live_record` and the streams (only the
-  speakers go silent).
+- An Ableton Link session (no MIDI port, over the network or on the same computer): "Ableton Link", below.
+- Not yet: their meter (ismail's beats per bar is assumed), their Start and Stop passed on to clock out, and the
+  silence while they are stopped reaching `live_listen`, `live_record` and the streams (only the speakers go
+  silent).
 
 ### Timecode: the set chases a video or a DAW, or sends its own time
 
@@ -1097,6 +1098,60 @@ lines sit on their time. For a tempo and a beat to follow, use clock in instead.
   line on their grid), their tempo map (their bars run at the set's tempo), 29.97 non-drop, and the silence
   reaching `live_listen`, `live_record` and the streams (the speakers only).
 
+### Ableton Link: the set joins a session
+
+Ableton Link keeps apps at one tempo and on one beat over the network (or on one computer), with no cables or
+ports: Ableton Live, Bitwig, many phone and tablet apps. Use it when the person plays along in such an app, or
+another computer runs one.
+
+- **The add-on.** Link comes from the package aalink, installed with the extra: `pip install "ismail[link]"` in the
+  Python that runs the set. aalink is GPLv3+ (it includes Ableton's Link library); ismail itself stays MIT and loads
+  it only when `live_link` is called. Without it, `live_link` says the exact line to run and installs nothing: ask
+  the person before installing it (it is a new download), then call `live_link` again (no restart).
+- **Follow.** `live_link()` joins and follows the session's tempo and beat. Their bar lines are where Link's phase
+  is 0: every `quantum` beats, the set's beats per bar by default (`quantum=8` lines up two-bar phrases). Joining
+  waits 1 s for peers. Alone, the session takes the set's beat and nothing is heard to change. With peers, the set
+  goes silent and comes in on the session's next bar line it can reach (one to two bars): tell the person before
+  you join. Then the beats stay on theirs with tempo changes as clock in makes them (`phase_tol_ms` 4,
+  `tempo_tol_bpm` 0.25, `max_bend_pct` 3, `step_beats` a bar).
+- **Their tempo changes.** A peer's change is heard about 1.5 s later (the set's notes render again from it) and
+  the beats are back on theirs within 2.5 to 3.5 s; a halving takes about 10 s. Their beat jumping (a peer forcing
+  it, two sessions meeting) or the set more than a beat off relocks: silent, then in on their next bar line.
+- **live_tempo.** Refused while the set only follows (the error says so). `live_link(lead=True)`: the set follows
+  and leads, and each `live_tempo` change reaches the session at the moment its bar is heard, so everyone changes
+  together.
+- **Lead.** `live_link(follow=False, lead=True)`: ismail is the session's clock. The session takes the set's tempo
+  and bar lines at once (the peers jump to them), a peer's tempo change is set back (the news says so), and a drift
+  is forced back at most once a bar. Use it when ismail's set is the reference for the room.
+- **Start and stop.** `start_stop=True` turns on Link's start/stop sync. Following, the session's stop silences
+  the set on the speakers (its time and queue run on; MIDI out is held back) and its start brings it in on the next
+  bar line. Leading, joining starts the session and leaving (or the set's end) stops it. Off by default, as in
+  Link apps: the person turns it on in their app too.
+- **Lining up by ear.** `offset_ms` (-500 to 2000, positive lands ismail later) for a peer whose sound comes out
+  late (Bluetooth, a long audio buffer). Ask whether the kicks sit together; change it in steps of 5 to 10 ms.
+- `live_status` shows `Link: 1 peer | session 126 BPM, beat 2.38 of 4 | follows | running, the session's bar line
+  = ismail bar 4 | set 126 BPM | phase -0.2 ms (+: ismail late) | 2 tempo changes`. `on=False` leaves; the tempo
+  holds and `live_tempo` is the set's own again.
+- One leader of the set's tempo at a time: Link is refused while MIDI clock in or timecode in is on, and they are
+  refused while Link is on.
+- **Settings and their ranges:** `follow` (True), `lead` (False), `start_stop` (False), `quantum` 1 to 64 (the
+  set's beats per bar), `offset_ms` -500 to 2000 (0), `phase_tol_ms` 0.5 to 50 (4), `tempo_tol_bpm` 0.01 to 5
+  (0.25), `max_bend_pct` 0.5 to 25 (3), `step_beats` 1 to 64 (a bar). Call again with only the setting to change.
+- **Example.** The person says "I'm on Ableton Live with Link on, play along."
+  1. Tell them: "I'll join your Link session. The music goes quiet for a bar or two and comes in on your bar line,
+     at your tempo."
+  2. `live_link()`. The reply ends `Link: alone (no peers yet) | ... | joining: looking for peers (1.0 s left)`.
+     After a second, the news: `Link: joined 1 peer at 126 BPM: the set goes silent ...`, then `Link: locked, the
+     session's bar line = ismail bar 4; the set comes in there at 126 BPM`. Still alone after they say Link is on:
+     the two computers are not on the same network (or a firewall blocks it), or Link is off in their app.
+  3. They want it faster from you: `live_link(lead=True)`, then `live_tempo(bpm=130)`; the reply says `Link: the
+     session goes to 130 BPM when bar 21 is heard (1 peer follows it)`.
+- Measured: on a stand-in session (`tests/test_link.py`) the lock bar lands within 0.1 ms of their bar line and the
+  beats stay within 0.1 ms; with two real Link peers on one Windows computer a silent set came in on the peer's bar
+  line and held its beats within 0.3 ms.
+- Not yet: bridging MIDI clock in or timecode in into a Link session, the session's start time as the set's bar 1,
+  and the silence while stopped reaching `live_listen`, `live_record` and the streams (the speakers only).
+
 ## Playing for a screen recording
 
 When the session itself is the show (the viewer sees your turns and hears the set):
@@ -1133,8 +1188,8 @@ from earlier bars are not played).
 Not yet: master-bus effects (the safety chain is the master; how a set, a deck and a stream reach their level is in
 `loudness.md`), vocoder modulators from sound-bank sounds, instrument-param automation on your own live tracks (a
 deck's song has it; otherwise use fx params, or expr lanes on a performer), gradual tempo
-ramps (`live_tempo` steps at a bar), Ableton Link (MIDI clock in and timecode work: `live_midi_clock_in`,
-`live_midi_timecode_in`), and placed audio clips on a deck.
+ramps (`live_tempo` steps at a bar), bridging MIDI clock in or timecode in into an Ableton Link session (each works
+alone: `live_midi_clock_in`, `live_midi_timecode_in`, `live_link`), and placed audio clips on a deck.
 
 ### Sung takes, tuned
 

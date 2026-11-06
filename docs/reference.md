@@ -246,6 +246,13 @@ Find any tool by what you need or by role with `ops_find`.
   their time runs again. `rate=` takes only one rate. With MIDI clock in on too, the clock leads. The arithmetic
   (labels, frame counts, drop-frame, quarter frames, the full frame) is pure, in `ismail/mtc.py`. SysEx goes out
   and comes in on both MIDI backends (winmm, mido).
+- **Ableton Link.** `live_link` joins a Link session (Ableton Live, Bitwig, phone apps, on the network or the same
+  computer) and follows its tempo and beat phase (`quantum` beats per bar line, the set's own by default): alone,
+  the session takes the set's beat; with peers the set comes in on the session's next bar line, then clock in's
+  follower keeps the beats on theirs. `lead=True` sends `live_tempo`'s changes to the session when their bar is
+  heard; `follow=False, lead=True` makes the set the session's clock; `start_stop=True` shares start and stop. An
+  optional add-on: `pip install "ismail[link]"` installs aalink, which is GPLv3+; ismail stays MIT and imports it
+  only when `live_link` is called.
 - **Live.** Decks, transitions and requests while the music plays (`live_*`), with lazy rendering that warns before a
   track starves. Recording (`live_record`), streams (`live_stream`), output devices per set or per track
   (`live_device`, `live_track(output=)`), controls a page or a scene can turn (`live_map`, `live_control`), and a
